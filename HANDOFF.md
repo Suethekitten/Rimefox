@@ -372,3 +372,41 @@ node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数�
 - 新增"跳过规则"前先想清楚：会不会把**可见内容**也跳过（坑 6、7）
 - 新增"替换规则"前先想清楚：会不会把**正文**也替换（坑：Tarkov 全页 flex）
 - 任何改动都先跑自检页，再上真实站点
+
+---
+
+## 13. ⚠️ 待实机验证（给海外协作者）
+
+作者所在网络无法访问 Anthropic（没有 Key）与 Gemini（`User location is not supported`），所以这两种协议**只做了纯函数单测，没有真实请求验证**。
+
+### Anthropic Claude
+
+1. 设置 → 提供商 `Anthropic Claude` → 填 Key（`sk-ant-...`）
+2. 「获取模型列表」→ 应看到 claude-* 列表（走 `GET /v1/models`）
+3. 「测试连接」→ 期望「连接正常 · xxx ms」
+4. 打开英文页面 `Alt+A` 整页翻译；再划词翻译一段
+5. 把「思考模式」切到「尽量关闭」再测试 → **不应**出现“带思考过程”的提示
+
+### Google Gemini
+
+1. 设置 → 提供商 `Google Gemini` → 填 Key（`AIza...`）
+2. 「获取模型列表」→ 应只出现能对话的模型（embedding 会被过滤）
+3. 「测试连接」
+4. 整页翻译 + 划词
+5. 如果报「当前网络所在地区不被 Gemini 支持」→ 出口 IP 仍被判定为不支持地区，换节点再试
+
+### 报错时请回传这四项
+
+| 项 | 在哪看 |
+|---|---|
+| 引擎 | 设置页「接口协议」 |
+| 地址 | 设置页「API 地址」 |
+| HTTP 状态 / 错误码 | 「测试连接」的结果，或 `edge://extensions` → Service Worker 控制台 |
+| 错误原文 | 同上 |
+
+### 预期行为（不是 bug）
+
+- Anthropic 已带 `anthropic-dangerous-direct-browser-access: true`（浏览器直连必需）
+- Gemini 3 用 `thinkingLevel`、2.5 用 `thinkingBudget`，由模型名自动选择
+- 「尽量关闭」发送的参数：Anthropic `thinking.type=disabled`、Gemini `thinkingConfig`
+- 服务返回 400 且提示不认识参数时，扩展会自动去掉参数重试一次（会成功，但思考没关掉）
