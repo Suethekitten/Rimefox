@@ -4,6 +4,11 @@ dist/
 
 # 打包产物
 *.zip
+*.crx
+
+# CRX 签名私钥：只放在 GitHub Secrets 和安全的备份里，绝不提交
+*.pem
+*.key
 
 # 编辑器与系统文件
 .vscode/

@@ -1,9 +1,15 @@
-# 自动发布 Release
+# 自动发布 Release（附带 ZIP 和 CRX）
 #
 # 触发：推送到 main 且改动了 manifest.json（通常就是改了版本号），或在 Actions 页面手动运行。
-# 同一个版本只发一次：v<版本号> 已经有 Release 就直接跳过，所以普通推送不会重复发版。
+#   - 同一个版本只发一次：v<版本号> 已经有 Release 或标签就跳过，绝不覆盖已有版本
+#   - 手动运行默认是"试运行"：只构建和校验 ZIP + CRX，产物作为 Actions artifact 上传，不发 Release
 #
-# 流程：校验版本号 → 跑离线自检（不通过就不发）→ 打包 zip → 从 CHANGELOG 摘出这一版的说明 → 发 Release
+# 流程：校验版本号 → 检查 CRX 私钥 → 跑离线自检 → 从同一份构建目录打 ZIP 和 CRX 并逐项校验
+#       → 从 CHANGELOG 摘出这一版的说明 → 发 Release（两个文件都在才算成功）
+#
+# 需要的配置（仓库 Settings → Secrets and variables → Actions）：
+#   Secret   CRX_PRIVATE_KEY_BASE64  CRX 签名私钥（PEM）的 Base64。没有它就不发版
+#   Variable CRX_EXPECTED_ID         可选：扩展 ID。设置后 ID 对不上就失败（防止换错私钥）
 name: Release
 
 on:
@@ -12,7 +18,13 @@ on:
     paths:
       - manifest.json
       - .github/workflows/release.yml
+      - .github/scripts/**
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "试运行：只构建和校验 ZIP + CRX，不发布 Release"
+        type: boolean
+        default: true
 
 permissions:
   contents: write # 创建 tag 和 Release
@@ -21,9 +33,15 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+defaults:
+  run:
+    shell: bash # 显式写 bash，GitHub 才会带上 -o pipefail
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,21 +57,40 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: 这个版本发过了就跳过
+      # build：要不要构建；publish：要不要发 Release。已经发过的版本两个都是 false
+      - name: 判断是否需要发布
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
-          if gh release view "${{ steps.ver.outputs.tag }}" > /dev/null 2>&1; then
-            echo "${{ steps.ver.outputs.tag }} 已经有 Release，跳过"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "试运行：只构建和校验，不发布 Release"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif gh release view "$TAG" > /dev/null 2>&1 \
+            || git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null 2>&1; then
+            echo "$TAG 已经有 Release 或标签，跳过（不会覆盖已有版本）"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 检查 CRX 签名私钥
+        if: steps.check.outputs.build == 'true'
+        env:
+          CRX_KEY_B64: ${{ secrets.CRX_PRIVATE_KEY_BASE64 }}
+        run: |
+          if [ -z "$CRX_KEY_B64" ]; then
+            echo "::error::没有配置 Secret CRX_PRIVATE_KEY_BASE64，无法签名 CRX，本次不发布。配置方法见 HANDOFF.md 的「发版流程」"
+            exit 1
           fi
 
       # 自检页是纯前端页面，不需要加载扩展：用无头 Chrome 打开 file:// 地址，读出结果
       - name: 跑离线自检
-        if: steps.check.outputs.skip == 'false'
+        if: steps.check.outputs.build == 'true'
         run: |
           google-chrome --headless=new --no-sandbox --allow-file-access-from-files \
             --virtual-time-budget=5000 --dump-dom "file://$PWD/selftest/index.html" > "$RUNNER_TEMP/selftest.html" 2> /dev/null
@@ -64,24 +101,39 @@ jobs:
             exit 1
           fi
 
-      # zip 里的文件夹名固定叫 DualTrans：已解压扩展的 ID 跟文件夹路径绑定，
-      # 用户升级时把新版本覆盖到同一个文件夹再点"重新加载"，设置（包括 API Key）就不会丢
-      - name: 打包
-        if: steps.check.outputs.skip == 'false'
+      # 私钥只在这一步里解码到临时目录（权限 600），用完就删；脚本不会打印它的内容。
+      # ZIP 和 CRX 都从同一个构建目录产出，并校验版本号、资源完整性、签名和逐字节一致性
+      - name: 打包 ZIP 和 CRX 并校验
+        if: steps.check.outputs.build == 'true'
         id: pack
+        env:
+          CRX_KEY_B64: ${{ secrets.CRX_PRIVATE_KEY_BASE64 }}
+          CRX_EXPECTED_ID: ${{ vars.CRX_EXPECTED_ID }}
+          CHROME_BIN: google-chrome
         run: |
-          ZIP="DualTrans-${{ steps.ver.outputs.tag }}.zip"
-          mkdir -p "$RUNNER_TEMP/pkg/DualTrans"
-          rsync -a --exclude '.git' --exclude '.github' --exclude '.gitignore' \
-            --exclude 'package.ps1' --exclude 'package.bat' ./ "$RUNNER_TEMP/pkg/DualTrans/"
-          (cd "$RUNNER_TEMP/pkg" && zip -qr "$GITHUB_WORKSPACE/$ZIP" DualTrans)
-          unzip -l "$ZIP" | tail -1
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          KEY_DIR=$(mktemp -d)
+          trap 'rm -rf "$KEY_DIR"' EXIT
+          chmod 700 "$KEY_DIR"
+          (umask 077 && printf '%s' "$CRX_KEY_B64" | base64 -d > "$KEY_DIR/crx-key.pem") \
+            || { echo "::error::CRX_PRIVATE_KEY_BASE64 不是有效的 Base64"; exit 1; }
+          CRX_KEY_FILE="$KEY_DIR/crx-key.pem" bash .github/scripts/build-release.sh "$RUNNER_TEMP/dist"
+
+      - name: 上传试运行产物
+        if: env.DRY_RUN == 'true' && steps.pack.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DualTrans-${{ steps.ver.outputs.tag }}-dry-run
+          path: |
+            ${{ steps.pack.outputs.zip }}
+            ${{ steps.pack.outputs.crx }}
+          retention-days: 7
 
       - name: 整理更新说明
-        if: steps.check.outputs.skip == 'false'
+        if: steps.check.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          CRX_ID: ${{ steps.pack.outputs.crx_id }}
         run: |
-          VERSION="${{ steps.ver.outputs.version }}"
           # CHANGELOG 里 "## <版本号> — 标题" 到下一个 "## " 之间就是这一版的说明
           awk -v v="$VERSION" '
             index($0, "## " v " ") == 1 || $0 == "## " v { found = 1; next }
@@ -91,21 +143,40 @@ jobs:
           if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
             echo "CHANGELOG.md 里没有 $VERSION 的说明。" > "$RUNNER_TEMP/notes.md"
           fi
-          cat >> "$RUNNER_TEMP/notes.md" <<'EOF'
+          cat >> "$RUNNER_TEMP/notes.md" <<EOF
 
           ---
 
-          **安装**：下载下面的 zip 并解压 → 打开 `chrome://extensions/`（Edge：`edge://extensions/`）→ 开启开发者模式 → 「加载已解压的扩展程序」→ 选择解压出来的 `DualTrans` 文件夹。
+          ### 下载哪个文件
 
-          **升级**：把新版本解压后覆盖原来的 `DualTrans` 文件夹，再在扩展管理页点「重新加载」。文件夹路径不变，设置和 API Key 都会保留。
+          **普通用户请用 \`DualTrans-v$VERSION.zip\`。** 解压 → 打开 \`chrome://extensions/\`（Edge：\`edge://extensions/\`）→ 开启开发者模式 → 「加载已解压的扩展程序」→ 选择解压出来的 \`DualTrans\` 文件夹。
+          升级时把新版本覆盖到同一个文件夹，再点「重新加载」，设置和 API Key 都会保留。
+
+          \`DualTrans-v$VERSION.crx\` 是用固定私钥签名的扩展包（扩展 ID：\`$CRX_ID\`），**不是通用的一键安装包**：
+          普通的 Chrome / Edge（Windows、macOS）一般只允许从官方应用商店安装 CRX，直接拖进浏览器通常会被拦截。
+          它适合用组策略部署扩展的企业 / 学校环境、或者需要固定扩展 ID 的场景。
+          用 CRX 安装的扩展和用 ZIP 加载的扩展 ID 不同，两者的设置互不相通。
           EOF
 
       - name: 发布 Release
-        if: steps.check.outputs.skip == 'false'
+        if: steps.check.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          ZIP: ${{ steps.pack.outputs.zip }}
+          CRX: ${{ steps.pack.outputs.crx }}
         run: |
-          gh release create "${{ steps.ver.outputs.tag }}" "${{ steps.pack.outputs.zip }}" \
-            --title "DualTrans ${{ steps.ver.outputs.tag }}" \
+          # 两个文件一起上传；gh 会先建草稿、上传完再正式发布，上传失败就不会出现半成品
+          gh release create "$TAG" "$ZIP" "$CRX" \
+            --title "DualTrans $TAG" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             --target "$GITHUB_SHA"
+          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          echo "Release 附件："
+          echo "$ASSETS"
+          for f in "$ZIP" "$CRX"; do
+            if ! printf '%s\n' "$ASSETS" | grep -qxF "$(basename "$f")"; then
+              echo "::error::Release 里缺少 $(basename "$f")"
+              exit 1
+            fi
+          done
