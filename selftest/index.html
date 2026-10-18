@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>DualTrans 自检</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #f7f8fa;
+        color: #16181d;
+        font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 4px;
+      }
+      .sub {
+        color: #6b7280;
+        font-size: 13px;
+        margin: 0 0 20px;
+      }
+      #summary {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-weight: 600;
+        margin-bottom: 16px;
+      }
+      #summary.pass {
+        background: #e7f6ec;
+        color: #067647;
+      }
+      #summary.fail {
+        background: #fdecec;
+        color: #b42318;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      li {
+        padding: 9px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 9px;
+        background: #fff;
+        margin-bottom: 8px;
+      }
+      .ok {
+        color: #067647;
+        font-weight: 600;
+      }
+      .no {
+        color: #b42318;
+        font-weight: 600;
+      }
+      .name {
+        font-weight: 600;
+      }
+      .detail {
+        color: #6b7280;
+        font-size: 12.5px;
+        word-break: break-all;
+      }
+      /* 注意：测试夹具必须"渲染但移出视口"，不能用 display:none，
+         否则 getComputedStyle 会把所有元素判成不可见，导致全部用例误报。 */
+      #fixture {
+        position: fixed;
+        left: -20000px;
+        top: 0;
+        width: 800px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>DualTrans 自检</h1>
+    <p class="sub">纯前端离线运行，验证段落切分 / 译文注入 / 长文拆分等核心逻辑。不发起任何网络请求。</p>
+    <div id="summary">运行中…</div>
+    <ul id="list"></ul>
+
+    <!-- 测试夹具：模拟一个真实页面结构 -->
+    <div id="fixture">
+      <div id="fx-root">
+        <h1>Test heading for translation</h1>
+        <p>This is the first paragraph. It has two sentences.</p>
+        <p>Second paragraph with <b>bold text</b> and a <a href="#">link</a>.</p>
+        <ul>
+          <li>List item one</li>
+          <li>List item two</li>
+        </ul>
+        <pre><code>const a = 1;</code></pre>
+        <p translate="no">Do not translate this one.</p>
+        <p>1234567890</p>
+        <p style="display: none">Hidden paragraph</p>
+        <table>
+          <tbody>
+            <tr>
+              <td>Cell text here</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- 回归用例：导航里的短标签必须原地替换（不追加节点） -->
+        <nav id="fx-nav" style="display: block; width: 600px">
+          <div id="fx-flex" style="display: flex; gap: 8px; align-items: center; width: 600px">
+            <span>User Name</span>
+            <span>Added camouflage - 3 Oct, 07:51</span>
+          </div>
+        </nav>
+
+        <!-- 回归用例：字号写在元素自己身上，译文必须继承过来 -->
+        <h3 id="fx-heading" style="font-size: 28px; font-weight: 700; color: rgb(200, 30, 30)">
+          Heading With Own Style
+        </h3>
+
+        <!-- 回归用例：固定定位的导航栏 -->
+        <div
+          id="fx-fixed"
+          style="position: fixed; top: -3000px; left: -20000px; width: 600px; height: 40px; display: flex; gap: 8px; background: #333; color: #fff"
+        >
+          <span>Sounds</span>
+          <span>Controls</span>
+        </div>
+
+        <!-- 回归用例：绝对定位的盒子尺寸写死，译文只能原地替换 -->
+        <div id="fx-abs" style="position: absolute; left: -20000px; top: 0; width: 300px">
+          Absolute Label Text
+        </div>
+      </div>
+    </div>
+
+    <script src="../content/core.js"></script>
+    <script src="../content/dom.js"></script>
+    <script src="test.js"></script>
+  </body>
+</html>

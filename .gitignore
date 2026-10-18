@@ -1,0 +1,18 @@
+# 依赖与构建产物（本项目零构建，理论上不会产生）
+node_modules/
+dist/
+
+# 打包产物
+*.zip
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# 本地环境变量（如果把 Key 写进配置时用）
+.env
+.env.*

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>DualTrans 设置</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <h1>DualTrans 设置</h1>
+        <p class="sub">只使用你自己的 OpenAI 兼容接口。Key 只保存在本机浏览器存储里，不会发往任何第三方服务器。</p>
+      </header>
+
+      <section class="card">
+        <h2>接口</h2>
+
+        <label class="field">
+          <span class="name">API 地址</span>
+          <input id="baseUrl" type="text" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
+          <span class="hint">OpenAI 兼容的 base URL，通常以 /v1 结尾。程序会自动补 /chat/completions。</span>
+        </label>
+
+        <label class="field">
+          <span class="name">API Key</span>
+          <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." autocomplete="off" />
+          <span class="hint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
+        </label>
+
+        <label class="field">
+          <span class="name">模型名</span>
+          <input id="model" type="text" spellcheck="false" placeholder="deepseek-chat" />
+          <span class="hint">例如 deepseek-chat、glm-4-flash、Qwen2.5-72B-Instruct。</span>
+        </label>
+
+        <div class="actions">
+          <button id="test" class="btn">测试连接</button>
+          <span id="testResult" class="result"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>翻译</h2>
+
+        <div class="grid">
+          <label class="field">
+            <span class="name">目标语言</span>
+            <select id="targetLang"></select>
+          </label>
+
+          <label class="field">
+            <span class="name">译文样式</span>
+            <select id="theme"></select>
+          </label>
+
+          <label class="field">
+            <span class="name">单批条数</span>
+            <input id="batchSize" type="number" min="1" max="50" step="1" />
+            <span class="hint">一次请求最多合并多少段。段数越多越省 token，但延迟更高。</span>
+          </label>
+
+          <label class="field">
+            <span class="name">单批字符上限</span>
+            <input id="maxCharsPerBatch" type="number" min="200" max="12000" step="100" />
+            <span class="hint">超过就自动拆成多批。</span>
+          </label>
+
+          <label class="field">
+            <span class="name">长段落拆分阈值</span>
+            <input id="maxUnitChars" type="number" min="200" max="6000" step="100" />
+            <span class="hint">单段超过该字符数时按句子切开分别翻译。</span>
+          </label>
+
+          <div class="field">
+            <span class="name">快捷键</span>
+            <div class="hotkey-row">
+              <button type="button" id="hotkeyBtn" class="hotkey-btn">Alt + A</button>
+              <span class="hint" id="hotkeyHint">点击按钮，然后直接按下你想要的组合键（Esc 取消）</span>
+            </div>
+          </div>
+
+          <label class="field">
+            <span class="name">并发请求数</span>
+            <input id="concurrency" type="number" min="1" max="8" step="1" />
+            <span class="hint">建议 2–3。太高容易触发限流。</span>
+          </label>
+        </div>
+
+        <label class="check">
+          <input id="skipSameLang" type="checkbox" />
+          <span>跳过已经是目标语言的段落（比如中文页翻中文时不重复翻）</span>
+        </label>
+
+        <label class="check">
+          <input id="translateOnLoad" type="checkbox" />
+          <span>打开页面后自动翻译（谨慎开启，会消耗较多额度）</span>
+        </label>
+
+        <label class="check">
+          <input id="chromeBilingual" type="checkbox" />
+          <span>界面元素（导航、按钮、标签）也保留原文 —— 默认关闭；开启后界面会中英对照，固定高度的导航条可能换行/溢出</span>
+        </label>
+
+        <label class="check">
+          <input id="debug" type="checkbox" />
+          <span>输出调试日志（网页控制台会打印 [DualTrans] 前缀的段落切分 / 批处理信息）</span>
+        </label>
+      </section>
+
+      <footer class="page-foot">
+        <button id="save" class="btn primary">保存</button>
+        <button id="reset" class="btn">恢复默认</button>
+        <button id="clearCache" class="btn ghost">清空翻译缓存</button>
+        <span id="saveResult" class="result"></span>
+      </footer>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

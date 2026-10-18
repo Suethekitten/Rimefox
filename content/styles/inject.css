@@ -1,0 +1,67 @@
+/* 注入到页面的译文样式。仅在扩展开启时生效（html[data-dt="on"]）。 */
+
+html[data-dt="on"] .dt-target {
+  display: block;
+  margin: 0.38em 0 0.2em;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  white-space: normal;
+  word-break: inherit;
+  overflow-wrap: anywhere;
+  opacity: 1;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  animation: dt-fade-in 0.18s ease-out;
+}
+
+html[data-dt="on"] .dt-target.dt-inline {
+  display: inline;
+  margin: 0 0 0 0.28em;
+}
+
+@keyframes dt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-1px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- 主题 ---- */
+/* 下划线用 text-decoration，只划在文字上；
+   之前用 border-bottom 会横贯整个容器宽度，看起来像一条分隔线。 */
+html[data-dt="on"][data-dt-theme="underline"] .dt-target {
+  border-bottom: 0;
+  text-decoration: underline;
+  text-decoration-color: rgba(59, 130, 246, 0.55);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+html[data-dt="on"][data-dt-theme="dashed"] .dt-target {
+  border: 1px dashed rgba(148, 163, 184, 0.9);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+html[data-dt="on"][data-dt-theme="highlight"] .dt-target {
+  background: rgba(255, 214, 0, 0.24);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+html[data-dt="on"][data-dt-theme="mask"] .dt-target {
+  opacity: 0.55;
+}
+
+/* ---- 仅译文模式 ----
+   现在"仅译文"是注入时原地替换文本节点（保留元素盒子），
+   不再靠 CSS 隐藏原文，所以这里不需要额外规则。 */

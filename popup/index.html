@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>DualTrans</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div class="brand"><span class="dot"></span> DualTrans</div>
+      <span class="ver" id="ver"></span>
+    </header>
+
+    <main class="main">
+      <button id="toggle" class="primary">翻译此页</button>
+
+      <div class="row">
+        <span class="label">显示</span>
+        <div class="seg" id="modeSeg">
+          <button type="button" data-mode="dual" class="active">双语</button>
+          <button type="button" data-mode="translation">仅译文(实验)</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="label">目标</span>
+        <select id="target"></select>
+      </div>
+
+      <div class="stat" id="stat">检测中…</div>
+
+      <section class="quick">
+        <textarea id="quickInput" rows="3" placeholder="粘贴 / 输入要翻译的文字…（Ctrl+Enter 翻译）"></textarea>
+        <div class="quick-actions">
+          <button type="button" id="quickGo" class="mini primary-mini">翻译</button>
+          <button type="button" id="quickCopy" class="mini">复制结果</button>
+          <button type="button" id="quickClear" class="mini">清空</button>
+        </div>
+        <div id="quickOut" class="quick-out" hidden></div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <button type="button" id="retranslate" class="link">重翻</button>
+      <button type="button" id="clearCache" class="link">清缓存</button>
+      <button type="button" id="diagnose" class="link">诊断</button>
+      <button type="button" id="openOptions" class="link">设置</button>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
