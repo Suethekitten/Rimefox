@@ -14,6 +14,7 @@ const fields = {
   concurrency: $('concurrency'),
   skipSameLang: $('skipSameLang'),
   translateOnLoad: $('translateOnLoad'),
+  lazy: $('lazy'),
   chromeBilingual: $('chromeBilingual'),
   debug: $('debug')
 };
@@ -105,9 +106,11 @@ document.addEventListener(
     }
 
     let k = KEY_NAMES[key] || key;
-    if (k.length > 1 && !/^f\d{1,2}$/.test(k)) {
-      // 其它命名键（pageup 等）原样保留
-      k = k;
+    // macOS 上 Option+A 按出来的是 "å"（Option+E 是 "Dead"），非拉丁布局是 "ф" 这类：
+    // 录成物理键位上的字母，和内容脚本的匹配规则一致。其它命名键（pageup、f5 等）原样保留
+    const codeMatch = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code || '');
+    if (!/^[a-z0-9]$/.test(k) && codeMatch) {
+      k = (codeMatch[1] || codeMatch[2]).toLowerCase();
     }
     parts.push(k);
 
@@ -132,6 +135,7 @@ function applyConfig(cfg) {
   setHotkeyValue(cfg.hotkey);
   fields.skipSameLang.checked = cfg.skipSameLang !== false;
   fields.translateOnLoad.checked = !!cfg.translateOnLoad;
+  fields.lazy.checked = cfg.lazy !== false;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.debug.checked = !!cfg.debug;
 }
@@ -150,6 +154,7 @@ function readForm() {
     hotkey: hotkeyValue || DEFAULTS.hotkey,
     skipSameLang: fields.skipSameLang.checked,
     translateOnLoad: fields.translateOnLoad.checked,
+    lazy: fields.lazy.checked,
     chromeBilingual: fields.chromeBilingual.checked,
     debug: fields.debug.checked
   };
@@ -192,7 +197,14 @@ $('test').addEventListener('click', async () => {
         else resolve(r);
       });
     });
-    if (res && res.ok) {
+    if (res && res.ok && res.reasoning) {
+      setResult(
+        $('testResult'),
+        '连接正常 · ' + res.ms + 'ms，但这个模型带"思考"过程：每批都要先想一阵再输出，整页翻译会慢很多。' +
+          '建议换成不带思考的模型，或在服务商那边关闭思考模式。',
+        'bad'
+      );
+    } else if (res && res.ok) {
       setResult($('testResult'), '连接正常 · ' + res.ms + 'ms · ' + (res.sample || ''), 'ok');
     } else {
       setResult($('testResult'), '失败：' + ((res && res.error) || '未知错误'), 'bad');

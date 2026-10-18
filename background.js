@@ -57,14 +57,29 @@ function parseArray(raw, expected) {
   const start = text.indexOf('[');
   const end = text.lastIndexOf(']');
   if (start >= 0 && end > start) {
+    let arr = null;
     try {
-      const arr = JSON.parse(text.slice(start, end + 1));
-      if (Array.isArray(arr) && arr.length === expected) {
-        return arr.map((x) => (x == null ? '' : String(x)));
-      }
+      arr = JSON.parse(text.slice(start, end + 1));
     } catch (err) {
       /* 落到下面的兜底 */
     }
+    if (Array.isArray(arr)) {
+      if (arr.length === expected) return arr.map((x) => (x == null ? '' : String(x)));
+      // 合法数组但条数不对（模型合并/拆分了段落）：不能再按行拆，
+      // 多行 JSON 按行拆出来是 `[`、`"xx",` 这种碎片，会被当成译文插进页面。交给重试。
+      return null;
+    }
+  }
+
+  // 只有一条时，模型常常直接回译文本身、不包数组：整段就是译文
+  if (expected === 1 && text[0] !== '[') {
+    try {
+      const s = JSON.parse(text);
+      if (typeof s === 'string') return [s];
+    } catch (err) {
+      /* 不是 JSON 字符串，原样当译文 */
+    }
+    return [text];
   }
 
   // 兜底：按行拆（有些模型会输出 "1. xxx" 形式）
@@ -80,14 +95,17 @@ function parseArray(raw, expected) {
 async function translateBatchWithRetry(texts, target, cfg) {
   let attempt = 0;
   let lastErr = null;
-  while (attempt < 3) {
+  // 不能写 `Number(x) || 0.2`：用户设成 0 会被当成没设
+  const temperature = Number.isFinite(Number(cfg.temperature)) ? Number(cfg.temperature) : 0.2;
+  let mismatch = false;
+  while (attempt < 3 && !mismatch) {
     attempt += 1;
     try {
       const raw = await chat({
         baseUrl: cfg.baseUrl,
         apiKey: cfg.apiKey,
         model: cfg.model,
-        temperature: Number(cfg.temperature) || 0.2,
+        temperature,
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
@@ -98,13 +116,26 @@ async function translateBatchWithRetry(texts, target, cfg) {
       const parsed = parseArray(raw, texts.length);
       if (parsed) return parsed;
       lastErr = new ApiError('模型没有按 JSON 数组返回', 0, String(raw).slice(0, 300));
+      // 多条时条数对不上（模型合并/拆分了段落）：整批原样重试多半还是对不上，
+      // 每次又要等完整生成。跳出重试，下面对半拆开
+      mismatch = texts.length > 1;
     } catch (err) {
       lastErr = err;
       const status = err && err.status ? err.status : 0;
       const retriable = status === 0 || status === 429 || status >= 500;
       if (!retriable) throw err;
     }
-    if (attempt < 3) await sleep(700 * attempt);
+    if (attempt < 3 && !mismatch) await sleep(700 * attempt);
+  }
+  if (mismatch) {
+    // 两半并行各自翻（各自带重试），拆到单条为止。放在重试循环外面：
+    // 某一半失败时直接失败，不能再把整批重来一遍
+    const mid = Math.ceil(texts.length / 2);
+    const halves = await Promise.all([
+      translateBatchWithRetry(texts.slice(0, mid), target, cfg),
+      translateBatchWithRetry(texts.slice(mid), target, cfg)
+    ]);
+    return halves[0].concat(halves[1]);
   }
   throw lastErr || new ApiError('翻译失败', 0, '');
 }
@@ -120,7 +151,7 @@ function describeError(err) {
 // ---------------- 主流程 ----------------
 async function handleTranslate(msg) {
   const cfg = await getConfig();
-  maxParallel = Math.max(1, Math.min(8, Number(cfg.concurrency) || 3));
+  maxParallel = Math.max(1, Math.min(16, Number(cfg.concurrency) || 6));
 
   const target = msg.target || cfg.targetLang;
   const rawTexts = Array.isArray(msg.texts) ? msg.texts : [];
@@ -179,6 +210,10 @@ async function handleTranslate(msg) {
             if (typeof value === 'string' && value.trim()) {
               results[index] = value;
               cache.set(cache.makeKey(target, texts[index]), value);
+            } else {
+              // 模型返回空（"EN"/"×" 这类不需要翻的）：给 ''，和失败的 null 区分开，
+              // 内容脚本据此记为"与原文相同"而不是失败。不进缓存，免得一次抽风永久生效。
+              results[index] = '';
             }
           });
         } catch (err) {
@@ -208,6 +243,7 @@ async function handleTest() {
   const cfg = await getConfig();
   if (!cfg.apiKey) return { ok: false, error: '还没有填写 API Key' };
   const started = Date.now();
+  const meta = {};
   try {
     const raw = await chat({
       baseUrl: cfg.baseUrl,
@@ -216,6 +252,7 @@ async function handleTest() {
       temperature: 0,
       maxTokens: 256,
       timeoutMs: Math.min(30000, Number(cfg.timeoutMs) || 30000),
+      meta,
       messages: [
         { role: 'system', content: '你是一个翻译引擎。只输出 JSON 字符串数组，不要任何解释。' },
         { role: 'user', content: JSON.stringify(['Hello, world.', 'This is a connection test.']) }
@@ -226,6 +263,7 @@ async function handleTest() {
       ok: true,
       ms: Date.now() - started,
       model: cfg.model,
+      reasoning: !!meta.reasoning,
       sample: parsed ? parsed.join(' / ') : String(raw).slice(0, 120)
     };
   } catch (err) {
@@ -274,9 +312,11 @@ const ROUTES = {
     const ok = await ensureInjected(msg.tabId);
     return { ok: ok };
   },
+  // 只给内容脚本用：去掉 API Key，换成 hasKey。
+  // 内容脚本跑在网页的渲染进程里，渲染进程一旦被攻破，它手里的东西都可能被读走。
   'config:get': async () => {
-    const cfg = await getConfig();
-    return { ok: true, config: cfg };
+    const { apiKey, ...safe } = await getConfig();
+    return { ok: true, config: { ...safe, hasKey: !!apiKey } };
   },
   'stats': async () => ({ ok: true, cacheSize: cache.size() }),
   // 标签页级"翻译中"记忆：返回/刷新后自动恢复翻译（同一站点才恢复）
@@ -354,6 +394,38 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   } catch (err) {
     /* 忽略 */
   }
+});
+
+// API Key 存在 storage.local，而 local 默认对内容脚本开放（内容脚本能直接 get 到整份配置）。
+// 收紧成只有扩展自己的页面 / service worker 可读。浏览器不支持对 local 设置时静默跳过：
+// 我们自己的代码本来也不再把 Key 发给内容脚本（见 config:get）。
+function restrictStorage() {
+  try {
+    const p = chrome.storage.local.setAccessLevel
+      ? chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
+      : null;
+    if (p && p.catch) p.catch(() => {});
+  } catch (err) {
+    /* 不支持 */
+  }
+}
+restrictStorage();
+chrome.runtime.onStartup.addListener(restrictStorage);
+
+// 配置变了（设置页保存、弹窗切模式）就通知所有标签页重新拉一次（去掉 Key 的）配置。
+// 以前内容脚本自己监听 storage.onChanged，但那样事件里带着完整配置（含 Key），
+// 而且 local 收紧访问后内容脚本也收不到了。
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.config) return;
+  chrome.tabs.query({}).then(
+    (tabs) => {
+      tabs.forEach((tab) => {
+        if (tab.id == null) return;
+        chrome.tabs.sendMessage(tab.id, { type: 'dt:configChanged' }).catch(() => {});
+      });
+    },
+    () => {}
+  );
 });
 
 // 首次安装且没有 key 时，直接拉开设置页

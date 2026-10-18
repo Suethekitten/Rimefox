@@ -8,6 +8,7 @@
 
 - 整页双语对照翻译（原文 + 译文分层显示）
 - 支持任意 OpenAI 兼容接口：DeepSeek / 智谱 / 硅基流动 / 通义 / 自建网关
+- 先翻眼前这屏；远处的内容滚到附近再翻（长页面省钱，可在设置里关掉）
 - 动态内容补翻（MutationObserver）、SPA 路由切换自动重翻
 - 批量合并请求 + 并发控制 + LRU 缓存 + 429/5xx 自动重试（省 token、防限流）
 - 4 种译文样式、双语 / 仅译文切换、Alt+A 一键开关
@@ -48,9 +49,9 @@ edge-bilingual/
 
 **结构安全**：`p/h*/div` 这类元素把译文插在后边（`afterend`）；`li/td/th/blockquote/figcaption` 或父容器是 flex/grid 时改为追加到内部，避免破坏列表与网格布局。
 
-**省钱**：条数 + 字符数双阈值合批；同语言跳过；后台 LRU 缓存命中直接返回；只在需要时并发（默认 3）。
+**省钱**：条数 + 字符数双阈值合批；同语言跳过；后台 LRU 缓存命中直接返回；并发跟设置走（默认 6）；默认只翻屏幕附近的内容，没滚到的不花钱。
 
-**隐私**：API Key 存在 `chrome.storage.local`，只有 background 读得到，content script 通过消息间接调用，页面 JS 无法接触 Key。
+**隐私**：API Key 存在 `chrome.storage.local`，并收紧为只有扩展自身（background / 设置页）可读（`setAccessLevel`，浏览器不支持时跳过）。content script 拿到的配置里没有 Key，只有 `hasKey`，翻译通过消息交给 background 发请求；页面 JS 无法接触 Key。
 
 ## 已知限制（v1）
 

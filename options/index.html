@@ -81,14 +81,19 @@
 
           <label class="field">
             <span class="name">并发请求数</span>
-            <input id="concurrency" type="number" min="1" max="8" step="1" />
-            <span class="hint">建议 2–3。太高容易触发限流。</span>
+            <input id="concurrency" type="number" min="1" max="16" step="1" />
+            <span class="hint">同时发出的请求数，越高整页翻完越快。DeepSeek 可设 6–10；其它服务商频繁提示限流（429）时再调低。</span>
           </label>
         </div>
 
         <label class="check">
           <input id="skipSameLang" type="checkbox" />
           <span>跳过已经是目标语言的段落（比如中文页翻中文时不重复翻）</span>
+        </label>
+
+        <label class="check">
+          <input id="lazy" type="checkbox" />
+          <span>只翻屏幕附近的内容，滚动到时再翻（长页面省钱；关掉则整页一次翻完）</span>
         </label>
 
         <label class="check">

@@ -90,9 +90,10 @@
   var fixture = document.getElementById('fx-root');
   var units = [];
 
-  check('collect: 收集到全部 12 个单元', function () {
+  // 13 = 标题 / 2 段正文 / 2 个 li / 数字段 / td / flex 两项 / 自带样式标题 / 固定导航两项 / 绝对定位
+  check('collect: 收集到全部 13 个单元', function () {
     units = DT.collect(fixture);
-    return units.length === 12 ? true : '应为 12 个，实际 ' + units.length + '：' +
+    return units.length === 13 ? true : '应为 13 个，实际 ' + units.length + '：' +
       JSON.stringify(units.map(function (u) { return u.text.slice(0, 14); }));
   });
 
@@ -265,6 +266,78 @@
     return again.length === units.length
       ? true
       : '收集数量不一致：' + again.length + ' vs ' + units.length;
+  });
+
+  // ---------------- 0.4.2 回归用例 ----------------
+  function onlyText(id) {
+    var got = DT.collect(document.getElementById(id));
+    return got.length === 1 ? got[0].text : '收集到 ' + got.length + ' 个单元';
+  }
+
+  check('<br> 分隔的两行不会粘成一个词', function () {
+    return eq(onlyText('fx-br'), 'First line Second line');
+  });
+
+  check('行内 <code> 留在句子里，不被丢掉', function () {
+    return eq(onlyText('fx-code'), 'Run npm install first.');
+  });
+
+  check('<script> 内容不进原文', function () {
+    return eq(onlyText('fx-script'), 'Visible text');
+  });
+
+  check('链接里的 SVG 图标：title 不进原文，替换后文字仍可见', function () {
+    var a = document.getElementById('fx-svg-link');
+    var u = DT.collect(a)[0];
+    if (!u) return '没有收集到链接';
+    if (u.text !== 'Home page') return '原文混进了图标 title：' + u.text;
+    if (!DT.inject(u.el, '首页', 'zh-CN')) return 'inject 返回 false';
+    var title = a.querySelector('title').textContent;
+    if (title !== 'Home icon') return '译文被写进了 svg title：' + title;
+    if (a.textContent.indexOf('Home page') >= 0) return '可见原文没被替换：' + a.textContent;
+    return a.textContent.indexOf('首页') >= 0 ? true : '链接可见文字丢失：' + a.textContent;
+  });
+
+  check('替换型元素被站点改写后：放回待翻译', function () {
+    var btn = document.getElementById('fx-counter-a');
+    var u = DT.collect(btn)[0];
+    if (!u || !DT.inject(u.el, '计数 2', 'zh-CN')) return '注入失败';
+    if (btn.textContent !== '计数 2') return '按钮应原地替换：' + btn.textContent;
+    if (DT.releaseReplaced() !== 0) return '站点没改时不该放回';
+    btn.firstChild.nodeValue = 'Count 3'; // 模拟 SPA 原地更新文本节点
+    var released = DT.releaseReplaced();
+    if (released !== 1) return '应放回 1 个，实际 ' + released;
+    if (btn.hasAttribute('data-dt-src')) return '仍被标记为已翻译，新内容永远不会再翻';
+    return eq(onlyText('fx-counter-a'), 'Count 3');
+  });
+
+  check('替换型元素被站点改写后：还原不拿旧原文覆盖新内容', function () {
+    var btn = document.getElementById('fx-counter-b');
+    var u = DT.collect(btn)[0];
+    if (!u || !DT.inject(u.el, '计数 2', 'zh-CN')) return '注入失败';
+    btn.firstChild.nodeValue = 'Count 3';
+    DT.restore();
+    return eq(btn.textContent, 'Count 3');
+  });
+
+  check('collect 过滤：不收的单元不占上限名额', function () {
+    var got = DT.collect(fixture, function (u) {
+      return u.text.indexOf('List item') === 0;
+    });
+    if (got.length !== 2) return '应只收到 2 个列表项，实际 ' + got.length;
+    if (DT.lastCollectFull) return '没收满却标记成已满';
+    return true;
+  });
+
+  check('自己写入的文本可被识别（观察器据此忽略）', function () {
+    var btn = document.getElementById('fx-counter-b');
+    var u = DT.collect(btn)[0];
+    if (!u || !DT.inject(u.el, '计数 3', 'zh-CN')) return '注入失败';
+    if (!DT.isOwnWrite(btn.firstChild)) return '我们写入的文本没被识别';
+    btn.firstChild.nodeValue = 'Count 4';
+    if (DT.isOwnWrite(btn.firstChild)) return '站点改写后仍被当成自己写的';
+    DT.restore();
+    return true;
   });
 
   // ---------------- 渲染 ----------------

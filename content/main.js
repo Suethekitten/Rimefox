@@ -13,8 +13,54 @@
   var lastUrl = location.href;
   var urlTimer = 0;
   var running = false;
-  var runningSince = 0;
+  // 每轮翻译一个编号。还原 / 重建 / 看门狗复位时把编号 +1，
+  // 旧一轮之后才回来的结果一律丢弃，也不会再改动 running 等状态。
+  var runId = 0;
+  // 最近一次有进展（批次返回）的时间。看门狗看的是"多久没进展"，不是"总共跑了多久"，
+  // 否则长页面正常翻到 90 秒就会被误杀。
+  var lastBeat = 0;
   var dirty = false; // 翻译过程中页面又变了
+  // 译文与原文相同 / 模型返回空的单元：记下当时的源文本，内容没变就不再重复送翻和计数
+  var settled = new WeakMap();
+  // 翻译失败的单元按段落各自退避：失败后等 5s / 15s / 45s 再试，第 4 次失败就放弃，
+  // 直到内容变了、用户手动重翻或改了设置。
+  // 以前失败段在每次点击、悬停、页面变动时都整页重发，遇到限流（429）只会越试越被限；
+  // 也不能整页一起退避 —— 一批固定出错的段落会把新加载内容的翻译一起拖住。
+  var RETRY_DELAYS = [5000, 15000, 45000];
+  var failures = new WeakMap(); // el → { text, count, until }
+  var retryTimer = 0;
+  var retryAt = 0;
+  // 用户滚动 / 窗口大小变了：下一次取批前重新按离屏幕的距离排序
+  var viewMoved = true;
+  var lastScrollY = -1;
+  var lastViewH = -1;
+  var lazyTimer = 0;
+
+  // 懒翻译的范围：屏幕上方 1 屏到下方 2 屏。下方多留一些，正常往下读时译文已经提前到了
+  var LAZY_ABOVE = 1;
+  var LAZY_BELOW = 2;
+
+  function isNearView(el, viewH) {
+    var r = el.getBoundingClientRect();
+    return r.bottom >= -viewH * LAZY_ABOVE && r.top <= viewH * (1 + LAZY_BELOW);
+  }
+
+  // 滚动 / 改窗口大小：待翻队列按新位置重排；懒翻译时还要补翻新进入范围的内容。
+  // 用节流不用防抖：一直往下滚时也要边滚边补，不能等停下来才翻
+  function onViewChange() {
+    viewMoved = true;
+    if (!DT.state.enabled || !DT.state.config || DT.state.config.lazy === false) return;
+    if (lazyTimer) return;
+    lazyTimer = setTimeout(function () {
+      lazyTimer = 0;
+      if (!DT.state.enabled) return;
+      if (running) {
+        dirty = true;
+        return;
+      }
+      translatePage({ silent: true });
+    }, 400);
+  }
 
   function applyChrome() {
     var html = document.documentElement;
@@ -54,73 +100,197 @@
     };
   }
 
+  // ---------------- 失败退避 ----------------
+  // DT.state.failed = 当前处于失败状态的段落数（有退避记录的单元），不是累计失败次数
+  function noteFailure(unit) {
+    var prev = failures.get(unit.el);
+    if (!prev) DT.state.failed += 1;
+    var count = prev && prev.text === unit.text ? prev.count + 1 : 1;
+    var delay = RETRY_DELAYS[count - 1] || 0; // 0 = 不再自动重试
+    failures.set(unit.el, { text: unit.text, count: count, until: Date.now() + delay });
+    return delay;
+  }
+
+  function clearFailure(el) {
+    if (!failures.has(el)) return;
+    failures.delete(el);
+    DT.state.failed = Math.max(0, DT.state.failed - 1);
+  }
+
+  function resetFailures() {
+    failures = new WeakMap();
+    DT.state.failed = 0;
+    clearTimeout(retryTimer);
+    retryTimer = 0;
+    retryAt = 0;
+  }
+
+  // ms 之后补扫一次；已经约好了更早的就不动
+  function scheduleRetry(ms) {
+    var at = Date.now() + ms;
+    if (retryTimer && retryAt <= at) return;
+    clearTimeout(retryTimer);
+    retryAt = at;
+    retryTimer = setTimeout(function () {
+      retryTimer = 0;
+      retryAt = 0;
+      scheduleIncremental();
+    }, ms);
+  }
+
   // ---------------- 翻译主流程 ----------------
+  // 作废当前这一轮（它的在途请求回来后会被丢弃）
+  function cancelRun() {
+    runId += 1;
+    running = false;
+    lastBeat = 0;
+  }
+
   // opts: { reset: 是否清零统计, silent: 是否不弹提示 }
   async function translatePage(opts) {
     var options = opts || {};
     if (running || !DT.state.enabled) return;
     running = true;
-    runningSince = Date.now();
+    runId += 1;
+    var myRun = runId;
+    lastBeat = Date.now();
+    var retryIn = 0; // 本轮结束后多久补扫一次（有段落在退避中时）
+    var collectedFull = false; // 本轮收集是否达到上限
+    var progressed = false; // 本轮是否有单元完成或失败
+
+    function cancelled() {
+      return myRun !== runId;
+    }
+
+    function wantRetry(ms) {
+      if (ms > 0) retryIn = retryIn ? Math.min(retryIn, ms) : ms;
+    }
+
     try {
       var cfg = DT.state.config || {};
       var target = DT.state.target;
       var maxUnit = Number(cfg.maxUnitChars) || 1200;
 
-      var units = DT.collect(document.body);
-      var queue = [];
-      units.forEach(function (unit) {
-        if (DT.skipText(unit.text)) return;
-        if (cfg.skipSameLang !== false && DT.looksLikeTarget(unit.text, target)) return;
-        queue.push(unit);
-      });
-
-      if (!queue.length) {
-        if (!options.silent) DT.toast('没有需要翻译的段落（可能已是目标语言）');
-        running = false;
-        return;
-      }
+      // 仅译文 / 控件替换过的元素，如果站点又改了它的文字，先放回待翻译
+      DT.releaseReplaced();
 
       if (options.reset) {
         DT.state.translated = 0;
-        DT.state.failed = 0;
+        resetFailures();
       }
-      DT.state.total = Math.max(DT.state.total || 0, queue.length);
+
+      // 过滤放进 collect 里做：不送翻的单元不占单轮上限
+      var now = Date.now();
+      var lazy = cfg.lazy !== false;
+      var viewH = window.innerHeight || 800;
+      var deferred = 0; // 离屏幕太远、留到滚过去再翻的单元数
+      var queue = DT.collect(document.body, function (unit) {
+        if (DT.skipText(unit.text)) return false;
+        if (cfg.skipSameLang !== false && DT.looksLikeTarget(unit.text, target)) return false;
+        if (settled.get(unit.el) === unit.text) return false;
+        // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
+        // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
+        if (lazy && !isNearView(unit.el, viewH)) {
+          deferred += 1;
+          return false;
+        }
+        var fail = failures.get(unit.el);
+        if (fail && fail.text === unit.text) {
+          if (fail.count > RETRY_DELAYS.length) return false; // 已放弃
+          if (now < fail.until) {
+            wantRetry(fail.until - now); // 还在退避中：这轮跳过，到点再来
+            return false;
+          }
+        }
+        return true;
+      });
+      collectedFull = DT.lastCollectFull;
+
+      if (!queue.length) {
+        if (!options.silent) DT.toast('没有需要翻译的段落（可能已是目标语言）');
+        return;
+      }
+      // 进度分母 = 已翻的 + 这一轮要翻的（懒翻译时每轮只是一小块，不能只看本轮）
+      DT.state.total = Math.max(DT.state.total || 0, DT.state.translated + queue.length);
 
       // 长段落切成多段，逐段翻完后拼回同一位置
-      var segments = [];
+      var pending = [];
       queue.forEach(function (unit, ui) {
         var parts = DT.splitLong(unit.text, maxUnit);
         unit.slots = new Array(parts.length);
         unit.done = false;
         parts.forEach(function (part, k) {
-          segments.push({ ui: ui, k: k, text: part });
+          pending.push({ ui: ui, k: k, text: part });
         });
       });
 
-      // 组批：条数 + 字符数双阈值
-      var maxItems = Math.max(1, Number(cfg.batchSize) || 12);
-      var maxChars = Math.max(200, Number(cfg.maxCharsPerBatch) || 3000);
-      var batches = [];
-      var current = [];
-      var chars = 0;
-      segments.forEach(function (seg) {
-        if (current.length && (current.length >= maxItems || chars + seg.text.length > maxChars)) {
-          batches.push(current);
-          current = [];
-          chars = 0;
-        }
-        current.push(seg);
-        chars += seg.text.length;
-      });
-      if (current.length) batches.push(current);
+      var maxItems = Math.max(1, Number(cfg.batchSize) || 8);
+      var maxChars = Math.max(200, Number(cfg.maxCharsPerBatch) || 2000);
 
-      DT.log('segments', segments.length, 'batches', batches.length);
+      // ---- 先翻用户正在看的 ----
+      // 以前按文档顺序从头翻：人在页面中间时，要等上面全部翻完才轮到眼前这屏。
+      // 现在每取一批都按"离当前屏幕多远"排序：屏幕内最先，往下的其次（多半要往下读），
+      // 已经滚过去的最后。用户中途滚动，下一批就跟着换。
+      viewMoved = true;
+      function distanceOf(el) {
+        var r = el.getBoundingClientRect();
+        if (!r.width && !r.height) return 1e9; // 不在布局里（折叠菜单等），放最后
+        var h = window.innerHeight || 800;
+        if (r.bottom < 0) return -r.bottom * 2; // 在上方：权重加倍
+        if (r.top > h) return r.top - h;
+        return 0; // 在屏幕内
+      }
+      function reprioritize() {
+        viewMoved = false;
+        lastScrollY = window.scrollY;
+        lastViewH = window.innerHeight;
+        var seen = {};
+        pending.forEach(function (seg) {
+          if (seen[seg.ui]) return;
+          seen[seg.ui] = true;
+          queue[seg.ui].prio = distanceOf(queue[seg.ui].el);
+        });
+        pending.sort(function (a, b) {
+          return queue[a.ui].prio - queue[b.ui].prio || a.ui - b.ui || a.k - b.k;
+        });
+      }
+
+      // 屏幕内的批次要小：非流式请求要等整批生成完才一起返回，
+      // 一批 2000 字符时眼前这屏要等半分钟；拆小后分给多路并发同时翻，几秒就出来
+      // 再往下一屏以内的用中等批次：正常往下读时，下一屏要在读完这屏之前翻好
+      var NEAR_ITEMS = 3;
+      var NEAR_CHARS = 500;
+      var SOON_CHARS = 1000;
+      function takeBatch() {
+        // 页面级滚动直接比对位置（不依赖 scroll 事件的派发时机）；页面内部容器的滚动靠 viewMoved
+        if (viewMoved || window.scrollY !== lastScrollY || window.innerHeight !== lastViewH) reprioritize();
+        var prio = queue[pending[0].ui].prio;
+        var near = prio === 0;
+        var soon = prio <= (window.innerHeight || 800);
+        var limitItems = near ? Math.min(maxItems, NEAR_ITEMS) : maxItems;
+        var limitChars = near
+          ? Math.min(maxChars, NEAR_CHARS)
+          : soon
+          ? Math.min(maxChars, SOON_CHARS)
+          : maxChars;
+        var batch = [];
+        var chars = 0;
+        while (pending.length) {
+          var seg = pending[0];
+          if (batch.length && (batch.length >= limitItems || chars + seg.text.length > limitChars)) break;
+          batch.push(pending.shift());
+          chars += seg.text.length;
+        }
+        return batch;
+      }
+
+      DT.log('segments', pending.length);
 
       function tryInject(unit) {
         if (!unit || unit.done) return;
-        if (DT.state.abort) return;
+        if (cancelled()) return;
         for (var k = 0; k < unit.slots.length; k += 1) {
-          if (unit.slots[k] === undefined) return; // 还有段没回来
+          if (unit.slots[k] === undefined) return; // 还有段没回来（或失败了，等下次补扫重试）
         }
         var text = unit.slots
           .filter(function (part) {
@@ -131,6 +301,7 @@
         unit.done = true;
         if (!text) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
+          settled.set(unit.el, unit.text);
           return;
         }
 
@@ -138,6 +309,7 @@
         // 否则会叠成一条"删除线"，看着像渲染 bug。
         if (DT.normalizeText(text) === DT.normalizeText(unit.text)) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
+          settled.set(unit.el, unit.text);
           return;
         }
 
@@ -146,8 +318,14 @@
         }
       }
 
+      function markFailed(batch) {
+        batch.forEach(function (seg) {
+          queue[seg.ui].failed = true;
+        });
+      }
+
       async function runBatch(batch) {
-        if (DT.state.abort) return;
+        if (cancelled()) return;
         var texts = batch.map(function (seg) {
           return seg.text;
         });
@@ -155,13 +333,17 @@
         try {
           res = await DT.send({ type: 'translate', texts: texts, target: target });
         } catch (err) {
+          if (cancelled()) return;
+          lastBeat = Date.now();
           DT.log('send failed', err);
-          DT.state.failed += batch.length;
+          markFailed(batch);
+          DT.state.lastError = err && err.message ? err.message : String(err);
           return;
         }
-        if (DT.state.abort) return; // 期间用户点了"还原"
+        if (cancelled()) return; // 期间用户点了"还原"，或这一轮已被复位
+        lastBeat = Date.now();
         if (!res || !res.results) {
-          DT.state.failed += batch.length;
+          markFailed(batch);
           if (res && res.error) {
             DT.state.lastError = res.error;
             DT.log('batch error', res.error);
@@ -171,13 +353,14 @@
         if (res.error) DT.state.lastError = res.error;
         batch.forEach(function (seg, k) {
           var value = res.results[k];
-          if (typeof value === 'string' && value.trim()) {
+          if (typeof value === 'string') {
+            // '' = 模型返回空（原文本身是 "EN"/"×" 这种）：tryInject 里记为"同原文跳过"，不算失败
             queue[seg.ui].slots[seg.k] = value.trim();
           } else {
-            // 模型返回空（比如原文本身是 "EN"/"×" 这种）：记为"同原文跳过"，
-            // 不算失败 —— 否则统计里会出现莫名其妙的"失败 N 段"
-            queue[seg.ui].slots[seg.k] = '';
-            DT.state.skipped = (DT.state.skipped || 0) + 1;
+            // null = 这一段请求失败（Key 无效、限流、余额不足…）。
+            // 以前这里也记成"跳过"，结果全部失败时弹的是"已翻译 N 段"。
+            // 槽位留空：本轮不注入，本轮结束后按退避表安排重试。
+            queue[seg.ui].failed = true;
           }
         });
         batch.forEach(function (seg) {
@@ -185,31 +368,44 @@
         });
       }
 
-      var cursor = 0;
       async function worker() {
-        while (cursor < batches.length) {
-          if (DT.state.abort) return;
-          var batch = batches[cursor];
-          cursor += 1;
-          await runBatch(batch);
+        while (pending.length) {
+          if (cancelled()) return;
+          await runBatch(takeBatch());
         }
       }
 
+      // 并发路数跟设置走（以前这里写死 3，设置里的"并发请求数"调多大都没用）
       var workers = [];
-      var parallel = Math.min(3, batches.length);
+      var parallel = Math.max(1, Math.min(16, Number(cfg.concurrency) || 6));
       for (var w = 0; w < parallel; w += 1) workers.push(worker());
       await Promise.all(workers);
 
       // 兜底：把剩余能拼的补上
       queue.forEach(tryInject);
 
-      if (DT.state.abort) {
-        // 用户中途点了"还原"，不再弹提示
+      // 记账：失败的进退避，成功（含"与原文相同"）的清掉旧的失败记录
+      if (!cancelled()) {
+        queue.forEach(function (unit) {
+          if (unit.failed) {
+            wantRetry(noteFailure(unit));
+            progressed = true;
+          } else if (unit.done) {
+            clearFailure(unit.el);
+            progressed = true;
+          }
+        });
+      }
+
+      if (cancelled()) {
+        // 用户中途点了"还原"，或这一轮已被复位，不再弹提示
       } else if (!options.silent) {
-        if (DT.state.failed > 0) {
+        if (DT.state.failed > 0 && !DT.state.translated) {
+          DT.toast('翻译失败：' + (DT.state.lastError || '未知错误'), 5000);
+        } else if (DT.state.failed > 0) {
           DT.toast('新增 ' + (DT.state.translated) + ' 段译文，' + DT.state.failed + ' 段失败');
         } else {
-          DT.toast('已翻译 ' + queue.length + ' 段');
+          DT.toast('已翻译 ' + queue.length + ' 段' + (deferred ? '，往下滚动会接着翻' : ''));
         }
       }
     } catch (err) {
@@ -218,11 +414,18 @@
         DT.toast('翻译出错：' + (err && err.message ? err.message : String(err)));
       }
     } finally {
-      running = false;
-      runningSince = 0;
-      if (dirty) {
-        dirty = false;
-        scheduleIncremental();
+      // 已被作废的旧一轮不能动状态：新一轮可能已经开始了
+      if (!cancelled()) {
+        running = false;
+        lastBeat = 0;
+        if (retryIn) scheduleRetry(retryIn);
+        // 这轮收满了上限（超长页面）：接着收下一批。
+        // 0.4.2 起观察器不再被自己插的译文触发，没有这一步时超出上限的部分永远不会翻。
+        // 要求本轮有进展，防止同一批收不走的单元原地打转
+        if (dirty || (collectedFull && progressed)) {
+          dirty = false;
+          scheduleIncremental();
+        }
       }
     }
   }
@@ -230,17 +433,17 @@
   // ---------------- 开关 ----------------
   async function enable() {
     var cfg = await loadConfig();
-    if (!cfg || !cfg.apiKey) {
+    // 内容脚本拿不到 Key 本身（后台只给 hasKey），见 background.js 的 config:get
+    if (!cfg || !cfg.hasKey) {
       DT.toast('还没配置 API Key：点扩展图标 → 设置');
       return summarize();
     }
     DT.state.enabled = true;
-    DT.state.abort = false;
     DT.send({ type: 'resume:set', value: true }).catch(function () {});
     detectForeignTranslator();
     DT.state.total = 0;
     DT.state.translated = 0;
-    DT.state.failed = 0;
+    resetFailures();
     DT.state.skipped = 0;
     DT.state.lastError = '';
     applyChrome();
@@ -250,10 +453,14 @@
   }
 
   function disable() {
-    DT.state.abort = true;
+    // 作废在途的一轮：否则快速"还原→再翻译"时，新一轮会因 running 还是 true 直接返回，
+    // 旧一轮却带着过期的队列继续往页面里插译文
+    cancelRun();
     DT.state.enabled = false;
     DT.send({ type: 'resume:set', value: false }).catch(function () {});
     DT.restore();
+    settled = new WeakMap();
+    resetFailures();
     applyChrome();
     DT.toast('已还原原文');
     return summarize();
@@ -270,6 +477,12 @@
   // 这里在页面里再抓一次，两者用 lastToggleAt 去重，不会翻两次。
   var lastToggleAt = 0;
 
+  // 物理键位上的字母 / 数字（"KeyA" → "a"）
+  function keyFromCode(code) {
+    var m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(String(code || ''));
+    return m ? (m[1] || m[2]).toLowerCase() : '';
+  }
+
   // 解析 "alt+a" / "alt+shift+a" / "ctrl+shift+a" 这类配置
   function matchesHotkey(event, spec) {
     var parts = String(spec || 'alt+a').toLowerCase().split('+');
@@ -282,7 +495,11 @@
     if (wantCtrl !== event.ctrlKey) return false;
     if (wantShift !== event.shiftKey) return false;
     if (event.metaKey) return false;
-    return String(event.key || '').toLowerCase() === key;
+    var pressed = String(event.key || '').toLowerCase();
+    if (pressed === key) return true;
+    // macOS 上 Option+A 的 event.key 是 "å"（Option+E 等还是 "Dead"），俄语布局下是 "ф"：
+    // 按出来的不是 ASCII 字母数字时，退回看物理键位
+    return !/^[a-z0-9]$/.test(pressed) && keyFromCode(event.code) === key;
   }
 
   function bindHotkey() {
@@ -380,20 +597,38 @@
     }
   }
 
+  // 我们自己插的译文节点 / 提示条
+  function isOwnNode(node) {
+    return (
+      node.nodeType === 1 &&
+      (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui'))
+    );
+  }
+
+  function hasForeignNodes(nodes) {
+    for (var k = 0; k < nodes.length; k += 1) {
+      if (!isOwnNode(nodes[k])) return true;
+    }
+    return false;
+  }
+
   function startObserver() {
     if (observer) return;
     observer = new MutationObserver(function (records) {
       for (var i = 0; i < records.length; i += 1) {
         var record = records[i];
         var target = record.target;
-        // 忽略我们自己造成的变更
+        // 忽略我们自己造成的变更：每插一批译文都会触发一次，
+        // 不过滤的话每轮翻译结束后都要白跑一遍整页扫描
         if (target && target.nodeType === 1 && target.closest && target.closest('[data-dt-ui]')) continue;
         if (record.type === 'childList' && record.addedNodes && record.addedNodes.length) {
           cleanupDuplicateTargets(record.addedNodes);
+          if (!hasForeignNodes(record.addedNodes)) continue;
           scheduleIncremental();
           return;
         }
         if (record.type === 'characterData') {
+          if (DT.isOwnWrite(target)) continue; // 仅译文模式原地替换文本
           scheduleIncremental();
           return;
         }
@@ -425,23 +660,16 @@
     }, 1000);
   }
 
-  // 中途重建：先掐断在途请求，等它退出，再清空重来
-  async function startOver() {
-    DT.state.abort = true;
-    var guard = 0;
-    while (running && guard < 120) {
-      await new Promise(function (resolve) {
-        setTimeout(resolve, 100);
-      });
-      guard += 1;
-    }
+  // 中途重建：作废在途的一轮（它回来的结果会被丢弃），清空重来
+  function startOver() {
+    cancelRun();
     DT.restore();
+    settled = new WeakMap();
+    resetFailures();
     DT.state.total = 0;
     DT.state.translated = 0;
-    DT.state.failed = 0;
     DT.state.skipped = 0;
     DT.state.lastError = '';
-    DT.state.abort = false;
     applyChrome();
     if (DT.state.enabled) translatePage({ reset: true, silent: true });
   }
@@ -551,28 +779,39 @@
       return false;
     }
 
+    // 设置页保存 / 弹窗改配置后由后台广播：立刻生效（尤其是快捷键，不用刷新页面）。
+    // 不再自己监听 storage.onChanged：那个事件带着完整配置（含 API Key）。
+    // 失败退避一并清零 —— 多半是刚把 Key 改对了，接着把没翻成的补上。
+    if (msg.type === 'dt:configChanged') {
+      loadConfig().then(function () {
+        resetFailures();
+        scheduleIncremental();
+      });
+      return false;
+    }
+
     return false;
   });
 
   // 看门狗：MV3 的 service worker 可能被回收，此时 sendMessage 的 Promise
   // 可能永远不 resolve，running 会卡死（面板一直显示"翻译中… 0 / ? 段"）。
+  // 判据是"多久没有任何批次返回"：DT.send 自带 90s 超时，正常情况下每批最迟 90s 就有结果，
+  // 这里多留 10s 余量。复位后不留下任何"中止"状态，翻译保持开启并自动重来。
   function startWatchdog() {
     setInterval(function () {
-      if (!running || !runningSince) return;
-      if (Date.now() - runningSince < 90000) return;
+      if (!running || !lastBeat) return;
+      if (Date.now() - lastBeat < 100000) return;
       DT.log('watchdog: 翻译卡住，强制复位');
-      running = false;
-      runningSince = 0;
-      DT.state.abort = true;
-      DT.toast('翻译超时，已复位。可以再点一次按钮重试。');
+      cancelRun();
+      DT.toast('翻译长时间没有响应，已复位并重新开始。');
+      scheduleIncremental();
     }, 5000);
   }
 
   // 从 bfcache 返回（浏览器的前进/后退）：DOM 是旧的，状态可能已被冻结打断
   window.addEventListener('pageshow', function (event) {
     if (!event.persisted) return;
-    running = false;
-    runningSince = 0;
+    cancelRun();
     if (DT.state.enabled) scheduleIncremental();
   });
 
@@ -583,18 +822,12 @@
     bindHoverRescan();
     bindHotkey();
     bindClickRescan();
+    // 滚动 / 改窗口大小后，待翻队列按新的可视区重新排序。
+    // 用捕获阶段：很多站点是页面里某个容器在滚，scroll 事件不冒泡
+    document.addEventListener('scroll', onViewChange, { capture: true, passive: true });
+    window.addEventListener('resize', onViewChange, { passive: true });
     watchUrl();
     startWatchdog();
-
-    // 设置页保存后立刻生效（尤其是快捷键，不用刷新页面）
-    try {
-      chrome.storage.onChanged.addListener(function (changes, area) {
-        if (area !== 'local' || !changes || !changes.config) return;
-        loadConfig();
-      });
-    } catch (err) {
-      /* 忽略 */
-    }
 
     // 同一个标签页里"刚才正在翻译"：刷新 / 返回后自动接着翻
     var resume = null;

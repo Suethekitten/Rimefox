@@ -1,7 +1,7 @@
 # DualTrans 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.4.0 ｜ 目录：`edge-bilingual/`
+> 版本：0.4.4 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -34,7 +34,7 @@
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-应显示 **28 / 28 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **37 / 37 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 
 ---
 
@@ -55,7 +55,7 @@ edge-bilingual/
 │   └── styles/inject.css  译文样式与主题
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（含快捷键录制）
-└── selftest/              离线自检（28 条用例）
+└── selftest/              离线自检（37 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -72,7 +72,7 @@ DT.collect()  收集待翻单元
    │
    ├─ 分段/长文拆分/组批
    │
-   ├─ DT.send({type:'translate'}) ──► 并发闸门（默认 4）
+   ├─ DT.send({type:'translate'}) ──► 并发闸门（默认 6）
    │                                   ├─ LRU 缓存命中直接返回
    │                                   ├─ 未命中 → provider.chat()
    │                                   ├─ 解析 JSON 数组（含兜底）
@@ -88,7 +88,7 @@ DT.collect()  收集待翻单元
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
 | `translate` | `{texts: string[], target: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败 |
-| `config:get` | — | `{ok, config}` | 读配置 |
+| `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本） |
 | `test` | — | `{ok, ms, model, sample}` / `{ok:false,error}` | 测试连接 |
 | `cache:clear` | — | `{ok}` | 清缓存 |
 | `stats` | — | `{ok, cacheSize}` | 调试用 |
@@ -106,6 +106,7 @@ DT.collect()  收集待翻单元
 | `dt:setTarget` | `{target}` | 快照 | 切换目标语言，会重建 |
 | `dt:retranslate` | — | 快照 | 清空重翻 |
 | `dt:diagnose` | — | 诊断报告对象 | 见第 7 节 |
+| `dt:configChanged` | — | 无 | 后台在 `storage.onChanged` 时广播；内容脚本重拉配置、清零失败退避并补扫。内容脚本**不要**自己监听 `storage.onChanged`（事件里带完整配置含 Key） |
 
 ---
 
@@ -166,6 +167,15 @@ DT.collect()  收集待翻单元
 | 9 | URL 变化就全量清空重翻 | 点开帖子/弹层时整页闪烁 | 记 `data-dt-sig` 源文本签名，只撤掉真变了的元素 |
 | 10 | 弹窗等 `dt:toggle` 完成 | 面板一直显示"未开启"，翻完才跳变 | `toggle` 立即返回 + 弹窗 400ms 轮询 |
 | 11 | 其它翻译扩展 / 浏览器自带翻译同时在跑 | 页面已被换成中文 → 我们全部跳过，看起来"没工作" | 启动时检测并提示用户关掉另一个 |
+| 12 | 看门狗按"总耗时"判卡死 + 全局 `abort` 标志 | 长页面翻到 90 秒被误杀，之后增量补翻永久失效 | 按"多久没有批次返回"判；用 `runId` 作废旧一轮，不留全局中止状态 |
+| 13 | 失败（`null`）和"模型返回空"混为一谈 | Key 无效时提示"已翻译 N 段" | 后台：`''` = 无需翻译，`null` = 失败；内容侧分别计数 |
+| 14 | 用 `el.tagName` 直接查表 | SVG 的 tagName 是小写，`<svg><title>` 抢走链接译文 | 一律 `tagOf(el)` 转大写；拼文本/替换时绕开 `NON_TEXT_TAGS` |
+| 15 | 替换型元素只记原值 | 站点改字后不再重翻；还原时旧原文盖掉新内容 | 同时记"我们写入的值"，对不上就放回待翻译、还原时不碰 |
+| 16 | 失败段每次补扫都整页重发 | Key 无效 / 限流时，每次点击、悬停都打一波请求，429 越试越重 | 按段落退避（5s/15s/45s，第 4 次失败放弃，`RETRY_DELAYS`）；不要整页一起退避，否则一批固定出错的段落会拖住新内容 |
+| 17 | `config:get` 把整份配置（含 API Key）发给内容脚本 | 每个网页的渲染进程里都有一份 Key | 只给 `hasKey`；`storage.local` 收紧为 `TRUSTED_CONTEXTS`；配置变更走 `dt:configChanged` 广播 |
+| 18 | 请求超时按总时长算（0.4.2） | DeepSeek 非流式先回响应头、生成期间发空行保活；生成超过 60s 的批次全被中止重试，永远不成功 | 按"多久没收到数据"计时（每块数据重置），另设 180s 总上限 |
+| 19 | 内容侧并发写死 3、按文档顺序从头翻、一批 2000 字符 | 设置里的并发不生效；人在页面中间要等上面全翻完；首屏要等一整批生成完 | 并发跟设置走；每次取批按离屏幕距离排序；屏幕内批次 ≤3 条 / ≤500 字符 |
+| 20 | 收集上限把"不送翻"的单元也算进去 + 观察器不再被自己的译文触发（0.4.2） | 超长页面（>上限）后半段永远不翻 | `collect(root, accept)` 只算送翻的；收满了本轮结束后接着收 |
 
 ---
 
@@ -175,7 +185,7 @@ DT.collect()  收集待翻单元
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-28 条纯前端用例，覆盖切分、注入、替换、还原、长文拆分。**改 `dom.js` 前后必跑。**
+37 条纯前端用例，覆盖切分、注入、替换、还原、长文拆分。**改 `dom.js` 前后必跑。**
 
 ### 7.2 诊断按钮
 弹窗底部「诊断」→ 生成 JSON 并复制到剪贴板，包含：
@@ -201,18 +211,19 @@ chrome-extension://<扩展ID>/selftest/index.html
 | `apiKey` | `''` | 只存 `chrome.storage.local`，仅 background 可读 |
 | `model` | `deepseek-chat` | |
 | `targetLang` | `zh-CN` | |
-| `batchSize` | 8 | 单批条数（省 token vs 首屏速度的权衡） |
+| `batchSize` | 8 | 单批条数（屏幕外的批次用。按离屏幕距离分级：屏幕内 ≤3 条 / ≤500 字符，一屏以内 ≤1000 字符，见 `takeBatch`） |
 | `maxCharsPerBatch` | 2000 | 单批字符上限 |
 | `maxUnitChars` | 1200 | 长段落拆分阈值 |
-| `concurrency` | 4 | 后台并发（内容侧另有 3 个工作协程） |
+| `concurrency` | 6 | 并发请求数：内容侧工作协程数和后台闸门都用它（0.4.3 前内容侧写死 3） |
 | `skipSameLang` | true | 跳过已是目标语言的段落 |
 | `translateOnLoad` | false | 打开页面自动翻译 |
+| `lazy` | true | 懒翻译：只翻屏幕上方 1 屏 ~ 下方 2 屏（`LAZY_ABOVE/LAZY_BELOW`），滚动时节流补翻（`onViewChange`）。false = 整页一次翻完 |
 | `mode` | `dual` | `dual` / `translation` |
 | `theme` | `underline` | 无 / 下划线 / 虚框 / 高亮 / 半透明 |
 | `chromeBilingual` | false | 界面元素也保留原文（可能溢出） |
 | `hotkey` | `alt+a` | **页面级**快捷键，可在设置里录制 |
 | `debug` | false | 输出调试日志 |
-| `_v` | 2 | 配置版本，用于升级时纠偏性能字段 |
+| `_v` | 3 | 配置版本，用于升级时纠偏性能字段 |
 
 ---
 
@@ -233,7 +244,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 | 优先级 | 任务 | 预估 | 风险 |
 |---|---|---|---|
 | P0 | **结构保真**：给文本节点打占位记号，要求模型保留 `<b>`/`<a>` 并回填 | 中 | 中（要改注入层） |
-| P0 | **可视区优先**：IntersectionObserver，先翻视口内，其余延后 | 小 | 低（首屏明显变快） |
+| P0 | ~~可视区优先~~（0.4.3：按离屏幕距离排序取批，分级批次）+ ~~懒翻译~~（0.4.4：远处的滚到附近再翻） | — | — |
 | P1 | **划词翻译**：`mouseup` 取选区 → 浮气泡 → 复用 `translate` | 小 | 低（约 150 行） |
 | P1 | **输入框翻译**：`Alt+I` 翻译当前输入框内容并回填 | 小 | 中（要处理 IME） |
 | P2 | **站点规则**：`{matches, textSelectors, excludeSelectors}` 配置化 | 中 | 中 |
@@ -248,7 +259,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 1. 改 `manifest.json` 的 `version`
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致）
 3. `edge://extensions/` → 点重新加载 → 页面 `F5`
-4. 跑自检页：必须 **28 / 28**
+4. 跑自检页：必须 **37 / 37**
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`
 

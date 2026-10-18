@@ -25,10 +25,33 @@
     CENTER: 1, LEGEND: 1, DETAILS: 1, SUMMARY: 1, DIALOG: 1
   };
 
-  var MAX_UNITS = 1200;
+  // 这些标签里的文字不是正文：拼文本、原地替换时都要绕开。
+  // 否则 <script> 源码会被当正文发给模型；链接里图标的 <svg><title> 会抢走译文，
+  // 仅译文模式下可见文字被清空、译文却写进了看不见的 title 里。
+  var NON_TEXT_TAGS = {
+    SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, SVG: 1, MATH: 1, CANVAS: 1,
+    VIDEO: 1, AUDIO: 1, OBJECT: 1, EMBED: 1, IFRAME: 1, FRAME: 1,
+    TEXTAREA: 1, SELECT: 1, OPTION: 1, OPTGROUP: 1, DATALIST: 1
+  };
+
+  // 行内代码：自己不单独翻，但属于句子的一部分，拼段落文本时要带上
+  var INLINE_CODE_TAGS = { CODE: 1, KBD: 1, SAMP: 1, VAR: 1 };
+
+  // 单轮最多收集多少个待翻单元（只算会真正送翻的，见 DT.collect 的 accept）。
+  // 超出的部分由下一轮接着收（main.js 看 DT.lastCollectFull）
+  var MAX_UNITS = 3000;
+  var collectAccept = null;
 
   DT.placements = [];
   DT.replaced = [];
+
+  // 我们写进页面文本节点的值：MutationObserver 据此忽略自己造成的变更
+  var ownWrites = new WeakMap();
+
+  // SVG / MathML 元素在 HTML 文档里的 tagName 是小写（"svg"），统一转大写再查表
+  function tagOf(el) {
+    return String(el.tagName || '').toUpperCase();
+  }
 
   function styleOf(el) {
     try {
@@ -40,7 +63,7 @@
 
   function isSkipped(el) {
     if (!el || el.nodeType !== 1) return true;
-    if (SKIP_TAGS[el.tagName]) return true;
+    if (SKIP_TAGS[tagOf(el)]) return true;
     if (el.hasAttribute('data-dt-target')) return true;
     if (el.hasAttribute('data-dt-src')) return true; // 已翻译过
     if (el.closest && el.closest('[data-dt-ui]')) return true;
@@ -78,6 +101,7 @@
         } else if (kid.nodeType === 1) {
           if (kid.hasAttribute('data-dt-target')) continue;
           if (kid.hasAttribute('data-dt-ui')) continue;
+          if (NON_TEXT_TAGS[tagOf(kid)]) continue;
           if (kid.tagName === 'BR') {
             parts.push(' ');
             continue;
@@ -106,6 +130,24 @@
       if (kids[i].nodeType === 3) buf += kids[i].nodeValue;
     }
     return DT.normalizeText(buf);
+  }
+
+  // 子元素全被跳过时，父级要翻的文本。不能只拼直接文本节点：
+  // "First<br>Second" 会粘成 "FirstSecond"，"Run <code>npm i</code> first" 会变成 "Run first"。
+  // <br> 当空格，行内代码照样拼进句子；已翻译 / 隐藏 / 非正文的子元素只留一个分隔空格，
+  // 免得把子级已翻过的内容再翻一遍。
+  function ownText(el) {
+    var parts = [];
+    var kids = el.childNodes;
+    for (var i = 0; i < kids.length; i += 1) {
+      var kid = kids[i];
+      if (kid.nodeType === 3) {
+        parts.push(kid.nodeValue);
+      } else if (kid.nodeType === 1) {
+        parts.push(INLINE_CODE_TAGS[tagOf(kid)] ? textOf(kid) : ' ');
+      }
+    }
+    return DT.normalizeText(parts.join(''));
   }
 
   function isStructural(el) {
@@ -148,6 +190,11 @@
     return usable >= 3;
   }
 
+  function addUnit(out, el, text) {
+    var unit = { el: el, text: text };
+    if (!collectAccept || collectAccept(unit)) out.push(unit);
+  }
+
   function walk(el, out) {
     if (out.length >= MAX_UNITS) return;
     if (!el || el.nodeType !== 1) return;
@@ -158,7 +205,7 @@
     // 1) 真叶子：直接作为一个单元
     if (!el.children.length) {
       var leafText = textOf(el);
-      if (leafText) out.push({ el: el, text: leafText });
+      if (leafText) addUnit(out, el, leafText);
       return;
     }
 
@@ -166,7 +213,7 @@
     //    以前这里会 fallback 成"整块翻译"，把子级已注入的译文一起送进去，
     //    于是同一段内容被翻第二遍 —— 重复译文的直接来源。
     if (!usableChildren(el)) {
-      if (own) out.push({ el: el, text: own });
+      if (own) addUnit(out, el, ownText(el));
       return;
     }
 
@@ -183,7 +230,7 @@
         return;
       }
       var text = textOf(el);
-      if (text) out.push({ el: el, text: text });
+      if (text) addUnit(out, el, text);
       return;
     }
 
@@ -194,16 +241,25 @@
     }
   }
 
-  // 对外：收集页面上所有待翻译单元
-  DT.collect = function (root) {
+  // 对外：收集页面上所有待翻译单元。
+  // accept(unit) 可选：返回 false 的单元不收、也不占 MAX_UNITS 名额
+  // （太短、已是目标语言、退避中的段落不该把真正要翻的挤到下一轮）。
+  // 收满了会置 DT.lastCollectFull = true，调用方据此安排下一轮接着收。
+  DT.lastCollectFull = false;
+  DT.collect = function (root, accept) {
     var out = [];
     var start = root || document.body;
+    DT.lastCollectFull = false;
     if (!start) return out;
+    collectAccept = accept || null;
     try {
       walk(start, out);
     } catch (err) {
       DT.log('collect error', err);
+    } finally {
+      collectAccept = null;
     }
+    DT.lastCollectFull = out.length >= MAX_UNITS;
     DT.log('collect units:', out.length);
     return out;
   };
@@ -287,10 +343,19 @@
 
   function collectTextNodes(el) {
     var nodes = [];
-    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        if (node.nodeType === 3) return NodeFilter.FILTER_ACCEPT;
+        if (NON_TEXT_TAGS[tagOf(node)]) return NodeFilter.FILTER_REJECT;
+        if (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_SKIP;
+      }
+    });
     var node;
     while ((node = walker.nextNode())) {
-      if (node.nodeValue && node.nodeValue.trim()) nodes.push(node);
+      if (node.nodeType === 3 && node.nodeValue && node.nodeValue.trim()) nodes.push(node);
     }
     return nodes;
   }
@@ -318,20 +383,55 @@
   }
 
   // 仅译文：原地替换文本节点（保留图标等子元素）
+  // 每个节点记下原值和我们写入的值：站点之后改了它（SPA 重渲染），
+  // 我们就不能再当它是"已翻译"，还原时也不能拿旧原文盖掉站点的新内容。
   function injectOnly(sourceEl, text) {
     var nodes = collectTextNodes(sourceEl);
     if (!nodes.length) return false;
     var saved = [];
     for (var i = 0; i < nodes.length; i += 1) {
-      saved.push({ node: nodes[i], value: nodes[i].nodeValue });
+      var wrote = i === 0 ? text : '';
+      saved.push({ node: nodes[i], value: nodes[i].nodeValue, wrote: wrote });
+      ownWrites.set(nodes[i], wrote);
+      nodes[i].nodeValue = wrote;
     }
-    nodes[0].nodeValue = text;
-    for (var j = 1; j < nodes.length; j += 1) nodes[j].nodeValue = '';
-    DT.replaced.push({ nodes: saved });
+    DT.replaced.push({ el: sourceEl, nodes: saved });
     sourceEl.setAttribute('data-dt-src', '1');
+    sourceEl.setAttribute('data-dt-replaced', '1');
     record('replace', null, sourceEl, text);
     return true;
   }
+
+  // 这个文本节点的当前值是不是我们写进去的（MutationObserver 用来忽略自己的改动）
+  DT.isOwnWrite = function (node) {
+    return !!node && ownWrites.has(node) && ownWrites.get(node) === node.nodeValue;
+  };
+
+  // 被站点改写过的替换型元素：放回"未翻译"，让下一轮按新内容重翻。
+  // 还是我们写的值的节点恢复原文，被站点改过的节点保持站点的新内容。
+  DT.releaseReplaced = function () {
+    var kept = [];
+    var released = 0;
+    (DT.replaced || []).forEach(function (item) {
+      if (!item.el.isConnected) return; // 整块被站点移除了，记录直接丢掉
+      var changed = item.nodes.some(function (saved) {
+        return !item.el.contains(saved.node) || saved.node.nodeValue !== saved.wrote;
+      });
+      if (!changed) {
+        kept.push(item);
+        return;
+      }
+      item.nodes.forEach(function (saved) {
+        if (saved.node.nodeValue === saved.wrote) saved.node.nodeValue = saved.value;
+        ownWrites.delete(saved.node);
+      });
+      item.el.removeAttribute('data-dt-src');
+      item.el.removeAttribute('data-dt-replaced');
+      released += 1;
+    });
+    DT.replaced = kept;
+    return released;
+  };
 
   function isPositioned(el) {
     var cs = styleOf(el);
@@ -440,7 +540,7 @@
     }
 
     function reason(el) {
-      if (SKIP_TAGS[el.tagName]) return 'tag-skip:' + el.tagName;
+      if (SKIP_TAGS[tagOf(el)]) return 'tag-skip:' + el.tagName;
       if (el.hasAttribute('data-dt-target')) return 'our-node';
       if (el.hasAttribute('data-dt-src')) return 'already-translated';
       if (el.closest && el.closest('[data-dt-ui]')) return 'our-ui';
@@ -481,13 +581,16 @@
         return;
       }
 
+      var text;
       if (!usableChildren(el)) {
-        // 子级已全部翻译过：父级不再整体重翻（否则会出现重复译文）
-        return;
+        // 子级全被跳过：父级只翻自己的文本（与 walk 一致），不整体重翻
+        if (!own) return;
+        text = ownText(el);
+      } else if (own || !shouldDescend(el)) {
+        text = textOf(el);
       }
 
-      if (own || !shouldDescend(el)) {
-        var text = textOf(el);
+      if (text !== undefined) {
         if (!text) return;
         var u = info(el);
         u.text = previewText(text);
@@ -522,7 +625,7 @@
   // 不清空整页译文（那会造成整页闪烁重翻），只撤掉那些源文本确实变了的元素。
   DT.refreshStale = function () {
     var marked = document.querySelectorAll('[data-dt-src][data-dt-sig]');
-    var removed = 0;
+    var removed = DT.releaseReplaced();
     for (var i = 0; i < marked.length; i += 1) {
       var el = marked[i];
       if (el.hasAttribute('data-dt-replaced')) continue; // 替换型不参与比对
@@ -547,11 +650,14 @@
 
   // 对外：还原原文
   DT.restore = function () {
-    // 1) 先还原被原地替换的文本
+    // 1) 先还原被原地替换的文本。
+    //    只还原仍是我们写入值的节点：站点后来改过的（计数、SPA 重渲染）保持站点的新内容，
+    //    否则还原后页面会显示过期的旧文字。
     (DT.replaced || []).forEach(function (item) {
       item.nodes.forEach(function (saved) {
         try {
-          saved.node.nodeValue = saved.value;
+          if (saved.node.nodeValue === saved.wrote) saved.node.nodeValue = saved.value;
+          ownWrites.delete(saved.node);
         } catch (err) {
           /* 节点可能已被站点移除 */
         }
@@ -571,6 +677,7 @@
     for (var j = 0; j < sources.length; j += 1) {
       sources[j].removeAttribute('data-dt-src');
       sources[j].removeAttribute('data-dt-sig');
+      sources[j].removeAttribute('data-dt-replaced');
     }
 
     DT.placements = [];

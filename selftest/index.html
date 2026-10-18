@@ -128,6 +128,18 @@
           Absolute Label Text
         </div>
       </div>
+
+      <!-- 0.4.2 回归用例（不在 fx-root 里，不影响上面的单元计数） -->
+      <div id="fx-extra">
+        <p id="fx-br">First line<br>Second line</p>
+        <p id="fx-code">Run <code>npm install</code> first.</p>
+        <div id="fx-script">Visible <span>text</span><script type="text/plain">var secretToken = 1;</script></div>
+        <nav>
+          <a id="fx-svg-link" href="#"><svg width="10" height="10"><title>Home icon</title><rect width="10" height="10"></rect></svg>Home page</a>
+        </nav>
+        <button id="fx-counter-a">Count 2</button>
+        <button id="fx-counter-b">Count 2</button>
+      </div>
     </div>
 
     <script src="../content/core.js"></script>
