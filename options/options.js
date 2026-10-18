@@ -509,12 +509,18 @@ providerSelect.addEventListener('change', () => {
   stashCurrentEngine();
 
   if (id === CUSTOM_PROVIDER_ID) {
+    // 自定义/第三方兼容接口默认按 OpenAI 通用协议处理；
+    // 如果对方是 Anthropic 格式，用户仍可以在「接口协议」里改
+    if (currentEngine !== 'openai') loadEngine('openai');
     fields.baseUrl.value = '';
     fields.model.value = '';
     modelIds = [];
     closePicker();
     updateKeyLink(null);
-    setResult(modelHint, '自定义：填第三方兼容接口或自建网关的地址；没有模型列表时直接手填模型名。');
+    setResult(
+      modelHint,
+      '自定义：填第三方兼容接口或自建网关的地址，默认按 OpenAI 通用协议处理；没有模型列表时直接手填模型名。'
+    );
     return;
   }
 
