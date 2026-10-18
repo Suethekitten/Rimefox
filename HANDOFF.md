@@ -265,41 +265,8 @@ chrome-extension://<扩展ID>/selftest/index.html
 4. 跑自检页：必须 **37 / 37**
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，Release 说明就从这里摘
-7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检，从同一份构建目录打包
-   `DualTrans-v<版本号>.zip` 和 `DualTrans-v<版本号>.crx`（`.github/scripts/build-release.sh`），
-   逐项校验（`.github/scripts/verify-package.py`：版本号、引用资源、ZIP 与 CRX 逐字节一致、CRX 签名、不含私钥），
-   全部通过才创建 `v<版本号>` 的 Release，并确认两个文件都在。任何一步失败都不会发版。
-   同一版本只发一次，已有 Release 或标签就跳过，不会覆盖；没改版本号的推送不会发版。
-
-### 11.1 CRX 签名私钥（一次性配置，之后每个版本复用）
-
-CRX 的扩展 ID 由签名私钥决定。**私钥一旦用于发版就不能换**，换了扩展 ID 就变了，已经用 CRX 装过的用户会变成另一个扩展。
-
-1. 在仓库外面生成私钥（不要放进仓库目录）：
-   ```bash
-   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ~/dualtrans-crx-key.pem
-   ```
-2. 转成一行 Base64：macOS `base64 -i ~/dualtrans-crx-key.pem | tr -d '\n'`，Linux `base64 -w0 ~/dualtrans-crx-key.pem`
-3. 仓库 **Settings → Secrets and variables → Actions → New repository secret**：名字 `CRX_PRIVATE_KEY_BASE64`，值填上一步的 Base64。
-   个人账号下的仓库只有**仓库所有者**能配置 Secret
-4. 把 `dualtrans-crx-key.pem` 备份到密码管理器等安全的地方，然后删掉本地明文副本。丢了就只能换私钥（扩展 ID 会变）
-5. 可选：算出扩展 ID，在 **Variables** 里加 `CRX_EXPECTED_ID`。之后私钥配错时 Actions 会直接失败，而不是发出一个 ID 不同的包：
-   ```bash
-   openssl pkey -in ~/dualtrans-crx-key.pem -pubout -outform DER | shasum -a 256 | cut -c1-32 | tr '0-9a-f' 'a-p'
-   ```
-
-私钥只在 Actions 的打包步骤里解码到临时目录（权限 600），用完即删；`.gitignore` 已忽略 `*.pem` / `*.key` / `*.crx`。
-
-### 11.2 试运行（不发版）
-
-GitHub 仓库 → **Actions → Release → Run workflow**，保持勾选「试运行」：只构建和校验 ZIP + CRX，
-产物作为 artifact 上传（保留 7 天），不创建标签和 Release。改了打包流程或换了私钥后先跑一次。
-
-本地也能跑同一个脚本（需要 Chrome 和私钥文件，输出目录要在仓库外）：
-```bash
-CRX_KEY_FILE=~/dualtrans-crx-key.pem CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  bash .github/scripts/build-release.sh /tmp/dualtrans-dist
-```
+7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检、打包 `DualTrans-v<版本号>.zip`、创建 `v<版本号>` 的 Release。
+   同一版本只发一次；没改版本号的推送不会发版。也可以在 GitHub 的 Actions 页面手动运行
 
 ---
 
