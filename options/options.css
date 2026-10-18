@@ -262,6 +262,11 @@ select {
   border-color: var(--primary, #3b82f6);
 }
 
+/* hidden 属性要压过 .field 自己的 display，否则隐藏不生效 */
+[hidden] {
+  display: none !important;
+}
+
 .check input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;

@@ -151,19 +151,22 @@ document.addEventListener(
   true
 );
 
-// 不同协议下地址 / Key 的说明不一样
+// 不同协议下地址 / Key / 模型名的说明不一样
 const ENGINE_HINTS = {
   openai: {
     baseUrl: 'OpenAI 兼容的 base URL，通常以 /v1 结尾。程序会自动补 /chat/completions。',
-    key: 'DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。'
+    key: 'DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。',
+    model: 'deepseek-chat'
   },
   anthropic: {
     baseUrl: 'Anthropic 的地址，通常填 https://api.anthropic.com/v1（程序会自动补 /messages）。',
-    key: '在 console.anthropic.com 申请，形如 sk-ant-...'
+    key: '在 console.anthropic.com 申请，形如 sk-ant-...',
+    model: 'claude-...'
   },
   gemini: {
     baseUrl: 'Google 的地址，通常填 https://generativelanguage.googleapis.com/v1beta（模型名会拼进 URL）。',
-    key: '在 aistudio.google.com 申请，形如 AIza...'
+    key: '在 aistudio.google.com 申请，形如 AIza...',
+    model: 'gemini-...'
   }
 };
 
@@ -171,6 +174,7 @@ function updateEngineHints() {
   const hint = ENGINE_HINTS[currentEngine] || ENGINE_HINTS.openai;
   $('baseUrlHint').textContent = hint.baseUrl;
   $('apiKeyHint').textContent = hint.key;
+  fields.model.placeholder = hint.model;
 }
 
 function updateThinkingUI() {
@@ -373,6 +377,7 @@ fields.engine.addEventListener('change', () => {
 
   modelSelect.innerHTML = '';
   modelSelect.hidden = true;
+  setResult($('testResult'), ''); // 上一个协议的测试结果不能留在这里
   const label = (engineList().find((e) => e.id === target) || {}).label || target;
   setResult(modelHint, '已切换到「' + label + '」，填好 Key 后会拉取该协议的模型列表。');
   updateEngineHints();
