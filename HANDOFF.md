@@ -1,7 +1,7 @@
 # 凛狐 Rimefox 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.6.1 ｜ 目录：`edge-bilingual/`
+> 版本：0.6.2 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -14,6 +14,8 @@
 - 动态内容补翻（MutationObserver + 点击补扫 + 悬停补扫）
 - SPA 前进/后退/路由切换自动续翻
 - 弹窗内的随手翻译（不依赖页面）
+- 设置页 / 弹窗：浅色与深夜配色、弹窗一键切换，界面文字可中英文
+- 术语表（指定译法）+ 自定义提示词（追加措辞要求）
 - **划词翻译**：右键菜单 / 选区小按钮 / 选中即译（三选，默认前两种）
 - 多协议接口：**OpenAI 兼容 / Anthropic Claude / Google Gemini**，内置 10 家提供商模板 + 可命名的自定义服务商
 - 只用**自己的** API，不内置任何免费端点
@@ -310,12 +312,14 @@ chrome-extension://<扩展ID>/selftest/index.html
 ### 7.1b Node 单测（接口层）
 ```
 node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射（45 条）
-node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（27 条）
+node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（30 条）
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
 node test/parse.test.mjs       # 回包解析 parseArray / 思考过程兜底 parseArrayFromReasoning / 输出长度护栏 isRunaway（15 条）
-node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、清空（11 条）
-node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度（8 条）
+node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、清空（13 条）
+node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度（13 条）
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息（5 条，假 fetch）
+node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹（18 条）
+node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t()（8 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
@@ -362,6 +366,10 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 | `selectionImmediate` | false | 划词：选中即翻译（会消耗额度，默认关） |
 | `subtitleTranslate` | false | YouTube 字幕双语：打开 CC 时接管字幕，只翻播放位置往后约 90 秒（0.5.2 起默认关闭；已保存过设置的用户保持原值） |
 | `hoverCompare` | true | 悬停对照：高亮同一处的原文和译文 |
+| `uiTheme` | `auto` | 设置页 / 弹窗配色：`auto` 跟随系统，`light` / `dark` 固定；弹窗右上角按钮直接改这一项 |
+| `uiLang` | `zh` | 设置页 / 弹窗界面语言：`zh` / `en` |
+| `customPrompt` | `''` | 追加到系统提示词末尾，进缓存指纹（改了旧译文失效） |
+| `glossary` | `[]` | 术语表 `[{src, dst, cat?}]`，全局一份，命中才注入提示词（进缓存指纹） |
 | `debug` | false | 输出调试日志 |
 | `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |
 
@@ -373,11 +381,10 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 2. **行内标签不在译文里保留** —— 段落里的 `<b>` / `<a>` 会被整段重写，译文是纯文本，不带原格式。
 3. **`<br>` 分隔的长帖**读起来是"一整段"，没做逐行对照（route 在图中的 `roadmap`）。
 4. ~~没有图标~~（0.4.7 已加：`icons/`，源文件是 `icon.svg` / `icon-small.svg`，PNG 用无头 Chrome 渲染）
-5. **没有 i18n**，界面固定中文。
-6. **没有站点规则库**，全部靠通用启发式；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
-7. **浏览器快捷键（manifest 里的 Alt+A）只是建议**：被其它扩展占用时浏览器不会分配给我们，而且按键在浏览器层就被那个扩展拿走，页面内快捷键也收不到。扩展没法自己改浏览器快捷键，只能引导用户去 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）；设置页和弹窗会用 `chrome.commands.getAll()` 显示实际绑定结果
-8. **划词没有独立快捷键** —— 快捷键监听在 `main.js`，按计划等 P0 拆分后再统一成"有选区就划词、没选区就整页"的自适应键
-9. **不支持 OpenAI Responses 协议**（`/v1/responses`）——目前只有 OpenAI 兼容（chat completions）/ Anthropic / Gemini 三种。遇到只开 responses 的第三方接口会 404，见第 10 节 P3
+5. **没有站点规则库**，全部靠通用启发式；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
+6. **浏览器快捷键（manifest 里的 Alt+A）只是建议**：被其它扩展占用时浏览器不会分配给我们，而且按键在浏览器层就被那个扩展拿走，页面内快捷键也收不到。扩展没法自己改浏览器快捷键，只能引导用户去 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）；设置页和弹窗会用 `chrome.commands.getAll()` 显示实际绑定结果
+7. **划词没有独立快捷键** —— 快捷键监听在 `main.js`，按计划等 P0 拆分后再统一成"有选区就划词、没选区就整页"的自适应键
+8. **不支持 OpenAI Responses 协议**（`/v1/responses`）——目前只有 OpenAI 兼容（chat completions）/ Anthropic / Gemini 三种。遇到只开 responses 的第三方接口会 404，见第 10 节 P3
 
 ---
 
@@ -387,14 +394,12 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 |---|---|---|---|
 | P0 | **拆 `main.js`**：把纯函数（离屏距离、取批上限、退避时间表）抽到 `core.js`，只动这两个文件 + 自检页；动手前先问协作者有没有并行改动 | 中 | 中 |
 | P0 | **结构保真**：给文本节点打占位记号，要求模型保留 `<b>`/`<a>` 并回填 | 中 | 中（要改注入层） |
-| P1 | **近似重复闸门**：改 `core.js` + `main.js` 的 `tryInject`，等 P0 拆完再做 | 中 | 中 |
 | P1 | **输入框翻译**：`Alt+I` 翻译当前输入框并回填 | 小 | 中（要处理 IME） |
 | P1 | **划词快捷键**：监听在 `main.js`，等 P0 拆完再和整页翻译统一成"自适应快捷键" | 小 | 低 |
-| P2 | **术语表**：原文 → 指定译法，命中才注入提示词；解决同一字符串译法不一致 | 中 | 中 |
+| P2 | **网页夜间模式**：把整页压暗 / 反色，译文跟着夜间配色；参考 AveMujica 的 `forceDark` | 中 | 高（图片/视频反色与站点兼容） |
 | P2 | **站点规则**：`{matches, textSelectors, excludeSelectors}` 配置化 | 中 | 中 |
 | P2 | **按 `<br>` 拆行**：长帖逐行对照 | 小 | 低 |
 | P3 | **OpenAI Responses 协议**（`/v1/responses`）：只有遇到"只开 responses 的第三方接口"时才需要 | 小 | 中（离线无法验证） |
-| P3 | **i18n** | 小 | 低 |
 | P3 | PDF / 其它站点的视频字幕 / 图片 OCR | 大 | 高（单独立项，别混进这个仓库）；YouTube 字幕已做（见 5.4） |
 
 ---
@@ -468,11 +473,14 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 
 ---
 
-## 14. 本版技术记录（0.6.1）
+## 14. 本版技术记录（0.6.2）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **正文段落里的行内子元素整段翻译**（`content/dom.js`）：`shouldDescend` 对正文块（p/h/li/td…）在“没有块级子元素”时直接返回 false，不再因为 3+ 并列子元素下钻。OWID 的 `<p>` 有 8 个行内子元素（句子 span、脚注、行内链接），以前会逐句拆、译文插在句子中间；现在整段一个单元，译文追加到段末。
-- **回归**：新增 OWID 形状夹具（8 个行内子元素），断言只产生 1 个单元且是整段文本；自检 87 → 88。导航 / 按钮 / 卡片链接 / flex / 目录的用例全部保持通过。
-- Node 单测 141 条不变；0.6.0 的术语表实现细节看 git log 与上一版记录。
+- **深夜模式 + 设计语言重做**（`options/options.css`、`popup/popup.css`）：参考 AveMujica 暗色体系——近黑冷调底（`#05060a`）、半透明卡片 + 内高光、玻璃侧栏 / 保存栏 / 下拉、软阴影、12–16px 圆角、紫色渐变强调；浅色同步换底与阴影；动画遵守 `prefers-reduced-motion`。颜色仍然全部走变量，深色只换一组值。
+- **弹窗一键切换深色 / 浅色**（`popup/popup.js`）：月亮 / 太阳按钮，点一次写入 `config.uiTheme`（不再停在 auto），同时更新 localStorage 首帧缓存；`auto` 时跟随系统，并用 `matchMedia` 在系统切换时换图标。
+- **首帧不闪白**（`lib/ui-theme-boot.js`）：`<head>` 里同步读 localStorage 的 `dt.uiTheme`，在样式表生效前设置 `data-theme` / `color-scheme`；没有缓存就退回 `prefers-color-scheme`。缓存由 `applyUiTheme()` 维护。
+- **界面中英文**（`lib/i18n.js`）：新增 `t()`（按当前语言输出；`translateText` 仍是纯中→英），弹窗的动态状态（未开启 / 翻译中 N 段 / 失败原因 / 快捷翻译 / 诊断 / 不支持页面）全部改走 `t()`，补了 15 条正则文案；`walk()` 对 `TEXTAREA` 只翻 placeholder 属性、不碰内容；`applyI18n(null, 'en')` 在没有 document 的 Node 单测里也能切语言。
+- **弹窗状态卡显示服务商 + 模型**：自定义服务商显示用户起的名字；模型为空时只显示服务商。
+- **测试**：Node 160 条（i18n 8 条，含动态文案与 `t()`）、自检 88 条不变。
 
