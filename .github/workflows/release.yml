@@ -1,0 +1,111 @@
+# 自动发布 Release
+#
+# 触发：推送到 main 且改动了 manifest.json（通常就是改了版本号），或在 Actions 页面手动运行。
+# 同一个版本只发一次：v<版本号> 已经有 Release 就直接跳过，所以普通推送不会重复发版。
+#
+# 流程：校验版本号 → 跑离线自检（不通过就不发）→ 打包 zip → 从 CHANGELOG 摘出这一版的说明 → 发 Release
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - manifest.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write # 创建 tag 和 Release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取并校验版本号
+        id: ver
+        run: |
+          VERSION=$(jq -r .version manifest.json)
+          CORE=$(grep -oP "DT\.VERSION = '\K[^']+" content/core.js)
+          if [ "$VERSION" != "$CORE" ]; then
+            echo "::error::manifest.json（$VERSION）和 content/core.js（$CORE）的版本号不一致"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 这个版本发过了就跳过
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.ver.outputs.tag }}" > /dev/null 2>&1; then
+            echo "${{ steps.ver.outputs.tag }} 已经有 Release，跳过"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 自检页是纯前端页面，不需要加载扩展：用无头 Chrome 打开 file:// 地址，读出结果
+      - name: 跑离线自检
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          google-chrome --headless=new --no-sandbox --allow-file-access-from-files \
+            --virtual-time-budget=5000 --dump-dom "file://$PWD/selftest/index.html" > "$RUNNER_TEMP/selftest.html" 2> /dev/null
+          SUMMARY=$(grep -oP 'id="summary"[^>]*>\K[^<]+' "$RUNNER_TEMP/selftest.html" || true)
+          echo "自检结果：$SUMMARY"
+          if ! echo "$SUMMARY" | grep -q '全部通过'; then
+            echo "::error::自检没有全部通过（$SUMMARY），不发布"
+            exit 1
+          fi
+
+      # zip 里的文件夹名固定叫 DualTrans：已解压扩展的 ID 跟文件夹路径绑定，
+      # 用户升级时把新版本覆盖到同一个文件夹再点"重新加载"，设置（包括 API Key）就不会丢
+      - name: 打包
+        if: steps.check.outputs.skip == 'false'
+        id: pack
+        run: |
+          ZIP="DualTrans-${{ steps.ver.outputs.tag }}.zip"
+          mkdir -p "$RUNNER_TEMP/pkg/DualTrans"
+          rsync -a --exclude '.git' --exclude '.github' --exclude '.gitignore' \
+            --exclude 'package.ps1' --exclude 'package.bat' ./ "$RUNNER_TEMP/pkg/DualTrans/"
+          (cd "$RUNNER_TEMP/pkg" && zip -qr "$GITHUB_WORKSPACE/$ZIP" DualTrans)
+          unzip -l "$ZIP" | tail -1
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: 整理更新说明
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          # CHANGELOG 里 "## <版本号> — 标题" 到下一个 "## " 之间就是这一版的说明
+          awk -v v="$VERSION" '
+            index($0, "## " v " ") == 1 || $0 == "## " v { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "CHANGELOG.md 里没有 $VERSION 的说明。" > "$RUNNER_TEMP/notes.md"
+          fi
+          cat >> "$RUNNER_TEMP/notes.md" <<'EOF'
+
+          ---
+
+          **安装**：下载下面的 zip 并解压 → 打开 `chrome://extensions/`（Edge：`edge://extensions/`）→ 开启开发者模式 → 「加载已解压的扩展程序」→ 选择解压出来的 `DualTrans` 文件夹。
+
+          **升级**：把新版本解压后覆盖原来的 `DualTrans` 文件夹，再在扩展管理页点「重新加载」。文件夹路径不变，设置和 API Key 都会保留。
+          EOF
+
+      - name: 发布 Release
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" "${{ steps.pack.outputs.zip }}" \
+            --title "DualTrans ${{ steps.ver.outputs.tag }}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --target "$GITHUB_SHA"
