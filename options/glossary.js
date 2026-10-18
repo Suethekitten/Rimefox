@@ -124,8 +124,36 @@ export function createGlossaryEditor(opts) {
     changed();
   });
 
+  // 「导入示例」是开关：第二次点击收起（回到导入前），不需要再点保存 / 放弃
+  let sampleBefore = null; // 导入前的快照（对象数组）
+  let sampleAfterKey = ''; // 导入后的内容指纹，用来判断用户有没有改过
+
+  function keyOf(list) {
+    return JSON.stringify(normalizeGlossary(list).map((one) => [one.source, one.target]));
+  }
+
   $('glossarySample').addEventListener('click', () => {
+    const list = current();
+
+    // 还没动过：收起，回到导入前
+    if (sampleAfterKey && keyOf(list) === sampleAfterKey) {
+      const cfg = opts.getConfig();
+      if (cfg) cfg.glossary = normalizeGlossary(sampleBefore || []);
+      sampleBefore = null;
+      sampleAfterKey = '';
+      expanded = false;
+      render();
+      message('已收起示例（回到导入前，点「保存」后生效）', 'ok');
+      changed();
+      return;
+    }
+
+    // 第一次，或导入后被改过：重新导入一份
+    const before = normalizeGlossary(list);
     merge(STARTER);
+    sampleBefore = before;
+    sampleAfterKey = keyOf(current());
+    message('已导入示例 ' + current().length + ' 条（再点一次「导入示例」可收起）', 'ok');
   });
 
   $('glossaryClear').addEventListener('click', () => {
