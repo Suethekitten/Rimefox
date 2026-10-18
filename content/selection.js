@@ -278,13 +278,51 @@
     true
   );
 
-  // 滚动 / 改窗口大小后，选区位置就对不上了，直接收起
-  window.addEventListener('scroll', hideButton, true);
-  window.addEventListener('scroll', hideBubble, true);
-  window.addEventListener('resize', function () {
-    hideButton();
-    hideBubble();
-  });
+  // 滚动 / 改窗口大小：气泡和小按钮跟着选区走，只有选区滚出屏幕才收起。
+  // （早期是"一滚就收"，读长文时很烦 —— 每滚一下都得重新触发）
+  function selectionRect() {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    try {
+      var rect = sel.getRangeAt(0).getBoundingClientRect();
+      if (!rect || (!rect.width && !rect.height)) return null;
+      return rect;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function inViewport(rect) {
+    return (
+      rect.bottom > 8 &&
+      rect.top < window.innerHeight - 8 &&
+      rect.right > 8 &&
+      rect.left < window.innerWidth - 8
+    );
+  }
+
+  var followRaf = 0;
+  function followSelection() {
+    if (followRaf) return;
+    followRaf = requestAnimationFrame(function () {
+      followRaf = 0;
+      var rect = selectionRect();
+      var visible = rect && inViewport(rect);
+
+      if (bubble && bubble.style.display !== 'none') {
+        if (!visible) hideBubble();
+        else placeBubble(rect);
+      }
+
+      if (btn && btn.style.display !== 'none') {
+        if (!visible) hideButton();
+        else showButton(rect);
+      }
+    });
+  }
+
+  window.addEventListener('scroll', followSelection, true);
+  window.addEventListener('resize', followSelection);
 
   // A 方案：右键菜单点击后由 background 发进来
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
