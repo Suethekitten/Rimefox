@@ -1,7 +1,7 @@
 # 凛狐 Rimefox 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.4.8 ｜ 目录：`edge-bilingual/`
+> 版本：0.4.9 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -14,7 +14,9 @@
 - 动态内容补翻（MutationObserver + 点击补扫 + 悬停补扫）
 - SPA 前进/后退/路由切换自动续翻
 - 弹窗内的随手翻译（不依赖页面）
-- 只用**自己的** OpenAI 兼容 API（DeepSeek / 智谱 / 硅基流动 / 通义 / 自建网关）
+- **划词翻译**：右键菜单 / 选区小按钮 / 选中即译（三选，默认前两种）
+- 多协议接口：**OpenAI 兼容 / Anthropic Claude / Google Gemini**，内置 10 家提供商模板 + 可命名的自定义服务商
+- 只用**自己的** API，不内置任何免费端点
 
 **零构建**：纯原生 JS + ESM，没有 npm / webpack / tsc。改完文件直接在扩展管理页「重新加载扩展」即可，不需要任何编译步骤。这是刻意选择——降低接手门槛。
 
@@ -46,16 +48,21 @@ edge-bilingual/
 ├── manifest.json          MV3 清单（权限、注入点、快捷键、入口页）
 ├── background.js          service worker：消息中枢、并发闸门、批处理、缓存、重试
 ├── lib/
-│   ├── config.js          配置默认值 + 存储读写 + 配置版本迁移
-│   ├── provider.js        OpenAI 兼容接口客户端（错误翻译成人话）
+│   ├── config.js          配置默认值 + 存储读写 + 版本迁移（v6）
+│   ├── provider.js        接口门面：chat() / listModels()，按 engine 分发
+│   ├── engines/           各协议实现（openai / anthropic / gemini）
+│   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
+│   ├── parse.js           模型返回值解析（JSON 数组容错）
 │   └── cache.js           LRU 翻译缓存（4000 条）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）
 │   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗
+│   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡
 │   └── styles/inject.css  译文样式与主题
 ├── popup/                 工具栏面板（含随手翻译）
-├── options/               设置页（含快捷键录制）
+├── options/               设置页（提供商模板、模型选择器、快捷键录制）
+├── test/                  Node 单测（引擎 / 配置 / 提供商模板）
 └── selftest/              离线自检（37 条用例）
 ```
 
@@ -108,6 +115,73 @@ DT.collect()  收集待翻单元
 | `dt:retranslate` | — | 快照 | 清空重翻 |
 | `dt:diagnose` | — | 诊断报告对象 | 见第 7 节 |
 | `dt:configChanged` | — | 无 | 后台在 `storage.onChanged` 时广播；内容脚本重拉配置、清零失败退避并补扫。内容脚本**不要**自己监听 `storage.onChanged`（事件里带完整配置含 Key） |
+
+### 接口层（协议 / 服务商 / 思考模式）
+
+```
+lib/
+├── provider.js       门面：chat() / listModels()，按 engine 分发
+├── engines/
+│   ├── openai.js     OpenAI 兼容（DeepSeek / 千问 / GLM / Kimi / 硅基流动 / 第三方接口）
+│   ├── anthropic.js  原生 Messages 协议
+│   └── gemini.js     原生 generateContent 协议
+├── providers.js      内置 10 家模板（地址 + 协议 + 关闭思考的参数）
+└── parse.js          模型返回值解析（JSON 数组容错）
+```
+
+每个引擎导出同一套接口，其中前三个必须是**纯函数**（这样能脱离浏览器跑单测）：
+
+```js
+{
+  id, label, defaults,
+  buildRequest(cfg, req) → { url, headers, body },
+  parseResponse(json) → { text, reasoning, error? },
+  parseError(status, bodyText) → ApiError,
+  listModels(cfg) → string[]
+}
+```
+
+**配置按「服务商」分槽，不是按协议**：
+
+```js
+{
+  currentProvider: 'deepseek',
+  providerConfig: {
+    deepseek:    { engine, baseUrl, apiKey, model },
+    siliconflow: { engine, baseUrl, apiKey, model },
+    __custom__:  { engine, baseUrl, apiKey, model }   // 自定义（可命名、可多个）
+  },
+  customProviders: [{ id: '__custom__', name: '我的中转 A' }]
+}
+```
+
+> 为什么不能按协议：DeepSeek 与硅基流动都走 OpenAI 协议，按协议存会让两家的 Key 互相覆盖（0.4.9 踩过这个坑）。
+
+**迁移**：`lib/config.js` 的 `migrateConfig()` 是纯函数，v3 → v4 → v5 → v6 逐级升级；迁移前把原配置备份到 `storage.config_backup_v3`。加字段只加不删。
+
+**思考模式**（`thinkingMode`）三态：
+
+| 取值 | 行为 |
+|---|---|
+| `auto` | 不发送任何额外参数 |
+| `off` | 按服务商发送关闭参数（`providers.js` 的 `thinkingOff`） |
+| `custom` | 把用户填的 JSON 合并进请求体 |
+
+服务不认该参数（400）时，`provider.js` 会**自动去掉参数重试一次**。
+
+各家关闭参数（来源：各家官方文档）：
+
+| 服务商 | 参数 |
+|---|---|
+| DeepSeek / 智谱 GLM / Kimi / Anthropic | `thinking: {"type":"disabled"}` |
+| 通义千问 / 硅基流动 | `enable_thinking: false` |
+| OpenRouter | `reasoning: {"enabled": false}` |
+| Gemini 2.5 | `thinkingConfig.thinkingBudget = 0` |
+| Gemini 3 | `thinkingConfig.thinkingLevel = "minimal"` |
+
+> GLM-5.3 系列、Kimi k3、Gemini 3 Pro 是**强制思考**，关不掉；参数被拒后会自动降级，不会让翻译失败。
+
+**新增一个协议**：写 `lib/engines/xxx.js` → 在 `provider.js` 的 `ENGINES` 注册 → `config.js` 的 `ENGINE_IDS` 加 id → 补 `test/engines.test.mjs` 用例。
 
 ---
 
@@ -190,6 +264,14 @@ chrome-extension://<扩展ID>/selftest/index.html
 ```
 37 条纯前端用例，覆盖切分、注入、替换、还原、长文拆分。**改 `dom.js` 前后必跑。**
 
+### 7.1b Node 单测（接口层）
+```
+node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射（43 条）
+node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（27 条）
+node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
+```
+需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
+
 ### 7.2 诊断按钮
 弹窗底部「诊断」→ 生成 JSON 并复制到剪贴板，包含：
 
@@ -210,9 +292,11 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 | 键 | 默认 | 作用 |
 |---|---|---|
-| `baseUrl` | `https://api.deepseek.com/v1` | OpenAI 兼容 base，自动补 `/chat/completions` |
-| `apiKey` | `''` | 只存 `chrome.storage.local`，仅 background 可读 |
-| `model` | `deepseek-chat` | |
+| `currentProvider` | `deepseek` | 当前服务商（内置模板 id，或 `__custom__` / `custom:N`） |
+| `providerConfig` | `{}` | 按服务商存的 `{engine, baseUrl, apiKey, model}`，**Key 不进内容脚本** |
+| `customProviders` | `[]` | 用户保存并命名的自定义服务商 `[{id, name}]` |
+| `thinkingMode` | `auto` | `auto` / `off` / `custom`，见接口层一节 |
+| `thinkingExtra` | `''` | `custom` 时合并进请求体的 JSON 字符串 |
 | `targetLang` | `zh-CN` | |
 | `batchSize` | 8 | 单批条数（屏幕外的批次用。按离屏幕距离分级：屏幕内 ≤3 条 / ≤500 字符，一屏以内 ≤1000 字符，见 `takeBatch`） |
 | `maxCharsPerBatch` | 2000 | 单批字符上限 |
@@ -225,8 +309,12 @@ chrome-extension://<扩展ID>/selftest/index.html
 | `theme` | `underline` | 无 / 下划线 / 虚框 / 高亮 / 半透明 |
 | `chromeBilingual` | false | 界面元素也保留原文（可能溢出） |
 | `hotkey` | `alt+a` | **页面级**快捷键，可在设置里录制 |
+| `selectionTranslate` | true | 划词翻译总开关 |
+| `selectionMenu` | true | 划词：右键菜单「翻译所选文字」 |
+| `selectionButton` | true | 划词：选区旁「译」小按钮 |
+| `selectionImmediate` | false | 划词：选中即翻译（会消耗额度，默认关） |
 | `debug` | false | 输出调试日志 |
-| `_v` | 3 | 配置版本，用于升级时纠偏性能字段 |
+| `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |
 
 ---
 
@@ -239,6 +327,8 @@ chrome-extension://<扩展ID>/selftest/index.html
 5. **没有 i18n**，界面固定中文。
 6. **没有站点规则库**，全部靠通用启发式；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
 7. **浏览器快捷键（manifest 里的 Alt+A）只是建议**：被其它扩展占用时浏览器不会分配给我们，而且按键在浏览器层就被那个扩展拿走，页面内快捷键也收不到。扩展没法自己改浏览器快捷键，只能引导用户去 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）；设置页和弹窗会用 `chrome.commands.getAll()` 显示实际绑定结果
+8. **划词没有独立快捷键** —— 快捷键监听在 `main.js`，按计划等 P0 拆分后再统一成"有选区就划词、没选区就整页"的自适应键
+9. **不支持 OpenAI Responses 协议**（`/v1/responses`）——目前只有 OpenAI 兼容（chat completions）/ Anthropic / Gemini 三种。遇到只开 responses 的第三方接口会 404，见第 10 节 P3
 
 ---
 
@@ -246,13 +336,16 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 | 优先级 | 任务 | 预估 | 风险 |
 |---|---|---|---|
+| P0 | **拆 `main.js`**：把纯函数（离屏距离、取批上限、退避时间表）抽到 `core.js`，只动这两个文件 + 自检页；动手前先问协作者有没有并行改动 | 中 | 中 |
 | P0 | **结构保真**：给文本节点打占位记号，要求模型保留 `<b>`/`<a>` 并回填 | 中 | 中（要改注入层） |
-| P0 | ~~可视区优先~~（0.4.3：按离屏幕距离排序取批，分级批次）+ ~~懒翻译~~（0.4.4：远处的滚到附近再翻） | — | — |
-| P1 | **划词翻译**：`mouseup` 取选区 → 浮气泡 → 复用 `translate` | 小 | 低（约 150 行） |
-| P1 | **输入框翻译**：`Alt+I` 翻译当前输入框内容并回填 | 小 | 中（要处理 IME） |
+| P1 | **近似重复闸门**：改 `core.js` + `main.js` 的 `tryInject`，等 P0 拆完再做 | 中 | 中 |
+| P1 | **输入框翻译**：`Alt+I` 翻译当前输入框并回填 | 小 | 中（要处理 IME） |
+| P1 | **划词快捷键**：监听在 `main.js`，等 P0 拆完再和整页翻译统一成"自适应快捷键" | 小 | 低 |
+| P2 | **术语表**：原文 → 指定译法，命中才注入提示词；解决同一字符串译法不一致 | 中 | 中 |
 | P2 | **站点规则**：`{matches, textSelectors, excludeSelectors}` 配置化 | 中 | 中 |
 | P2 | **按 `<br>` 拆行**：长帖逐行对照 | 小 | 低 |
-| P3 | ~~图标~~（0.4.7）+ **i18n** | 小 | 低 |
+| P3 | **OpenAI Responses 协议**（`/v1/responses`）：只有遇到"只开 responses 的第三方接口"时才需要 | 小 | 中（离线无法验证） |
+| P3 | **i18n** | 小 | 低 |
 | P3 | PDF / 视频字幕 / 图片 OCR | 大 | 高（单独立项，别混进这个仓库） |
 
 ---
@@ -263,6 +356,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错）
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
 4. 跑自检页：必须 **37 / 37**
+4b. 跑 Node 单测：`node test/engines.test.mjs`、`node test/config.test.mjs`、`node test/providers.test.mjs`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，Release 说明就从这里摘
 7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检、打包 `Rimefox-v<版本号>.zip`、创建 `v<版本号>` 的 Release。
