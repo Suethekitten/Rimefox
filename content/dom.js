@@ -68,6 +68,7 @@
     if (el.hasAttribute('data-dt-src')) return true; // 已翻译过
     if (el.closest && el.closest('[data-dt-ui]')) return true;
     if (el.getAttribute('translate') === 'no') return true;
+    if (siteExclude && el.matches(siteExclude)) return true; // 站点规则：这些区域不翻
     // 注意：不要因为 aria-hidden 就跳过！
     // 弹层/灯箱打开时，站点会给背景内容统一加 aria-hidden="true"，
     // 但内容明明还在屏幕上——跳过就会导致"点开一张图，整页译文消失"。
@@ -250,6 +251,51 @@
   // （太短、已是目标语言、退避中的段落不该把真正要翻的挤到下一轮）。
   // 收满了会置 DT.lastCollectFull = true，调用方据此安排下一轮接着收。
   DT.lastCollectFull = false;
+  // ---------------- 站点规则 ----------------
+  // 后台按网址算好的规则（lib/site-rules.js）：excludeSelectors 不翻、textSelectors 只翻这些区域。
+  // 选择器逐个试一遍，写错的单独丢掉，不能让一条坏选择器把整页翻译弄挂
+  var siteExclude = '';
+  var siteText = '';
+  function validSelectors(list) {
+    return (list || []).filter(function (sel) {
+      try {
+        document.createDocumentFragment().querySelector(sel);
+        return true;
+      } catch (err) {
+        DT.log('站点规则里的选择器无效，已忽略：', sel);
+        return false;
+      }
+    });
+  }
+  DT.setSiteRule = function (rule) {
+    siteExclude = rule ? validSelectors(rule.excludeSelectors).join(',') : '';
+    siteText = rule ? validSelectors(rule.textSelectors).join(',') : '';
+  };
+
+  // 要从哪些根开始收：有 textSelectors 就只收这些区域（嵌套的只留最外层），否则整个 body
+  DT.collectRoots = function () {
+    var body = document.body;
+    if (!siteText || !body) return body ? [body] : [];
+    var found = Array.prototype.slice.call(body.querySelectorAll(siteText));
+    return found.filter(function (el) {
+      return !found.some(function (other) {
+        return other !== el && other.contains(el);
+      });
+    });
+  };
+
+  // 按站点规则的根逐个收集；任何一个根收满了上限都算本轮收满
+  DT.collectAll = function (accept) {
+    var out = [];
+    var full = false;
+    DT.collectRoots().forEach(function (root) {
+      out = out.concat(DT.collect(root, accept));
+      if (DT.lastCollectFull) full = true;
+    });
+    DT.lastCollectFull = full;
+    return out;
+  };
+
   DT.collect = function (root, accept) {
     var out = [];
     var start = root || document.body;

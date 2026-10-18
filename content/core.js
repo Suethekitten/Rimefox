@@ -30,6 +30,28 @@
     return style;
   };
 
+  // 配置变了（启动、设置页保存、换了网址）时通知各模块：外观、站点规则、悬浮入口各自订阅
+  var configHooks = [];
+  DT.onConfig = function (fn) {
+    configHooks.push(fn);
+    if (DT.state.config) {
+      try {
+        fn(DT.state.config);
+      } catch (err) {
+        DT.log('config hook failed', err);
+      }
+    }
+  };
+  DT.emitConfig = function (cfg) {
+    configHooks.forEach(function (fn) {
+      try {
+        fn(cfg);
+      } catch (err) {
+        DT.log('config hook failed', err);
+      }
+    });
+  };
+
   DT.log = function () {
     if (DT.state.config && DT.state.config.debug) {
       var args = Array.prototype.slice.call(arguments);

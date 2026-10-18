@@ -837,6 +837,71 @@
     });
   });
 
+  // ---------------- 站点规则（DT.setSiteRule） ----------------
+  function siteFixture(html, fn) {
+    var box = document.createElement('div');
+    box.innerHTML = html;
+    document.getElementById('fixture').appendChild(box);
+    try {
+      return fn(box);
+    } finally {
+      DT.setSiteRule(null);
+      box.remove();
+    }
+  }
+
+  check('站点规则：排除区域不收集，写错的选择器单独忽略', function () {
+    return siteFixture('<div id="sr-a"><p>Keep this paragraph please.</p><p class="sr-skip">Skip this paragraph please.</p></div>', function (box) {
+      DT.setSiteRule({ excludeSelectors: ['.sr-skip', 'p[[[bad'], textSelectors: [] });
+      var got = DT.collect(box.querySelector('#sr-a')).map(function (u) { return u.text; });
+      return eq(got, ['Keep this paragraph please.']);
+    });
+  });
+
+  check('站点规则：只翻指定区域，嵌套的只留最外层', function () {
+    return siteFixture('<div id="sr-b"><article class="sr-main"><p class="sr-main">Inside article.</p></article><aside>Outside text here.</aside></div>', function (box) {
+      DT.setSiteRule({ textSelectors: ['.sr-main'], excludeSelectors: [] });
+      var roots = DT.collectRoots();
+      if (roots.length !== 1 || roots[0].tagName !== 'ARTICLE') return '根不对：' + roots.map(function (r) { return r.tagName; }).join(',');
+      var texts = DT.collectAll().map(function (u) { return u.text; });
+      if (texts.indexOf('Outside text here.') >= 0) return '指定区域外的文字也被收集了';
+      DT.setSiteRule(null);
+      return DT.collectRoots()[0] === document.body ? true : '清掉规则后应回到整个 body';
+    });
+  });
+
+  // ---------------- 网页外观（content/appearance.js） ----------------
+  check('外观：强调色 / 排版 / 自定义 CSS 写到 <html> 上，清掉后恢复', function () {
+    var root = document.documentElement;
+    DT.emitConfig({ pageDarkAdapt: true, page: { accent: '#0e9384', typo: { '--dt-font-scale': '1.2', '--dt-line-height': 'inherit', '--dt-gap': '0.6em', '--dt-indent': '0' }, customCss: 'color: #555', night: false } });
+    var style = document.getElementById('dt-custom-css');
+    var r = true;
+    if (root.style.getPropertyValue('--dt-accent') !== '#0e9384') r = '强调色没写上';
+    else if (root.getAttribute('data-dt-typo') !== 'on' || root.style.getPropertyValue('--dt-font-scale') !== '1.2') r = '排版变量没写上';
+    else if (!style || style.textContent !== 'html[data-dt="on"] .dt-target{color: #555}') r = '自定义 CSS 没包进作用域：' + (style && style.textContent);
+    DT.emitConfig({ pageDarkAdapt: true, page: {} });
+    if (r !== true) return r;
+    if (root.style.getPropertyValue('--dt-accent') || root.hasAttribute('data-dt-typo') || document.getElementById('dt-custom-css')) return '清掉后没恢复';
+    return true;
+  });
+
+  check('外观：按页面背景判断明暗，夜间模式下不再判断', function () {
+    var body = document.body;
+    var old = body.style.backgroundColor;
+    body.style.backgroundColor = 'rgb(18, 18, 20)';
+    var dark = DT.pageScheme();
+    body.style.backgroundColor = 'rgb(250, 250, 250)';
+    var light = DT.pageScheme();
+    body.style.backgroundColor = old;
+    if (dark !== 'dark' || light !== 'light') return '判断错：' + dark + ' / ' + light;
+    DT.emitConfig({ pageDarkAdapt: true, page: { night: true } });
+    var night = document.documentElement.hasAttribute('data-dt-scheme');
+    var nightOn = document.documentElement.getAttribute('data-dt-night') === 'on';
+    DT.emitConfig({ pageDarkAdapt: true, page: {} });
+    if (!nightOn) return '夜间模式没打开';
+    return night ? '夜间模式下不该再判断明暗（页面已经反色）' : true;
+  });
+
   // ---------------- 渲染 ----------------
   var list = document.getElementById('list');
   var passed = 0;

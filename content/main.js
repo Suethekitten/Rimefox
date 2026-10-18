@@ -74,11 +74,16 @@
         DT.state.target = res.config.targetLang || 'zh-CN';
         DT.state.mode = res.config.mode || 'dual';
         DT.state.theme = res.config.theme || 'underline';
+        // 站点规则可以固定这个网站的显示方式 / 译文样式
+        var site = res.config.page && res.config.page.site;
+        if (site && site.mode) DT.state.mode = site.mode;
+        if (site && site.theme) DT.state.theme = site.theme;
       }
     } catch (err) {
       DT.log('loadConfig failed', err);
     }
     applyChrome();
+    if (DT.state.config) DT.emitConfig(DT.state.config);
     return DT.state.config;
   }
 
@@ -185,7 +190,7 @@
       var viewH = window.innerHeight || 800;
       var deferred = 0; // 离屏幕太远、留到滚过去再翻的单元数
       var pageStyle = DT.state.style || 'plain';
-      var queue = DT.collect(document.body, function (unit) {
+      var queue = DT.collectAll(function (unit) {
         if (DT.skipText(unit.text)) return false;
         // 趣味翻译：正文里够长的段落按风格改写；中文页面也要改写，所以风格单元不跳过「已是目标语言」
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
@@ -640,6 +645,8 @@
     urlTimer = setInterval(function () {
       if (location.href === lastUrl) return;
       lastUrl = location.href;
+      // 站点规则可以按路径写：换了网址重新取一次（外观 / 规则跟着新网址走）
+      loadConfig();
       if (!DT.state.enabled) return;
       // SPA 路由切换 / 打开弹层时 URL 会变。
       // 这里不再整页清空重翻（那样会闪一下），只把"源文本确实变了"的元素撤掉，

@@ -54,6 +54,7 @@
       "js": [
         "content/core.js",
         "content/dom.js",
+        "content/appearance.js",
         "content/main.js",
         "content/selection.js",
         "content/hover.js"

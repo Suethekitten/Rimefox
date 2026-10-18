@@ -1,4 +1,6 @@
-/* 注入到页面的译文样式。仅在扩展开启时生效（html[data-dt="on"]）。 */
+/* 注入到页面的译文样式。仅在扩展开启时生效（html[data-dt="on"]）。
+   颜色跟随强调色 --dt-accent（设置页「外观」，content/appearance.js 写到 <html> 上）；
+   没设时用后面的默认蓝，和以前一样。 */
 
 html[data-dt="on"] .dt-target {
   display: block;
@@ -41,13 +43,13 @@ html[data-dt="on"] .dt-target.dt-inline {
 html[data-dt="on"][data-dt-theme="underline"] .dt-target {
   border-bottom: 0;
   text-decoration: underline;
-  text-decoration-color: rgba(59, 130, 246, 0.55);
+  text-decoration-color: color-mix(in srgb, var(--dt-accent, #3b82f6) 55%, transparent);
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
 
 html[data-dt="on"][data-dt-theme="dashed"] .dt-target {
-  border: 1px dashed rgba(148, 163, 184, 0.9);
+  border: 1px dashed color-mix(in srgb, var(--dt-accent, #94a3b8) 70%, transparent);
   border-radius: 4px;
   padding: 2px 6px;
 }
@@ -75,7 +77,7 @@ html[data-dt="on"][data-dt-theme="mask"] .dt-target {
 }
 
 ::highlight(dt-hover-target) {
-  background-color: rgba(59, 130, 246, 0.26);
+  background-color: color-mix(in srgb, var(--dt-accent, #3b82f6) 26%, transparent);
 }
 
 /* 浏览器不支持 Highlight API 时的退路：整段高亮 */
@@ -87,14 +89,14 @@ html[data-dt="on"] [data-dt-hover="src"] {
 
 /* 译文在源元素内部：底色会叠在原文的黄色上，再加一条蓝色竖线区分 */
 html[data-dt="on"] [data-dt-hover="target"] {
-  background-color: rgba(59, 130, 246, 0.2);
-  box-shadow: inset 3px 0 0 rgba(59, 130, 246, 0.75);
+  background-color: color-mix(in srgb, var(--dt-accent, #3b82f6) 20%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--dt-accent, #3b82f6) 75%, transparent);
   border-radius: 3px;
   opacity: 1;
 }
 
 html[data-dt="on"] [data-dt-hover="replaced"] {
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.45);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dt-accent, #3b82f6) 45%, transparent);
   border-radius: 3px;
 }
 
@@ -110,9 +112,72 @@ html[data-dt="on"] .dt-hover-tip {
   white-space: pre-wrap;
   word-break: break-word;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  border-left: 3px solid var(--dt-accent, #60a5fa);
   pointer-events: none;
 }
 
 html[data-dt="on"] .dt-hover-tip[hidden] {
   display: none;
 }
+
+/* ---- 深色网页（data-dt-scheme="dark"，content/appearance.js 按页面背景判断）----
+   夜读时浅色的高亮和半透明蓝太刺眼：换成更柔和、对比够的一套 */
+html[data-dt="on"][data-dt-scheme="dark"][data-dt-theme="underline"] .dt-target {
+  text-decoration-color: color-mix(in srgb, var(--dt-accent, #60a5fa) 70%, transparent);
+}
+
+html[data-dt="on"][data-dt-scheme="dark"][data-dt-theme="highlight"] .dt-target {
+  background: rgba(250, 204, 21, 0.16);
+}
+
+html[data-dt="on"][data-dt-scheme="dark"][data-dt-theme="dashed"] .dt-target {
+  border-color: rgba(203, 213, 225, 0.45);
+}
+
+html[data-dt-scheme="dark"] ::highlight(dt-hover-src) {
+  background-color: rgba(250, 204, 21, 0.26);
+}
+
+html[data-dt-scheme="dark"] ::highlight(dt-hover-target) {
+  background-color: color-mix(in srgb, var(--dt-accent, #60a5fa) 32%, transparent);
+}
+
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-tip {
+  background: rgba(241, 245, 249, 0.96);
+  color: #0f172a;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- 译文排版（设置页「外观 → 译文排版」，全是默认值时不生效）----
+   注入时会把原文的字号 / 行高复制成内联样式，这里要 !important 才盖得住 */
+html[data-dt="on"][data-dt-typo="on"] .dt-target {
+  font-size: calc(var(--dt-font-scale, 1) * 1em) !important;
+  line-height: var(--dt-line-height, inherit) !important;
+}
+
+html[data-dt="on"][data-dt-typo="on"] .dt-target.dt-block {
+  margin-top: var(--dt-gap, 0.3em) !important;
+  text-indent: var(--dt-indent, 0);
+}
+
+/* ---- 网页夜间模式（Beta，只在设置里列出的网站生效）----
+   整页反色 + 色相转半圈；图片、视频、画布等再反一次恢复原样，我们自己的浮层也恢复。
+   canvas 画的界面、用 CSS 背景图做的内容可能显示异常，所以默认关、按网站白名单开 */
+html[data-dt-night="on"] {
+  filter: invert(1) hue-rotate(180deg);
+  background-color: #fff;
+}
+
+html[data-dt-night="on"] img,
+html[data-dt-night="on"] picture,
+html[data-dt-night="on"] video,
+html[data-dt-night="on"] canvas,
+html[data-dt-night="on"] iframe,
+html[data-dt-night="on"] embed,
+html[data-dt-night="on"] object,
+html[data-dt-night="on"] svg image,
+html[data-dt-night="on"] [style*="background-image"],
+html[data-dt-night="on"] body > [data-dt-ui] {
+  filter: invert(1) hue-rotate(180deg);
+}
+

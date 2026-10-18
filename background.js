@@ -5,6 +5,8 @@ import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseArrayFromReasoning, isRunaway } from './lib/parse.js';
 import { matchGlossary, normalizeGlossary, glossaryFingerprint } from './lib/glossary.js';
 import * as cache from './lib/cache.js';
+import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
+import { resolveSiteRule, hostListed } from './lib/site-rules.js';
 
 // ---------------- 并发闸门 ----------------
 let running = 0;
@@ -305,7 +307,7 @@ async function ensureInjected(tabId, frameId = 0) {
   try {
     await chrome.scripting.executeScript({
       target,
-      files: ['content/core.js', 'content/dom.js', 'content/main.js', 'content/selection.js', 'content/hover.js']
+      files: ['content/core.js', 'content/dom.js', 'content/appearance.js', 'content/main.js', 'content/selection.js', 'content/hover.js']
     });
     return true;
   } catch (err) {
@@ -325,6 +327,25 @@ async function sendOrInject(tabId, msg, frameId) {
   }
 }
 
+// 这个页面要用的外观：按发消息的页面网址算好再给内容脚本（站点规则、夜间名单、强调色、清洗过的自定义 CSS），
+// 逻辑都在可测的 lib/ 里，内容脚本只管照着写到 <html> 上
+function pageAppearance(cfg, sender) {
+  const url = (sender && (sender.url || (sender.tab && sender.tab.url))) || '';
+  let host = '';
+  try {
+    host = new URL(url).hostname;
+  } catch (err) {
+    host = '';
+  }
+  return {
+    accent: isDefaultAccent(cfg.accentColor) ? '' : accentHex(cfg.accentColor),
+    customCss: sanitizeTranslationCss(cfg.customCss).css,
+    typo: typographyVars(cfg),
+    site: url ? resolveSiteRule(url, cfg.siteRules) : null,
+    night: !!cfg.nightMode && hostListed(host, cfg.nightSites)
+  };
+}
+
 // ---------------- 消息路由 ----------------
 const ROUTES = {
   translate: handleTranslate,
@@ -335,7 +356,7 @@ const ROUTES = {
   },
   // 只给内容脚本用：去掉 API Key，换成 hasKey。
   // 内容脚本跑在网页的渲染进程里，渲染进程一旦被攻破，它手里的东西都可能被读走。
-  'config:get': async () => {
+  'config:get': async (msg, sender) => {
     const cfg = await getConfig();
     // 嵌套的 providerConfig 里也有 Key：逐个剥掉，只留协议、地址和模型
     const providerConfig = {};
@@ -344,7 +365,7 @@ const ROUTES = {
       providerConfig[id] = { engine: one.engine, baseUrl: one.baseUrl, model: one.model };
     });
     const { providerConfig: _omit, ...rest } = cfg;
-    return { ok: true, config: { ...rest, providerConfig, hasKey: !!activeConfig(cfg).apiKey } };
+    return { ok: true, config: { ...rest, providerConfig, hasKey: !!activeConfig(cfg).apiKey, page: pageAppearance(cfg, sender) } };
   },
   // 设置页的缓存统计：估算值（LRU 预算用）+ 浏览器实际记的占用
   'cache:stats': async () => {
