@@ -54,7 +54,8 @@ edge-bilingual/
 │   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
 │   ├── parse.js           模型返回值解析（JSON 数组容错）+ 输出长度护栏
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格），纯函数
-│   └── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
+│   ├── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
+│   └── ui-theme-boot.js   设置页/弹窗的首帧主题预判（<head> 同步执行，避免闪一帧白底）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）

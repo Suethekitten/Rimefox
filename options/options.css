@@ -1,72 +1,96 @@
 /* 设置页样式：左侧分类导航 + 右侧分组卡片 + 底部保存栏。
    布局参照 Chrome 设置页 / GitHub 设置页的常见做法（没有引入第三方样式库：扩展零构建，页面也只有这一张）。
-   颜色都走变量，深色模式只换一组值（与弹窗同一套配色）。 */
+   颜色都走变量：浅色一套、深夜一套（近黑冷调底 + 玻璃质感 + 紫色渐变强调），
+   风格参考 AveMujica 的暗色体系；深色只换变量，结构不动。 */
 :root {
-  --bg: #f4f5f9;
-  --sidebar: #eceef4;
-  --card: #ffffff;
+  color-scheme: light;
+  --bg: #f4f5fa;
+  --bg-glow:
+    radial-gradient(1100px 520px at 12% -8%, rgba(106, 92, 240, 0.10), transparent 62%),
+    radial-gradient(900px 460px at 108% 4%, rgba(63, 142, 252, 0.08), transparent 58%);
+  --sidebar: rgba(255, 255, 255, 0.62);
+  --card: rgba(255, 255, 255, 0.82);
   --field: #ffffff;
-  --line: #e4e7ee;
-  --line-soft: #eef0f5;
-  --text: #151821;
-  --text-2: #374151;
-  --muted: #6b7280;
-  --accent: #4f46e5;
-  --accent-2: #2563eb;
-  --accent-soft: rgba(79, 70, 229, 0.12);
-  --ok: #067647;
-  --bad: #c0262d;
-  --warn: #b45309;
-  --warn-soft: rgba(245, 158, 11, 0.14);
-  --switch-off: #d5d9e2;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 2px 8px rgba(16, 24, 40, 0.04);
-  --radius: 14px;
+  --line: rgba(21, 24, 33, 0.09);
+  --line-soft: rgba(21, 24, 33, 0.055);
+  --text: #14161f;
+  --text-2: #3b4152;
+  --muted: #6b7285;
+  --accent: #6a5cf0;
+  --accent-2: #3f8efc;
+  --accent-soft: rgba(106, 92, 240, 0.11);
+  --accent-glow: rgba(106, 92, 240, 0.30);
+  --ok: #0a7f5c;
+  --bad: #c22a35;
+  --warn: #a16207;
+  --warn-soft: rgba(245, 158, 11, 0.16);
+  --switch-off: rgba(21, 24, 33, 0.16);
+  --card-hi: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --shadow: 0 1px 2px rgba(21, 24, 33, 0.04), 0 10px 30px -22px rgba(21, 24, 33, 0.32);
+  --shadow-lg: 0 16px 44px -26px rgba(21, 24, 33, 0.38);
+  --glass: blur(18px) saturate(160%);
+  --radius: 16px;
   --sidebar-w: 232px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --bg: #0f1116;
-    --sidebar: #13161c;
-    --card: #181b22;
-    --field: #11141a;
-    --line: #2a2f3a;
-    --line-soft: #222731;
-    --text: #e8eaf0;
-    --text-2: #c5cad4;
-    --muted: #9aa1ad;
-    --accent: #7c74ff;
-    --accent-2: #4f8bff;
-    --accent-soft: rgba(124, 116, 255, 0.18);
-    --ok: #34d399;
-    --bad: #f87171;
-    --warn: #fbbf24;
-    --warn-soft: rgba(251, 191, 36, 0.14);
-    --switch-off: #3a404d;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --bg: #05060a;
+    --bg-glow:
+      radial-gradient(1200px 620px at 8% -12%, rgba(124, 92, 255, 0.26), transparent 62%),
+      radial-gradient(1000px 560px at 106% 0%, rgba(56, 132, 255, 0.16), transparent 58%),
+      radial-gradient(900px 700px at 50% 118%, rgba(145, 130, 255, 0.08), transparent 62%);
+    --sidebar: rgba(12, 14, 22, 0.62);
+    --card: rgba(255, 255, 255, 0.075);
+    --field: rgba(8, 9, 14, 0.42);
+    --line: rgba(255, 255, 255, 0.095);
+    --line-soft: rgba(255, 255, 255, 0.06);
+    --text: #edf0f9;
+    --text-2: rgba(222, 227, 243, 0.88);
+    --muted: rgba(168, 176, 198, 0.82);
+    --accent: #9182ff;
+    --accent-2: #4da3ff;
+    --accent-soft: rgba(145, 130, 255, 0.17);
+    --accent-glow: rgba(145, 130, 255, 0.4);
+    --ok: #43d9a3;
+    --bad: #ff7f8a;
+    --warn: #f3c969;
+    --warn-soft: rgba(243, 201, 105, 0.14);
+    --switch-off: rgba(255, 255, 255, 0.18);
+    --card-hi: inset 0 1px 0 rgba(255, 255, 255, 0.072);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 42px -26px rgba(0, 0, 0, 0.95);
+    --shadow-lg: 0 26px 64px -34px rgba(0, 0, 0, 1);
+    color-scheme: dark;
   }
 }
 
 /* 手动深色：覆盖系统浅色；手动浅色直接用上面的 :root 值 */
 :root[data-theme="dark"] {
-  --bg: #0f1116;
-  --sidebar: #13161c;
-  --card: #181b22;
-  --field: #11141a;
-  --line: #2a2f3a;
-  --line-soft: #222731;
-  --text: #e8eaf0;
-  --text-2: #c5cad4;
-  --muted: #9aa1ad;
-  --accent: #7c74ff;
-  --accent-2: #4f8bff;
-  --accent-soft: rgba(124, 116, 255, 0.18);
-  --ok: #34d399;
-  --bad: #f87171;
-  --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, 0.14);
-  --switch-off: #3a404d;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --bg: #05060a;
+  --bg-glow:
+    radial-gradient(1200px 620px at 8% -12%, rgba(124, 92, 255, 0.26), transparent 62%),
+    radial-gradient(1000px 560px at 106% 0%, rgba(56, 132, 255, 0.16), transparent 58%),
+    radial-gradient(900px 700px at 50% 118%, rgba(145, 130, 255, 0.08), transparent 62%);
+  --sidebar: rgba(12, 14, 22, 0.62);
+  --card: rgba(255, 255, 255, 0.075);
+  --field: rgba(8, 9, 14, 0.42);
+  --line: rgba(255, 255, 255, 0.095);
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --text: #edf0f9;
+  --text-2: rgba(222, 227, 243, 0.88);
+  --muted: rgba(168, 176, 198, 0.82);
+  --accent: #9182ff;
+  --accent-2: #4da3ff;
+  --accent-soft: rgba(145, 130, 255, 0.17);
+  --accent-glow: rgba(145, 130, 255, 0.4);
+  --ok: #43d9a3;
+  --bad: #ff7f8a;
+  --warn: #f3c969;
+  --warn-soft: rgba(243, 201, 105, 0.14);
+  --switch-off: rgba(255, 255, 255, 0.18);
+  --card-hi: inset 0 1px 0 rgba(255, 255, 255, 0.072);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 42px -26px rgba(0, 0, 0, 0.95);
+  --shadow-lg: 0 26px 64px -34px rgba(0, 0, 0, 1);
   color-scheme: dark;
 }
 
@@ -79,15 +103,22 @@
 }
 
 html {
+  background: var(--bg);
   scroll-behavior: smooth;
   scroll-padding-top: 24px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 24%, transparent) transparent;
 }
 
 body {
   margin: 0;
-  background: var(--bg);
+  /* 固定住的氛围渐变：滚动时整个页面的"光"不动，卡片像浮在一层夜色上 */
+  background-color: var(--bg);
+  background-image: var(--bg-glow);
+  background-attachment: fixed;
   color: var(--text);
   font: 14px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -96,6 +127,42 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 20%, transparent);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 32%, transparent);
+  background-clip: padding-box;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* hidden 属性要压过各元素自己的 display，否则隐藏不生效 */
@@ -120,6 +187,8 @@ textarea {
   gap: 18px;
   padding: 28px 16px 20px;
   background: var(--sidebar);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
   border-right: 1px solid var(--line);
 }
 
@@ -132,18 +201,20 @@ textarea {
 
 .brand .logo {
   flex: none;
-  border-radius: 10px;
-  box-shadow: 0 4px 14px var(--accent-soft);
+  border-radius: 11px;
+  box-shadow: 0 0 0 1px var(--line), 0 10px 26px -14px var(--accent-glow);
 }
 
 .brand-name {
   font-size: 15px;
   font-weight: 650;
+  letter-spacing: 0.01em;
 }
 
 .brand-ver {
   font-size: 12px;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .nav {
@@ -157,20 +228,21 @@ textarea {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 9px;
+  border-radius: 10px;
   color: var(--text-2);
   font-size: 13.5px;
   text-decoration: none;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .nav-item:hover {
-  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   color: var(--text);
 }
 
 .nav-item.is-active {
-  background: var(--accent-soft);
+  background: linear-gradient(135deg, var(--accent-soft), transparent 75%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent);
   font-weight: 600;
 }
@@ -180,17 +252,30 @@ textarea {
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
-  background: var(--card);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   border: 1px solid var(--line);
   font-size: 12px;
   line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.nav-ico svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .nav-item.is-active .nav-ico {
   border-color: transparent;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
+  box-shadow: 0 4px 12px -4px var(--accent-glow);
 }
 
 .sidebar-note {
@@ -217,8 +302,9 @@ textarea {
 
 .section-head h2 {
   margin: 10px 0 2px;
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 650;
+  letter-spacing: -0.015em;
 }
 
 .section-head p {
@@ -229,11 +315,11 @@ textarea {
 
 .card {
   margin-bottom: 16px;
-  padding: 6px 20px;
+  padding: 8px 22px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), var(--card-hi);
 }
 
 .card-title {
@@ -278,7 +364,7 @@ label.row {
 
 .row-title {
   font-size: 13.5px;
-  font-weight: 550;
+  font-weight: 560;
   color: var(--text);
 }
 
@@ -324,11 +410,15 @@ textarea {
   width: 100%;
   padding: 8px 11px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--field);
   color: var(--text);
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
 }
 
 textarea {
@@ -372,7 +462,7 @@ input.switch {
   border-radius: 999px;
   background: var(--switch-off);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 input.switch::after {
@@ -384,12 +474,13 @@ input.switch::after {
   height: 16px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
   transition: transform 0.15s ease;
 }
 
 input.switch:checked {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 2px 10px -2px var(--accent-glow);
 }
 
 input.switch:checked::after {
@@ -404,19 +495,29 @@ input.switch:focus-visible {
 /* ---- 按钮 ---- */
 .btn {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 7px 14px;
   border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--field);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--field) 82%, transparent);
   color: var(--text);
   font-size: 13px;
   white-space: nowrap;
+  text-decoration: none;
   cursor: pointer;
-  transition: border-color 0.15s ease, filter 0.15s ease;
+  transition: border-color 0.15s ease, filter 0.15s ease, transform 0.06s ease, box-shadow 0.15s ease;
 }
 
 .btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--muted) 45%, var(--line));
+  border-color: color-mix(in srgb, var(--muted) 55%, var(--line));
+  box-shadow: var(--shadow);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .btn:disabled {
@@ -430,10 +531,11 @@ input.switch:focus-visible {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
   font-weight: 600;
+  box-shadow: 0 6px 18px -6px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .btn.primary:hover:not(:disabled) {
-  filter: brightness(1.07);
+  filter: brightness(1.08);
 }
 
 .btn.danger {
@@ -446,8 +548,8 @@ input.switch:focus-visible {
   min-width: 150px;
   padding: 7px 14px;
   border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--field);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--field) 82%, transparent);
   color: var(--text);
   font-weight: 600;
   letter-spacing: 0.5px;
@@ -495,9 +597,11 @@ input.switch:focus-visible {
 /* ---- 可搜索的模型选择器 ---- */
 .picker {
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  box-shadow: var(--shadow);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
+  box-shadow: var(--shadow), var(--card-hi);
   overflow: hidden;
 }
 
@@ -544,7 +648,7 @@ input.switch:focus-visible {
   margin-left: auto;
   padding: 0 5px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 10px;
   font-weight: 400;
   color: var(--muted);
@@ -584,9 +688,9 @@ input.switch:focus-visible {
   z-index: 5;
   margin: 8px -36px 0;
   padding: 12px 36px 14px;
-  background: color-mix(in srgb, var(--bg) 85%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
   border-top: 1px solid var(--line);
   transition: background 0.2s ease, border-color 0.2s ease;
 }
@@ -618,8 +722,8 @@ input.switch:focus-visible {
 
 /* 有未保存的修改：栏变色、圆点变成提醒色 */
 .savebar[data-dirty="true"] {
-  background: color-mix(in srgb, var(--warn) 12%, var(--card));
-  border-top-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn) 9%, var(--card));
+  border-top-color: color-mix(in srgb, var(--warn) 50%, var(--line));
 }
 
 .savebar[data-dirty="true"] .savebar-dot {
@@ -712,7 +816,7 @@ input.switch:focus-visible {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 8px 10px;
-  background: var(--field);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
 }
 
 .glossary-group-head {
@@ -745,8 +849,8 @@ input.switch:focus-visible {
   min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--card);
+  border-radius: 10px;
+  background: var(--field);
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -786,4 +890,18 @@ input.switch:focus-visible {
 
 .glossary-more {
   align-self: flex-start;
+}
+
+/* 减少动态效果：系统开了"减弱动态"就不做过渡和动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
 }

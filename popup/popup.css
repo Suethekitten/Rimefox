@@ -1,52 +1,77 @@
-/* 弹窗样式。颜色都走变量，深色模式只需要换一组值 */
+/* 弹窗样式。颜色都走变量：浅色一套、深夜一套（近黑冷调底 + 玻璃卡片 + 紫色渐变强调），
+   与设置页同一套设计语言；深色只换变量，结构不动。 */
 :root {
-  --bg: #f6f7fb;
-  --card: #ffffff;
-  --line: #e4e7ee;
-  --text: #151821;
-  --muted: #6b7280;
-  --accent: #4f46e5;
-  --accent-2: #2563eb;
-  --accent-soft: rgba(79, 70, 229, 0.12);
-  --on: #059669;
+  color-scheme: light;
+  --bg: #f4f5fa;
+  --bg-glow:
+    radial-gradient(520px 260px at 8% -20%, rgba(106, 92, 240, 0.12), transparent 65%),
+    radial-gradient(420px 220px at 108% 0%, rgba(63, 142, 252, 0.09), transparent 60%);
+  --card: rgba(255, 255, 255, 0.84);
+  --field: rgba(255, 255, 255, 0.9);
+  --line: rgba(21, 24, 33, 0.09);
+  --text: #14161f;
+  --muted: #6b7285;
+  --accent: #6a5cf0;
+  --accent-2: #3f8efc;
+  --accent-soft: rgba(106, 92, 240, 0.12);
+  --accent-glow: rgba(106, 92, 240, 0.3);
+  --elevated: #ffffff;
+  --on: #0a8a5f;
   --busy: #2563eb;
-  --bad: #dc2626;
-  --idle: #9ca3af;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --bad: #c22a35;
+  --idle: #9aa0b0;
+  --card-hi: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  --shadow: 0 1px 2px rgba(21, 24, 33, 0.05), 0 10px 28px -22px rgba(21, 24, 33, 0.3);
+  --glass: blur(18px) saturate(160%);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --bg: #111318;
-    --card: #1a1d24;
-    --line: #2a2f3a;
-    --text: #e8eaf0;
-    --muted: #9aa1ad;
-    --accent: #7c74ff;
-    --accent-2: #4f8bff;
-    --accent-soft: rgba(124, 116, 255, 0.18);
-    --on: #34d399;
-    --busy: #60a5fa;
-    --bad: #f87171;
-    --idle: #6b7280;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --bg: #05060a;
+    --bg-glow:
+      radial-gradient(600px 300px at 6% -22%, rgba(124, 92, 255, 0.3), transparent 66%),
+      radial-gradient(460px 250px at 108% -2%, rgba(56, 132, 255, 0.18), transparent 62%);
+    --card: rgba(255, 255, 255, 0.07);
+    --field: rgba(8, 9, 14, 0.42);
+    --line: rgba(255, 255, 255, 0.095);
+    --text: #edf0f9;
+    --muted: rgba(168, 176, 198, 0.82);
+    --accent: #9182ff;
+    --accent-2: #4da3ff;
+    --accent-soft: rgba(145, 130, 255, 0.18);
+    --accent-glow: rgba(145, 130, 255, 0.4);
+    --elevated: rgba(255, 255, 255, 0.11);
+    --on: #43d9a3;
+    --busy: #63b0ff;
+    --bad: #ff7f8a;
+    --idle: rgba(168, 176, 198, 0.55);
+    --card-hi: inset 0 1px 0 rgba(255, 255, 255, 0.072);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 36px -26px rgba(0, 0, 0, 0.95);
+    color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #111318;
-  --card: #1a1d24;
-  --line: #2a2f3a;
-  --text: #e8eaf0;
-  --muted: #9aa1ad;
-  --accent: #7c74ff;
-  --accent-2: #4f8bff;
-  --accent-soft: rgba(124, 116, 255, 0.18);
-  --on: #34d399;
-  --busy: #60a5fa;
-  --bad: #f87171;
-  --idle: #6b7280;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --bg: #05060a;
+  --bg-glow:
+    radial-gradient(600px 300px at 6% -22%, rgba(124, 92, 255, 0.3), transparent 66%),
+    radial-gradient(460px 250px at 108% -2%, rgba(56, 132, 255, 0.18), transparent 62%);
+  --card: rgba(255, 255, 255, 0.07);
+  --field: rgba(8, 9, 14, 0.42);
+  --line: rgba(255, 255, 255, 0.095);
+  --text: #edf0f9;
+  --muted: rgba(168, 176, 198, 0.82);
+  --accent: #9182ff;
+  --accent-2: #4da3ff;
+  --accent-soft: rgba(145, 130, 255, 0.18);
+  --accent-glow: rgba(145, 130, 255, 0.4);
+  --elevated: rgba(255, 255, 255, 0.11);
+  --on: #43d9a3;
+  --busy: #63b0ff;
+  --bad: #ff7f8a;
+  --idle: rgba(168, 176, 198, 0.55);
+  --card-hi: inset 0 1px 0 rgba(255, 255, 255, 0.072);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 36px -26px rgba(0, 0, 0, 0.95);
   color-scheme: dark;
 }
 
@@ -66,9 +91,13 @@ body {
 
 body {
   width: 340px;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: var(--bg-glow);
   color: var(--text);
   font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 24%, transparent) transparent;
 }
 
 button,
@@ -78,17 +107,56 @@ textarea {
   color: inherit;
 }
 
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 20%, transparent);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 32%, transparent);
+  background-clip: padding-box;
+}
+
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ---- 头部 ---- */
 .head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 16px 12px;
+  padding: 15px 16px 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 92%);
+  border-bottom: 1px solid var(--line);
 }
 
 .logo {
   flex: none;
-  border-radius: 8px;
+  border-radius: 9px;
+  box-shadow: 0 0 0 1px var(--line), 0 8px 20px -12px var(--accent-glow);
 }
 
 .brand {
@@ -99,7 +167,7 @@ textarea {
 .name {
   font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.02em;
 }
 
 .tagline {
@@ -122,22 +190,22 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 16px 14px;
+  padding: 14px 16px;
 }
 
 .primary {
   width: 100%;
   padding: 11px 12px;
   border: 0;
-  border-radius: 11px;
+  border-radius: 13px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.3px;
   cursor: pointer;
-  box-shadow: 0 4px 14px var(--accent-soft);
-  transition: filter 0.15s ease, transform 0.05s ease;
+  box-shadow: 0 8px 22px -8px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  transition: filter 0.15s ease, transform 0.06s ease, box-shadow 0.15s ease;
 }
 
 .primary:hover {
@@ -153,11 +221,13 @@ textarea {
   background: var(--card);
   color: var(--text);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), var(--card-hi);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
 }
 
 .primary:disabled {
-  background: var(--line);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--muted);
   box-shadow: none;
   cursor: not-allowed;
@@ -168,10 +238,12 @@ textarea {
   display: flex;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 11px;
+  border-radius: 12px;
   background: var(--card);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), var(--card-hi);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
 }
 
 .status-dot {
@@ -185,7 +257,7 @@ textarea {
 
 .status[data-state="on"] .status-dot {
   background: var(--on);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--on) 20%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--on) 20%, transparent), 0 0 10px color-mix(in srgb, var(--on) 45%, transparent);
 }
 
 .status[data-state="busy"] .status-dot {
@@ -229,7 +301,7 @@ textarea {
   height: 4px;
   margin-top: 8px;
   border-radius: 999px;
-  background: var(--line);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
   overflow: hidden;
 }
 
@@ -239,6 +311,7 @@ textarea {
   width: 0;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 10px var(--accent-glow);
   transition: width 0.3s ease;
 }
 
@@ -248,10 +321,12 @@ textarea {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border-radius: 11px;
+  border-radius: 12px;
   background: var(--card);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), var(--card-hi);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
 }
 
 .card-title {
@@ -278,8 +353,8 @@ textarea {
   display: flex;
   flex: 1;
   padding: 3px;
-  border-radius: 9px;
-  background: var(--bg);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   border: 1px solid var(--line);
 }
 
@@ -292,13 +367,14 @@ textarea {
   color: var(--muted);
   font-size: 12.5px;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .seg button.active {
-  background: var(--card);
+  background: var(--elevated);
   color: var(--text);
   font-weight: 600;
-  box-shadow: var(--shadow);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), var(--card-hi);
 }
 
 .seg button:disabled {
@@ -311,8 +387,8 @@ select {
   min-width: 0;
   padding: 6px 9px;
   border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--card);
+  border-radius: 10px;
+  background: var(--field);
 }
 
 select:focus,
@@ -329,11 +405,13 @@ select:focus,
   max-height: 160px;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--bg);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--text);
   font-size: 12.5px;
   line-height: 1.5;
   resize: vertical;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .quick textarea::placeholder {
@@ -349,14 +427,20 @@ select:focus,
   flex: 1;
   padding: 7px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--field) 82%, transparent);
+  color: var(--text);
   font-size: 12px;
   cursor: pointer;
+  transition: border-color 0.15s ease, filter 0.15s ease, transform 0.06s ease;
 }
 
 .mini:hover {
-  border-color: color-mix(in srgb, var(--muted) 45%, var(--line));
+  border-color: color-mix(in srgb, var(--muted) 55%, var(--line));
+}
+
+.mini:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .mini:disabled {
@@ -369,14 +453,15 @@ select:focus,
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
   font-weight: 600;
+  box-shadow: 0 5px 14px -6px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .quick-out {
   max-height: 140px;
   overflow: auto;
   padding: 9px 11px;
-  border-radius: 9px;
-  background: var(--bg);
+  border-radius: 10px;
+  background: var(--field);
   border: 1px solid var(--line);
   font-size: 12.5px;
   line-height: 1.65;
@@ -401,9 +486,20 @@ select:focus,
   color: var(--muted);
   font-size: 12px;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .link:hover {
   background: var(--card);
   color: var(--text);
+}
+
+/* 减少动态效果：系统开了"减弱动态"就不做过渡和动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
 }

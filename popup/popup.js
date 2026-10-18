@@ -225,6 +225,13 @@ function applyUiTheme(value) {
     delete root.dataset.theme;
     root.style.colorScheme = '';
   }
+  // 首帧预判用（lib/ui-theme-boot.js）：读配置之前先按上次的取值上色，避免闪一帧白底
+  try {
+    if (value === 'light' || value === 'dark') localStorage.setItem('dt.uiTheme', value);
+    else localStorage.removeItem('dt.uiTheme');
+  } catch (err) {
+    /* 存储不可用就退化为 prefers-color-scheme */
+  }
 }
 
 async function init() {
