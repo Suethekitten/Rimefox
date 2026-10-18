@@ -519,8 +519,13 @@ providerSelect.addEventListener('change', () => {
 
   const provider = providerById(id);
   if (!provider) return;
-  fields.model.value = '';
-  setResult(modelHint, '已套用「' + provider.name + '」的地址，模型请点「获取模型列表」后选一个。');
+  // 模型名也按服务商记忆：loadProvider 已经恢复了上次填的，这里不要再清空
+  setResult(
+    modelHint,
+    fields.model.value
+      ? '已切回「' + provider.name + '」，模型沿用上次保存的「' + fields.model.value + '」。'
+      : '已套用「' + provider.name + '」的地址，模型请点「获取模型列表」后选一个。'
+  );
   if (fields.apiKey.value) fetchModels();
 });
 
