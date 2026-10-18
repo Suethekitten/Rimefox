@@ -1016,7 +1016,8 @@ details.more > summary:hover {
 /* ---- 强调色色板 ---- */
 .swatches {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex: none;
+  flex-wrap: nowrap; /* 英文说明更长时也保持一行 */
   gap: 8px;
   justify-content: flex-end;
 }
