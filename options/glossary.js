@@ -199,7 +199,8 @@ export function createGlossaryEditor(opts) {
       message('术语表是空的，没有可导出的内容。', 'bad');
       return;
     }
-    const blob = new Blob([toGlossaryCsv(list)], { type: 'text/csv;charset=utf-8' });
+    // 前面加 BOM：Excel 直接双击打开时中文不会乱码（导入端会自动去掉 BOM）
+    const blob = new Blob(['\uFEFF' + toGlossaryCsv(list)], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
