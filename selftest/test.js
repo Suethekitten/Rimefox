@@ -340,6 +340,180 @@
     return true;
   });
 
+  // ---------------- 区域模型（DT.areaOf） ----------------
+  function unitsIn(id) {
+    return DT.collect(document.getElementById(id)).filter(function (u) {
+      return !DT.skipText(u.text);
+    });
+  }
+
+  function texts(list) {
+    return list.map(function (u) {
+      return u.text;
+    });
+  }
+
+  check('GitHub 顶栏：行内 span 套在链接里 → 原地替换，高度不变，只出现一次文字', function () {
+    var nav = document.getElementById('fx-gh-nav');
+    var links = nav.querySelectorAll('a');
+    // 顶栏宽度收到刚好放下原文：追加任何文字都会把条目挤成两行（真实 GitHub 顶栏就是这么满）
+    var bar = nav.querySelector('ul');
+    var natural = 0;
+    Array.prototype.forEach.call(bar.children, function (li) {
+      natural += li.getBoundingClientRect().width;
+    });
+    bar.style.width = Math.ceil(natural) + 2 + 'px';
+    var before = Array.prototype.map.call(links, function (a) {
+      return a.getBoundingClientRect().height;
+    });
+    var got = unitsIn('fx-gh-nav');
+    var names = eq(texts(got), ['Code', 'Issues', 'Pull requests']);
+    if (names !== true) return names;
+    var zh = { Code: '代码', Issues: '议题', 'Pull requests': '拉取请求' };
+    for (var i = 0; i < got.length; i += 1) {
+      var area = DT.areaOf(got[i].el);
+      if (area !== 'control') return got[i].text + ' 判成了 ' + area;
+      if (!DT.inject(got[i].el, zh[got[i].text], 'zh-CN')) return got[i].text + ' inject 返回 false';
+    }
+    if (nav.querySelector('[data-dt-target]')) return '顶栏里不该追加译文节点';
+    for (var k = 0; k < links.length; k += 1) {
+      var h = links[k].getBoundingClientRect().height;
+      if (Math.abs(h - before[k]) > 0.5) return '第 ' + (k + 1) + ' 项高度变了：' + before[k] + ' → ' + h;
+    }
+    var shown = DT.normalizeText(nav.textContent);
+    if (/Code|Issues|Pull requests/.test(shown)) return '原文还在：' + shown;
+    return shown.split('代码').length === 2 ? true : '译文出现次数不对：' + shown;
+  });
+
+  check('按钮里的行内 span 判为控件', function () {
+    var hit = byText(unitsIn('fx-btn-span'), 'Save changes');
+    if (!hit) return '没收集到按钮文字';
+    return eq(DT.areaOf(hit.el), 'control');
+  });
+
+  check('长卡片链接：按正文追加，不被替换', function () {
+    var card = document.getElementById('fx-card');
+    var u = unitsIn('fx-card')[0];
+    if (!u) return '没收集到卡片标题';
+    var area = DT.areaOf(u.el);
+    if (area !== 'content') return '判成了 ' + area;
+    if (!DT.inject(u.el, '新版本发布', 'zh-CN')) return 'inject 返回 false';
+    if (!u.el.querySelector('[data-dt-target]')) return '应该追加译文，不是替换';
+    return card.textContent.indexOf('Introducing') >= 0 ? true : '原文被替换掉了';
+  });
+
+  check('链接里的标题仍按正文处理', function () {
+    var u = unitsIn('fx-link-heading')[0];
+    if (!u) return '没收集到标题';
+    return eq(DT.areaOf(u.el), 'content');
+  });
+
+  check('整页 flex 布局：标题与正文不被替换', function () {
+    var got = unitsIn('fx-pageflex');
+    var names = eq(texts(got), ['Patch notes', 'Read more about this update']);
+    if (names !== true) return names;
+    var bad = got.filter(function (u) {
+      return DT.areaOf(u.el) !== 'content';
+    });
+    return bad.length ? '被判成界面文字：' + JSON.stringify(texts(bad)) : true;
+  });
+
+  check('role="tabpanel" 不是控件', function () {
+    var u = unitsIn('fx-tabpanel')[0];
+    if (!u) return '没收集到面板文字';
+    return eq(DT.areaOf(u.el), 'content');
+  });
+
+  check('目录条目：按正文追加，不替换', function () {
+    var u = byText(unitsIn('fx-toc'), 'Description');
+    if (!u) return '没收集到目录条目';
+    var area = DT.areaOf(u.el);
+    if (area !== 'content') return '判成了 ' + area;
+    if (!DT.inject(u.el, '1 描述', 'zh-CN')) return 'inject 返回 false';
+    return u.el.querySelector('[data-dt-target]') ? true : '目录条目被替换了';
+  });
+
+  check('导航里折成多行的行内文字：不替换', function () {
+    var u = byText(unitsIn('fx-nav-wrap'), 'This inline label');
+    if (!u) return '没收集到导航文字';
+    return eq(DT.areaOf(u.el), 'content');
+  });
+
+  DT.restore();
+
+  // ---------------- YouTube 字幕（DT.subs） ----------------
+  // 夹具的结构照抄真实 json3 回包（时间、aAppend 换行事件、tOffsetMs 逐词偏移），文字是自己写的
+  var MANUAL = {
+    events: [
+      { tStartMs: 1000, dDurationMs: 2000, segs: [{ utf8: 'Good morning.' }] },
+      { tStartMs: 3100, dDurationMs: 1800, segs: [{ utf8: 'This sentence is split' }] },
+      { tStartMs: 4950, dDurationMs: 1500, segs: [{ utf8: 'across two cues.' }] },
+      { tStartMs: 6500, dDurationMs: 1000, segs: [{ utf8: '[Music]' }] },
+      { tStartMs: 7600, dDurationMs: 1000, segs: [{ utf8: 'No ending here' }] },
+      { tStartMs: 11000, dDurationMs: 1000, segs: [{ utf8: 'so this starts fresh.' }] }
+    ]
+  };
+  var ASR = {
+    events: [
+      { tStartMs: 0, dDurationMs: 1205280, id: 1, segs: [] },
+      { tStartMs: 6260, dDurationMs: 3880, wWinId: 1, segs: [{ utf8: '[Music]' }] },
+      { tStartMs: 26550, wWinId: 1, aAppend: 1, segs: [{ utf8: '\n' }] },
+      { tStartMs: 26560, dDurationMs: 6400, wWinId: 1, segs: [{ utf8: 'good', acAsrConf: 0 }, { utf8: ' morning', tOffsetMs: 160 }] },
+      { tStartMs: 28390, dDurationMs: 4570, wWinId: 1, aAppend: 1, segs: [{ utf8: '\n' }] },
+      {
+        tStartMs: 28400, dDurationMs: 6240, wWinId: 1,
+        segs: [{ utf8: 'how' }, { utf8: ' are', tOffsetMs: 240 }, { utf8: ' you', tOffsetMs: 440 },
+          { utf8: " it's", tOffsetMs: 2320 }, { utf8: ' been', tOffsetMs: 2480 }, { utf8: ' great', tOffsetMs: 2639 }]
+      }
+    ]
+  };
+
+  check('字幕：人工字幕按句末标点合并，[Music] 单独成句，隔太久不合并', function () {
+    var units = DT.subs.unitsOf(MANUAL, 'https://www.youtube.com/api/timedtext?v=x&lang=en&fmt=json3');
+    var r = eq(units.map(function (u) { return u.text; }), [
+      'Good morning.', 'This sentence is split across two cues.', '[Music]', 'No ending here', 'so this starts fresh.'
+    ]);
+    if (r !== true) return r;
+    if (!units[2].tag) return '[Music] 没被标成音效（会白白送去翻译）';
+    return eq([units[1].start, units[1].end], [3100, 6450]);
+  });
+
+  check('字幕：自动生成字幕按停顿拼句，跳过换行事件', function () {
+    var url = 'https://www.youtube.com/api/timedtext?v=x&lang=en&kind=asr&fmt=json3';
+    if (!DT.subs.isAsr(ASR, url) || DT.subs.isAsr(MANUAL, '')) return 'isAsr 判断不对';
+    var units = DT.subs.unitsOf(ASR, url);
+    return eq(units.map(function (u) { return u.text; }), ['[Music]', 'good morning', 'how are you', "it's been great"]);
+  });
+
+  check('字幕：自动生成字幕的每句不会一直挂到下一句', function () {
+    var units = DT.subs.unitsOf(ASR, 'https://www.youtube.com/api/timedtext?kind=asr');
+    var gm = units[1];
+    if (gm.end > 28400) return '"good morning" 结束于 ' + gm.end + '，盖住了下一句';
+    return gm.end > gm.start ? true : '结束时间不对：' + gm.end;
+  });
+
+  check('字幕：自动生成字幕的短句遇到中等停顿不断开（避免一两个词一段）', function () {
+    var words = [{ t: 0, text: 'so', end: 5000 }, { t: 900, text: 'yeah', end: 5000 }, { t: 1100, text: 'that', end: 5000 },
+      { t: 1300, text: 'was', end: 5000 }, { t: 1500, text: 'interesting', end: 5000 }, { t: 3200, text: 'next', end: 5000 }];
+    return eq(DT.subs.chunksOf(words).map(function (u) { return u.text; }), ['so yeah that was interesting', 'next']);
+  });
+
+  check('字幕：unitAt 二分查找命中与空档', function () {
+    var units = DT.subs.unitsOf(MANUAL, '');
+    return eq([1500, 3200, 6000, 6450, 9500, 11500].map(function (ms) { return DT.subs.unitAt(units, ms); }), [0, 1, 1, -1, -1, 4]);
+  });
+
+  check('字幕：机翻轨道去掉 tlang 拿原文；语言比较认 zh-Hans ≈ zh-CN', function () {
+    var url = 'https://www.youtube.com/api/timedtext?v=abc&lang=en&kind=asr&pot=TOKEN&tlang=zh-Hans&fmt=json3';
+    var p = DT.subs.paramsOf(url);
+    if (p.tlang !== 'zh-Hans' || p.lang !== 'en' || p.v !== 'abc') return '参数解析不对：' + JSON.stringify(p);
+    var src = DT.subs.withoutTlang(url);
+    if (/tlang=/.test(src) || src.indexOf('pot=TOKEN') < 0 || src.indexOf('kind=asr') < 0) return '去 tlang 不对：' + src;
+    var cases = [['zh-Hans', 'zh-CN', true], ['zh-Hant', 'zh-CN', false], ['zh-Hant', 'zh-TW', true], ['en-US', 'en', true], ['en', 'zh-CN', false]];
+    var bad = cases.filter(function (c) { return DT.subs.sameLanguage(c[0], c[1]) !== c[2]; });
+    return bad.length ? '语言比较错：' + JSON.stringify(bad) : true;
+  });
+
   // ---------------- 渲染 ----------------
   var list = document.getElementById('list');
   var passed = 0;

@@ -21,6 +21,9 @@
   // 选区所在的元素：有些站点（比如 X）一滚动就把选区清掉，
   // 这时没法再用 getSelection 定位，改用这个元素跟着走
   var anchorEl = null;
+  // 小按钮相对选区左上角的偏移（松开鼠标时指针所在的位置）。
+  // 记偏移而不是屏幕坐标：页面滚动后按钮还能跟着选区走
+  var btnOffset = null;
 
   function cfg() {
     return DT.state.config || {};
@@ -175,18 +178,30 @@
   }
 
   function hideButton() {
+    btnOffset = null;
     if (btn) btn.style.display = 'none';
   }
 
-  function showButton(rect) {
+  // 按钮放在鼠标指针的右下方。以前放在选区包围盒的右下角：
+  // 选区一跨行，包围盒的右下角就是整段文字的末尾，离松开鼠标的地方很远。
+  // point：松开鼠标时的指针坐标；不传时沿用上次记下的偏移（滚动跟随），都没有才退回选区右下角
+  function showButton(rect, point) {
     ensureButton();
     var pad = 6;
     var size = 26;
+    var gap = 10; // 别盖住指针本身
     var vw = window.innerWidth;
     var vh = window.innerHeight;
 
-    var left = Math.min(Math.max(pad, rect.right + 6), vw - size - pad);
-    var top = Math.min(Math.max(pad, rect.bottom + 6), vh - size - pad);
+    if (point) btnOffset = { dx: point.x - rect.left, dy: point.y - rect.top };
+    var x = btnOffset ? rect.left + btnOffset.dx : rect.right;
+    var y = btnOffset ? rect.top + btnOffset.dy : rect.bottom;
+
+    // 右边 / 下边放不下就翻到指针的左边 / 上边
+    var left = x + gap + size > vw - pad ? x - gap - size : x + gap;
+    var top = y + gap + size > vh - pad ? y - gap - size : y + gap;
+    left = Math.min(Math.max(pad, left), vw - size - pad);
+    top = Math.min(Math.max(pad, top), vh - size - pad);
 
     btn.style.left = Math.round(left) + 'px';
     btn.style.top = Math.round(top) + 'px';
@@ -259,6 +274,7 @@
     function (event) {
       var target = event.target;
       if (target && target.closest && target.closest('[data-dt-ui]')) return;
+      var point = { x: event.clientX, y: event.clientY };
 
       // 让浏览器先把选区落定
       setTimeout(function () {
@@ -281,7 +297,7 @@
           return;
         }
         // B 方案：只出小按钮，等用户点
-        if (cfg().selectionButton !== false) showButton(info.rect);
+        if (cfg().selectionButton !== false) showButton(info.rect, point);
       }, 10);
     },
     true

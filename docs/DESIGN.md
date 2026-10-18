@@ -16,7 +16,7 @@ content script（3 个 classic script，共享 window.__DT）
 service worker（ESM）
     background.js  消息路由、并发闸门、批处理、缓存、重试
     lib/provider.js  OpenAI 兼容客户端
-    lib/cache.js     LRU
+    lib/cache.js     三层缓存：内存 → storage.session → storage.local（短文本）
     lib/config.js    默认值 + 存储 + 版本迁移
 ```
 
@@ -85,8 +85,18 @@ walk(el):
 |---|---|
 | 仅译文模式 | 就是要把原文换掉 |
 | `position: fixed / sticky / absolute` | 盒子尺寸写死，追加必溢出（昵称、日期、浮层标签） |
-| `a` / `button` / `label` / `summary` / `option` / `role=*` | 真控件，追加会撑破按钮 |
-| 位于 `header` / `nav` 内 + 字号 ≤ 20px + 单行 | 导航条固定高度，追加会溢出成第二排 |
+| `DT.areaOf(el)` 不是 `content` | 控件 / 导航里的界面文字，追加会撑破按钮或把导航条挤成两排 |
+
+`DT.areaOf(el)` 是"这段文字属于页面哪一层"的唯一判定，站点适配问题只改它。判定顺序（命中即返回）：
+
+1. 在目录里（祖先的 id / class 带 `toc`、`table-of-contents`）→ `content`：条目就是正文小标题，要对照着看
+2. 自己是控件（`a` / `button` / `label` / `summary` / `role=button|tab|menuitem|link|…`），或沿**行内包裹链**能找到所属控件，且整个控件的文字 ≤ 80 字 → `control`。
+   `<a><svg/><span>Code</span></a>` 的 span 属于链接；`<a class="card"><div><span>标题</span></div></a>` 的 span 不算（中间隔了块级 div）；超过 80 字的整条链接是卡片，按正文处理
+3. 位于 `header` / `nav` / `role=navigation|banner|menubar` 内 + 字号 ≤ 20px + 只占一行 → `chrome`
+4. 其余 → `content`
+
+"只占一行"：行内元素看 `getClientRects()` 有几个行片段，其它元素看 `getBoundingClientRect()` 的内容高度 ≤ 行高 × 1.9。
+**不能**读 `getComputedStyle().height`：行内元素的计算值是 `"auto"`，`parseFloat` 得 NaN，判断直接落空（0.4.8 GitHub 顶栏中英两行堆叠的根因）；`line-height: normal` 同理，要按字号 × 1.2 兜底。
 
 原地替换时，每个文本节点同时记下**原值**和**我们写入的值**：
 
@@ -199,7 +209,7 @@ walk(el):
 
 ## 8. 改代码前的检查
 
-1. 改 `content/dom.js` → 先跑 `selftest/index.html`（37 条用例，离线）
+1. 改 `content/dom.js` → 先跑 `selftest/index.html`（51 条用例，离线）
 2. 新增"跳过规则" → 想清楚会不会把**可见内容**也跳过（弹层、下拉菜单常被 `opacity`/`aria-hidden` 标记）
 3. 新增"替换规则" → 想清楚会不会把**正文**也替换
 4. 发版 → 同步 `manifest.json` 与 `content/core.js` 的 `DT.VERSION`

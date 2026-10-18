@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.4.9';
+  DT.VERSION = '0.5.0';
 
   DT.state = {
     enabled: false,

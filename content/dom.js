@@ -325,12 +325,13 @@
     return node;
   }
 
-  function record(where, node, sourceEl, text) {
+  function record(where, node, sourceEl, text, area) {
     try {
       DT.placements.push({
         tag: sourceEl.tagName,
         cls: shortCls(sourceEl.className),
         where: where,
+        area: area || '',
         span: !!node && node.tagName === 'SPAN',
         mode: DT.state.mode,
         text: previewText(text)
@@ -367,7 +368,7 @@
   }
 
   // 双语：追加到源元素内部末尾
-  function injectDual(sourceEl, text, lang) {
+  function injectDual(sourceEl, text, lang, area) {
     var sourceText = textOf(sourceEl);
     var node = makeNode(sourceEl, text, lang);
     try {
@@ -378,14 +379,14 @@
     }
     sourceEl.setAttribute('data-dt-src', '1');
     sourceEl.setAttribute('data-dt-sig', sigOf(sourceText));
-    record('inside', node, sourceEl, text);
+    record('inside', node, sourceEl, text, area);
     return true;
   }
 
   // 仅译文：原地替换文本节点（保留图标等子元素）
   // 每个节点记下原值和我们写入的值：站点之后改了它（SPA 重渲染），
   // 我们就不能再当它是"已翻译"，还原时也不能拿旧原文盖掉站点的新内容。
-  function injectOnly(sourceEl, text) {
+  function injectOnly(sourceEl, text, area) {
     var nodes = collectTextNodes(sourceEl);
     if (!nodes.length) return false;
     var saved = [];
@@ -398,7 +399,7 @@
     DT.replaced.push({ el: sourceEl, nodes: saved });
     sourceEl.setAttribute('data-dt-src', '1');
     sourceEl.setAttribute('data-dt-replaced', '1');
-    record('replace', null, sourceEl, text);
+    record('replace', null, sourceEl, text, area);
     return true;
   }
 
@@ -440,43 +441,105 @@
     return p === 'fixed' || p === 'sticky' || p === 'absolute';
   }
 
-  // 元素是否是"横向 flex/grid 里的一个格子"（导航项、卡片横排、按钮组）
-  function parentIsFlexRow(el) {
-    var parent = el.parentElement;
-    if (!parent) return false;
-    var cs = styleOf(parent);
-    if (!cs) return false;
-    if (!/flex|grid/.test(cs.display)) return false;
-    return !/column/.test(cs.flexDirection || '');
+  // ---------------- 区域模型：这段文字属于页面哪一层 ----------------
+  // 'control' 链接 / 按钮 / 菜单项里的文字 → 单语替换（追加会撑破按钮）
+  // 'chrome'  导航 / 页头 / 工具栏里的小字号单行文字 → 单语替换（导航条高度固定，追加必溢出）
+  // 'content' 其余（标题、正文）→ 双语追加
+  // "替换还是追加"只读这一个函数，站点适配问题只改这里。
+  // ⚠️ 不要把"文本短"或"元素是 flex"单独当替换条件：
+  //    0.3.1 试过"短文本 + 父级是 flex-row 就替换"，整页 flex 的站点标题和正文全被顶掉。
+
+  var CONTROL_TAGS = { A: 1, BUTTON: 1, LABEL: 1, SUMMARY: 1 };
+  // 只认完整的 role 名：以前用子串匹配，role="tabpanel"（里面是正文）也会被当成 tab
+  var CONTROL_ROLES = /^(button|tab|menuitem|menuitemcheckbox|menuitemradio|option|link|switch|checkbox|radio)$/;
+  // 这些标签本身就是正文块，不往上找所属控件（链接里的标题照样双语）
+  var CONTENT_TAGS = {
+    H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1, P: 1, LI: 1, BLOCKQUOTE: 1, DD: 1, DT: 1,
+    TD: 1, TH: 1, FIGCAPTION: 1, ARTICLE: 1, SECTION: 1, MAIN: 1, TABLE: 1
+  };
+  var CONTROL_TEXT_MAX = 80; // 整个控件的文字超过这么长 = 卡片链接，按正文处理
+  var CHROME_TEXT_MAX = 80;
+  var CONTROL_CLIMB_MAX = 4;
+  var CHROME_SELECTOR = 'header,nav,[role="navigation"],[role="banner"],[role="menubar"]';
+  // 目录：Wikipedia 的 vector-toc / mw-panel-toc、文档站的 toc / table-of-contents
+  var TOC_NAME = /(^|[\s_-])toc([\s_-]|$)|table-?of-?contents/i;
+
+  // 目录里的条目就是正文的小标题，读者要对照着看，按正文双语处理（发版清单："Wikipedia 目录不被替换"）。
+  // 目录项本身是导航里的单行链接，不单独排除的话会被判成控件 / 界面文字。
+  function inToc(el) {
+    for (var node = el; node && node.nodeType === 1 && node !== document.body; node = node.parentElement) {
+      if (TOC_NAME.test(node.id || '')) return true;
+      if (typeof node.className === 'string' && TOC_NAME.test(node.className)) return true;
+    }
+    return false;
   }
 
-  // ---- 什么时候"原地替换"，什么时候"追加双语" ----
-  // 判据要保守：只有真正的控件、以及页面 chrome（导航/小字号单行标签）
-  // 才替换；标题、正文一律追加，否则用户会看到"原文被译文顶掉了"。
-
-  var CONTROL_TAGS = { A: 1, BUTTON: 1, LABEL: 1, SUMMARY: 1, OPTION: 1 };
-
-  function isControlLike(el) {
-    if (CONTROL_TAGS[el.tagName]) return true;
-    var role = String(el.getAttribute('role') || '').toLowerCase();
-    return /button|menuitem|tab|option|link|switch|checkbox|radio/.test(role);
+  function isControl(el) {
+    if (CONTROL_TAGS[tagOf(el)]) return true;
+    var role = String(el.getAttribute('role') || '').trim().toLowerCase().split(/\s+/)[0];
+    return CONTROL_ROLES.test(role);
   }
 
-  // 单行 + 小字号：导航项、标签、按钮文字这类
-  function isSingleLineSmallText(el) {
+  function isInlineWrapper(el) {
+    var cs = styleOf(el);
+    return !!cs && /^(inline|inline-block|inline-flex|inline-grid|contents)$/.test(cs.display);
+  }
+
+  // 沿"行内包裹链"找所属控件：<a><svg/><span>Code</span></a> 里的 span 属于这个链接。
+  // 中间只能经过行内元素：<a class="card"><div><span>标题</span></div></a> 的 span 不算（隔了块级 div）。
+  // 起点本身不要求是行内：flex 控件会把子元素"块化"（computed display 变成 block），但它仍是按钮文字。
+  function controlOf(el) {
+    if (isControl(el)) return el;
+    if (CONTENT_TAGS[tagOf(el)]) return null;
+    var node = el;
+    for (var depth = 0; depth < CONTROL_CLIMB_MAX; depth += 1) {
+      var parent = node.parentElement;
+      if (!parent) return null;
+      if (isControl(parent)) return parent;
+      if (CONTENT_TAGS[tagOf(parent)] || !isInlineWrapper(parent)) return null;
+      node = parent;
+    }
+    return null;
+  }
+
+  // 是否只占一行。
+  // ⚠️ 不能读 getComputedStyle().height：行内元素的计算值是 "auto"，parseFloat 得 NaN，
+  //    判断直接落空 —— GitHub 顶栏中英两行堆叠就是这么来的。
+  // 行内元素看它被排成了几个行片段；其它元素看真实盒子的内容高度（扣掉内边距和边框）。
+  function isSingleLine(el, cs) {
+    if (cs.display === 'inline') return el.getClientRects().length <= 1;
+    var fs = parseFloat(cs.fontSize) || 16;
+    var lh = parseFloat(cs.lineHeight) || fs * 1.2; // line-height: normal
+    var h = el.getBoundingClientRect().height;
+    h -= (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    h -= (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    return h <= lh * 1.9;
+  }
+
+  // 导航 / 页头里的小字号单行文字
+  function isChromeLabel(el) {
+    if (!el.closest || !el.closest(CHROME_SELECTOR)) return false;
     var cs = styleOf(el);
     if (!cs) return false;
-    var h = parseFloat(cs.height);
-    var lh = parseFloat(cs.lineHeight);
     var fs = parseFloat(cs.fontSize);
-    if (!h || !lh || !fs) return false;
-    return h <= lh * 1.9 && fs <= 20;
+    if (!fs || fs > 20) return false;
+    if (textOf(el).length > CHROME_TEXT_MAX) return false;
+    return isSingleLine(el, cs);
   }
 
-  function insideChrome(el) {
-    if (!el.closest) return false;
-    return !!el.closest('header,nav,[role="navigation"],[role="banner"],[role="menubar"]');
-  }
+  // 判定顺序（命中即返回）：
+  // 1) 在目录里 → content
+  // 2) 自己是控件，或沿行内包裹链能找到所属控件，且整个控件的文字 ≤80 字 → control
+  // 3) 在导航 / 页头里，字号 ≤20px，只占一行 → chrome
+  // 4) 其余 → content
+  DT.areaOf = function (el) {
+    if (!el || el.nodeType !== 1) return 'content';
+    if (inToc(el)) return 'content';
+    var control = controlOf(el);
+    if (control && textOf(control).length <= CONTROL_TEXT_MAX) return 'control';
+    if (isChromeLabel(el)) return 'chrome';
+    return 'content';
+  };
 
   // 对外：注入一条译文
   DT.inject = function (sourceEl, text, lang) {
@@ -486,7 +549,7 @@
     if (sourceEl.querySelector && sourceEl.querySelector(':scope > [data-dt-target]')) return false;
     if (!text) return false;
 
-    var small = text.length <= 60;
+    var area = DT.areaOf(sourceEl);
     // 用户可以选择"界面也保留原文"：那样连导航/按钮都不替换，全都追加
     var allowChromeReplace = !(DT.state.config && DT.state.config.chromeBilingual);
     var replaceMode =
@@ -494,13 +557,11 @@
       DT.state.mode === 'translation' ||
       // 2) 绝对/固定定位：盒子尺寸写死，追加必溢出
       isPositioned(sourceEl) ||
-      // 3) 真控件：链接、按钮、菜单项
-      (allowChromeReplace && isControlLike(sourceEl) && text.length <= 80) ||
-      // 4) 导航/页头里的小字号单行文字
-      (allowChromeReplace && small && insideChrome(sourceEl) && isSingleLineSmallText(sourceEl));
+      // 3) 控件 / 导航里的界面文字
+      (allowChromeReplace && area !== 'content');
 
-    if (replaceMode) return injectOnly(sourceEl, text);
-    return injectDual(sourceEl, text, lang);
+    if (replaceMode) return injectOnly(sourceEl, text, area);
+    return injectDual(sourceEl, text, lang, area);
   };
 
   // ---------------- 诊断 ----------------
@@ -534,6 +595,7 @@
         cls: shortCls(el.className),
         display: cs ? cs.display : '',
         position: cs ? cs.position : '',
+        area: DT.areaOf(el),
         directText: previewText(directText(el)),
         descend: shouldDescend(el)
       };

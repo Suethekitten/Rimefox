@@ -13,7 +13,8 @@ import {
   pickImportedConfig,
   localIso,
   activeConfig,
-  slotFor
+  slotFor,
+  mergeConfig
 } from '../lib/config.js';
 import { listModels, engineList } from '../lib/provider.js';
 import { PROVIDERS, CUSTOM_PROVIDER_ID, providerById } from '../lib/providers.js';
@@ -50,6 +51,7 @@ const fields = {
   selectionMenu: $('selectionMenu'),
   selectionButton: $('selectionButton'),
   selectionImmediate: $('selectionImmediate'),
+  subtitleTranslate: $('subtitleTranslate'),
   chromeBilingual: $('chromeBilingual'),
   debug: $('debug')
 };
@@ -68,9 +70,12 @@ function fillSelect(select, items) {
 // 最近一次读到的配置（导出时用）
 let currentCfg = {};
 
+// 只增删 ok / bad，不覆盖元素原有的 class（提示文字现在多放在每行的说明里）。
+// 文字清空时退回 HTML 里写的默认说明（data-default，init 时记下）
 function setResult(node, text, kind) {
-  node.textContent = text || '';
-  node.className = 'result' + (kind ? ' ' + kind : '');
+  node.textContent = text || node.dataset.default || '';
+  node.classList.remove('ok', 'bad');
+  if (kind) node.classList.add(kind);
 }
 
 // ---------------- 快捷键录制 ----------------
@@ -210,6 +215,7 @@ function applyConfig(cfg) {
   fields.selectionMenu.checked = cfg.selectionMenu !== false;
   fields.selectionButton.checked = cfg.selectionButton !== false;
   fields.selectionImmediate.checked = cfg.selectionImmediate === true;
+  fields.subtitleTranslate.checked = cfg.subtitleTranslate !== false;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.debug.checked = !!cfg.debug;
 
@@ -259,6 +265,7 @@ function readForm() {
     selectionMenu: fields.selectionMenu.checked,
     selectionButton: fields.selectionButton.checked,
     selectionImmediate: fields.selectionImmediate.checked,
+    subtitleTranslate: fields.subtitleTranslate.checked,
     chromeBilingual: fields.chromeBilingual.checked,
     debug: fields.debug.checked
   };
@@ -626,7 +633,123 @@ fields.baseUrl.addEventListener('input', scheduleModelFetch);
 fields.apiKey.addEventListener('input', scheduleModelFetch);
 $('refreshModels').addEventListener('click', () => fetchModels(true));
 
+// ---------------- 未保存的更改（底部保存栏） ----------------
+// 以"上次保存时的表单"为基准，和当前表单逐项比较：改回原值就不算改动
+let savedCfg = null; // 上次保存的完整配置（放弃更改时恢复用）
+let savedForm = null; // 上次保存时 readForm() 的结果
+const savebar = $('savebar');
+
+function clone(obj) {
+  return JSON.parse(JSON.stringify(obj || {}));
+}
+
+// 有几处不同：普通项一项算一处，服务商配置按「服务商 × 字段」算
+function countChanges(a, b) {
+  let n = 0;
+  const keys = new Set(Object.keys(a).concat(Object.keys(b)));
+  keys.forEach((key) => {
+    if (key === 'providerConfig') {
+      const pa = a.providerConfig || {};
+      const pb = b.providerConfig || {};
+      new Set(Object.keys(pa).concat(Object.keys(pb))).forEach((id) => {
+        const sa = pa[id] || {};
+        const sb = pb[id] || {};
+        ['engine', 'baseUrl', 'apiKey', 'model'].forEach((f) => {
+          if ((sa[f] || '') !== (sb[f] || '')) n += 1;
+        });
+      });
+    } else if (JSON.stringify(a[key]) !== JSON.stringify(b[key])) {
+      n += 1;
+    }
+  });
+  return n;
+}
+
+function updateDirty() {
+  if (!savedForm) return;
+  const n = countChanges(savedForm, readForm());
+  const dirty = n > 0;
+  savebar.dataset.dirty = String(dirty);
+  $('saveState').textContent = dirty ? '有 ' + n + ' 处未保存的更改' : '所有更改已保存';
+  $('save').disabled = !dirty;
+  $('discard').disabled = !dirty;
+  if (dirty) setResult($('saveResult'), '');
+}
+
+function markSaved(cfg) {
+  savedCfg = clone(cfg);
+  savedForm = readForm();
+  updateDirty();
+}
+
+// 表单的任何交互之后重新比较一次（下拉、开关、输入、快捷键录制、删除服务商、选模型都覆盖到）
+// 合并同一轮里的多个事件（一次点击会连发 click / input / change），等事件处理完再比较
+let dirtyTimer = 0;
+function scheduleDirty() {
+  if (dirtyTimer) return;
+  dirtyTimer = setTimeout(() => {
+    dirtyTimer = 0;
+    updateDirty();
+  }, 0);
+}
+['input', 'change', 'click', 'keyup'].forEach((type) => document.addEventListener(type, scheduleDirty, true));
+
+$('discard').addEventListener('click', () => {
+  if (!savedCfg) return;
+  currentCfg = clone(savedCfg);
+  applyConfig(currentCfg);
+  updateDirty();
+  setResult($('saveResult'), '已放弃未保存的更改');
+});
+
+// Ctrl/⌘ + S 保存
+document.addEventListener('keydown', (event) => {
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && String(event.key).toLowerCase() === 's') {
+    event.preventDefault();
+    if (!$('save').disabled) $('save').click();
+  }
+});
+
+// 有未保存的更改时关闭 / 刷新页面先提醒
+window.addEventListener('beforeunload', (event) => {
+  if (savebar.dataset.dirty === 'true') {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
+
+// ---------------- 左侧导航：滚动时高亮当前分组 ----------------
+function bindNav() {
+  const links = Array.from(document.querySelectorAll('.nav-item'));
+  const sections = links.map((a) => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  const visible = new Map();
+  function highlight(id) {
+    links.forEach((a) => a.classList.toggle('is-active', a.getAttribute('href') === '#' + id));
+  }
+  const io = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((e) => visible.set(e.target.id, e.isIntersecting));
+      // 最上面那个还在视口里的分组算当前分组
+      const first = sections.find((sec) => visible.get(sec.id));
+      if (first) highlight(first.id);
+    },
+    { rootMargin: '-10% 0px -55% 0px' }
+  );
+  sections.forEach((sec) => io.observe(sec));
+  links.forEach((a) => a.addEventListener('click', () => highlight(a.getAttribute('href').slice(1))));
+  if (sections[0]) highlight(sections[0].id);
+}
+
 async function init() {
+  try {
+    $('appVersion').textContent = 'v' + chrome.runtime.getManifest().version;
+  } catch (err) {
+    /* 不在扩展环境 */
+  }
+  ['testResult', 'cfgResult'].forEach((id) => {
+    $(id).dataset.default = $(id).textContent;
+  });
+  bindNav();
   fillProviderSelect();
   fillSelect(fields.engine, engineList().map((e) => ({ value: e.id, label: e.label })));
   fillSelect(fields.thinkingMode, THINKING_MODES);
@@ -636,25 +759,28 @@ async function init() {
   const cfg = await getConfig();
   currentCfg = cfg;
   applyConfig(cfg);
-  $('saveResult').textContent = '';
+  markSaved(cfg);
   renderBrowserShortcut();
+  renderCacheStats();
   fetchModels(); // 已经保存过地址和 Key 时，打开设置页就把列表准备好
 }
 
 $('save').addEventListener('click', async () => {
   const patch = readForm();
   const active = activeConfig(patch);
-  if (!active.apiKey) {
-    setResult($('saveResult'), '还没有填 API Key，保存后翻译会失败。', 'bad');
-  }
   currentCfg = await saveConfig(patch);
-  setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
+  markSaved(currentCfg);
+  if (active.apiKey) setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
+  else setResult($('saveResult'), '已保存，但还没有填 API Key，翻译会失败。', 'bad');
 });
 
-$('reset').addEventListener('click', async () => {
-  await saveConfig(DEFAULTS);
-  applyConfig(DEFAULTS);
-  setResult($('saveResult'), '已恢复默认值', 'ok');
+// 恢复默认：只填进表单，确认后点「保存」才生效（可以「放弃更改」反悔）。
+// 已保存的各服务商地址 / Key / 模型和自定义服务商保留，其它项回到默认值
+$('reset').addEventListener('click', () => {
+  currentCfg = mergeConfig(currentCfg, { ...DEFAULTS, customProviders: (currentCfg && currentCfg.customProviders) || [] });
+  applyConfig(currentCfg);
+  updateDirty();
+  setResult($('saveResult'), '已填入默认值，点「保存」后生效');
 });
 
 $('test').addEventListener('click', async () => {
@@ -662,7 +788,8 @@ $('test').addEventListener('click', async () => {
   btn.disabled = true;
   setResult($('testResult'), '测试中…');
   try {
-    await saveConfig(readForm()); // 先落盘，后台读的是存储里的配置
+    currentCfg = await saveConfig(readForm()); // 先落盘，后台读的是存储里的配置
+    markSaved(currentCfg);
     const res = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ type: 'test' }, (r) => {
         const err = chrome.runtime.lastError;
@@ -688,11 +815,50 @@ $('test').addEventListener('click', async () => {
   btn.disabled = false;
 });
 
-$('clearCache').addEventListener('click', async () => {
-  await new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: 'cache:clear' }, () => resolve());
+// ---------------- 翻译缓存 ----------------
+function askBackground(msg) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(msg, (res) => {
+      void chrome.runtime.lastError; // 后台没起来时别在控制台报未检查的错误
+      resolve(res);
+    });
   });
-  setResult($('saveResult'), '翻译缓存已清空', 'ok');
+}
+
+function formatBytes(n) {
+  if (n == null) return '—';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function renderCacheStats() {
+  const node = $('cacheStats');
+  const res = await askBackground({ type: 'cache:stats' });
+  if (!res || !res.ok) {
+    setResult(node, '读取失败：' + ((res && res.error) || '后台没有响应'), 'bad');
+    return;
+  }
+  const { memory, disk, hits, misses } = res.stats;
+  const used = res.bytesInUse || {};
+  // 有浏览器实际占用就显示实际值，没有（旧版浏览器的 session 区）就显示估算值
+  const memBytes = used.session != null ? used.session : memory.bytes;
+  const diskBytes = used.local != null ? used.local : disk.bytes;
+  const lookups = hits + misses;
+  node.textContent =
+    '本次会话：' + memory.entries + ' 条 · ' + formatBytes(memBytes) +
+    '（上限 ' + memory.maxEntries + ' 条 / ' + formatBytes(memory.maxBytes) + '）　' +
+    '磁盘：' + disk.entries + ' 条 · ' + formatBytes(diskBytes) + '（上限 ' + formatBytes(disk.maxBytes) + '）　' +
+    '命中率：' + (lookups ? Math.round((hits / lookups) * 100) + '%（' + hits + ' / ' + lookups + '）' : '—');
+  node.classList.remove('ok', 'bad');
+}
+
+$('refreshCache').addEventListener('click', renderCacheStats);
+
+$('clearCache').addEventListener('click', async () => {
+  await askBackground({ type: 'cache:clear' });
+  setResult($('cacheResult'), '翻译缓存已清空', 'ok');
+  renderCacheStats();
 });
 
 // ---------------- 配置导出 / 导入 ----------------
@@ -766,6 +932,7 @@ $('importFile').addEventListener('change', async (event) => {
     const next = await saveConfig(patch);
     currentCfg = next;
     applyConfig(next);
+    markSaved(next);
     renderBrowserShortcut();
     if (next.baseUrl && next.apiKey) fetchModels();
 

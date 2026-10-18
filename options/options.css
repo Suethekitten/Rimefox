@@ -1,35 +1,47 @@
-/* 设置页样式。颜色都走变量，深色模式只需要换一组值（与弹窗同一套配色） */
+/* 设置页样式：左侧分类导航 + 右侧分组卡片 + 底部保存栏。
+   布局参照 Chrome 设置页 / GitHub 设置页的常见做法（没有引入第三方样式库：扩展零构建，页面也只有这一张）。
+   颜色都走变量，深色模式只换一组值（与弹窗同一套配色）。 */
 :root {
   --bg: #f4f5f9;
+  --sidebar: #eceef4;
   --card: #ffffff;
   --field: #ffffff;
   --line: #e4e7ee;
+  --line-soft: #eef0f5;
   --text: #151821;
   --text-2: #374151;
   --muted: #6b7280;
   --accent: #4f46e5;
   --accent-2: #2563eb;
-  --accent-soft: rgba(79, 70, 229, 0.14);
+  --accent-soft: rgba(79, 70, 229, 0.12);
   --ok: #067647;
   --bad: #c0262d;
+  --warn: #b45309;
+  --warn-soft: rgba(245, 158, 11, 0.14);
   --switch-off: #d5d9e2;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 2px 8px rgba(16, 24, 40, 0.04);
+  --radius: 14px;
+  --sidebar-w: 232px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0f1116;
+    --sidebar: #13161c;
     --card: #181b22;
     --field: #11141a;
     --line: #2a2f3a;
+    --line-soft: #222731;
     --text: #e8eaf0;
     --text-2: #c5cad4;
     --muted: #9aa1ad;
     --accent: #7c74ff;
     --accent-2: #4f8bff;
-    --accent-soft: rgba(124, 116, 255, 0.2);
+    --accent-soft: rgba(124, 116, 255, 0.18);
     --ok: #34d399;
     --bad: #f87171;
+    --warn: #fbbf24;
+    --warn-soft: rgba(251, 191, 36, 0.14);
     --switch-off: #3a404d;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   }
@@ -37,6 +49,11 @@
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 24px;
 }
 
 body {
@@ -48,150 +65,363 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: inherit;
 }
 
-.page {
-  max-width: 780px;
-  margin: 0 auto;
-  padding: 44px 24px 24px;
+/* hidden 属性要压过各元素自己的 display，否则隐藏不生效 */
+[hidden] {
+  display: none !important;
 }
 
-/* ---- 页头 ---- */
-.page-head {
+/* ---------------- 整体布局 ---------------- */
+.layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ---------------- 左侧导航 ---------------- */
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 28px 16px 20px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--line);
+}
+
+.brand {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 26px;
+  gap: 10px;
+  padding: 0 8px;
 }
 
-.page-head .logo {
+.brand .logo {
   flex: none;
-  border-radius: 12px;
-  box-shadow: 0 6px 18px var(--accent-soft);
+  border-radius: 10px;
+  box-shadow: 0 4px 14px var(--accent-soft);
 }
 
-.page-head h1 {
-  margin: 0 0 2px;
-  font-size: 22px;
-  letter-spacing: 0.2px;
-}
-
-.sub {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-/* ---- 卡片 ---- */
-.card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 22px 24px 20px;
-  margin-bottom: 18px;
-  box-shadow: var(--shadow);
-}
-
-.card h2 {
-  margin: 0;
-  font-size: 16px;
+.brand-name {
+  font-size: 15px;
   font-weight: 650;
 }
 
-.card-sub {
-  margin: 2px 0 18px;
+.brand-ver {
+  font-size: 12px;
   color: var(--muted);
-  font-size: 12.5px;
 }
 
-/* ---- 表单项 ---- */
-.field {
-  display: block;
-  margin-bottom: 18px;
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.field .name {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 600;
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
   color: var(--text-2);
+  font-size: 13.5px;
+  text-decoration: none;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
-.field input[type="text"],
-.field input[type="password"],
-.field input[type="number"],
-.field select {
-  width: 100%;
-  padding: 9px 12px;
+.nav-item:hover {
+  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  color: var(--text);
+}
+
+.nav-item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.nav-item.is-active .nav-ico {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+}
+
+.sidebar-note {
+  margin: auto 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------------- 右侧内容 ---------------- */
+.content {
+  min-width: 0;
+  padding: 28px 36px 0;
+}
+
+/* 内容列宽度：分组和保存栏里的内容都对齐到这个宽度，保存栏的底色铺满整列 */
+.section,
+.savebar-inner {
+  max-width: 780px;
+}
+
+.section {
+  padding-bottom: 18px;
+}
+
+.section-head h2 {
+  margin: 10px 0 2px;
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.section-head p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.card {
+  margin-bottom: 16px;
+  padding: 6px 20px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card-title {
+  padding: 12px 0 4px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+
+.card-desc {
+  margin: 4px 0 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---- 一行一个设置：左边标题 + 说明，右边控件 ---- */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.card-title + .row,
+.card-desc + .row,
+.card > .row:first-child {
+  border-top: 0;
+}
+
+label.row {
+  cursor: pointer;
+}
+
+.row-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.row-title {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text);
+}
+
+.row-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.row-desc:empty {
+  display: none;
+}
+
+/* 文本框类设置：控件放到说明下面，占满整行 */
+.row.stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+/* 从属选项：缩进，视觉上归属上面的主开关 */
+.row.sub {
+  padding-left: 22px;
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.row.stack .inline input {
+  flex: 1 1 220px;
+}
+
+/* ---------------- 表单控件 ---------------- */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
   background: var(--field);
   color: var(--text);
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.field input:focus,
-.field select:focus {
+textarea {
+  font: 12px/1.6 ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  resize: vertical;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.field input::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: var(--muted);
   opacity: 0.8;
 }
 
-.hint {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 12px;
+/* 右侧窄控件（下拉 / 数字） */
+.control {
+  flex: none;
+  width: 200px;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 22px;
+.control.num {
+  width: 110px;
+  text-align: right;
 }
 
-.hotkey-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+/* ---- 开关 ---- */
+input.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--switch-off);
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-.hotkey-row + .hotkey-row {
-  margin-top: 10px;
+input.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
 }
 
-/* 占满整行（网格里两栏都用） */
-.field.wide {
-  grid-column: 1 / -1;
+input.switch:checked {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 
-.model-row input {
-  flex: 2 1 200px;
+input.switch:checked::after {
+  transform: translateX(16px);
 }
 
-.model-row select {
-  flex: 1 1 160px;
+input.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- 按钮 ---- */
+.btn {
+  flex: none;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s ease, filter 0.15s ease;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--muted) 45%, var(--line));
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.primary {
+  padding: 7px 20px;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn.primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+
+.btn.danger {
+  color: var(--bad);
 }
 
 /* ---- 快捷键录制按钮 ---- */
 .hotkey-btn {
-  min-width: 180px;
-  padding: 9px 14px;
+  flex: none;
+  min-width: 150px;
+  padding: 7px 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--field);
   color: var(--text);
-  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.5px;
   cursor: pointer;
@@ -218,56 +448,7 @@ select {
   }
 }
 
-/* ---- 开关项：复选框画成开关 ---- */
-.check {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin: 0;
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
-  font-size: 13px;
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-.grid + .check {
-  margin-top: 6px;
-}
-
-/* 从属选项：缩进一级，视觉上归属上面的主开关 */
-.sub-check {
-  padding-left: 40px;
-}
-
-.sub-check .name-note {
-  color: var(--muted);
-}
-
-/* 多行自定义参数输入 */
-.field textarea {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font: 12px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace;
-  resize: vertical;
-}
-
-.field textarea:focus {
-  outline: none;
-  border-color: var(--primary, #3b82f6);
-}
-
-/* hidden 属性要压过 .field 自己的 display，否则隐藏不生效 */
-[hidden] {
-  display: none !important;
-}
-
-/* ---- 提供商的 Key 申请链接 ---- */
+/* ---- 提供商的 Key 申请链接 / 删除 ---- */
 .key-link {
   margin-left: 8px;
   font-size: 12px;
@@ -285,12 +466,7 @@ select {
 }
 
 /* ---- 可搜索的模型选择器 ---- */
-.model-toggle {
-  flex: none;
-}
-
 .picker {
-  margin-top: 8px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--card);
@@ -299,15 +475,12 @@ select {
 }
 
 .picker-search {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
-  color: var(--text);
+  border: 0 !important;
+  border-bottom: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
   font-size: 13px;
-  outline: none;
 }
 
 .picker-list {
@@ -336,7 +509,7 @@ select {
 }
 
 .picker-item.is-current::before {
-  content: '✓';
+  content: "✓";
   color: var(--accent-2);
 }
 
@@ -363,127 +536,123 @@ select {
   color: var(--muted);
 }
 
-.check input[type="checkbox"] {
-  appearance: none;
-  -webkit-appearance: none;
-  position: relative;
-  flex: none;
-  width: 36px;
-  height: 21px;
-  margin: 0;
-  border-radius: 999px;
-  background: var(--switch-off);
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.check input[type="checkbox"]::after {
-  content: "";
-  position: absolute;
-  top: 2.5px;
-  left: 2.5px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  transition: transform 0.15s ease;
-}
-
-.check input[type="checkbox"]:checked {
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-}
-
-.check input[type="checkbox"]:checked::after {
-  transform: translateX(15px);
-}
-
-.check input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* ---- 按钮 ---- */
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 2px;
-}
-
-.btn {
-  padding: 9px 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--field);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, filter 0.15s ease;
-}
-
-.btn:hover {
-  border-color: color-mix(in srgb, var(--muted) 45%, var(--line));
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.btn.primary {
-  padding: 9px 22px;
-  border-color: transparent;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #fff;
-  font-weight: 600;
-  box-shadow: 0 4px 14px var(--accent-soft);
-}
-
-.btn.primary:hover {
-  filter: brightness(1.07);
-}
-
-.btn.ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-}
-
-.btn.ghost:hover {
-  color: var(--text);
-}
-
-/* ---- 底部操作栏（滚动时吸底） ---- */
-.page-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  position: sticky;
-  bottom: 0;
-  margin: 0 -24px;
-  padding: 14px 24px 18px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-top: 1px solid var(--line);
-}
-
+/* ---- 结果提示（测试连接、导入、缓存等） ---- */
 .result {
   font-size: 12.5px;
   color: var(--muted);
 }
 
-.result.ok {
-  color: var(--ok);
+.ok {
+  color: var(--ok) !important;
 }
 
-.result.bad {
-  color: var(--bad);
+.bad {
+  color: var(--bad) !important;
 }
 
-@media (max-width: 620px) {
-  .grid {
-    grid-template-columns: 1fr;
+/* ---------------- 底部保存栏 ---------------- */
+.savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin: 8px -36px 0;
+  padding: 12px 36px 14px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid var(--line);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.savebar-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.savebar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+
+.savebar-state {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.savebar-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 有未保存的修改：栏变色、圆点变成提醒色 */
+.savebar[data-dirty="true"] {
+  background: color-mix(in srgb, var(--warn) 12%, var(--card));
+  border-top-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+}
+
+.savebar[data-dirty="true"] .savebar-dot {
+  background: var(--warn);
+  box-shadow: 0 0 0 4px var(--warn-soft);
+}
+
+.savebar[data-dirty="true"] .savebar-state {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------------- 窄屏：导航挪到顶部横排 ---------------- */
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+  }
+
+  .brand-ver,
+  .sidebar-note,
+  .brand-name {
+    display: none;
+  }
+
+  .nav {
+    flex-direction: row;
+  }
+
+  .nav-item {
+    white-space: nowrap;
+  }
+
+  .content {
+    padding: 16px 16px 0;
+  }
+
+  .savebar {
+    margin: 8px -16px 0;
+    padding: 12px 16px 14px;
+  }
+
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .control {
+    width: 100%;
   }
 }

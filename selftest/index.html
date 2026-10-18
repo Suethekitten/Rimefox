@@ -140,10 +140,41 @@
         <button id="fx-counter-a">Count 2</button>
         <button id="fx-counter-b">Count 2</button>
       </div>
+
+      <!-- 区域模型（DT.areaOf）回归用例 -->
+      <div id="fx-area">
+        <!-- GitHub 仓库顶栏：前两项是块级 <a> 里的行内 span（D1 的现场），第三项是 flex <a> -->
+        <nav id="fx-gh-nav" aria-label="Repository">
+          <ul style="display: flex; list-style: none; margin: 0; padding: 0; font-size: 14px; line-height: 30px">
+            <li><a href="#" style="display: block; padding: 0 8px"><span class="icon"><svg width="16" height="16"></svg></span> <span>Code</span> <span class="Counter">12</span></a></li>
+            <li><a href="#" style="display: block; padding: 0 8px"><span class="icon"><svg width="16" height="16"></svg></span> <span>Issues</span> <span class="Counter">3</span></a></li>
+            <li><a href="#" style="display: flex; align-items: center; gap: 8px; padding: 0 8px"><span class="icon"><svg width="16" height="16"></svg></span><span>Pull requests</span><span class="Counter">5</span></a></li>
+          </ul>
+        </nav>
+        <button id="fx-btn-span"><span class="icon"></span><span>Save changes</span><span class="kbd">S</span></button>
+        <div id="fx-card">
+          <a class="card" href="#" style="display: block; width: 300px">
+            <div><span>Introducing the new release: faster startup, smaller bundles, better accessibility and a redesigned settings page</span></div>
+          </a>
+        </div>
+        <div id="fx-link-heading"><a href="#" style="display: flex"><h3>Short title</h3></a></div>
+        <div id="fx-pageflex" style="display: flex">
+          <div style="display: flex; flex-direction: column"><h2>Patch notes</h2><span>Read more about this update</span></div>
+        </div>
+        <div id="fx-tabpanel"><div role="tabpanel">Panel body text</div></div>
+        <!-- Wikipedia 目录：导航里的单行链接，但条目是正文小标题，要双语 -->
+        <nav id="fx-toc" class="vector-toc" aria-label="Contents">
+          <ul><li><a href="#Description" class="vector-toc-link"><div class="vector-toc-text"><span class="vector-toc-numb">1</span> <span>Description</span></div></a></li></ul>
+        </nav>
+        <nav id="fx-nav-wrap">
+          <div style="width: 120px"><span>This inline label is long enough to wrap onto several lines</span><i></i><i></i></div>
+        </nav>
+      </div>
     </div>
 
     <script src="../content/core.js"></script>
     <script src="../content/dom.js"></script>
+    <script src="../content/subtitles.js"></script>
     <script src="test.js"></script>
   </body>
 </html>

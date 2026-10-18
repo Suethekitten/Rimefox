@@ -3,210 +3,395 @@
   <head>
     <meta charset="utf-8" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>凛狐 设置</title>
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <div class="page">
-      <header class="page-head">
-        <img class="logo" src="../icons/icon128.png" alt="" width="48" height="48" />
-        <div>
-          <h1>凛狐 设置</h1>
-          <p class="sub">使用你自己的接口（OpenAI 兼容 / Anthropic / Gemini）。Key 只保存在本机浏览器存储里，不会发往任何第三方服务器。</p>
-        </div>
-      </header>
-
-      <section class="card">
-        <h2>接口</h2>
-        <p class="card-sub">填好地址和 Key 会自动获取可用模型。</p>
-
-        <label class="field">
-          <span class="name">提供商</span>
-          <select id="provider"></select>
-          <span class="hint">选中后自动填好地址和协议；自定义服务商保存后会出现在列表里，随时可以切回来。</span>
-        </label>
-
-        <div class="field" id="providerNameField" hidden>
-          <span class="name">服务商名称<a id="deleteProvider" class="key-link danger" href="#">删除</a></span>
-          <input id="providerName" type="text" maxlength="40" spellcheck="false" placeholder="例如：我的中转 A" />
-          <span class="hint">改完点底部「保存」；名称只影响列表里怎么显示。</span>
-        </div>
-
-        <label class="field">
-          <span class="name">接口协议</span>
-          <select id="engine"></select>
-          <span class="hint">地址、Key、模型都按服务商分别保存，切换不会丢。</span>
-        </label>
-
-        <label class="field">
-          <span class="name">API 地址</span>
-          <input id="baseUrl" type="text" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
-          <span class="hint" id="baseUrlHint">OpenAI 兼容的 base URL，通常以 /v1 结尾。程序会自动补 /chat/completions。</span>
-        </label>
-
-        <div class="field">
-          <span class="name">API Key<a id="keyLink" class="key-link" target="_blank" rel="noreferrer" hidden>去申请 →</a></span>
-          <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." autocomplete="off" />
-          <span class="hint" id="apiKeyHint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
-        </div>
-
-        <div class="field">
-          <span class="name">模型名</span>
-          <div class="hotkey-row model-row">
-            <input id="model" type="text" spellcheck="false" placeholder="deepseek-chat" autocomplete="off" />
-            <button type="button" id="modelToggle" class="btn model-toggle" aria-expanded="false">选择 ▾</button>
-            <button type="button" id="refreshModels" class="btn">获取模型列表</button>
-          </div>
-          <span class="hint" id="modelHint">填好 API 地址和 Key 后会自动获取可用模型；也可以直接手填。</span>
-
-          <div id="modelPicker" class="picker" hidden>
-            <input id="modelSearch" type="text" class="picker-search" placeholder="搜索模型…" spellcheck="false" autocomplete="off" />
-            <div id="modelList" class="picker-list"></div>
-            <div class="picker-foot">列表里没有？直接在上面输入模型名即可</div>
+    <div class="layout">
+      <!-- 左侧分类导航：点击滚到对应分组，滚动时高亮当前分组 -->
+      <aside class="sidebar">
+        <div class="brand">
+          <img class="logo" src="../icons/icon128.png" alt="" width="36" height="36" />
+          <div>
+            <div class="brand-name">凛狐 Rimefox</div>
+            <div class="brand-ver" id="appVersion"></div>
           </div>
         </div>
+        <nav class="nav" aria-label="设置分类">
+          <a class="nav-item" href="#sec-api"><span class="nav-ico" aria-hidden="true">⌁</span>接口</a>
+          <a class="nav-item" href="#sec-translate"><span class="nav-ico" aria-hidden="true">文</span>翻译</a>
+          <a class="nav-item" href="#sec-reading"><span class="nav-ico" aria-hidden="true">▤</span>划词与字幕</a>
+          <a class="nav-item" href="#sec-hotkey"><span class="nav-ico" aria-hidden="true">⌘</span>快捷键</a>
+          <a class="nav-item" href="#sec-data"><span class="nav-ico" aria-hidden="true">⛁</span>缓存与迁移</a>
+          <a class="nav-item" href="#sec-advanced"><span class="nav-ico" aria-hidden="true">⚙</span>高级</a>
+        </nav>
+        <p class="sidebar-note">Key 只保存在本机浏览器里，只发给你自己填的接口地址。</p>
+      </aside>
 
-        <label class="field">
-          <span class="name">思考模式</span>
-          <select id="thinkingMode"></select>
-          <span class="hint">自动：不发送额外参数。尽量关闭：按服务商发送对应的关闭参数（DeepSeek / GLM / Kimi / 千问 / OpenRouter / Gemini 各不相同）；服务不支持时会自动去掉参数重试。</span>
-        </label>
+      <main class="content">
+        <!-- ================= 接口 ================= -->
+        <section class="section" id="sec-api">
+          <header class="section-head">
+            <h2>接口</h2>
+            <p>用你自己的接口：OpenAI 兼容 / Anthropic / Gemini。填好地址和 Key 会自动获取可用模型。</p>
+          </header>
 
-        <label class="field" id="thinkingExtraField" hidden>
-          <span class="name">自定义参数（JSON）</span>
-          <textarea id="thinkingExtra" rows="3" spellcheck="false" placeholder='{"enable_thinking": false}'></textarea>
-          <span class="hint">会原样合并进请求体，用于千问 / GLM 这类非标准参数；写错会被忽略。</span>
-        </label>
+          <div class="card">
+            <div class="card-title">服务商</div>
 
-        <div class="actions">
-          <button id="test" class="btn">测试连接</button>
-          <span id="testResult" class="result"></span>
-        </div>
-      </section>
+            <label class="row stack">
+              <span class="row-text">
+                <span class="row-title">提供商</span>
+                <span class="row-desc">选中后自动填好地址和协议；自定义服务商保存后会出现在列表里，随时可以切回来。</span>
+              </span>
+              <select id="provider"></select>
+            </label>
 
-      <section class="card">
-        <h2>翻译</h2>
-        <p class="card-sub">速度、显示方式和快捷键。</p>
+            <div class="row stack" id="providerNameField" hidden>
+              <span class="row-text">
+                <span class="row-title">服务商名称<a id="deleteProvider" class="key-link danger" href="#">删除</a></span>
+                <span class="row-desc">名称只影响列表里怎么显示。</span>
+              </span>
+              <input id="providerName" type="text" maxlength="40" spellcheck="false" placeholder="例如：我的中转 A" />
+            </div>
 
-        <div class="grid">
-          <label class="field">
-            <span class="name">目标语言</span>
-            <select id="targetLang"></select>
-          </label>
+            <label class="row stack">
+              <span class="row-text">
+                <span class="row-title">接口协议</span>
+                <span class="row-desc">地址、Key、模型都按服务商分别保存，切换不会丢。</span>
+              </span>
+              <select id="engine"></select>
+            </label>
 
-          <label class="field">
-            <span class="name">译文样式</span>
-            <select id="theme"></select>
-          </label>
+            <label class="row stack">
+              <span class="row-text">
+                <span class="row-title">API 地址</span>
+                <span class="row-desc" id="baseUrlHint">OpenAI 兼容的 base URL，通常以 /v1 结尾。程序会自动补 /chat/completions。</span>
+              </span>
+              <input id="baseUrl" type="text" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
+            </label>
 
-          <label class="field">
-            <span class="name">单批条数</span>
-            <input id="batchSize" type="number" min="1" max="50" step="1" />
-            <span class="hint">一次请求最多合并多少段。段数越多越省 token，但延迟更高。</span>
-          </label>
+            <div class="row stack">
+              <span class="row-text">
+                <span class="row-title">API Key<a id="keyLink" class="key-link" target="_blank" rel="noreferrer" hidden>去申请 →</a></span>
+                <span class="row-desc" id="apiKeyHint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
+              </span>
+              <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." autocomplete="off" />
+            </div>
+          </div>
 
-          <label class="field">
-            <span class="name">单批字符上限</span>
-            <input id="maxCharsPerBatch" type="number" min="200" max="12000" step="100" />
-            <span class="hint">超过就自动拆成多批。</span>
-          </label>
+          <div class="card">
+            <div class="card-title">模型</div>
 
-          <label class="field">
-            <span class="name">长段落拆分阈值</span>
-            <input id="maxUnitChars" type="number" min="200" max="6000" step="100" />
-            <span class="hint">单段超过该字符数时按句子切开分别翻译。</span>
-          </label>
+            <div class="row stack">
+              <span class="row-text">
+                <span class="row-title">模型名</span>
+                <span class="row-desc" id="modelHint">填好 API 地址和 Key 后会自动获取可用模型；也可以直接手填。</span>
+              </span>
+              <div class="inline">
+                <input id="model" type="text" spellcheck="false" placeholder="deepseek-chat" autocomplete="off" />
+                <button type="button" id="modelToggle" class="btn" aria-expanded="false">选择 ▾</button>
+                <button type="button" id="refreshModels" class="btn">获取模型列表</button>
+              </div>
+              <div id="modelPicker" class="picker" hidden>
+                <input id="modelSearch" type="text" class="picker-search" placeholder="搜索模型…" spellcheck="false" autocomplete="off" />
+                <div id="modelList" class="picker-list"></div>
+                <div class="picker-foot">列表里没有？直接在上面输入模型名即可</div>
+              </div>
+            </div>
 
-          <div class="field wide">
-            <span class="name">快捷键</span>
-            <div class="hotkey-row">
-              <span id="browserShortcut" class="result">浏览器快捷键：检测中…</span>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">思考模式</span>
+                <span class="row-desc">自动：不发送额外参数。尽量关闭：按服务商发送对应的关闭参数；服务不支持时会自动去掉参数重试。</span>
+              </span>
+              <select id="thinkingMode" class="control"></select>
+            </label>
+
+            <label class="row stack" id="thinkingExtraField" hidden>
+              <span class="row-text">
+                <span class="row-title">自定义参数（JSON）</span>
+                <span class="row-desc">会原样合并进请求体，用于千问 / GLM 这类非标准参数；写错会被忽略。</span>
+              </span>
+              <textarea id="thinkingExtra" rows="3" spellcheck="false" placeholder='{"enable_thinking": false}'></textarea>
+            </label>
+
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">测试连接</span>
+                <span class="row-desc" id="testResult">会先保存当前表单，再用它发一次很小的请求。</span>
+              </span>
+              <button id="test" class="btn">测试连接</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= 翻译 ================= -->
+        <section class="section" id="sec-translate">
+          <header class="section-head">
+            <h2>翻译</h2>
+            <p>目标语言、显示方式和请求节奏。</p>
+          </header>
+
+          <div class="card">
+            <div class="card-title">语言与显示</div>
+
+            <label class="row">
+              <span class="row-text"><span class="row-title">目标语言</span></span>
+              <select id="targetLang" class="control"></select>
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">译文样式</span>
+                <span class="row-desc">双语模式下译文的标记方式。</span>
+              </span>
+              <select id="theme" class="control"></select>
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">跳过已是目标语言的段落</span>
+                <span class="row-desc">比如中文页翻中文时不重复翻。</span>
+              </span>
+              <input id="skipSameLang" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">界面元素也保留原文</span>
+                <span class="row-desc">导航、按钮、标签也中英对照。默认关闭：固定高度的导航条可能换行或溢出。</span>
+              </span>
+              <input id="chromeBilingual" type="checkbox" class="switch" />
+            </label>
+          </div>
+
+          <div class="card">
+            <div class="card-title">请求与性能</div>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">只翻屏幕附近的内容</span>
+                <span class="row-desc">滚动到时再翻，长页面省钱；关掉则整页一次翻完。</span>
+              </span>
+              <input id="lazy" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">打开页面后自动翻译</span>
+                <span class="row-desc">谨慎开启，会消耗较多额度。</span>
+              </span>
+              <input id="translateOnLoad" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">并发请求数</span>
+                <span class="row-desc">越高整页翻完越快。DeepSeek 可设 6–10；频繁提示限流（429）时调低。</span>
+              </span>
+              <input id="concurrency" type="number" min="1" max="16" step="1" class="control num" />
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">单批条数</span>
+                <span class="row-desc">一次请求最多合并多少段。越多越省 token，但延迟更高。</span>
+              </span>
+              <input id="batchSize" type="number" min="1" max="50" step="1" class="control num" />
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">单批字符上限</span>
+                <span class="row-desc">超过就自动拆成多批。</span>
+              </span>
+              <input id="maxCharsPerBatch" type="number" min="200" max="12000" step="100" class="control num" />
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">长段落拆分阈值</span>
+                <span class="row-desc">单段超过该字符数时按句子切开分别翻译。</span>
+              </span>
+              <input id="maxUnitChars" type="number" min="200" max="6000" step="100" class="control num" />
+            </label>
+          </div>
+        </section>
+
+        <!-- ================= 划词与字幕 ================= -->
+        <section class="section" id="sec-reading">
+          <header class="section-head">
+            <h2>划词与字幕</h2>
+            <p>不翻整页时，按需翻一句话或一段视频。</p>
+          </header>
+
+          <div class="card">
+            <div class="card-title">划词翻译</div>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">划词翻译</span>
+                <span class="row-desc">选中文字后按下面的方式触发，气泡里显示译文（点击气泡复制）。</span>
+              </span>
+              <input id="selectionTranslate" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row sub">
+              <span class="row-text">
+                <span class="row-title">右键菜单</span>
+                <span class="row-desc">「凛狐：翻译所选文字」，只有选中文字时才出现。</span>
+              </span>
+              <input id="selectionMenu" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row sub">
+              <span class="row-text">
+                <span class="row-title">鼠标旁的「译」按钮</span>
+                <span class="row-desc">点击才翻译，推荐，不误触。</span>
+              </span>
+              <input id="selectionButton" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row sub">
+              <span class="row-text">
+                <span class="row-title">选中后立即翻译</span>
+                <span class="row-desc">选中就发请求，会消耗额度，默认关闭。</span>
+              </span>
+              <input id="selectionImmediate" type="checkbox" class="switch" />
+            </label>
+          </div>
+
+          <div class="card">
+            <div class="card-title">YouTube 字幕</div>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">字幕双语</span>
+                <span class="row-desc">打开字幕（CC）时显示「原文 + 译文」，支持人工、自动生成和 YouTube 机翻字幕；只翻播放位置往后约 90 秒，看多少翻多少。</span>
+              </span>
+              <input id="subtitleTranslate" type="checkbox" class="switch" />
+            </label>
+          </div>
+        </section>
+
+        <!-- ================= 快捷键 ================= -->
+        <section class="section" id="sec-hotkey">
+          <header class="section-head">
+            <h2>快捷键</h2>
+            <p>翻译 / 还原当前页面。</p>
+          </header>
+
+          <div class="card">
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">浏览器快捷键</span>
+                <span class="row-desc" id="browserShortcut">检测中…</span>
+              </span>
               <button type="button" id="openShortcuts" class="btn">去浏览器里设置</button>
             </div>
-            <div class="hotkey-row">
+
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">页面内快捷键</span>
+                <span class="row-desc" id="hotkeyHint">点击右边的按钮，然后直接按下组合键（Esc 取消）。</span>
+              </span>
               <button type="button" id="hotkeyBtn" class="hotkey-btn">Alt + A</button>
-              <span class="hint" id="hotkeyHint">页面内快捷键：点击按钮，然后直接按下组合键（Esc 取消）</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= 缓存与迁移 ================= -->
+        <section class="section" id="sec-data">
+          <header class="section-head">
+            <h2>缓存与迁移</h2>
+            <p>翻过的内容记在本机；换电脑或换版本时把设置带走。</p>
+          </header>
+
+          <div class="card">
+            <div class="card-title">翻译缓存</div>
+            <p class="card-desc">
+              翻过的文字会记下来，再遇到直接用，不再请求接口。本次会话的缓存在关闭浏览器时清空；短文本（按钮、标题、导航）另存一份到磁盘，重启浏览器后还能用。缓存按网站和模型分开存。
+            </p>
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">当前缓存</span>
+                <span class="row-desc" id="cacheStats">正在读取…</span>
+                <span class="row-desc" id="cacheResult"></span>
+              </span>
+              <span class="inline">
+                <button id="refreshCache" class="btn">刷新</button>
+                <button id="clearCache" class="btn">清空</button>
+              </span>
             </div>
           </div>
 
-          <label class="field">
-            <span class="name">并发请求数</span>
-            <input id="concurrency" type="number" min="1" max="16" step="1" />
-            <span class="hint">同时发出的请求数，越高整页翻完越快。DeepSeek 可设 6–10；其它服务商频繁提示限流（429）时再调低。</span>
-          </label>
-        </div>
+          <div class="card">
+            <div class="card-title">配置迁移</div>
+            <p class="card-desc">把 API 地址、Key、模型和各项设置导出成一个 JSON 文件；换电脑或换扩展版本时导入，不用重填。</p>
 
-        <label class="check">
-          <input id="skipSameLang" type="checkbox" />
-          <span>跳过已经是目标语言的段落（比如中文页翻中文时不重复翻）</span>
-        </label>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">导出时包含 API Key</span>
+                <span class="row-desc">跨电脑 / 跨版本迁移必须勾选。文件里是明文，迁移完请删掉，不要外传。</span>
+              </span>
+              <input id="exportKey" type="checkbox" class="switch" />
+            </label>
 
-        <label class="check">
-          <input id="lazy" type="checkbox" />
-          <span>只翻屏幕附近的内容，滚动到时再翻（长页面省钱；关掉则整页一次翻完）</span>
-        </label>
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">导出 / 导入</span>
+                <span class="row-desc" id="cfgResult">导入会立即保存并生效。</span>
+              </span>
+              <span class="inline">
+                <button id="exportCfg" class="btn">导出</button>
+                <button id="importCfg" class="btn">导入</button>
+              </span>
+              <input id="importFile" type="file" accept=".json,application/json" hidden />
+            </div>
+          </div>
+        </section>
 
-        <label class="check">
-          <input id="selectionTranslate" type="checkbox" />
-          <span>划词翻译：选中文字后按下面的方式触发，气泡里显示译文（点击气泡复制）</span>
-        </label>
+        <!-- ================= 高级 ================= -->
+        <section class="section" id="sec-advanced">
+          <header class="section-head">
+            <h2>高级</h2>
+            <p>排查问题时用。</p>
+          </header>
 
-        <label class="check sub-check">
-          <input id="selectionMenu" type="checkbox" />
-          <span>右键菜单「凛狐：翻译所选文字」——只有选中文字时才出现</span>
-        </label>
+          <div class="card">
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">输出调试日志</span>
+                <span class="row-desc">网页控制台会打印 [凛狐] 前缀的段落切分 / 批处理信息。</span>
+              </span>
+              <input id="debug" type="checkbox" class="switch" />
+            </label>
 
-        <label class="check sub-check">
-          <input id="selectionButton" type="checkbox" />
-          <span>选区旁边显示「译」小按钮，点击才翻译（推荐，不误触）</span>
-        </label>
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">恢复默认设置</span>
+                <span class="row-desc">把表单填回默认值（已保存的 API Key 保留），确认后点底部「保存」才生效。</span>
+              </span>
+              <button id="reset" class="btn danger">恢复默认</button>
+            </div>
+          </div>
+        </section>
 
-        <label class="check sub-check">
-          <input id="selectionImmediate" type="checkbox" />
-          <span>选中后立即翻译——选中就发请求，会消耗额度，默认关闭</span>
-        </label>
-
-        <label class="check">
-          <input id="translateOnLoad" type="checkbox" />
-          <span>打开页面后自动翻译（谨慎开启，会消耗较多额度）</span>
-        </label>
-
-        <label class="check">
-          <input id="chromeBilingual" type="checkbox" />
-          <span>界面元素（导航、按钮、标签）也保留原文 —— 默认关闭；开启后界面会中英对照，固定高度的导航条可能换行/溢出</span>
-        </label>
-
-        <label class="check">
-          <input id="debug" type="checkbox" />
-          <span>输出调试日志（网页控制台会打印 [凛狐] 前缀的段落切分 / 批处理信息）</span>
-        </label>
-      </section>
-
-      <section class="card">
-        <h2>配置迁移</h2>
-        <p class="hint" style="margin: -8px 0 14px">
-          把 API 地址、Key、模型和各项设置导出成一个 JSON 文件；换电脑或换扩展版本时导入，不用重填。
-        </p>
-
-        <label class="check">
-          <input id="exportKey" type="checkbox" />
-          <span>导出时包含 API Key —— 跨电脑 / 跨版本迁移必须勾选。文件里是明文，迁移完请删掉，不要外传</span>
-        </label>
-
-        <div class="actions" style="margin-top: 14px">
-          <button id="exportCfg" class="btn">导出配置文件</button>
-          <button id="importCfg" class="btn">导入配置文件</button>
-          <input id="importFile" type="file" accept=".json,application/json" hidden />
-          <span id="cfgResult" class="result"></span>
-        </div>
-      </section>
-
-      <footer class="page-foot">
-        <button id="save" class="btn primary">保存</button>
-        <button id="reset" class="btn">恢复默认</button>
-        <button id="clearCache" class="btn ghost">清空翻译缓存</button>
-        <span id="saveResult" class="result"></span>
-      </footer>
+        <!-- 底部保存栏：有未保存的修改时高亮 -->
+        <footer class="savebar" id="savebar" data-dirty="false">
+          <div class="savebar-inner">
+            <span class="savebar-dot" aria-hidden="true"></span>
+            <span class="savebar-state" id="saveState">所有更改已保存</span>
+            <span class="result" id="saveResult"></span>
+            <span class="savebar-actions">
+              <button id="discard" class="btn" disabled>放弃更改</button>
+              <button id="save" class="btn primary" disabled>保存</button>
+            </span>
+          </div>
+        </footer>
+      </main>
     </div>
 
     <script type="module" src="options.js"></script>

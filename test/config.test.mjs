@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 import {
   DEFAULTS,
   CONFIG_VERSION,
-  ENGINE_DEFAULTS,
   migrateConfig,
   mergeConfig,
   activeConfig,

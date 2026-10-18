@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "凛狐 · 双语对照翻译",
   "short_name": "凛狐",
-  "version": "0.4.9",
+  "version": "0.5.0",
   "description": "凛狐 Rimefox：用自己的 API 做整页双语对照翻译，动态内容自动补翻。",
   "minimum_chrome_version": "114",
   "permissions": [
@@ -55,12 +55,20 @@
         "content/core.js",
         "content/dom.js",
         "content/main.js",
-        "content/selection.js"
+        "content/selection.js",
+        "content/subtitles.js"
       ],
       "css": ["content/styles/inject.css"],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": false
+    },
+    {
+      "matches": ["*://www.youtube.com/*", "*://m.youtube.com/*", "*://www.youtube-nocookie.com/*"],
+      "js": ["content/youtube-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [

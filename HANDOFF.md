@@ -1,7 +1,7 @@
 # 凛狐 Rimefox 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.4.9 ｜ 目录：`edge-bilingual/`
+> 版本：0.5.0 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -37,7 +37,7 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **37 / 37 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **51 / 51 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 
 ---
 
@@ -53,17 +53,19 @@ edge-bilingual/
 │   ├── engines/           各协议实现（openai / anthropic / gemini）
 │   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
 │   ├── parse.js           模型返回值解析（JSON 数组容错）
-│   └── cache.js           LRU 翻译缓存（4000 条）
+│   └── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）
 │   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗
 │   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡
+│   ├── subtitles.js       YouTube 字幕双语：解析 json3、拼句、懒翻译、叠层显示
+│   ├── youtube-hook.js    页面主环境（world: MAIN）：捕获播放器的字幕请求，转给 subtitles.js
 │   └── styles/inject.css  译文样式与主题
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制）
-├── test/                  Node 单测（引擎 / 配置 / 提供商模板）
-└── selftest/              离线自检（37 条用例）
+├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存）
+└── selftest/              离线自检（51 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -81,7 +83,7 @@ DT.collect()  收集待翻单元
    ├─ 分段/长文拆分/组批
    │
    ├─ DT.send({type:'translate'}) ──► 并发闸门（默认 6）
-   │                                   ├─ LRU 缓存命中直接返回
+   │                                   ├─ 同批重复文本合并，缓存命中直接返回
    │                                   ├─ 未命中 → provider.chat()
    │                                   ├─ 解析 JSON 数组（含兜底）
    │                                   ├─ 429/5xx 自动重试 3 次
@@ -98,8 +100,8 @@ DT.collect()  收集待翻单元
 | `translate` | `{texts: string[], target: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败 |
 | `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本） |
 | `test` | — | `{ok, ms, model, sample}` / `{ok:false,error}` | 测试连接 |
-| `cache:clear` | — | `{ok}` | 清缓存 |
-| `stats` | — | `{ok, cacheSize}` | 调试用 |
+| `cache:clear` | — | `{ok}` | 清空三层缓存（storage 里的 `dt.cache.v1` 一并删掉） |
+| `cache:stats` | — | `{ok, stats: {memory, disk, hits, misses}, bytesInUse: {session, local}}` | 设置页「翻译缓存」卡片用；`bytesInUse` 是浏览器实际记的占用 |
 | `ensure` | `{tabId}` | `{ok}` | 补注入内容脚本（页面在安装前打开时） |
 | `resume:set` | `{value: boolean}` | `{ok}` | 记录本标签页"在翻译"，用于返回/刷新后自动续翻 |
 | `resume:get` | — | `{ok, value}` | 查询（会校验域名一致） |
@@ -207,14 +209,22 @@ lib/
 
 **默认追加**（双语）：把译文节点 append 到源元素**内部末尾**，这样它跟随源元素的盒子、字号、对齐。
 
-**四种情况改为原地替换**（`injectOnly`：替换元素的文本节点，保留子元素如图标）：
+**三种情况改为原地替换**（`injectOnly`：替换元素的文本节点，保留子元素如图标）：
 
 | 条件 | 原因 |
 |---|---|
 | `mode === 'translation'` | 仅译文模式 |
 | `isPositioned()`：fixed/sticky/absolute | 盒子尺寸写死，追加必溢出（昵称、日期、浮层标签） |
-| `isControlLike()`：a/button/label/summary/option/role=* | 真控件，追加会撑破按钮 |
-| 导航/页头里 + 小字号(≤20px) + 单行 | 导航条固定高度，追加会溢出 |
+| `DT.areaOf(el)` 为 `control` / `chrome`（且 `chromeBilingual` 关） | 控件 / 导航里的界面文字，追加会撑破按钮、把导航条挤成两排 |
+
+`DT.areaOf()` 是"这段文字属于哪一层"的唯一判定（`content/dom.js`），站点适配问题只改它：
+
+1. 在目录里（祖先 id / class 带 `toc`、`table-of-contents`）→ `content`
+2. 自己是控件，或沿**行内包裹链**找到所属控件（`<a><svg/><span>Code</span></a>` 的 span），且整个控件 ≤80 字 → `control`；超过 80 字的整条链接是卡片，不算控件
+3. `header` / `nav` / `role=navigation|banner|menubar` 内 + 字号 ≤20px + 只占一行 → `chrome`
+4. 其余 → `content`
+
+诊断报告的 `units[].area` 和 `placements[].area` 会写出每个单元的判定结果。
 
 > ⚠️ **不要**把"文本短"或"元素是 flex"单独作为替换条件。
 > 0.3.1 试过"短文本 + 父级是 flex-row 就替换"，结果在 Tarkov 这种整页 flex 布局的站点上，
@@ -224,6 +234,25 @@ lib/
 
 `textOf(el)` 递归时跳过 `[data-dt-target]` 和 `[data-dt-ui]` 子树。
 **否则**增量重扫时会把"原文 + 已注入的译文"当成新文本再翻一次，表现为同一段译文出现两遍。
+
+### 5.4 YouTube 字幕（`subtitles.js` + `youtube-hook.js`）
+
+```
+播放器 XHR /api/timedtext?…&pot=…&fmt=json3
+   │  youtube-hook.js（world: MAIN）挂钩 XHR / fetch，postMessage 原样转出；留最后一份，扩展脚本晚到时发 replay 再要
+   ▼
+subtitles.js（扩展环境）
+   ├─ 地址带 tlang（YouTube 机翻）→ 去掉 tlang 同源再请求一次，拿原文轨道
+   ├─ 字幕语言 = 目标语言 → 不接管
+   ├─ 人工字幕：按句末标点合并相邻事件；自动生成：逐词按停顿拼句（短句要长停顿才断）
+   ├─ 每 200ms：按 video.currentTime 找当前句；只翻 [当前 − 3s, 当前 + 90s] 里没翻过的，20 句 / 2000 字一批
+   └─ 叠层插在 .html5-video-player 里（全屏跟着走），z-index 30；播放器加 rimefox-subs-on 类隐藏原生字幕
+```
+
+- **为什么挂钩而不是自己请求**：字幕地址要带播放器生成的 `pot` 令牌，直接请求 `captionTracks[].baseUrl` 只会拿到 200 + 空内容（2026-10 实测）
+- **CC 开关**看 `.ytp-subtitles-button[aria-pressed]`；换视频看地址里的 `v`，不清轨道（新字幕可能比地址栏先到）
+- 纯函数在 `DT.subs.*`，自检页直接测；运行时只在 `youtube.com` / `youtube-nocookie.com` 启动
+- 这一块依赖 YouTube 的私有接口与 DOM 类名，YouTube 改版就可能失效 —— 出问题先看 `/api/timedtext` 回包还在不在、类名变没变
 
 ---
 
@@ -253,6 +282,8 @@ lib/
 | 20 | 收集上限把"不送翻"的单元也算进去 + 观察器不再被自己的译文触发（0.4.2） | 超长页面（>上限）后半段永远不翻 | `collect(root, accept)` 只算送翻的；收满了本轮结束后接着收 |
 | 21 | 以为页面内快捷键能兜底"被其它扩展占用的 Alt+A" | 装了其它默认 Alt+A 的扩展时，Option+A / Alt+A 完全没反应 | 占用发生在浏览器层，页面收不到按键；改为显示 `chrome.commands.getAll()` 的实际绑定，没绑定就引导去快捷键设置页 |
 | 22 | service worker 里用 `tabs.query({currentWindow})` 找当前标签页 | 快捷键偶尔找不到标签页 | 用 `onCommand` 传进来的 `tab`，退回 `lastFocusedWindow` |
+| 24 | 直接请求 YouTube 字幕地址 | 200 + 空内容：地址要带播放器生成的 `pot` 令牌 | 页面主环境挂钩播放器自己的请求（`youtube-hook.js`）；要别的轨道时拿它的地址改参数同源再请求 |
+| 23 | 用 `getComputedStyle().height` / `lineHeight` 判"单行"，控件判定只看元素自身 | GitHub 顶栏 `Code / 代码` 两行堆叠、整页错位：链接里的行内 `<span>` 高度是 `"auto"` → NaN → 不替换 → 追加把导航挤成两排；`line-height: normal` 同样 NaN | 统一走 `DT.areaOf()`：沿行内包裹链找所属控件；单行看 `getClientRects()` / `getBoundingClientRect()`，行高 `normal` 按字号 × 1.2 |
 
 ---
 
@@ -262,13 +293,15 @@ lib/
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-37 条纯前端用例，覆盖切分、注入、替换、还原、长文拆分。**改 `dom.js` 前后必跑。**
+51 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、YouTube 字幕解析与拼句（`DT.subs`）。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
 node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射（43 条）
 node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（27 条）
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
+node test/parse.test.mjs       # 回包解析 parseArray + 输出长度护栏 isRunaway（10 条）
+node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、清空（11 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
@@ -313,6 +346,7 @@ node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数�
 | `selectionMenu` | true | 划词：右键菜单「翻译所选文字」 |
 | `selectionButton` | true | 划词：选区旁「译」小按钮 |
 | `selectionImmediate` | false | 划词：选中即翻译（会消耗额度，默认关） |
+| `subtitleTranslate` | true | YouTube 字幕双语：打开 CC 时接管字幕，只翻播放位置往后约 90 秒 |
 | `debug` | false | 输出调试日志 |
 | `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |
 
@@ -346,7 +380,7 @@ node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数�
 | P2 | **按 `<br>` 拆行**：长帖逐行对照 | 小 | 低 |
 | P3 | **OpenAI Responses 协议**（`/v1/responses`）：只有遇到"只开 responses 的第三方接口"时才需要 | 小 | 中（离线无法验证） |
 | P3 | **i18n** | 小 | 低 |
-| P3 | PDF / 视频字幕 / 图片 OCR | 大 | 高（单独立项，别混进这个仓库） |
+| P3 | PDF / 其它站点的视频字幕 / 图片 OCR | 大 | 高（单独立项，别混进这个仓库）；YouTube 字幕已做（见 5.4） |
 
 ---
 
@@ -355,7 +389,7 @@ node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数�
 1. 改 `manifest.json` 的 `version`
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错）
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **37 / 37**
+4. 跑自检页：必须 **51 / 51**
 4b. 跑 Node 单测：`node test/engines.test.mjs`、`node test/config.test.mjs`、`node test/providers.test.mjs`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，Release 说明就从这里摘
