@@ -465,13 +465,16 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 
 ---
 
-## 14. 本版技术记录（0.5.3）
+## 14. 本版技术记录（0.5.4）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **字幕跟随趣味风格**（`content/subtitles.js`）：`DT.send` 带上 `style: DT.state.style || 'plain'`；`track.style` 记住当前风格，`pump()` 发现风格变了就清空 `trans` / `failedAt` / `pending` 重新翻。请求途中风格又变了的话，回包按 `batchStyle` 丢弃，避免旧措辞写进新风格。缓存键本来带 style，互不串用
-- **句间空档不再闪没**：`render()` 先判 `state.orig`，没有内容就移除 `.rimefox-subs-on`（把原生字幕交还），不再“先藏原生再判空”；`tick()` 在 `unitAt` 返回 -1 时用 `DT.subs.shouldLinger(prev, ms, 1500)` 保留上一句最多 1.5s；`track` 为空时也 `render(null)`，避免留下旧的隐藏类
-- **当前句优先**：字幕批从 20 条 / 2000 字降到 8 条 / 1000 字，当前句的译文回来更快；`inflight` 仍是串行，不改后台并发
-- **猫娘提示词重写**（`lib/config.js`）：明确“不要每句句尾加喵”，混用自称「本喵 / 人家」、语气词与傲娇句式，每段「喵」最多 1–2 次；非中文目标用当地猫娘说法；信息不增不减。`test/prompt.test.mjs` 的猫娘用例加了对应断言
-- 自检 85 → 87：新增 `shouldLinger` 的保留 / 不保留两条（句末、超时、句末之前、没有上一句）
+- **字幕取批按距离排序**（`content/subtitles.js` 的 `pump()`）：先收集窗口内候选，按"离当前播放位置的距离"升序取批（正在说的那句 `dist = 0`），修掉积压 / 拖进度后当前句要等前几批的问题；批大小仍是 8 条 / 1000 字，`inflight` 仍串行
+- **日文页面不跳过纯汉字短语**（`content/main.js`）：读 `document.documentElement.lang`，`ja` 页面翻成中文时不再套用 `looksLikeTarget` 的同语言跳过；其它语言组合不受影响
+- **恢复默认保留服务商**（`options/options.js`）：`DEFAULTS` 里有 `currentProvider: 'deepseek'`，reset 时显式传回当前值，只重置翻译 / 显示设置；Key / 缓存 / 自定义服务商都不动
+- **诊断信息**（`content/dom.js`）：`DT.diagnose()` 报告新增 `provider` / `engine` / `model` / `thinkingMode`（从 `config:get` 的配置取，不含 Key）
+- **快捷键自适应**（`content/selection.js` + `content/main.js`）：`DT.selectionTranslate()` 复用划词的 `currentSelection` / `eligible` / `run`；页面内快捷键与浏览器命令两条路径都先判选区，有选区就划词、没有才翻整页，仍用 `lastToggleAt` 去重
+- **设置页自检入口**（`options/index.html`）：高级区块加「打开自检页」，走扩展内部链接，避开 Edge 对地址栏输入 `chrome-extension://` 的拦截
+- **代码拆分**（0.5.4 前完成）：`options.js` 拆成 `ui.js` / `model-picker.js` / `provider-list.js`；`subtitles.js` 拆成 `subtitles-core.js`（纯函数，自检页 + YouTube 共用）与运行时（只在 YouTube 加载）
+- 自检 87 条；Node 单测 124 条
 
