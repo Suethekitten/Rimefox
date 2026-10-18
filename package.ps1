@@ -28,8 +28,8 @@ if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Path $staging | Out-Null
 Copy-Item -Path $src -Destination (Join-Path $staging 'edge-bilingual') -Recurse -Force
 
-# 清理不该进包的临时文件
-Get-ChildItem -Path (Join-Path $staging 'edge-bilingual') -Recurse -Force -Include '.DS_Store', 'Thumbs.db', '*.log' |
+# 清理不该进包的文件：.git 是整个仓库历史（项目文件夹本身就是 git 仓库），其余是临时文件
+Get-ChildItem -Path (Join-Path $staging 'edge-bilingual') -Recurse -Force -Include '.git', '.DS_Store', 'Thumbs.db', '*.log' |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 # 用 ZipFile 而不是 Compress-Archive：后者会漏掉 .gitignore 这类隐藏文件
