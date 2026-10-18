@@ -20,6 +20,17 @@ import { listModels, engineList } from '../lib/provider.js';
 import { providerById } from '../lib/providers.js';
 import { $, fillSelect, setResult } from './ui.js';
 import { applyI18n } from '../lib/i18n.js';
+import { applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig, runWhenIdle } from '../lib/ui-appearance.js';
+import { normalizeHosts } from '../lib/site-rules.js';
+import {
+  createAccentPicker,
+  updateTypoPreview,
+  renderBuiltinRules,
+  parseSiteRulesText,
+  showSiteRulesResult,
+  showCustomCssResult
+} from './appearance-ui.js';
+import { bindSettingsSearch } from './search.js';
 import { createModelPicker } from './model-picker.js';
 import {
   NEW_CUSTOM_ID,
@@ -70,7 +81,22 @@ const fields = {
   chromeBilingual: $('chromeBilingual'),
   uiTheme: $('uiTheme'),
   uiLang: $('uiLang'),
-  debug: $('debug')
+  debug: $('debug'),
+  accentColor: $('accentColor'),
+  reduceTransparency: $('reduceTransparency'),
+  disableShadow: $('disableShadow'),
+  typoFontScale: $('typoFontScale'),
+  typoLineHeight: $('typoLineHeight'),
+  typoGap: $('typoGap'),
+  typoIndent: $('typoIndent'),
+  pageDarkAdapt: $('pageDarkAdapt'),
+  siteRules: $('siteRules'),
+  nightMode: $('nightMode'),
+  nightSites: $('nightSites'),
+  customCss: $('customCss'),
+  dockEnabled: $('dockEnabled'),
+  dockSide: $('dockSide'),
+  dockAutoHide: $('dockAutoHide')
 };
 
 // 设置页 / 弹窗的界面主题；auto 交给 CSS 的 prefers-color-scheme
@@ -92,8 +118,30 @@ function applyUiTheme(value) {
   }
 }
 
-fields.uiTheme.addEventListener('change', () => applyUiTheme(fields.uiTheme.value));
+fields.uiTheme.addEventListener('change', () => switchThemeAnimated(() => applyUiTheme(fields.uiTheme.value), fields.uiTheme));
 fields.uiLang.addEventListener('change', () => applyI18n(document, fields.uiLang.value));
+
+// ---------------- 外观：改了立刻预览（保存前就能看到效果） ----------------
+function previewLook() {
+  const form = {
+    accentColor: fields.accentColor.value,
+    reduceTransparency: fields.reduceTransparency.checked,
+    disableShadow: fields.disableShadow.checked,
+    typoFontScale: Number(fields.typoFontScale.value),
+    typoLineHeight: Number(fields.typoLineHeight.value),
+    typoGap: Number(fields.typoGap.value),
+    typoIndent: fields.typoIndent.checked
+  };
+  applyUiAppearance(form);
+  updateTypoPreview($('typoPreview'), form);
+}
+
+const accentPicker = createAccentPicker({ container: $('accentSwatches'), input: fields.accentColor, onPick: previewLook });
+['reduceTransparency', 'disableShadow', 'typoFontScale', 'typoLineHeight', 'typoGap', 'typoIndent'].forEach((key) =>
+  fields[key].addEventListener('change', previewLook)
+);
+fields.siteRules.addEventListener('input', () => showSiteRulesResult(fields.siteRules.value));
+fields.customCss.addEventListener('input', () => showCustomCssResult(fields.customCss.value));
 
 // 最近一次读到的配置（导出时用）
 let currentCfg = {};
@@ -249,6 +297,24 @@ function applyConfig(cfg) {
   applyUiTheme(fields.uiTheme.value);
   fields.uiLang.value = cfg.uiLang || 'zh';
   fields.debug.checked = !!cfg.debug;
+  accentPicker.set(cfg.accentColor);
+  fields.reduceTransparency.checked = !!cfg.reduceTransparency;
+  fields.disableShadow.checked = !!cfg.disableShadow;
+  fields.typoFontScale.value = String(cfg.typoFontScale || 100);
+  fields.typoLineHeight.value = String(cfg.typoLineHeight || 0);
+  fields.typoGap.value = String(Number.isFinite(Number(cfg.typoGap)) ? cfg.typoGap : 3);
+  fields.typoIndent.checked = !!cfg.typoIndent;
+  fields.pageDarkAdapt.checked = cfg.pageDarkAdapt !== false;
+  fields.siteRules.value = (cfg.siteRules || []).length ? JSON.stringify(cfg.siteRules, null, 2) : '';
+  fields.nightMode.checked = !!cfg.nightMode;
+  fields.nightSites.value = (cfg.nightSites || []).join('\n');
+  fields.customCss.value = cfg.customCss || '';
+  fields.dockEnabled.checked = !!cfg.dockEnabled;
+  fields.dockSide.value = cfg.dockSide === 'left' ? 'left' : 'right';
+  fields.dockAutoHide.checked = cfg.dockAutoHide !== false;
+  previewLook();
+  showSiteRulesResult(fields.siteRules.value);
+  showCustomCssResult(fields.customCss.value);
 
   updateEngineHints();
   updateThinkingUI();
@@ -305,8 +371,29 @@ function readForm() {
     subtitleTranslate: fields.subtitleTranslate.checked,
     hoverCompare: fields.hoverCompare.checked,
     chromeBilingual: fields.chromeBilingual.checked,
-    debug: fields.debug.checked
+    debug: fields.debug.checked,
+    accentColor: fields.accentColor.value || 'violet',
+    reduceTransparency: fields.reduceTransparency.checked,
+    disableShadow: fields.disableShadow.checked,
+    typoFontScale: Number(fields.typoFontScale.value) || 100,
+    typoLineHeight: Number(fields.typoLineHeight.value) || 0,
+    typoGap: Number(fields.typoGap.value),
+    typoIndent: fields.typoIndent.checked,
+    pageDarkAdapt: fields.pageDarkAdapt.checked,
+    // JSON 写错时原样带上文本：比较「有没有改动」仍然准确，保存时会被拦下
+    siteRules: siteRulesForm(),
+    nightMode: fields.nightMode.checked,
+    nightSites: normalizeHosts(fields.nightSites.value),
+    customCss: fields.customCss.value.trim(),
+    dockEnabled: fields.dockEnabled.checked,
+    dockSide: fields.dockSide.value,
+    dockAutoHide: fields.dockAutoHide.checked
   };
+}
+
+function siteRulesForm() {
+  const parsed = parseSiteRulesText(fields.siteRules.value);
+  return parsed.errors.length ? { invalid: fields.siteRules.value } : parsed.rules;
 }
 
 // ---------------- 浏览器快捷键 ----------------
@@ -541,6 +628,7 @@ function countChanges(a, b) {
   return n;
 }
 
+let lastChangeCount = 0;
 function updateDirty() {
   if (!savedForm) return;
   const n = countChanges(savedForm, readForm());
@@ -549,7 +637,9 @@ function updateDirty() {
   $('saveState').textContent = dirty ? '有 ' + n + ' 处未保存的更改' : '所有更改已保存';
   $('save').disabled = !dirty;
   $('discard').disabled = !dirty;
-  if (dirty) setResult($('saveResult'), '');
+  // 改动数变了才清掉上一条提示：点「保存」本身也会触发这里，不能把刚出来的「有错误，改好再保存」冲掉
+  if (dirty && n !== lastChangeCount) setResult($('saveResult'), '');
+  lastChangeCount = n;
 }
 
 function markSaved(cfg) {
@@ -637,7 +727,8 @@ async function init() {
     $(id).dataset.default = $(id).textContent;
   });
   bindNav();
-  hideSelftestIfMissing();
+  bindSettingsSearch({ input: $('settingsSearch'), main: document.querySelector('.content'), empty: $('searchEmpty') });
+  renderBuiltinRules($('builtinRules'));
   refreshProviderList();
   fillSelect(fields.engine, engineList().map((e) => ({ value: e.id, label: e.label })));
   fillSelect(fields.thinkingMode, THINKING_MODES);
@@ -647,16 +738,48 @@ async function init() {
   const cfg = await getConfig();
   currentCfg = cfg;
   applyConfig(cfg);
+  rememberSaved(cfg);
   markSaved(cfg);
-  renderBrowserShortcut();
-  renderCacheStats();
-  fetchModels(); // 已经保存过地址和 Key 时，打开设置页就把列表准备好
+  // 非首屏的工作放到空闲时做：打开设置页先把表单画出来
+  runWhenIdle(renderBrowserShortcut);
+  runWhenIdle(renderCacheStats);
+  runWhenIdle(hideSelftestIfMissing);
+  runWhenIdle(() => fetchModels()); // 已经保存过地址和 Key 时，打开设置页就把列表准备好
+  watchConfig(onConfigElsewhere);
+}
+
+// 别的页面（弹窗切深色、另一个设置页）改了配置：没有未保存的改动就整页刷新成新值；
+// 有未保存的改动时只同步界面外观，并提示保存会以这里为准
+function onConfigElsewhere(next) {
+  const merged = mergeConfig(DEFAULTS, next);
+  if (savebar.dataset.dirty !== 'true') {
+    currentCfg = merged;
+    applyConfig(currentCfg);
+    markSaved(currentCfg);
+    return;
+  }
+  applyUiTheme(merged.uiTheme || 'auto');
+  applyUiAppearance(merged);
+  setResult($('saveResult'), '设置在别的页面被修改过；保存时会以这里的内容为准', 'bad');
 }
 
 $('save').addEventListener('click', async () => {
+  // 先把还没跑的「改动数」更新做掉：不然它稍后才跑，会把下面刚写出来的提示冲掉
+  clearTimeout(dirtyTimer);
+  dirtyTimer = 0;
+  updateDirty();
+  // 站点规则 / 自定义 CSS 写错时不保存：坏数据不该落盘，也不该让网页里的规则悄悄失效
+  const ruleErrors = showSiteRulesResult(fields.siteRules.value);
+  const cssErrors = showCustomCssResult(fields.customCss.value);
+  if (ruleErrors.length || cssErrors.length) {
+    setResult($('saveResult'), ruleErrors.length ? '站点规则有错误，改好再保存' : '译文自定义 CSS 有错误，改好再保存', 'bad');
+    (ruleErrors.length ? fields.siteRules : fields.customCss).scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return;
+  }
   const patch = readForm();
   const active = activeConfig(patch);
   currentCfg = await saveConfig(patch);
+  rememberSaved(currentCfg);
   markSaved(currentCfg);
   glossaryEditor.render(); // 清洗后的结果（去空行 / 去重）反映到表格
   if (active.apiKey) setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
@@ -682,6 +805,7 @@ $('test').addEventListener('click', async () => {
   setResult($('testResult'), '测试中…');
   try {
     currentCfg = await saveConfig(readForm()); // 先落盘，后台读的是存储里的配置
+    rememberSaved(currentCfg);
     markSaved(currentCfg);
     const res = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ type: 'test' }, (r) => {
@@ -823,6 +947,7 @@ $('importFile').addEventListener('change', async (event) => {
     const parsed = pickImportedConfig(raw);
     const patch = parsed.config;
     const next = await saveConfig(patch);
+    rememberSaved(next);
     currentCfg = next;
     applyConfig(next);
     markSaved(next);

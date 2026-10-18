@@ -905,3 +905,282 @@ input.switch:focus-visible {
     scroll-behavior: auto;
   }
 }
+
+/* ================= 0.7.0：搜索、风险提示、折叠区、外观 ================= */
+
+/* ---- 设置搜索 ---- */
+.search {
+  position: relative;
+  margin: 2px 0 12px;
+}
+
+.search-ico {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.search input {
+  width: 100%;
+  padding: 7px 10px 7px 30px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.search-hidden {
+  display: none !important;
+}
+
+/* 窄屏时侧栏变成顶部横条：搜索框固定一个能看清的宽度，不被导航挤没 */
+@media (max-width: 760px) {
+  .search {
+    flex: 0 0 160px;
+    margin: 0;
+  }
+
+  /* 搜索结果很短时，顶部横条不被拉高 */
+  .layout {
+    align-content: start;
+  }
+}
+
+.search-empty {
+  margin: 24px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ---- 风险提示：会降低性能或改变页面外观的开关 ---- */
+.risk {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  vertical-align: 1px;
+}
+
+/* ---- 折叠的高级参数 ---- */
+details.more {
+  border-top: 1px solid var(--line-soft);
+}
+
+details.more > summary {
+  padding: 11px 0;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+details.more > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.more > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 14px;
+  transition: transform 0.15s ease;
+}
+
+details.more[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+details.more > summary:hover {
+  color: var(--text);
+}
+
+/* ---- 强调色色板 ---- */
+.swatches {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.swatch {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+
+.swatch[aria-checked="true"],
+.swatch-custom.is-checked {
+  outline: 2px solid var(--swatch);
+  outline-offset: 2px;
+}
+
+.swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 自定义颜色：彩虹圈里藏一个取色器 */
+.swatch-custom {
+  display: inline-block;
+  overflow: hidden;
+  background: conic-gradient(#f43f5e, #f59e0b, #22c55e, #06b6d4, #6366f1, #d946ef, #f43f5e);
+}
+
+.swatch-custom.is-checked {
+  background: var(--swatch);
+}
+
+.swatch-custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ---- 译文排版预览 ---- */
+.typo-preview {
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.typo-preview p {
+  margin: 0;
+}
+
+.typo-preview .typo-target {
+  margin-top: var(--dt-gap, 0.3em);
+  font-size: calc(var(--dt-font-scale, 1) * 1em);
+  line-height: var(--dt-line-height, inherit);
+  text-indent: var(--dt-indent, 0);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--dt-accent, #3b82f6) 55%, transparent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+/* ---- 内置站点规则 ---- */
+.rule-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.rule-list code {
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 12px/20px ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* ---- 强调色：所有 hover / soft / glow 都从 --accent-user 派生 ---- */
+:root[data-accent] {
+  --accent: var(--accent-user);
+  --accent-2: color-mix(in oklab, var(--accent-user) 62%, #3f8efc);
+  --accent-soft: color-mix(in srgb, var(--accent-user) 12%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent-user) 32%, transparent);
+  --bg-glow:
+    radial-gradient(1200px 620px at 8% -12%, color-mix(in srgb, var(--accent-user) 14%, transparent), transparent 62%),
+    radial-gradient(1000px 560px at 106% 0%, color-mix(in srgb, var(--accent-user) 9%, transparent), transparent 58%);
+}
+
+:root[data-accent][data-theme="dark"] {
+  --accent: color-mix(in srgb, var(--accent-user) 76%, white);
+  --accent-2: color-mix(in oklab, color-mix(in srgb, var(--accent-user) 76%, white) 62%, #4da3ff);
+  --accent-soft: color-mix(in srgb, var(--accent-user) 20%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent-user) 42%, transparent);
+  --bg-glow:
+    radial-gradient(1200px 620px at 8% -12%, color-mix(in srgb, var(--accent-user) 24%, transparent), transparent 62%),
+    radial-gradient(1000px 560px at 106% 0%, color-mix(in srgb, var(--accent-user) 12%, transparent), transparent 58%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-accent]:not([data-theme]) {
+    --accent: color-mix(in srgb, var(--accent-user) 76%, white);
+    --accent-2: color-mix(in oklab, color-mix(in srgb, var(--accent-user) 76%, white) 62%, #4da3ff);
+    --accent-soft: color-mix(in srgb, var(--accent-user) 20%, transparent);
+    --accent-glow: color-mix(in srgb, var(--accent-user) 42%, transparent);
+    --bg-glow:
+      radial-gradient(1200px 620px at 8% -12%, color-mix(in srgb, var(--accent-user) 24%, transparent), transparent 62%),
+      radial-gradient(1000px 560px at 106% 0%, color-mix(in srgb, var(--accent-user) 12%, transparent), transparent 58%);
+  }
+}
+
+/* ---- 减少透明和模糊：玻璃改实色，去掉氛围渐变 ---- */
+:root[data-reduce-transparency] {
+  --glass: none;
+  --sidebar: #f2f3f8;
+  --card: #ffffff;
+  --field: #ffffff;
+  --bg-glow: none;
+}
+
+:root[data-reduce-transparency][data-theme="dark"] {
+  --sidebar: #0c0e15;
+  --card: #141721;
+  --field: #0b0d13;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-reduce-transparency]:not([data-theme]) {
+    --sidebar: #0c0e15;
+    --card: #141721;
+    --field: #0b0d13;
+  }
+}
+
+/* ---- 关闭阴影：投影和光晕都走变量，焦点环（--accent-soft）保留 ---- */
+:root[data-no-shadow] {
+  --shadow: none;
+  --shadow-lg: none;
+  --card-hi: 0 0 #0000;
+  --accent-glow: transparent;
+}
+
+/* ---- 深色切换：圆形扩散由 JS 驱动 clip-path，这里关掉默认的淡入淡出 ---- */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
