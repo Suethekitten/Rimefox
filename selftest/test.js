@@ -172,6 +172,28 @@
     return eq(got, ['User Name', 'Added camouflage - 3 Oct, 07:51']);
   });
 
+  check('collect: 表单里的按钮单独成单元，不整块替换', function () {
+    var units2 = DT.collect(document.getElementById('fx-form-row'));
+    var formUnit = units2.some(function (u) {
+      return u.el && u.el.id === 'fx-form';
+    });
+    if (formUnit) return '整个 FORM 被当成了单元';
+    var joined = units2.map(function (u) {
+      return u.text;
+    }).join(' | ');
+    if (/hide branch protection settings/i.test(joined)) return '隐藏对话框文案被拼进了单元：' + joined;
+    var hasBtn = units2.some(function (u) {
+      return u.el && u.el.id === 'fx-form-btn';
+    });
+    if (!hasBtn) return '按钮没有单独成单元：' + joined;
+    return true;
+  });
+
+  check('collect: 隐藏子树不产出单元', function () {
+    var hidden = DT.collect(document.getElementById('fx-hidden-only'));
+    return hidden.length === 0 ? true : '隐藏元素不该产出单元，实际 ' + hidden.length;
+  });
+
   // ---------------- 双语注入 ----------------
   check('inject: 译文插到源元素内部末尾', function () {
     var target = byText(units, 'This is the first paragraph');

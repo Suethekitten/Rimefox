@@ -107,6 +107,11 @@
             parts.push(' ');
             continue;
           }
+          // 隐藏子树（display:none 的对话框 / 展开菜单）不算正文：
+          // 以前会把 GitHub 设置页里隐藏的确认对话框文案拼进按钮文本，整行布局被撑坏
+          if (kid.hidden) continue;
+          var cs = styleOf(kid);
+          if (cs && cs.display === 'none') continue;
           visit(kid);
         }
       }
@@ -189,9 +194,24 @@
 
     if (isFlexOrGrid(el)) return true;
     if (structural > 0) return true;
+    // 含交互控件的容器（form / action-menu / 下拉菜单 / 对话框）不能整块替换：
+    // 会把按钮文字和隐藏的对话框 / 菜单文案拼成一段，按钮被挤成竖排（GitHub 设置页实例）。
+    // 自定义元素（action-menu 之类）即使暂时查不到 button 也先下钻。
+    var tagName = tagOf(el);
+    if (!CONTENT_TAGS[tagName]) {
+      if (tagName.indexOf('-') >= 0 && usable >= 2) return true;
+      if (
+        el.querySelector &&
+        el.querySelector(
+          'button, input, select, textarea, summary, [role="button"], [role="menuitem"], [role="menu"], [role="dialog"], [role="alertdialog"], [role="toolbar"]'
+        )
+      ) {
+        return true;
+      }
+    }
     // 正文块里的 3+ 个行内子元素（OWID 的 <p> 有 8 个：句子 span、脚注、行内链接）
     // 以前会逐个子元素拆，译文插在句子中间；整段翻、追加到段末可读性更好。
-    if (CONTENT_TAGS[tagOf(el)]) return false;
+    if (CONTENT_TAGS[tagName]) return false;
     return usable >= 3;
   }
 
@@ -401,6 +421,10 @@
         if (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui')) {
           return NodeFilter.FILTER_REJECT;
         }
+        // 隐藏子树不参与替换：否则会把译文写进看不见的对话框
+        if (node.hidden) return NodeFilter.FILTER_REJECT;
+        var cs = styleOf(node);
+        if (cs && cs.display === 'none') return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_SKIP;
       }
     });

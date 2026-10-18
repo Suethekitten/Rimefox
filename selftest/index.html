@@ -141,6 +141,20 @@
         <button id="fx-counter-b">Count 2</button>
       </div>
 
+      <!-- 0.7.2 回归：表单里的按钮 + 隐藏对话框，不能被当成一个单元整块替换 -->
+      <div id="fx-form-row">
+        <form id="fx-form">
+          <strong id="fx-form-title">Disable branch protection rules</strong>
+          <div id="fx-form-dialog" class="d-none" style="display: none">
+            This will hide branch protection settings and disable branch protection rules for this repository.
+          </div>
+          <button id="fx-form-btn" type="button">Disable branch protection rules</button>
+        </form>
+      </div>
+      <div id="fx-hidden-only" style="display: none">
+        Hidden dialog text that must never be translated.
+      </div>
+
       <!-- 区域模型（DT.areaOf）回归用例 -->
       <div id="fx-area">
         <!-- GitHub 仓库顶栏：前两项是块级 <a> 里的行内 span（D1 的现场），第三项是 flex <a> -->
