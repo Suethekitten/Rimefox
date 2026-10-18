@@ -74,6 +74,7 @@ console.log('\n[夜间名单]');
 
 t('一行一个域名：去协议 / 路径 / *.，去重，子域名也算', () => {
   assert.deepEqual(normalizeHosts('https://Example.com/a\n*.blog.io  example.com\n\nnot a host!'), ['example.com', 'blog.io']);
+  assert.deepEqual(normalizeHosts('http://localhost:8080/x 127.0.0.1:3000'), ['localhost', '127.0.0.1']);
   assert.ok(hostListed('www.example.com', ['example.com']));
   assert.ok(!hostListed('badexample.com', ['example.com']));
 });

@@ -58,6 +58,15 @@
           <span class="label" title="只改写正文，只对当前页生效；还原后回到普通翻译">趣味</span>
           <div class="seg" id="styleSeg"></div>
         </div>
+        <!-- 网页夜间模式（Beta）：只对当前网站开关，名单在设置页「站点与兼容性」 -->
+        <div class="row" id="nightRow" hidden>
+          <span class="label" title="把网页反色成深色，只对这个网站生效（Beta）">夜间</span>
+          <label class="night-line">
+            <span class="night-host" id="nightHost"></span>
+            <input type="checkbox" id="nightSite" role="switch" />
+            <span class="mini-switch" aria-hidden="true"></span>
+          </label>
+        </div>
       </div>
 
       <section class="card quick">

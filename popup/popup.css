@@ -576,3 +576,137 @@ select:focus,
     animation: none !important;
   }
 }
+
+/* ---- 本站夜间模式：一行开关，左边显示当前网站 ---- */
+.night-line {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.night-host {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.night-line input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mini-switch {
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+  transition: background 0.15s ease;
+}
+
+.mini-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+
+.night-line input:checked + .mini-switch {
+  background: var(--accent);
+}
+
+.night-line input:checked + .mini-switch::after {
+  transform: translateX(14px);
+}
+
+.night-line input:focus-visible + .mini-switch {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.night-line input:disabled + .mini-switch {
+  opacity: 0.5;
+}
+
+/* ---- 强调色：和设置页同一套派生方式（设置页「外观」里选） ---- */
+:root[data-accent] {
+  --accent: var(--accent-user);
+  --accent-2: color-mix(in oklab, var(--accent-user) 62%, #3f8efc);
+  --accent-soft: color-mix(in srgb, var(--accent-user) 12%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent-user) 30%, transparent);
+  --bg-glow:
+    radial-gradient(520px 260px at 8% -20%, color-mix(in srgb, var(--accent-user) 12%, transparent), transparent 65%),
+    radial-gradient(420px 220px at 108% 0%, color-mix(in srgb, var(--accent-user) 8%, transparent), transparent 60%);
+}
+
+:root[data-accent][data-theme="dark"] {
+  --accent: color-mix(in srgb, var(--accent-user) 76%, white);
+  --accent-2: color-mix(in oklab, color-mix(in srgb, var(--accent-user) 76%, white) 62%, #4da3ff);
+  --accent-soft: color-mix(in srgb, var(--accent-user) 18%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent-user) 40%, transparent);
+  --bg-glow:
+    radial-gradient(600px 300px at 6% -22%, color-mix(in srgb, var(--accent-user) 30%, transparent), transparent 66%),
+    radial-gradient(460px 250px at 108% -2%, color-mix(in srgb, var(--accent-user) 14%, transparent), transparent 62%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-accent]:not([data-theme]) {
+    --accent: color-mix(in srgb, var(--accent-user) 76%, white);
+    --accent-2: color-mix(in oklab, color-mix(in srgb, var(--accent-user) 76%, white) 62%, #4da3ff);
+    --accent-soft: color-mix(in srgb, var(--accent-user) 18%, transparent);
+    --accent-glow: color-mix(in srgb, var(--accent-user) 40%, transparent);
+    --bg-glow:
+      radial-gradient(600px 300px at 6% -22%, color-mix(in srgb, var(--accent-user) 30%, transparent), transparent 66%),
+      radial-gradient(460px 250px at 108% -2%, color-mix(in srgb, var(--accent-user) 14%, transparent), transparent 62%);
+  }
+}
+
+/* ---- 减少透明和模糊 ---- */
+:root[data-reduce-transparency] {
+  --glass: none;
+  --card: #ffffff;
+  --field: #ffffff;
+  --bg-glow: none;
+}
+
+:root[data-reduce-transparency][data-theme="dark"] {
+  --card: #141721;
+  --field: #0b0d13;
+  --elevated: #222634;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-reduce-transparency]:not([data-theme]) {
+    --card: #141721;
+    --field: #0b0d13;
+    --elevated: #222634;
+  }
+}
+
+/* ---- 关闭阴影 ---- */
+:root[data-no-shadow] {
+  --shadow: none;
+  --card-hi: 0 0 #0000;
+  --accent-glow: transparent;
+}
+
+/* ---- 深浅色切换：圆形扩散由 JS 驱动，关掉默认的淡入淡出 ---- */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}

@@ -7,10 +7,14 @@ import {
   EXTENSIONS_PAGE,
   FILE_ACCESS_LABEL,
   browserShortcut,
-  STYLES
+  STYLES,
+  mergeConfig,
+  DEFAULTS
 } from '../lib/config.js';
 import { providerById } from '../lib/providers.js';
 import { applyI18n, t } from '../lib/i18n.js';
+import { normalizeHosts, hostListed } from '../lib/site-rules.js';
+import { applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig } from '../lib/ui-appearance.js';
 
 const el = {
   ver: document.getElementById('ver'),
@@ -32,7 +36,10 @@ const el = {
   quickCopy: document.getElementById('quickCopy'),
   quickClear: document.getElementById('quickClear'),
   quickOut: document.getElementById('quickOut'),
-  themeToggle: document.getElementById('themeToggle')
+  themeToggle: document.getElementById('themeToggle'),
+  nightRow: document.getElementById('nightRow'),
+  nightSite: document.getElementById('nightSite'),
+  nightHost: document.getElementById('nightHost')
 };
 
 let tabId = null;
@@ -292,21 +299,84 @@ darkMedia.addEventListener('change', () => {
 el.themeToggle.addEventListener('click', async () => {
   const next = el.themeToggle.dataset.next === 'light' ? 'light' : 'dark';
   uiTheme = next;
-  applyUiTheme(next);
-  renderThemeToggle();
+  // 支持 View Transition 时从按钮位置圆形扩散
+  switchThemeAnimated(() => {
+    applyUiTheme(next);
+    renderThemeToggle();
+  }, el.themeToggle);
+  await saveAndRemember({ uiTheme: next });
+});
+
+// 存配置并记下结果：自己这次写入触发的 storage.onChanged 不再回调（见 watchConfig）
+async function saveAndRemember(patch) {
   try {
-    const saved = await saveConfig({ uiTheme: next });
-    if (saved) currentCfg = saved;
+    const saved = await saveConfig(patch);
+    if (saved) {
+      currentCfg = saved;
+      rememberSaved(saved);
+    }
+    return saved;
   } catch (err) {
     /* 存不进配置也不影响这次显示，下次打开会回到之前的设置 */
+    return null;
   }
+}
+
+// ---------------- 本站夜间模式（Beta） ----------------
+// 只在普通网页显示；打开 = 把当前网站加进名单并打开总开关，关闭 = 把能匹配到这个网站的名单项去掉
+function tabHostname() {
+  try {
+    const url = new URL(tabUrl);
+    return /^https?:$/.test(url.protocol) ? url.hostname : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+function renderNight() {
+  const host = tabHostname();
+  el.nightRow.hidden = !host || !supported;
+  if (el.nightRow.hidden) return;
+  el.nightHost.textContent = host;
+  el.nightHost.title = host;
+  el.nightSite.checked = !!currentCfg.nightMode && hostListed(host, currentCfg.nightSites);
+  const label = t('本站夜间模式（Beta）：把网页反色成深色，图片和视频保持原样');
+  el.nightSite.setAttribute('aria-label', label);
+  el.nightRow.title = label;
+}
+
+el.nightSite.addEventListener('change', async () => {
+  const host = tabHostname();
+  if (!host) return;
+  const sites = normalizeHosts(currentCfg.nightSites || []);
+  const on = el.nightSite.checked;
+  const patch = on
+    ? { nightMode: true, nightSites: hostListed(host, sites) ? sites : sites.concat(host) }
+    : { nightSites: sites.filter((one) => !(host === one || host.endsWith('.' + one))) };
+  el.nightSite.disabled = true;
+  await saveAndRemember(patch);
+  el.nightSite.disabled = false;
+  renderNight();
 });
+
+// 设置页或另一个弹窗改了配置：外观、主题图标、服务商、夜间开关跟着变
+function onConfigElsewhere(next) {
+  currentCfg = mergeConfig(DEFAULTS, next);
+  uiTheme = currentCfg.uiTheme || 'auto';
+  applyUiTheme(uiTheme);
+  applyUiAppearance(currentCfg);
+  renderThemeToggle();
+  renderMeta();
+  renderNight();
+}
 
 async function init() {
   const cfg = await getConfig();
   currentCfg = cfg;
+  rememberSaved(cfg);
   uiTheme = cfg.uiTheme || 'auto';
   applyUiTheme(cfg.uiTheme);
+  applyUiAppearance(cfg);
   shortcut = await browserShortcut();
 
   LANGUAGES.forEach((lang) => {
@@ -344,6 +414,8 @@ async function init() {
   render();
   renderMeta();
   renderThemeToggle();
+  renderNight();
+  watchConfig(onConfigElsewhere);
 }
 
 el.toggle.addEventListener('click', async () => {
@@ -368,7 +440,7 @@ el.modeSeg.addEventListener('click', async (event) => {
   try {
     status = await sendToTab({ type: 'dt:setMode', mode });
     stopPolling();
-    await saveConfig({ mode });
+    await saveAndRemember({ mode });
   } catch (err) {
     el.stat.textContent = t('切换失败：') + err.message;
   }
@@ -392,7 +464,7 @@ el.styleSeg.addEventListener('click', async (event) => {
 
 el.target.addEventListener('change', async () => {
   const target = el.target.value;
-  await saveConfig({ targetLang: target });
+  await saveAndRemember({ targetLang: target });
   try {
     status = await sendToTab({ type: 'dt:setTarget', target });
     stopPolling();
