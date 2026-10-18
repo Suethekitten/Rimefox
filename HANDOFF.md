@@ -1,7 +1,7 @@
-# DualTrans 交接文档
+# 凛狐 Rimefox 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.4.7 ｜ 目录：`edge-bilingual/`
+> 版本：0.4.8 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -201,7 +201,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 页面控制台也能取：`copy(JSON.stringify(__DT_LAST_DIAG))`
 
 ### 7.3 日志
-- 设置页勾选「输出调试日志」→ 网页 Console 过滤 `[DualTrans]`
+- 设置页勾选「输出调试日志」→ 网页 Console 过滤 `[凛狐]`
 - API 报错原文：`chrome://extensions/`（Edge：`edge://extensions/`）→ 卡片 →「Service Worker」→ 控制台
 
 ---
@@ -265,7 +265,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 4. 跑自检页：必须 **37 / 37**
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，Release 说明就从这里摘
-7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检、打包 `DualTrans-v<版本号>.zip`、创建 `v<版本号>` 的 Release。
+7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检、打包 `Rimefox-v<版本号>.zip`、创建 `v<版本号>` 的 Release。
    同一版本只发一次；没改版本号的推送不会发版。也可以在 GitHub 的 Actions 页面手动运行
 
 ---

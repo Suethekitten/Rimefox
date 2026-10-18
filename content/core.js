@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.4.7';
+  DT.VERSION = '0.4.8';
 
   DT.state = {
     enabled: false,
@@ -19,7 +19,7 @@
   DT.log = function () {
     if (DT.state.config && DT.state.config.debug) {
       var args = Array.prototype.slice.call(arguments);
-      console.log.apply(console, ['[DualTrans]'].concat(args));
+      console.log.apply(console, ['[凛狐]'].concat(args));
     }
   };
 

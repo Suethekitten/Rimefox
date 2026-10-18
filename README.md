@@ -1,4 +1,4 @@
-# DualTrans 双语对照翻译
+# 凛狐 Rimefox · 双语对照翻译
 
 > 交接开发请看 **[HANDOFF.md](HANDOFF.md)**（架构、消息协议、踩坑清单、调试方法、路线图）。
 > 版本历史见 **[CHANGELOG.md](CHANGELOG.md)**；架构与取舍见 **[docs/DESIGN.md](docs/DESIGN.md)**。
@@ -16,7 +16,7 @@ Chrome / Edge 通用的自建双语网页翻译扩展（MV3）：**只用你自�
 
 ## 安装
 
-从 Releases 下载 `DualTrans-v<版本号>.zip` 解压，按下表加载解压出来的 `DualTrans` 文件夹（直接用仓库源码也一样）。
+从 Releases 下载 `Rimefox-v<版本号>.zip` 解压，按下表加载解压出来的 `Rimefox` 文件夹（直接用仓库源码也一样）。
 **升级**时把新版本覆盖到同一个文件夹再点「重新加载」：已解压扩展的 ID 跟文件夹路径绑定，路径不变设置和 API Key 才会保留。
 
 

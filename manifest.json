@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "DualTrans 双语对照翻译",
-  "version": "0.4.7",
-  "description": "自己的 API，自己的翻译引擎：整页双语对照翻译、动态内容补翻、多主题显示。",
+  "name": "凛狐 · 双语对照翻译",
+  "short_name": "凛狐",
+  "version": "0.4.8",
+  "description": "凛狐 Rimefox：用自己的 API 做整页双语对照翻译，动态内容自动补翻。",
   "minimum_chrome_version": "114",
   "permissions": [
     "storage",
@@ -21,14 +22,17 @@
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
+    "128": "icons/icon128.png",
+    "256": "icons/icon256.png"
   },
   "action": {
-    "default_title": "双语翻译",
+    "default_title": "凛狐 · 双语对照翻译",
     "default_popup": "popup/index.html",
     "default_icon": {
       "16": "icons/icon16.png",
-      "32": "icons/icon32.png"
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   },
   "options_ui": {

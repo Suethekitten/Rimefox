@@ -64,17 +64,19 @@ jobs:
             exit 1
           fi
 
-      # zip 里的文件夹名固定叫 DualTrans：已解压扩展的 ID 跟文件夹路径绑定，
+      # zip 里的文件夹名固定叫 Rimefox：已解压扩展的 ID 跟文件夹路径绑定，
       # 用户升级时把新版本覆盖到同一个文件夹再点"重新加载"，设置（包括 API Key）就不会丢
       - name: 打包
         if: steps.check.outputs.skip == 'false'
         id: pack
         run: |
-          ZIP="DualTrans-${{ steps.ver.outputs.tag }}.zip"
-          mkdir -p "$RUNNER_TEMP/pkg/DualTrans"
+          ZIP="Rimefox-${{ steps.ver.outputs.tag }}.zip"
+          mkdir -p "$RUNNER_TEMP/pkg/Rimefox"
           rsync -a --exclude '.git' --exclude '.github' --exclude '.gitignore' \
-            --exclude 'package.ps1' --exclude 'package.bat' ./ "$RUNNER_TEMP/pkg/DualTrans/"
-          (cd "$RUNNER_TEMP/pkg" && zip -qr "$GITHUB_WORKSPACE/$ZIP" DualTrans)
+            --exclude 'package.ps1' --exclude 'package.bat' \
+            --exclude 'icons/source.png' --exclude 'icons/preview-*.png' --exclude 'tools' \
+            ./ "$RUNNER_TEMP/pkg/Rimefox/"
+          (cd "$RUNNER_TEMP/pkg" && zip -qr "$GITHUB_WORKSPACE/$ZIP" Rimefox)
           unzip -l "$ZIP" | tail -1
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 
@@ -95,9 +97,9 @@ jobs:
 
           ---
 
-          **安装**：下载下面的 zip 并解压 → 打开 `chrome://extensions/`（Edge：`edge://extensions/`）→ 开启开发者模式 → 「加载已解压的扩展程序」→ 选择解压出来的 `DualTrans` 文件夹。
+          **安装**：下载下面的 zip 并解压 → 打开 `chrome://extensions/`（Edge：`edge://extensions/`）→ 开启开发者模式 → 「加载已解压的扩展程序」→ 选择解压出来的 `Rimefox` 文件夹。
 
-          **升级**：把新版本解压后覆盖原来的 `DualTrans` 文件夹，再在扩展管理页点「重新加载」。文件夹路径不变，设置和 API Key 都会保留。
+          **升级**：把新版本解压后覆盖原来的 `Rimefox` 文件夹，再在扩展管理页点「重新加载」。文件夹路径不变，设置和 API Key 都会保留。
           EOF
 
       - name: 发布 Release
@@ -106,6 +108,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.ver.outputs.tag }}" "${{ steps.pack.outputs.zip }}" \
-            --title "DualTrans ${{ steps.ver.outputs.tag }}" \
+            --title "凛狐 Rimefox ${{ steps.ver.outputs.tag }}" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             --target "$GITHUB_SHA"
