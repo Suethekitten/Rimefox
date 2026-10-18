@@ -17,9 +17,20 @@ import {
   mergeConfig
 } from '../lib/config.js';
 import { listModels, engineList } from '../lib/provider.js';
-import { PROVIDERS, CUSTOM_PROVIDER_ID, providerById } from '../lib/providers.js';
-
-const $ = (id) => document.getElementById(id);
+import { providerById } from '../lib/providers.js';
+import { $, fillSelect, setResult } from './ui.js';
+import { createModelPicker } from './model-picker.js';
+import {
+  NEW_CUSTOM_ID,
+  SEP_ID,
+  isCustomProvider,
+  fillProviderSelect,
+  updateProviderNameUI,
+  createCustomProvider,
+  updateKeyLink,
+  stashCurrentProvider,
+  providerSlot
+} from './provider-list.js';
 
 // 思考模式的三种取值（与 lib/config.js 的 DEFAULTS.thinkingMode 对应）
 const THINKING_MODES = [
@@ -57,27 +68,8 @@ const fields = {
   debug: $('debug')
 };
 
-function fillSelect(select, items) {
-  select.innerHTML = '';
-  items.forEach((item) => {
-    const opt = document.createElement('option');
-    opt.value = item.value;
-    opt.textContent = item.label;
-    if (item.disabled) opt.disabled = true;
-    select.appendChild(opt);
-  });
-}
-
 // 最近一次读到的配置（导出时用）
 let currentCfg = {};
-
-// 只增删 ok / bad，不覆盖元素原有的 class（提示文字现在多放在每行的说明里）。
-// 文字清空时退回 HTML 里写的默认说明（data-default，init 时记下）
-function setResult(node, text, kind) {
-  node.textContent = text || node.dataset.default || '';
-  node.classList.remove('ok', 'bad');
-  if (kind) node.classList.add(kind);
-}
 
 // ---------------- 快捷键录制 ----------------
 const hotkeyBtn = $('hotkeyBtn');
@@ -190,7 +182,7 @@ function updateThinkingUI() {
 }
 
 function applyConfig(cfg) {
-  fillProviderSelect();
+  refreshProviderList();
 
   const slot = slotFor(cfg, cfg.currentProvider);
   currentProvider = slot.provider;
@@ -223,14 +215,14 @@ function applyConfig(cfg) {
 
   updateEngineHints();
   updateThinkingUI();
-  updateKeyLink(providerById(slot.provider));
-  updateProviderNameUI();
-  updateModelHint();
+  updateKeyLink(keyLink, providerById(slot.provider));
+  syncProviderNameUI();
+  picker.updateHint();
 }
 
 function readForm() {
   // 先把手上的编辑存回内存，避免切过服务商后未保存的内容被丢掉
-  stashCurrentProvider();
+  stash();
 
   const providerConfig = {};
   Object.keys((currentCfg && currentCfg.providerConfig) || {}).forEach((id) => {
@@ -304,17 +296,22 @@ const NON_CHAT = /embed|rerank|whisper|tts|speech|audio|dall-?e|moderation|bge-|
 const REASONING = /reason|thinking|qwq|(^|[-/])[rz]1([-.]|$)|(^|[-/])o[134](-|$)/i;
 
 const modelHint = $('modelHint');
-const picker = $('modelPicker');
-const pickerSearch = $('modelSearch');
-const pickerList = $('modelList');
-const pickerToggle = $('modelToggle');
 const providerSelect = $('provider');
 const keyLink = $('keyLink');
 
+// 可搜索的模型选择器（渲染 / 过滤 / 键盘 / 开合在 options/model-picker.js）
+const picker = createModelPicker({
+  input: fields.model,
+  toggle: $('modelToggle'),
+  panel: $('modelPicker'),
+  search: $('modelSearch'),
+  list: $('modelList'),
+  hint: modelHint,
+  isSlow: (id) => REASONING.test(id)
+});
+
 let modelSeq = 0;
 let modelTimer = 0;
-let modelIds = [];
-let pickerIndex = -1;
 
 function scheduleModelFetch() {
   clearTimeout(modelTimer);
@@ -333,13 +330,10 @@ async function fetchModels(manual) {
   try {
     const ids = (await listModels({ engine: fields.engine.value, baseUrl, apiKey })).filter((id) => !NON_CHAT.test(id)).sort();
     if (seq !== modelSeq) return; // 期间地址或 Key 又改了，以最新一次为准
-    modelIds = ids;
-    if (!picker.hidden) renderPicker();
-    updateModelHint();
+    picker.setItems(ids);
   } catch (err) {
     if (seq !== modelSeq) return;
-    modelIds = [];
-    if (!picker.hidden) renderPicker();
+    picker.setItems([]);
     // "接口不提供模型列表"本身已经说了要手填，别再重复一遍
     const text = /手填/.test(err.message)
       ? err.message + '。'
@@ -348,209 +342,45 @@ async function fetchModels(manual) {
   }
 }
 
-function updateModelHint() {
-  const current = fields.model.value.trim();
-  if (!modelIds.length) {
-    setResult(modelHint, '填好 API 地址和 Key 后会自动获取可用模型；也可以直接手填模型名。');
-    return;
-  }
-  if (current && modelIds.indexOf(current) < 0) {
-    setResult(
-      modelHint,
-      '已获取 ' + modelIds.length + ' 个模型，但「' + current + '」不在列表里，请确认拼写或点「选择」挑一个。',
-      'bad'
-    );
-    return;
-  }
-  setResult(modelHint, '已获取 ' + modelIds.length + ' 个模型。点「选择」挑一个，或直接手填；别忘了保存。', 'ok');
-}
-
-// ---------------- 可搜索的模型选择器 ----------------
-function pickerItems(query) {
-  const q = String(query || '').trim().toLowerCase();
-  const hit = q ? modelIds.filter((id) => id.toLowerCase().indexOf(q) >= 0) : modelIds;
-  return hit.slice(0, 100); // 列表可能几百条，只渲染前 100
-}
-
-function renderPicker() {
-  const items = pickerItems(pickerSearch.value);
-  pickerList.innerHTML = '';
-  pickerIndex = -1;
-
-  if (!items.length) {
-    const empty = document.createElement('div');
-    empty.className = 'picker-empty';
-    empty.textContent = modelIds.length ? '没有匹配的模型' : '还没有拉取到模型列表';
-    pickerList.appendChild(empty);
-    return;
-  }
-
-  const current = fields.model.value.trim();
-  items.forEach((id) => {
-    const row = document.createElement('div');
-    row.className = 'picker-item' + (id === current ? ' is-current' : '');
-    row.dataset.id = id;
-    row.textContent = id;
-    if (REASONING.test(id)) {
-      const tag = document.createElement('span');
-      tag.className = 'picker-tag';
-      tag.textContent = '慢';
-      row.appendChild(tag);
-    }
-    row.addEventListener('mousedown', (event) => {
-      event.preventDefault();
-      chooseModel(id);
-    });
-    pickerList.appendChild(row);
-  });
-}
-
-function openPicker() {
-  if (!modelIds.length) {
-    setResult(modelHint, '先点「获取模型列表」把可用模型拉下来。', 'bad');
-    return;
-  }
-  picker.hidden = false;
-  pickerToggle.setAttribute('aria-expanded', 'true');
-  pickerSearch.value = '';
-  renderPicker();
-  pickerSearch.focus();
-}
-
-function closePicker() {
-  picker.hidden = true;
-  pickerToggle.setAttribute('aria-expanded', 'false');
-  pickerIndex = -1;
-}
-
-function chooseModel(id) {
-  fields.model.value = id;
-  closePicker();
-  updateModelHint();
-}
-
-function movePicker(step) {
-  const rows = Array.from(pickerList.querySelectorAll('.picker-item'));
-  if (!rows.length) return;
-  pickerIndex = (pickerIndex + step + rows.length) % rows.length;
-  rows.forEach((row, i) => row.classList.toggle('is-active', i === pickerIndex));
-  rows[pickerIndex].scrollIntoView({ block: 'nearest' });
-}
-
-pickerToggle.addEventListener('click', () => {
-  if (picker.hidden) openPicker();
-  else closePicker();
-});
-
-pickerSearch.addEventListener('input', renderPicker);
-
-pickerSearch.addEventListener('keydown', (event) => {
-  if (event.key === 'ArrowDown') {
-    event.preventDefault();
-    movePicker(1);
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault();
-    movePicker(-1);
-  } else if (event.key === 'Enter') {
-    event.preventDefault();
-    const rows = Array.from(pickerList.querySelectorAll('.picker-item'));
-    const hit = rows[pickerIndex] || rows[0];
-    if (hit && hit.dataset.id) chooseModel(hit.dataset.id);
-  } else if (event.key === 'Escape') {
-    event.preventDefault();
-    closePicker();
-  }
-});
-
-document.addEventListener('mousedown', (event) => {
-  if (picker.hidden) return;
-  if (picker.contains(event.target) || pickerToggle.contains(event.target)) return;
-  closePicker();
-});
-
-fields.model.addEventListener('input', updateModelHint);
-
 // ---------------- 提供商模板 ----------------
-const NEW_CUSTOM_ID = '__new_custom__';
-const SEP_ID = '__sep__';
+// 列表 / 名称 / 槽位等纯操作在 options/provider-list.js
+const providerNameEls = { nameField: $('providerNameField'), nameInput: $('providerName') };
 
-function isCustomProvider(id) {
-  return id === CUSTOM_PROVIDER_ID || /^custom:/.test(String(id || ''));
-}
-
-function fillProviderSelect() {
-  const items = PROVIDERS.map((p) => ({ value: p.id, label: p.name }));
-  const customs = (currentCfg && currentCfg.customProviders) || [];
-  if (customs.length) {
-    items.push({ value: SEP_ID, label: '────────────', disabled: true });
-    customs.forEach((p) => items.push({ value: p.id, label: p.name || '自定义' }));
-  }
-  items.push({ value: NEW_CUSTOM_ID, label: '＋ 新建自定义服务商' });
-  fillSelect(providerSelect, items);
-}
-
-// 自定义服务商才显示「名称 / 删除」
-function updateProviderNameUI() {
-  const custom = isCustomProvider(currentProvider);
-  $('providerNameField').hidden = !custom;
-  if (!custom) return;
-  const entry = ((currentCfg && currentCfg.customProviders) || []).find((p) => p.id === currentProvider);
-  $('providerName').value = (entry && entry.name) || '';
-}
-
-// 新建一个自定义服务商槽位（第一个沿用老 id，后面依次 custom:2、custom:3…）
-function createCustomProvider() {
-  const list = ((currentCfg && currentCfg.customProviders) || []).slice();
-  const has = (id) => list.some((p) => p.id === id);
-
-  let id = CUSTOM_PROVIDER_ID;
-  if (has(id)) {
-    let n = 2;
-    while (has('custom:' + n)) n += 1;
-    id = 'custom:' + n;
-  }
-
-  list.push({ id, name: '自定义 ' + (list.length + 1) });
-  currentCfg.customProviders = list;
-  return id;
-}
-
-function updateKeyLink(provider) {
-  if (provider && provider.keyUrl) {
-    keyLink.href = provider.keyUrl;
-    keyLink.hidden = false;
-  } else {
-    keyLink.hidden = true;
-    keyLink.removeAttribute('href');
-  }
-}
-
-// 把当前表单存回内存中的配置（切换服务商时不丢未保存的编辑）
-function stashCurrentProvider() {
-  if (!currentCfg) return;
-  currentCfg.providerConfig = currentCfg.providerConfig || {};
-  currentCfg.providerConfig[currentProvider] = {
-    engine: fields.engine.value || 'openai',
-    baseUrl: fields.baseUrl.value.trim(),
-    apiKey: fields.apiKey.value.trim(),
-    model: fields.model.value.trim()
+function formOf() {
+  return {
+    engine: fields.engine.value,
+    baseUrl: fields.baseUrl.value,
+    apiKey: fields.apiKey.value,
+    model: fields.model.value
   };
+}
+
+function stash() {
+  stashCurrentProvider(currentCfg, currentProvider, formOf());
+}
+
+function refreshProviderList() {
+  fillProviderSelect(providerSelect, currentCfg);
+}
+
+function syncProviderNameUI() {
+  updateProviderNameUI(providerNameEls, currentCfg, currentProvider);
 }
 
 // 载入某个服务商自己的地址 / Key / 模型（没保存过就用模板默认值）
 function loadProvider(id) {
-  const slot = slotFor(currentCfg || {}, id);
+  const slot = providerSlot(currentCfg, id);
   currentProvider = slot.provider;
   providerSelect.value = slot.provider;
   fields.engine.value = slot.engine;
   fields.baseUrl.value = slot.baseUrl || '';
   fields.apiKey.value = slot.apiKey || '';
   fields.model.value = slot.model || '';
-  modelIds = [];
-  closePicker();
+  picker.setItems([]);
+  picker.close();
   updateEngineHints();
-  updateKeyLink(providerById(slot.provider));
-  updateModelHint();
+  updateKeyLink(keyLink, providerById(slot.provider));
+  picker.updateHint();
 }
 
 // 切换服务商：各用各的地址 / Key / 模型
@@ -558,19 +388,19 @@ providerSelect.addEventListener('change', () => {
   const id = providerSelect.value;
   if (!id || id === SEP_ID) return;
 
-  stashCurrentProvider(); // 先把上一个服务商的编辑存住
+  stash(); // 先把上一个服务商的编辑存住
 
   if (id === NEW_CUSTOM_ID) {
-    const newId = createCustomProvider();
-    fillProviderSelect();
+    const newId = createCustomProvider(currentCfg);
+    refreshProviderList();
     loadProvider(newId);
-    updateProviderNameUI();
+    syncProviderNameUI();
     setResult(modelHint, '新的自定义服务商：填地址和 Key，测试通过后改个名字点「保存」。');
     return;
   }
 
   loadProvider(id);
-  updateProviderNameUI();
+  syncProviderNameUI();
   setResult($('testResult'), '');
 
   if (isCustomProvider(id)) {
@@ -613,9 +443,9 @@ $('deleteProvider').addEventListener('click', (event) => {
   );
   if (currentCfg.providerConfig) delete currentCfg.providerConfig[currentProvider];
 
-  fillProviderSelect();
+  refreshProviderList();
   loadProvider('deepseek');
-  updateProviderNameUI();
+  syncProviderNameUI();
   setResult(modelHint, '已删除该自定义服务商（点底部「保存」后生效）。');
 });
 
@@ -623,7 +453,7 @@ $('deleteProvider').addEventListener('click', (event) => {
 fields.engine.addEventListener('change', () => {
   const target = fields.engine.value;
   if (!target) return;
-  stashCurrentProvider();
+  stash();
   setResult($('testResult'), '');
   const label = (engineList().find((e) => e.id === target) || {}).label || target;
   setResult(modelHint, '协议已切换为「' + label + '」，地址和模型请确认后保存。');
@@ -753,7 +583,7 @@ async function init() {
     $(id).dataset.default = $(id).textContent;
   });
   bindNav();
-  fillProviderSelect();
+  refreshProviderList();
   fillSelect(fields.engine, engineList().map((e) => ({ value: e.id, label: e.label })));
   fillSelect(fields.thinkingMode, THINKING_MODES);
   fillSelect(fields.targetLang, LANGUAGES);
