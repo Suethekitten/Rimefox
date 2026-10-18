@@ -505,7 +505,7 @@
                 <span class="row-title">我的规则（JSON）</span>
                 <span class="row-desc" id="siteRulesHint">留空表示不加规则。字段：matches（网址，支持 *. 子域名和路径里的 *）、textSelectors（只翻这些区域）、excludeSelectors（不翻这些区域）、mode（dual / translation）、theme。</span>
               </span>
-              <textarea id="siteRules" rows="6" spellcheck="false" placeholder='[{"matches": ["news.example.com"], "textSelectors": ["article"], "excludeSelectors": [".ad"]}]'></textarea>
+              <textarea id="siteRules" rows="6" spellcheck="false" aria-describedby="siteRulesHint" placeholder='[{"matches": ["news.example.com"], "textSelectors": ["article"], "excludeSelectors": [".ad"]}]'></textarea>
               <div class="result" id="siteRulesResult"></div>
             </div>
           </div>
