@@ -1,136 +1,85 @@
-# 凛狐 Rimefox · 双语对照翻译
+<p align="center">
+  <img src="icons/source.png" width="96" height="96" alt="凛狐 Rimefox" />
+</p>
 
-> 交接开发请看 **[HANDOFF.md](HANDOFF.md)**（架构、消息协议、踩坑清单、调试方法、路线图）。
-> 版本历史见 **[CHANGELOG.md](CHANGELOG.md)**；架构与取舍见 **[docs/DESIGN.md](docs/DESIGN.md)**。
-> 隐私说明见 **[PRIVACY.md](PRIVACY.md)**；安全问题请按 **[SECURITY.md](SECURITY.md)** 私下报告。
-> 下载安装包：仓库的 **Releases** 页面（每次改版本号推送到 main 会自动发布）；本地打包也可以双击 `package.bat`。
+<h1 align="center">凛狐 Rimefox · 双语对照翻译</h1>
 
-Chrome / Edge 通用的自建双语网页翻译扩展（MV3）：**只用你自己的 API Key**，不接任何第三方免费端点，不向作者服务器发送任何内容。
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/manifest-v3-6f42c1" alt="Manifest V3" />
+  <img src="https://img.shields.io/badge/Chrome%20%2F%20Edge-114%2B-4285F4" alt="Chrome / Edge 114+" />
+</p>
 
-- 整页双语对照翻译（原文 + 译文分层显示）
-- 支持任意 OpenAI 兼容接口：DeepSeek / 智谱 / 硅基流动 / 通义 / 自建网关
-- 先翻眼前这屏；远处的内容滚到附近再翻（长页面省钱，可在设置里关掉）
-- 动态内容补翻（MutationObserver）、SPA 路由切换自动重翻
-- 批量合并请求 + 并发控制 + 三层缓存（刷新、重启浏览器后仍可命中）+ 429/5xx 自动重试（省 token、防限流）
-- 4 种译文样式、双语 / 仅译文切换、Alt+A（Mac 上是 Option+A）一键开关
-- 悬停对照：鼠标移到已翻译的段落上，同时高亮这一处的原文和译文（仅译文模式弹气泡显示原文）
-- 划词翻译、YouTube 字幕双语（非官方功能，见下文）
-- 趣味翻译：把当前页的正文改写成文言文 / 猫娘口吻（只对当前页生效）
-- 界面支持浅色 / 深夜配色，弹窗右上角一键切换；设置页和弹窗可切换中文 / English，可换强调色
-- 译文排版可调（字号、行高、与原文的间距、首行缩进）；深色网页上译文颜色自动适配
-- 站点规则：按网址指定只翻 / 跳过哪些区域；网页夜间模式（Beta，按网站开关）；译文自定义 CSS
-- 网页悬浮入口（默认关闭）：开关翻译、切换显示方式、翻译选中文字；划词译文可放进置顶小窗
-- 术语表（指定某些词必须怎么翻）+ 自定义提示词（追加自己的措辞要求）
-- 零构建：纯原生 ESM，不需要 npm / webpack，直接加载即可
+<p align="center">用自己的 API Key 做整页双语对照翻译，不经过任何作者服务器。</p>
+
+凛狐（Rimefox）是一个 Chrome / Edge 通用的网页翻译扩展（Manifest V3）：**只用你自己的 API Key**，不接第三方免费端点，也不向作者服务器发送任何内容。纯原生 JavaScript，零构建，改完刷新即可使用。
+
+*Rimefox is a bring-your-own-key bilingual translation extension for Chrome and Edge (Manifest V3).*
+
+## 核心功能
+
+- **整页双语对照** —— 原文与译文分层显示，多种译文样式，双语 / 仅译文一键切换
+- **自己的接口** —— DeepSeek、智谱 GLM、通义千问、Kimi、硅基流动、OpenRouter、Ollama、Anthropic、Gemini，以及任意 OpenAI 兼容网关
+- **省 token、防限流** —— 懒翻译（只翻屏幕附近）、批量合并、并发控制、三层缓存、429/5xx 自动重试
+- **动态页面** —— MutationObserver 补翻新内容，SPA 路由切换后自动重翻
+- **阅读辅助** —— 悬停对照、划词翻译、置顶翻译小窗、网页悬浮入口（默认关闭）
+- **YouTube 字幕双语** —— 打开 CC 时显示「原文 + 译文」（非官方功能，默认关闭）
+- **术语表与提示词** —— 指定词条必须怎么翻，追加自己的措辞要求；还能把当前页改写成文言文 / 猫娘口吻
+- **外观可调** —— 浅色 / 深夜配色、强调色、译文字号与行高、深色网页适配、站点规则、网页夜间模式（Beta）、译文自定义 CSS
+- **中英文界面** —— 设置页与弹窗支持中文 / English
+- **零构建** —— 不需要 npm、webpack 或编译步骤，直接加载本目录即可
 
 ## 安装
 
-从 Releases 下载 `Rimefox-v<版本号>.zip` 解压，按下表加载解压出来的 `Rimefox` 文件夹（直接用仓库源码也一样）。
-**升级**时把新版本覆盖到同一个文件夹再点「重新加载」：已解压扩展的 ID 跟文件夹路径绑定，路径不变设置和 API Key 才会保留。
-
+从本仓库的 **Releases** 页面下载 `Rimefox-v<版本号>.zip`，解压后按下表加载解压出来的 `Rimefox` 文件夹；直接用仓库源码也可以。
 
 | | Chrome | Edge |
 |---|---|---|
 | 1. 打开扩展管理页 | 地址栏输入 `chrome://extensions/` | 地址栏输入 `edge://extensions/` |
 | 2. 打开开发者模式 | 右上角「开发者模式」 | 左下角「开发人员模式」 |
-| 3. 加载本目录 | 点「加载已解压的扩展程序」，选择本目录 | 点「加载解压缩的扩展」，选择本目录 |
+| 3. 加载扩展 | 「加载已解压的扩展程序」，选择解压出的 `Rimefox` 文件夹 | 「加载解压缩的扩展」，选择解压出的 `Rimefox` 文件夹 |
 
-4. 首次加载会自动弹出设置页。**提供商**里可以直接选 DeepSeek / 智谱 GLM / 千问 / Kimi / 硅基流动 / OpenRouter / Ollama / Anthropic / Gemini，选中后自动填好地址；填 Key 会自动拉模型列表，选一个再点「测试连接」。用第三方兼容接口就选「＋ 新建自定义服务商」，填地址和 Key 后还能给它起个名字保存下来
-5. 打开任意网页，点工具栏图标或按 `Alt+A`（Mac：`Option+A`）翻译；再按一次还原原文。快捷键没反应时看设置页的「浏览器快捷键」：显示「未设置」说明这个组合键被其它扩展占用了，点「去浏览器里设置」换一个
-6. Chrome 会把新扩展收进工具栏的拼图图标里，点旁边的图钉把它固定出来更方便
-7. 想翻本地 `file://` 页面：在扩展的「详细信息」里打开「允许访问文件网址」（Edge：「允许访问文件 URL」）
+> **升级**：把新版本覆盖到同一个文件夹再点「重新加载」。已解压扩展的 ID 与文件夹路径绑定，路径不变，设置和 API Key 才会保留。
 
-## 从旧版升级（DualTrans → 凛狐）
+从 **0.4.7 或更早的 DualTrans** 升级、或想用配置导出 / 导入迁移，见 [docs/UPGRADING.md](docs/UPGRADING.md)。
 
-> 上面「安装」第 2 条说的"覆盖到同一个文件夹"适用于 **0.4.8 及以后**的版本之间。
-> 如果你装的是 **0.4.7 或更早**的 DualTrans，请看这一节。
+## 快速开始
 
-0.4.8 起项目更名为「凛狐 Rimefox」，发布包的文件夹名也从 `DualTrans` 变成了 `Rimefox`。
+1. 首次加载会自动打开设置页。在「提供商」里选一个服务（或「＋ 新建自定义服务商」），填好地址和 Key
+2. 点「获取模型列表」选一个模型，再点「测试连接」确认能通
+3. 打开任意网页，点工具栏图标或按 `Alt+A`（Mac：`Option+A`）翻译；再按一次还原原文
+4. 快捷键没反应时，看设置页「浏览器快捷键」：显示「未设置」说明组合键被其它扩展占用，点「去浏览器里设置」换一个
 
-**未打包扩展的 ID 是按文件夹绝对路径计算的**，路径变了就是另一个扩展，所以：
+> Chrome 会把新扩展收进工具栏的拼图图标里，点旁边的图钉固定出来更方便。想翻本地 `file://` 页面，需要在扩展「详细信息」里打开「允许访问文件网址」。
 
-- 浏览器会把新旧两版当成两个不同的扩展，可以同时存在
-- 旧版的 API Key、设置、缓存在新版里**不会自动继承**，需要重新填一次
+## 文档
 
-升级步骤：
+| 文档 | 内容 |
+|---|---|
+| [HANDOFF.md](HANDOFF.md) | 开发交接：架构、消息协议、踩坑清单、调试与发版流程 |
+| [docs/DESIGN.md](docs/DESIGN.md) | 切分模型、注入策略、生命周期、已知取舍 |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | 优先级、已完成 / 待办、明确不做的清单 |
+| [docs/UPGRADING.md](docs/UPGRADING.md) | 从旧版 DualTrans 升级与配置迁移 |
+| [docs/YOUTUBE.md](docs/YOUTUBE.md) | YouTube 字幕双语的限制、风险与隐私说明 |
+| [PRIVACY.md](PRIVACY.md) · [English](docs/privacy.en.md) | 隐私说明：会发送什么、保存在哪里 |
+| [SECURITY.md](SECURITY.md) | 安全问题如何私下报告 |
+| [docs/STORE.md](docs/STORE.md) | Chrome Web Store 上架材料与权限审计草稿 |
+| [CHANGELOG.md](CHANGELOG.md) | 每个版本的变更 |
 
-1. 打开旧版设置页，记下 API 地址 / Key / 模型名（Key 忘了就去申请它的平台重新复制）
-2. `edge://extensions/`（Chrome 为 `chrome://extensions/`）→ 卸载旧版 DualTrans
-3. 解压新版 `Rimefox-v<版本号>.zip` → 「加载解压缩的扩展」→ 选 `Rimefox` 文件夹
-4. 在新版设置页填回地址与 Key，点「测试连接」
+## 支持范围
 
-> **0.4.9 起支持「配置导出 / 导入」**：设置页「缓存与迁移」里可以把整份配置导出成 JSON（勾选后才包含 API Key），
-> 以后跨版本或换电脑时先导出、再导入即可。旧版没有这个功能，首次迁移仍需手动重填一次。
+- Chrome 114+ / Edge 114+，Manifest V3
+- 视频字幕只支持 YouTube 的 CC 字幕轨道；画面硬字幕、PDF / EPUB、图片 OCR 不做
+- 行内标签（`<b>`、`<a>`）不保证保留；个别重前端站点需要在设置页写站点规则
 
-> **为什么本地开发目录仍叫 `edge-bilingual/`？**
-> 改目录名同样会改变扩展 ID、丢失设置，所以只在对外名称上做了区隔。
-
-## 目录结构
-
-```
-edge-bilingual/
-├── manifest.json          MV3 清单
-├── background.js          service worker：翻译中枢、并发闸门、缓存、重试
-├── lib/
-│   ├── config.js          配置项与读写（chrome.storage.local）
-│   ├── provider.js        OpenAI 兼容接口客户端
-│   └── cache.js           三层翻译缓存（内存 / 会话 / 磁盘）
-├── content/
-│   ├── core.js            命名空间、文本工具、提示条
-│   ├── dom.js             段落切分、译文注入、还原
-│   ├── main.js            调度：开关、批处理、动态补翻、快捷键
-│   └── styles/inject.css  译文样式与主题
-├── popup/                 工具栏面板
-└── options/               设置页
-```
-
-## 关键设计
-
-**段落切分**：从 `body` 起递归，只下钻到「块级且包含文本」的子节点；没有块级子节点的元素视为一个翻译单元（`content/dom.js` 的 `walk`）。跳过 `code/pre/script/textarea/[contenteditable]/notranslate/aria-hidden` 以及隐藏元素。
-
-**长文本**：单段超过 `maxUnitChars`（默认 1200）按句末标点切开，分批翻译后拼回同一个注入点，避免一次请求过大。
-
-**结构安全**：`p/h*/div` 这类元素把译文插在后边（`afterend`）；`li/td/th/blockquote/figcaption` 或父容器是 flex/grid 时改为追加到内部，避免破坏列表与网格布局。
-
-**省钱**：条数 + 字符数双阈值合批；同语言跳过；同一批里重复的文本只翻一次；后台缓存命中直接返回（按网站和模型分开存，刷新页面、重启浏览器后短文本仍能命中）；并发跟设置走（默认 6）；默认只翻屏幕附近的内容，没滚到的不花钱。
-
-**隐私**：API Key 存在 `chrome.storage.local`，并收紧为只有扩展自身（background / 设置页）可读（`setAccessLevel`，浏览器不支持时跳过）。content script 拿到的配置里没有 Key，只有 `hasKey`，翻译通过消息交给 background 发请求；页面 JS 无法接触 Key。
-
-## 已知限制（v1）
-
-- 视频字幕只支持 YouTube 的 CC 字幕轨道（打开 CC 即显示「原文 + 译文」），画面里的硬字幕不支持（需要 OCR）；不支持 PDF / EPUB / 其它站点的视频字幕 / 图片 OCR —— 这几项各自是独立大工程，需要另开项目
-- 没有做行内标签级结构保真（例如段落里的 `<b>`、`<a>` 文字会被整段重写）；正文翻译够用，代码/富文本站点效果一般
-- 内置站点规则还很少，个别重前端站点需要在设置页「站点与兼容性」里自己写规则
-- 网页夜间模式用反色实现，画布绘制的界面、复杂背景图可能显示异常，所以默认关闭、只对名单里的网站生效
-
-## 后续路线
-
-- **下一步**：输入框翻译、自适应快捷键
-- **之后**：行内标签保真、扩充内置站点规则、夜间模式识别自带深色主题的网站
-- **观望**：会话级 Key 存储
-
-完整的优先级、预估与「明确不做」清单见 [docs/ROADMAP.md](docs/ROADMAP.md)。
-
-版本号：正式版 1.0 之前一律用 `0.x.y`——新功能升中间位（0.7.0 → 0.8.0），修 bug 升末位（0.7.0 → 0.7.1），`0.9.x` 之后是 `0.10.0`、`0.11.0`（按数字逐段比较，自动更新不受影响）；`1.0.0` 时承诺配置结构稳定、迁移可回退。规则见 [AGENTS.md](AGENTS.md)「版本号规则」。
-
----
-
-## YouTube 字幕（非官方功能）
-
-「YouTube 字幕双语」是**非官方**功能：凛狐与 YouTube、Google 没有任何关联，也未获其认可或支持；YouTube 是 Google LLC 的商标。
-
-- 它读取的是播放器在你的浏览器里**已经加载**的字幕数据，依赖 YouTube 未公开的内部接口，YouTube 改版后可能随时失效
-- **只翻 CC 字幕轨道**（人工字幕、自动生成字幕、YouTube 机翻字幕）。烧录在画面里的硬字幕抓不到：那需要对视频画面做文字识别（OCR），本项目不做；视频没有 CC 轨道时字幕按钮是灰的，这个功能也就不会出现
-- 字幕原文的版权归原作者；译文由你配置的模型生成，可能有误，请勿当作官方字幕转载或分发
-- 默认关闭，需要时在设置页「划词与字幕」里打开；使用时请遵守 YouTube 的服务条款
+完整清单见 [docs/DESIGN.md 的「已知取舍」](docs/DESIGN.md#7-已知取舍) 与 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 声明
 
-本项目为**独立实现**，不含任何第三方产品的代码、图标或文案，与任何商业产品无关联。
+本项目为**独立实现**，不含任何第三方产品的代码、图标或文案，与任何商业产品无关联。YouTube 字幕是**非官方**功能，与 YouTube、Google 无关联；YouTube 是 Google LLC 的商标。
 
-所有翻译请求都发往**你自己配置的接口**，不经过本项目作者的服务器；API Key 只保存在本机浏览器的 `chrome.storage.local` 中。
+所有翻译请求只发往**你自己配置的接口**，不经过本项目作者的服务器；API Key 只保存在本机浏览器的 `chrome.storage.local` 中。
 
 ## 许可
 
-[MIT](LICENSE)
-
+[MIT](LICENSE)。
