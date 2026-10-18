@@ -4,7 +4,15 @@
 import { $, setResult } from './ui.js';
 import { normalizeGlossary, parseGlossaryCsv, toGlossaryCsv } from '../lib/glossary.js';
 import { STARTER } from '../lib/glossary-sample.js';
-import { localIso } from '../lib/config.js';
+
+// 文件名用的时间戳：不带冒号和加号（Windows 不允许，会被替换成下划线，看起来像乱码）
+function fileStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return (
+    d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds())
+  );
+}
 
 export function createGlossaryEditor(opts) {
   const wrap = $('glossaryList');
@@ -204,7 +212,7 @@ export function createGlossaryEditor(opts) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'rimefox-glossary-' + localIso() + '.csv';
+    a.download = 'rimefox-glossary-' + fileStamp() + '.csv';
     document.body.appendChild(a);
     a.click();
     a.remove();
