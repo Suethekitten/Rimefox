@@ -129,16 +129,28 @@
     var batch = [];
     var chars = 0;
     var now = Date.now();
+    // 先收集窗口内的候选，再按"离当前播放位置的距离"排序：
+    // 正在说的那一句必须排第一，否则积压时当前句要等前面几批翻完才轮到。
+    var cands = [];
     for (var i = 0; i < units.length; i += 1) {
       var u = units[i];
       if (u.end < nowMs - LOOK_BEHIND_MS) continue;
       if (u.start > nowMs + LOOK_AHEAD_MS) break;
       if (u.tag || track.trans[i] !== undefined || track.pending[i]) continue;
       if (track.failedAt[i] && now - track.failedAt[i] < RETRY_MS) continue;
-      if (batch.length && (batch.length >= BATCH_ITEMS || chars + u.text.length > BATCH_CHARS)) break;
-      batch.push(i);
-      chars += u.text.length;
+      cands.push({
+        i: i,
+        dist: u.start <= nowMs && u.end >= nowMs ? 0 : (u.start > nowMs ? u.start - nowMs : nowMs - u.end)
+      });
     }
+    cands.sort(function (a, b) {
+      return a.dist - b.dist || a.i - b.i;
+    });
+    cands.forEach(function (c) {
+      if (batch.length && (batch.length >= BATCH_ITEMS || chars + units[c.i].text.length > BATCH_CHARS)) return;
+      batch.push(c.i);
+      chars += units[c.i].text.length;
+    });
     if (!batch.length) return;
 
     var mine = track;
