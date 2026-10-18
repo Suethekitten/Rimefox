@@ -29,6 +29,7 @@ YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默
 | 数据 | 位置 | 说明 |
 |---|---|---|
 | 界面语言、主题、术语表、自定义提示词 | `chrome.storage.local` | 界面语言与主题仅本机使用；主题还在扩展页面 localStorage 缓存以避免闪白 |
+| 外观、站点规则、夜间模式网站名单、译文自定义 CSS | `chrome.storage.local` | 仅本机使用，不随翻译请求发送；强调色等外观也在扩展页面 localStorage 缓存以避免闪白 |
 | 设置与 API Key | `chrome.storage.local` | 收紧为只有扩展自己的页面和后台可读，网页里的脚本拿不到；内容脚本也只知道「有没有 Key」 |
 | 翻译缓存（会话） | `chrome.storage.session` | 翻过的原文和译文，关闭浏览器即清空 |
 | 翻译缓存（磁盘） | `chrome.storage.local` | 只存短文本（原文 + 译文 ≤ 160 字符），上限 512 KB；按网站域名和模型分开存 |

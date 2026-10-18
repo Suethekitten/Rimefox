@@ -57,21 +57,27 @@ edge-bilingual/
 │   ├── parse.js           模型返回值解析（JSON 数组容错）+ 输出长度护栏
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格），纯函数
 │   ├── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
-│   └── ui-theme-boot.js   设置页/弹窗的首帧主题预判（<head> 同步执行，避免闪一帧白底）
+│   ├── appearance.js      强调色预设、译文排版变量、译文自定义 CSS 清洗（纯函数，后台按网址算 page 对象用）
+│   ├── site-rules.js      站点规则：内置规则、校验、按网址匹配；夜间模式网站名单
+│   ├── ui-appearance.js   设置页/弹窗共用：强调色等写到 <html>、深浅色圆形过渡、跨页面配置同步、空闲执行
+│   └── ui-theme-boot.js   设置页/弹窗的首帧主题与外观预判（<head> 同步执行，避免闪一帧白底）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
-│   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）
-│   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗
-│   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡
+│   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）；站点规则的只翻 / 跳过区域
+│   ├── appearance.js      网页里的外观：强调色、译文排版、自定义 CSS、页面明暗、夜间模式写到 <html> 上
+│   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗；DT.control 给悬浮入口用
+│   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡（翻完可「置顶」）
 │   ├── subtitles-core.js  YouTube 字幕纯函数（解析 json3、拼句）；自检页与 YouTube 运行时共用
 │   ├── subtitles.js       YouTube 字幕运行时：懒翻译、叠层显示（只在 YouTube 加载）
 │   ├── youtube-hook.js    页面主环境（world: MAIN）：捕获播放器的字幕请求，转给 subtitles.js
 │   ├── hover.js           悬停对照：高亮同一处的原文和译文，替换型单元弹原文气泡
-│   └── styles/inject.css  译文样式与主题
+│   ├── pip.js             置顶翻译窗：Document Picture-in-Picture，不支持时退回 window.open 小窗
+│   ├── dock.js            悬浮入口：Shadow DOM（closed）里的小球 + 按钮列，默认关闭
+│   └── styles/inject.css  译文样式与主题、页面明暗适配、夜间模式反色
 ├── popup/                 工具栏面板（含随手翻译）
-├── options/               设置页（提供商模板、模型选择器、快捷键录制；拆分见 options/ 下各模块）
-├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词）
-└── selftest/              离线自检（88 条用例）
+├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
+├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言）
+└── selftest/              离线自检（96 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -104,7 +110,8 @@ DT.collect()  收集待翻单元
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
 | `translate` | `{texts: string[], target: string, style?: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败 |
-| `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本） |
+| `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本）。`config.page` 是后台按发送方网址算好的 `{accent, customCss, typo, site, night, provider}`（自定义 CSS 已清洗、站点规则已匹配） |
+| `mode:set` | `{mode}` | `{ok}` | 悬浮入口切显示方式后记进配置；只接受 `dual` / `translation`，内容脚本改不了别的配置项 |
 | `test` | — | `{ok, ms, model, sample}` / `{ok:false,error}` | 测试连接 |
 | `cache:clear` | — | `{ok}` | 清空三层缓存（storage 里的 `dt.cache.v1` 一并删掉） |
 | `cache:stats` | — | `{ok, stats: {memory, disk, hits, misses}, bytesInUse: {session, local}}` | 设置页「翻译缓存」卡片用；`bytesInUse` 是浏览器实际记的占用 |
@@ -307,7 +314,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-88 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）。**改 `dom.js` 前后必跑。**
+96 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -319,7 +326,9 @@ node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、�
 node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度（13 条）
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息（5 条，假 fetch）
 node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹（18 条）
-node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t()（8 条）
+node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖（13 条）
+node test/appearance.test.mjs  # 强调色、译文排版变量、自定义 CSS 清洗（8 条）
+node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间名单、配置导入（8 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
@@ -367,7 +376,22 @@ node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 /
 | `subtitleTranslate` | false | YouTube 字幕双语：打开 CC 时接管字幕，只翻播放位置往后约 90 秒（0.5.2 起默认关闭；已保存过设置的用户保持原值） |
 | `hoverCompare` | true | 悬停对照：高亮同一处的原文和译文 |
 | `uiTheme` | `auto` | 设置页 / 弹窗配色：`auto` 跟随系统，`light` / `dark` 固定；弹窗右上角按钮直接改这一项 |
-| `uiLang` | `zh` | 设置页 / 弹窗界面语言：`zh` / `en` |
+| `uiLang` | `zh` | 设置页 / 弹窗界面语言：`zh` / `en`；网页里的悬浮入口和置顶小窗也跟着它 |
+| `accentColor` | `violet` | 强调色：预设 id（`violet` / `blue` / `teal` / `green` / `amber` / `rose` / `slate`）或 `#rrggbb`；`violet` = 不改网页译文颜色 |
+| `reduceTransparency` | false | 设置页 / 弹窗：玻璃效果改实色 |
+| `disableShadow` | false | 设置页 / 弹窗：去掉投影 |
+| `typoFontScale` | 100 | 译文字号百分比（70–160，100 = 跟随原文） |
+| `typoLineHeight` | 0 | 译文行高（0 = 跟随原文，最大 3） |
+| `typoGap` | 3 | 段落译文与原文的间距（0.1em 为单位，0–20） |
+| `typoIndent` | false | 段落译文首行缩进两格 |
+| `pageDarkAdapt` | true | 深色网页上换一套译文颜色（`html[data-dt-scheme="dark"]`） |
+| `siteRules` | `[]` | 用户站点规则 `[{matches, textSelectors?, excludeSelectors?, mode?, theme?}]`，优先于内置规则；最多 50 条 |
+| `nightMode` | false | 网页夜间模式总开关（Beta） |
+| `nightSites` | `[]` | 夜间模式生效的域名（含子域名，不带端口） |
+| `customCss` | `''` | 译文自定义 CSS：只允许属性声明，后台清洗后包进 `.dt-target` |
+| `dockEnabled` | false | 网页悬浮入口 |
+| `dockSide` | `right` | 悬浮入口位置：`right` / `left` |
+| `dockAutoHide` | true | 悬浮入口收起时半藏 |
 | `customPrompt` | `''` | 追加到系统提示词末尾，进缓存指纹（改了旧译文失效） |
 | `glossary` | `[]` | 术语表 `[{src, dst, cat?}]`，全局一份，命中才注入提示词（进缓存指纹） |
 | `debug` | false | 输出调试日志 |
@@ -381,10 +405,12 @@ node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 /
 2. **行内标签不在译文里保留** —— 段落里的 `<b>` / `<a>` 会被整段重写，译文是纯文本，不带原格式。
 3. **`<br>` 分隔的长帖**读起来是"一整段"，没做逐行对照（route 在图中的 `roadmap`）。
 4. ~~没有图标~~（0.4.7 已加：`icons/`，源文件是 `icon.svg` / `icon-small.svg`，PNG 用无头 Chrome 渲染）
-5. **没有站点规则库**，全部靠通用启发式；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
+5. **站点规则库还很小**：内置规则只有 GitHub 文件列表和 Wikipedia 语言列表两条，其余靠通用启发式和用户自己写的规则；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
 6. **浏览器快捷键（manifest 里的 Alt+A）只是建议**：被其它扩展占用时浏览器不会分配给我们，而且按键在浏览器层就被那个扩展拿走，页面内快捷键也收不到。扩展没法自己改浏览器快捷键，只能引导用户去 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）；设置页和弹窗会用 `chrome.commands.getAll()` 显示实际绑定结果
 7. **划词没有独立快捷键** —— 快捷键监听在 `main.js`，按计划等 P0 拆分后再统一成"有选区就划词、没选区就整页"的自适应键
 8. **不支持 OpenAI Responses 协议**（`/v1/responses`）——目前只有 OpenAI 兼容（chat completions）/ Anthropic / Gemini 三种。遇到只开 responses 的第三方接口会 404，见第 10 节 P3
+9. **网页夜间模式是反色实现**：`filter: invert(1) hue-rotate(180deg)` + 媒体元素反向回正；画布绘制的界面、CSS 背景图、自带深色主题的网站可能显示异常，所以默认关闭、只对名单里的网站生效。
+10. **置顶小窗依赖浏览器能力**：Document Picture-in-Picture 需要 Chrome 116+；退回的 `window.open` 小窗不会置顶，网页设置了 COOP 等隔离或拦截弹窗时打不开（会提示）。
 
 ---
 
@@ -396,8 +422,8 @@ node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 /
 | P0 | **结构保真**：给文本节点打占位记号，要求模型保留 `<b>`/`<a>` 并回填 | 中 | 中（要改注入层） |
 | P1 | **输入框翻译**：`Alt+I` 翻译当前输入框并回填 | 小 | 中（要处理 IME） |
 | P1 | **划词快捷键**：监听在 `main.js`，等 P0 拆完再和整页翻译统一成"自适应快捷键" | 小 | 低 |
-| P2 | **网页夜间模式**：把整页压暗 / 反色，译文跟着夜间配色；参考 AveMujica 的 `forceDark` | 中 | 高（图片/视频反色与站点兼容） |
-| P2 | **站点规则**：`{matches, textSelectors, excludeSelectors}` 配置化 | 中 | 中 |
+| P2 | **站点规则库扩充**：0.7.0 已有规则机制，按真实站点补内置规则（每条都要在保存的真实页面上验证） | 小 | 低 |
+| P2 | **夜间模式改进**：自带深色主题的网站自动跳过反色；CSS 背景图更准确地回正 | 中 | 中 |
 | P2 | **按 `<br>` 拆行**：长帖逐行对照 | 小 | 低 |
 | P3 | **OpenAI Responses 协议**（`/v1/responses`）：只有遇到"只开 responses 的第三方接口"时才需要 | 小 | 中（离线无法验证） |
 | P3 | PDF / 其它站点的视频字幕 / 图片 OCR | 大 | 高（单独立项，别混进这个仓库）；YouTube 字幕已做（见 5.4） |
@@ -409,7 +435,7 @@ node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 /
 1. 改 `manifest.json` 的 `version`
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错）
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **88 / 88**
+4. 跑自检页：必须 **96 / 96**
 4b. 跑 Node 单测：`for f in test/*.test.mjs; do node $f; done`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -429,6 +455,8 @@ node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 /
 - 新增"跳过规则"前先想清楚：会不会把**可见内容**也跳过（坑 6、7）
 - 新增"替换规则"前先想清楚：会不会把**正文**也替换（坑：Tarkov 全页 flex）
 - 任何改动都先跑自检页，再上真实站点
+- **我们加到网页上的界面**（悬浮入口、置顶小窗、气泡、提示条）都带 `data-dt-ui`，切分 / 观察器 / 点击补扫都会跳过；大块界面放进 closed Shadow DOM，不受网页样式影响。文案用 `DT.uiText(zh, en)` 跟随界面语言
+- **配置变了要跟着变的模块**用 `DT.onConfig(fn)` 订阅（外观、站点规则、悬浮入口），`main.js` 的 `loadConfig` 读完后统一 `DT.emitConfig`
 - **调度用的纯函数放 `core.js`，挂成 `DT.*`**（自检页能直接测）。约定：不读 `window`、不调 `getBoundingClientRect`、不碰 DOM 状态，矩形/时间等全部由调用方传参。现有：`distanceOf` / `nearView` / `batchLimits` / `nextRetry` / `joinSlots` / `matchesHotkey` / `keyFromCode` / `isEditableTarget`
 
 ---
@@ -473,14 +501,21 @@ node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 /
 
 ---
 
-## 14. 本版技术记录（0.6.2）
+## 14. 本版技术记录（0.7.0）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
+> 参考项目 BewlyBewly-AveMujica 是 AGPL-3.0：只借鉴思路（色板派生、Dock 交互、设置项「底部展开区」），代码全部独立实现，没有复制。
 
-- **深夜模式 + 设计语言重做**（`options/options.css`、`popup/popup.css`）：参考 AveMujica 暗色体系——近黑冷调底（`#05060a`）、半透明卡片 + 内高光、玻璃侧栏 / 保存栏 / 下拉、软阴影、12–16px 圆角、紫色渐变强调；浅色同步换底与阴影；动画遵守 `prefers-reduced-motion`。颜色仍然全部走变量，深色只换一组值。
-- **弹窗一键切换深色 / 浅色**（`popup/popup.js`）：月亮 / 太阳按钮，点一次写入 `config.uiTheme`（不再停在 auto），同时更新 localStorage 首帧缓存；`auto` 时跟随系统，并用 `matchMedia` 在系统切换时换图标。
-- **首帧不闪白**（`lib/ui-theme-boot.js`）：`<head>` 里同步读 localStorage 的 `dt.uiTheme`，在样式表生效前设置 `data-theme` / `color-scheme`；没有缓存就退回 `prefers-color-scheme`。缓存由 `applyUiTheme()` 维护。
-- **界面中英文**（`lib/i18n.js`）：新增 `t()`（按当前语言输出；`translateText` 仍是纯中→英），弹窗的动态状态（未开启 / 翻译中 N 段 / 失败原因 / 快捷翻译 / 诊断 / 不支持页面）全部改走 `t()`，补了 15 条正则文案；`walk()` 对 `TEXTAREA` 只翻 placeholder 属性、不碰内容；`applyI18n(null, 'en')` 在没有 document 的 Node 单测里也能切语言。
-- **弹窗状态卡显示服务商 + 模型**：自定义服务商显示用户起的名字；模型为空时只显示服务商。
-- **测试**：Node 160 条（i18n 8 条，含动态文案与 `t()`）、自检 88 条不变。
-
+- **外观底层**（`lib/appearance.js`）：7 个强调色预设 + 自定义 `#rrggbb`；`typographyVars(cfg)` 全默认时返回 `null`（网页上什么都不写）；`sanitizeTranslationCss` 只放行 `属性: 值`，拒绝 `{ } @ < \`、`url()` / `image-set()`、`expression` / `javascript:` / `behavior` / `-moz-binding`、注释，最多 2000 字 / 40 条声明。
+- **按网址算外观**（`background.js` 的 `pageAppearance`）：`config:get` 带回 `page = {accent, customCss, typo, site, night, provider}`，内容脚本不用自己匹配规则、也拿不到原始 CSS 文本；`content/appearance.js` 写到 `<html>`（`--dt-accent`、`data-dt-typo` + 变量、`#dt-custom-css`、`data-dt-night`）。
+- **页面明暗**：`DT.pageScheme()` 取 body → html 的实际背景亮度（< 0.18 判深色），都透明时看 `color-scheme`；加载 2 秒后和系统明暗变化时再判一次；夜间模式开着时不判断（页面已反色）。`inject.css` 里所有强调色派生都用 `color-mix`，深色换一套。
+- **夜间模式**：`html[data-dt-night="on"]` 整页 `invert(1) hue-rotate(180deg)`，`img / picture / video / canvas / iframe / embed / object / svg image / [style*="background-image"] / body > [data-dt-ui]` 反向回正。只在 `nightMode && hostListed(host, nightSites)` 时开。`normalizeHosts` 去掉协议、路径、`*.` 和端口，单个词不算域名。
+- **站点规则**（`lib/site-rules.js` + `content/dom.js`）：内置规则（GitHub 文件名列、Wikipedia 语言列表，都在保存的真实页面上验证过）+ 用户规则，用户规则优先、同一网址取第一条命中；`excludeSelectors` 进 `isSkipped`，`textSelectors` 限定收集根（嵌套的只留最外层），选择器逐个用 `DocumentFragment.querySelector` 试，写错的单独忽略；规则里的 `mode` / `theme` 覆盖这个网站的显示方式。换网址（SPA）时重新取一次配置。
+- **设置页**：新增「外观」「站点与兼容性」两个分区（`options/appearance-ui.js`）；风险提示徽标；翻译分区的并发 / 批量参数收进 `<details class="more">`；侧栏搜索（`options/search.js`）按当前语言的显示文字过滤行 / 卡片 / 分区，命中折叠区里的项自动展开、清空时收回。站点规则 JSON / 自定义 CSS 实时校验，写错时拦下保存并滚动到出错处；点保存前先把还在防抖的「改动数」更新做掉，避免它稍后把拦截提示冲掉。
+- **跨页面同步**（`lib/ui-appearance.js`）：`watchConfig` 监听 `storage.onChanged`，`rememberSaved` 记住自己最近写入的 JSON，相同就不回调（防回写循环）；`chrome.runtime.id` 没了（扩展被重载）就摘掉监听。设置页没有未保存改动时整页刷新成新值，有改动时只同步外观并提示。只在扩展自己的页面用，内容脚本仍然只走后台的 `dt:configChanged` 广播。
+- **深浅色过渡**：`document.startViewTransition` + `::view-transition-new(root)` 上的 `clip-path: circle()` 动画，从按钮位置扩散；不支持或 `prefers-reduced-motion` 时直接切。首帧缓存（`dt.uiLook`）也带上强调色 / 减少透明 / 关闭阴影。
+- **弹窗**：应用外观、动画切换主题、实时同步；「夜间」一行：打开 = 当前网站进名单并打开总开关，关闭 = 去掉能匹配当前网站的名单项（总开关不动）。只在 http(s) 页面显示。
+- **悬浮入口**（`content/dock.js`）：只在顶层页面；closed Shadow DOM；`:host` 和收起的面板都是 `pointer-events: none`，只有小球和展开后的面板接收鼠标（否则看不见的面板会挡住网页边缘的点击）；状态靠 `MutationObserver` 看 `<html>` 的 `data-dt / data-dt-mode / data-dt-scheme / data-dt-night`；按钮 `mousedown` 时 `preventDefault` 保住网页选区；切显示方式走后台 `mode:set` 记进配置（否则下次配置广播会把状态改回去、和页面显示对不上）。服务商标签由后台在 `page.provider` 里给（名 + 模型，不含 Key）。
+- **置顶翻译窗**（`content/pip.js`）：`documentPictureInPicture.requestWindow`，失败退回 `window.open('', 'rimefox-pinned', 'popup,…')`；两种都要用户手势。小窗是空白文档，内容全部 `textContent` 写入，样式是自己的一段 CSS（不搬网页样式）；`selection.js` 每次翻完通过 `DT.onSelectionResult` 推给它。
+- **界面语言**：新增文案的英文、带编号 / 原文的校验提示用正则；几条错误用「；」连接时逐条翻（整句自带「；」的文案仍先整句匹配）；顺手补了 0.6.2 起漏掉的服务商名、模型获取结果、缓存统计、浏览器快捷键行。
+- **测试**：Node 181 条（新增 appearance 8、site-rules 8，i18n 8 → 13：校验器产生的每条错误都要有英文）；自检 88 → 96（站点规则 2、外观 2、悬浮入口 4）。另外用无头 Chrome + DevTools 协议跑了设置页（35 项）、弹窗（12 项）、悬浮入口与置顶小窗（16 项）的交互场景，脚本不在仓库里。

@@ -20,6 +20,7 @@ Subtitle translation is off by default. A packaged MAIN-world script nevertheles
 |---|---|
 | API keys, provider configuration, glossary and custom prompts | chrome.storage.local, retained until edited, removed or the extension is uninstalled. These fields may be transmitted as described above. |
 | Interface language and theme | Local settings only; the theme is also cached in the extension page's localStorage to prevent flashing. |
+| Appearance, site rules, night-mode site list and custom translation CSS | chrome.storage.local, local settings only and not sent with translation requests; appearance choices are also cached in the extension page's localStorage to prevent flashing. |
 | Translation cache containing source and translated text | In-memory cache and chrome.storage.session; session storage is cleared when the browser session ends. A bounded short-text cache persists in chrome.storage.local (512 KB budget; source plus translation at most 160 characters per entry). Capacity eviction applies, with no fixed retention period. Cache keys include site scope, not a browsing-history log. |
 | Per-tab translation resume state | chrome.storage.session; removed on tab close. |
 
