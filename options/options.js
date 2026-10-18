@@ -610,12 +610,7 @@ $('save').addEventListener('click', async () => {
 // 恢复默认：只填进表单，确认后点「保存」才生效（可以「放弃更改」反悔）。
 // 已保存的各服务商地址 / Key / 模型和自定义服务商保留，其它项回到默认值
 $('reset').addEventListener('click', () => {
-  // 只重置"翻译行为 / 显示"这类设置，不切走用户当前选的服务商
-  currentCfg = mergeConfig(currentCfg, {
-    ...DEFAULTS,
-    currentProvider: currentCfg.currentProvider,
-    customProviders: (currentCfg && currentCfg.customProviders) || []
-  });
+  currentCfg = mergeConfig(currentCfg, { ...DEFAULTS, customProviders: (currentCfg && currentCfg.customProviders) || [] });
   applyConfig(currentCfg);
   updateDirty();
   setResult($('saveResult'), '已填入默认值，点「保存」后生效');
