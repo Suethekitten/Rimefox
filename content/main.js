@@ -26,7 +26,7 @@
   // 直到内容变了、用户手动重翻或改了设置。
   // 以前失败段在每次点击、悬停、页面变动时都整页重发，遇到限流（429）只会越试越被限；
   // 也不能整页一起退避 —— 一批固定出错的段落会把新加载内容的翻译一起拖住。
-  var RETRY_DELAYS = [5000, 15000, 45000];
+  // 退避表本身在 core.js 的 DT.RETRY_DELAYS / DT.nextRetry（纯函数，自检可测）
   var failures = new WeakMap(); // el → { text, count, until }
   var retryTimer = 0;
   var retryAt = 0;
@@ -36,13 +36,9 @@
   var lastViewH = -1;
   var lazyTimer = 0;
 
-  // 懒翻译的范围：屏幕上方 1 屏到下方 2 屏。下方多留一些，正常往下读时译文已经提前到了
-  var LAZY_ABOVE = 1;
-  var LAZY_BELOW = 2;
-
-  function isNearView(el, viewH) {
-    var r = el.getBoundingClientRect();
-    return r.bottom >= -viewH * LAZY_ABOVE && r.top <= viewH * (1 + LAZY_BELOW);
+  // 懒翻译的范围（屏幕上方 1 屏到下方 2 屏）在 core.js：DT.LAZY_ABOVE / DT.LAZY_BELOW
+  function nearView(el, viewH) {
+    return DT.nearView(el.getBoundingClientRect(), viewH);
   }
 
   // 滚动 / 改窗口大小：待翻队列按新位置重排；懒翻译时还要补翻新进入范围的内容。
@@ -105,10 +101,9 @@
   function noteFailure(unit) {
     var prev = failures.get(unit.el);
     if (!prev) DT.state.failed += 1;
-    var count = prev && prev.text === unit.text ? prev.count + 1 : 1;
-    var delay = RETRY_DELAYS[count - 1] || 0; // 0 = 不再自动重试
-    failures.set(unit.el, { text: unit.text, count: count, until: Date.now() + delay });
-    return delay;
+    var plan = DT.nextRetry(prev, unit.text, Date.now());
+    failures.set(unit.el, { text: unit.text, count: plan.count, until: plan.until });
+    return plan.delay;
   }
 
   function clearFailure(el) {
@@ -190,13 +185,13 @@
         if (settled.get(unit.el) === unit.text) return false;
         // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
         // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
-        if (lazy && !isNearView(unit.el, viewH)) {
+        if (lazy && !nearView(unit.el, viewH)) {
           deferred += 1;
           return false;
         }
         var fail = failures.get(unit.el);
         if (fail && fail.text === unit.text) {
-          if (fail.count > RETRY_DELAYS.length) return false; // 已放弃
+          if (fail.count > DT.RETRY_DELAYS.length) return false; // 已放弃
           if (now < fail.until) {
             wantRetry(fail.until - now); // 还在退避中：这轮跳过，到点再来
             return false;
@@ -232,13 +227,8 @@
       // 现在每取一批都按"离当前屏幕多远"排序：屏幕内最先，往下的其次（多半要往下读），
       // 已经滚过去的最后。用户中途滚动，下一批就跟着换。
       viewMoved = true;
-      function distanceOf(el) {
-        var r = el.getBoundingClientRect();
-        if (!r.width && !r.height) return 1e9; // 不在布局里（折叠菜单等），放最后
-        var h = window.innerHeight || 800;
-        if (r.bottom < 0) return -r.bottom * 2; // 在上方：权重加倍
-        if (r.top > h) return r.top - h;
-        return 0; // 在屏幕内
+      function viewHeight() {
+        return window.innerHeight || 800;
       }
       function reprioritize() {
         viewMoved = false;
@@ -248,7 +238,7 @@
         pending.forEach(function (seg) {
           if (seen[seg.ui]) return;
           seen[seg.ui] = true;
-          queue[seg.ui].prio = distanceOf(queue[seg.ui].el);
+          queue[seg.ui].prio = DT.distanceOf(queue[seg.ui].el.getBoundingClientRect(), viewHeight());
         });
         pending.sort(function (a, b) {
           return queue[a.ui].prio - queue[b.ui].prio || a.ui - b.ui || a.k - b.k;
@@ -258,21 +248,14 @@
       // 屏幕内的批次要小：非流式请求要等整批生成完才一起返回，
       // 一批 2000 字符时眼前这屏要等半分钟；拆小后分给多路并发同时翻，几秒就出来
       // 再往下一屏以内的用中等批次：正常往下读时，下一屏要在读完这屏之前翻好
-      var NEAR_ITEMS = 3;
-      var NEAR_CHARS = 500;
-      var SOON_CHARS = 1000;
+      // 具体上限由 DT.batchLimits 决定（纯函数，自检可测）
       function takeBatch() {
         // 页面级滚动直接比对位置（不依赖 scroll 事件的派发时机）；页面内部容器的滚动靠 viewMoved
         if (viewMoved || window.scrollY !== lastScrollY || window.innerHeight !== lastViewH) reprioritize();
         var prio = queue[pending[0].ui].prio;
-        var near = prio === 0;
-        var soon = prio <= (window.innerHeight || 800);
-        var limitItems = near ? Math.min(maxItems, NEAR_ITEMS) : maxItems;
-        var limitChars = near
-          ? Math.min(maxChars, NEAR_CHARS)
-          : soon
-          ? Math.min(maxChars, SOON_CHARS)
-          : maxChars;
+        var limits = DT.batchLimits(prio, viewHeight(), maxItems, maxChars);
+        var limitItems = limits.items;
+        var limitChars = limits.chars;
         var batch = [];
         var chars = 0;
         while (pending.length) {
@@ -292,12 +275,7 @@
         for (var k = 0; k < unit.slots.length; k += 1) {
           if (unit.slots[k] === undefined) return; // 还有段没回来（或失败了，等下次补扫重试）
         }
-        var text = unit.slots
-          .filter(function (part) {
-            return part;
-          })
-          .join(' ')
-          .trim();
+        var text = DT.joinSlots(unit.slots);
         unit.done = true;
         if (!text) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
@@ -480,42 +458,16 @@
   var lastToggleAt = 0;
   var TOGGLE_DEDUPE_MS = 500;
 
-  // 物理键位上的字母 / 数字（"KeyA" → "a"）
-  function keyFromCode(code) {
-    var m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(String(code || ''));
-    return m ? (m[1] || m[2]).toLowerCase() : '';
-  }
-
-  // 解析 "alt+a" / "alt+shift+a" / "ctrl+shift+a" 这类配置
-  function matchesHotkey(event, spec) {
-    var parts = String(spec || 'alt+a').toLowerCase().split('+');
-    var key = parts.pop();
-    if (!key) return false;
-    var wantAlt = parts.indexOf('alt') >= 0;
-    var wantCtrl = parts.indexOf('ctrl') >= 0;
-    var wantShift = parts.indexOf('shift') >= 0;
-    if (wantAlt !== event.altKey) return false;
-    if (wantCtrl !== event.ctrlKey) return false;
-    if (wantShift !== event.shiftKey) return false;
-    if (event.metaKey) return false;
-    var pressed = String(event.key || '').toLowerCase();
-    if (pressed === key) return true;
-    // macOS 上 Option+A 的 event.key 是 "å"（Option+E 等还是 "Dead"），俄语布局下是 "ф"：
-    // 按出来的不是 ASCII 字母数字时，退回看物理键位
-    return !/^[a-z0-9]$/.test(pressed) && keyFromCode(event.code) === key;
-  }
+  // 物理键位 / 快捷键解析在 core.js：DT.keyFromCode / DT.matchesHotkey（纯函数，自检可测）
 
   function bindHotkey() {
     document.addEventListener(
       'keydown',
       function (event) {
         var spec = (DT.state.config && DT.state.config.hotkey) || 'alt+a';
-        if (!matchesHotkey(event, spec)) return;
-        var target = event.target;
-        if (target && target.nodeType === 1) {
-          if (target.isContentEditable) return;
-          if (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-        }
+        if (!DT.matchesHotkey(event, spec)) return;
+        // 正在输入框 / 可编辑区域里打字：不抢这个键
+        if (DT.isEditableTarget(event.target)) return;
         event.preventDefault();
         var now = Date.now();
         if (now - lastToggleAt < TOGGLE_DEDUPE_MS) return; // 和浏览器快捷键去重
@@ -733,6 +685,11 @@
     if (msg.type === 'dt:toggle') {
       // 浏览器快捷键刚和页面内快捷键一起触发过：忽略这一次（弹窗按钮不带 source，不受影响）
       if (msg.source === 'command' && Date.now() - lastToggleAt < TOGGLE_DEDUPE_MS) {
+        sendResponse(summarize());
+        return false;
+      }
+      // 浏览器快捷键不区分焦点：正在输入框里打字时不该被它切走翻译
+      if (msg.source === 'command' && DT.isEditableTarget(document.activeElement)) {
         sendResponse(summarize());
         return false;
       }

@@ -393,6 +393,7 @@ node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、�
 4b. 跑 Node 单测：`node test/engines.test.mjs`、`node test/config.test.mjs`、`node test/providers.test.mjs`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，Release 说明就从这里摘
+   - **每版控制在 3–6 条，只写用户能感知的变化**；实现细节、重构过程、内部取舍写进本文件，不要塞进 CHANGELOG（0.4.9/0.5.0 写得太长，协作者提过）
 7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检、打包 `Rimefox-v<版本号>.zip`、创建 `v<版本号>` 的 Release。
    同一版本只发一次；没改版本号的推送不会发版。也可以在 GitHub 的 Actions 页面手动运行
 
@@ -406,6 +407,7 @@ node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、�
 - 新增"跳过规则"前先想清楚：会不会把**可见内容**也跳过（坑 6、7）
 - 新增"替换规则"前先想清楚：会不会把**正文**也替换（坑：Tarkov 全页 flex）
 - 任何改动都先跑自检页，再上真实站点
+- **调度用的纯函数放 `core.js`，挂成 `DT.*`**（自检页能直接测）。约定：不读 `window`、不调 `getBoundingClientRect`、不碰 DOM 状态，矩形/时间等全部由调用方传参。现有：`distanceOf` / `nearView` / `batchLimits` / `nextRetry` / `joinSlots` / `matchesHotkey` / `keyFromCode` / `isEditableTarget`
 
 ---
 

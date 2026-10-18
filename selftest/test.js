@@ -63,6 +63,30 @@
     return DT.looksLikeTarget(text, 'zh-CN') === false ? true : '中英混排被判成已达标，会漏翻';
   });
 
+  check('looksLikeTarget: 日文（汉字多）不能判成中文', function () {
+    var cases = ['進捗状況を確認します', '無料プランのご案内です', '９月進捗其一のまとめ'];
+    var bad = cases.filter(function (t) {
+      return DT.looksLikeTarget(t, 'zh-CN') !== false;
+    });
+    return bad.length ? '这些日文被判成中文了：' + JSON.stringify(bad) : true;
+  });
+
+  check('looksLikeTarget: 目标日语时中文不能被跳过', function () {
+    return DT.looksLikeTarget('这是一个完整的中文句子，用于测试识别效果。', 'ja') === false
+      ? true
+      : '中文被判成"已是日语"，会漏翻';
+  });
+
+  check('looksLikeTarget: 目标韩语时中文不能被跳过', function () {
+    return DT.looksLikeTarget('这是一个完整的中文句子，用于测试识别效果。', 'ko') === false
+      ? true
+      : '中文被判成"已是韩语"，会漏翻';
+  });
+
+  check('looksLikeTarget: 目标日语时带假名的日文应跳过', function () {
+    return DT.looksLikeTarget('進捗状況を確認します。', 'ja') === true ? true : '应判为已是日语';
+  });
+
   check('normalizeText: 折叠空白', function () {
     return eq(DT.normalizeText('  a \n\t b  '), 'a b');
   });
@@ -512,6 +536,144 @@
     var cases = [['zh-Hans', 'zh-CN', true], ['zh-Hant', 'zh-CN', false], ['zh-Hant', 'zh-TW', true], ['en-US', 'en', true], ['en', 'zh-CN', false]];
     var bad = cases.filter(function (c) { return DT.subs.sameLanguage(c[0], c[1]) !== c[2]; });
     return bad.length ? '语言比较错：' + JSON.stringify(bad) : true;
+  });
+
+  // ---------------- 调度纯函数（从 main.js 抽到 core.js） ----------------
+  check('distanceOf: 屏幕内为 0', function () {
+    var d = DT.distanceOf({ top: 100, bottom: 120, width: 300, height: 20 }, 800);
+    return d === 0 ? true : '应为 0，实际 ' + d;
+  });
+
+  check('distanceOf: 上方按 2 倍权重', function () {
+    var d = DT.distanceOf({ top: -200, bottom: -50, width: 300, height: 150 }, 800);
+    return d === 100 ? true : '应为 100，实际 ' + d;
+  });
+
+  check('distanceOf: 下方按距离', function () {
+    var d = DT.distanceOf({ top: 900, bottom: 940, width: 300, height: 40 }, 800);
+    return d === 100 ? true : '应为 100，实际 ' + d;
+  });
+
+  check('distanceOf: 不在布局里给极大值', function () {
+    var d = DT.distanceOf({ top: 0, bottom: 0, width: 0, height: 0 }, 800);
+    return d >= 1e9 ? true : '零尺寸应排最后，实际 ' + d;
+  });
+
+  check('nearView: 上方 1 屏内算近', function () {
+    var rect = { top: -700, bottom: -600, width: 300, height: 100 };
+    return DT.nearView(rect, 800) === true ? true : '上方 1 屏内应算近';
+  });
+
+  check('nearView: 上方超过 1 屏算远', function () {
+    var rect = { top: -900, bottom: -850, width: 300, height: 50 };
+    return DT.nearView(rect, 800) === false ? true : '上方 900px 应算远';
+  });
+
+  check('nearView: 下方 2 屏内算近', function () {
+    var rect = { top: 2300, bottom: 2400, width: 300, height: 100 };
+    return DT.nearView(rect, 800) === true ? true : '2400 应在 800*(1+2) 之内';
+  });
+
+  check('nearView: 下方超过 2 屏算远', function () {
+    var rect = { top: 2450, bottom: 2500, width: 300, height: 50 };
+    return DT.nearView(rect, 800) === false ? true : '2500 已超出范围';
+  });
+
+  check('batchLimits: 屏幕内 3 条 / 500 字', function () {
+    var l = DT.batchLimits(0, 800, 8, 2000);
+    return l.items === 3 && l.chars === 500 ? true : '实际 ' + JSON.stringify(l);
+  });
+
+  check('batchLimits: 一屏以内中等批次', function () {
+    var l = DT.batchLimits(400, 800, 8, 2000);
+    return l.items === 8 && l.chars === 1000 ? true : '实际 ' + JSON.stringify(l);
+  });
+
+  check('batchLimits: 远处用满', function () {
+    var l = DT.batchLimits(3000, 800, 8, 2000);
+    return l.items === 8 && l.chars === 2000 ? true : '实际 ' + JSON.stringify(l);
+  });
+
+  check('batchLimits: 用户设置更小时不能撑大', function () {
+    var l = DT.batchLimits(0, 800, 2, 300);
+    return l.items === 2 && l.chars === 300 ? true : '应取用户更小的值：' + JSON.stringify(l);
+  });
+
+  check('nextRetry: 第一次失败等 5s', function () {
+    var p = DT.nextRetry(null, 'abc', 1000);
+    return p.count === 1 && p.delay === 5000 && p.until === 6000 ? true : JSON.stringify(p);
+  });
+
+  check('nextRetry: 同一段连续失败 15s / 45s', function () {
+    var p1 = DT.nextRetry({ text: 'abc', count: 1 }, 'abc', 1000);
+    var p2 = DT.nextRetry({ text: 'abc', count: 2 }, 'abc', 1000);
+    return p1.delay === 15000 && p2.delay === 45000 ? true : JSON.stringify([p1, p2]);
+  });
+
+  check('nextRetry: 第四次放弃（0 延迟）', function () {
+    var p = DT.nextRetry({ text: 'abc', count: 3 }, 'abc', 1000);
+    return p.count === 4 && p.delay === 0 ? true : JSON.stringify(p);
+  });
+
+  check('nextRetry: 文本变了重新计数', function () {
+    var p = DT.nextRetry({ text: 'old', count: 3 }, 'new', 1000);
+    return p.count === 1 && p.delay === 5000 ? true : JSON.stringify(p);
+  });
+
+  check('joinSlots: 丢空段、空格连接', function () {
+    var s = DT.joinSlots(['第一段', '', undefined, '第二段']);
+    return s === '第一段 第二段' ? true : '实际 ' + JSON.stringify(s);
+  });
+
+  check('matchesHotkey: alt+a 命中', function () {
+    var ev = { altKey: true, ctrlKey: false, shiftKey: false, metaKey: false, key: 'a', code: 'KeyA' };
+    return DT.matchesHotkey(ev, 'alt+a') === true ? true : '应命中';
+  });
+
+  check('matchesHotkey: 没按 Alt 不命中', function () {
+    var ev = { altKey: false, ctrlKey: false, shiftKey: false, metaKey: false, key: 'a', code: 'KeyA' };
+    return DT.matchesHotkey(ev, 'alt+a') === false ? true : '不应命中';
+  });
+
+  check('matchesHotkey: 配置要 Shift 但没按', function () {
+    var ev = { altKey: true, ctrlKey: false, shiftKey: false, metaKey: false, key: 'a', code: 'KeyA' };
+    return DT.matchesHotkey(ev, 'alt+shift+a') === false ? true : '不应命中';
+  });
+
+  check('matchesHotkey: 带了 Meta 一律不命中', function () {
+    var ev = { altKey: true, ctrlKey: false, shiftKey: false, metaKey: true, key: 'a', code: 'KeyA' };
+    return DT.matchesHotkey(ev, 'alt+a') === false ? true : 'Meta 存在时应拒绝';
+  });
+
+  check('matchesHotkey: macOS Option+A 退回物理键位', function () {
+    var ev = { altKey: true, ctrlKey: false, shiftKey: false, metaKey: false, key: 'å', code: 'KeyA' };
+    return DT.matchesHotkey(ev, 'alt+a') === true ? true : '非 ASCII 时应按 code 兜底';
+  });
+
+  check('keyFromCode: 字母 / 数字 / 其它键', function () {
+    return DT.keyFromCode('KeyA') === 'a' && DT.keyFromCode('Digit5') === '5' && DT.keyFromCode('F5') === ''
+      ? true
+      : '解析结果不对';
+  });
+
+  check('isEditableTarget: 输入框 / 文本域 / 下拉 / contenteditable 都要拦', function () {
+    var input = document.createElement('input');
+    var ta = document.createElement('textarea');
+    var sel = document.createElement('select');
+    var ce = document.createElement('div');
+    ce.setAttribute('contenteditable', 'true');
+    document.body.appendChild(ce);
+
+    var plain = document.createElement('div');
+    var bad = [];
+    if (!DT.isEditableTarget(input)) bad.push('input');
+    if (!DT.isEditableTarget(ta)) bad.push('textarea');
+    if (!DT.isEditableTarget(sel)) bad.push('select');
+    if (!DT.isEditableTarget(ce)) bad.push('contenteditable');
+    if (DT.isEditableTarget(plain)) bad.push('普通 div 不该算');
+
+    ce.remove();
+    return bad.length ? bad.join(' / ') : true;
   });
 
   // ---------------- 渲染 ----------------

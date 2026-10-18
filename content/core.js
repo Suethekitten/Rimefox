@@ -117,7 +117,9 @@
   // 这段文本是否已经基本是目标语言（避免中→中、英→英）
   // 注意：不能只看 CJK 占比。中英混排的段落（作者原文就混写）如果被判成
   // "已是中文"，整段就不会翻，表现为"有些段落没翻译"。
-  // 规则：要同时满足「CJK 占绝对多数」且「拉丁字母很少」才算已达标。
+  // 规则：要同时满足「CJK 占绝对多数」且「拉丁字母很少」才算已达标；
+  // 另外必须排除假名 / 谚文 —— 日文常混大量汉字（「進捗状況」「無料」），
+  // 只看汉字比例会把日文判成中文，然后被"跳过已是目标语言"漏掉。
   DT.looksLikeTarget = function (text, lang) {
     if (!text) return false;
     var letters = (text.match(/\p{L}/gu) || []).length;
@@ -130,16 +132,19 @@
     var latin = (text.match(/[A-Za-z]/g) || []).length;
 
     if (code.indexOf('zh') === 0) {
+      if (kana > 0 || hangul > 0) return false; // 有假名/谚文就不是中文
       if (cjk / letters <= 0.75) return false;
       if (latin / letters > 0.15) return false;
       return true;
     }
     if (code.indexOf('ja') === 0) {
+      if (kana === 0) return false; // 没有假名的不当日语（否则中文会被判成"已是日语"）
       if ((kana + cjk) / letters <= 0.6) return false;
       if (latin / letters > 0.2) return false;
       return true;
     }
     if (code.indexOf('ko') === 0) {
+      if (hangul === 0) return false; // 没有谚文的不当韩语
       if (hangul / letters <= 0.6) return false;
       if (latin / letters > 0.2) return false;
       return true;
@@ -182,6 +187,101 @@
     });
 
     return safe.length ? safe : [text.slice(0, limit)];
+  };
+
+  // ---------------- 调度用的纯函数 ----------------
+  // 这些函数不读 window、不调 getBoundingClientRect：矩形由调用方传进来。
+  // 这样自检页能直接给假矩形做断言，main.js 里只剩流程编排。
+
+  // 懒翻译范围：屏幕上方 1 屏到下方 2 屏
+  DT.LAZY_ABOVE = 1;
+  DT.LAZY_BELOW = 2;
+
+  // 元素是否在"该翻"的可视区范围内（rect 为元素相对视口的矩形）
+  DT.nearView = function (rect, viewH) {
+    if (!rect) return false;
+    var h = Number(viewH) || 800;
+    return rect.bottom >= -h * DT.LAZY_ABOVE && rect.top <= h * (1 + DT.LAZY_BELOW);
+  };
+
+  // 离当前屏幕多远：屏幕内 0；上方按 2 倍权重；下方按距离；不在布局里给一个极大值
+  DT.distanceOf = function (rect, viewH) {
+    if (!rect || (!rect.width && !rect.height)) return 1e9;
+    var h = Number(viewH) || 800;
+    if (rect.bottom < 0) return -rect.bottom * 2;
+    if (rect.top > h) return rect.top - h;
+    return 0;
+  };
+
+  // 取批上限：屏幕内的批次要小（非流式要等整批生成完），下一屏以内中等，其余用满
+  DT.BATCH_NEAR_ITEMS = 3;
+  DT.BATCH_NEAR_CHARS = 500;
+  DT.BATCH_SOON_CHARS = 1000;
+
+  DT.batchLimits = function (prio, viewH, maxItems, maxChars) {
+    var h = Number(viewH) || 800;
+    var items = Number(maxItems) || 8;
+    var chars = Number(maxChars) || 2000;
+    var near = prio === 0;
+    var soon = prio <= h;
+    return {
+      items: near ? Math.min(items, DT.BATCH_NEAR_ITEMS) : items,
+      chars: near ? Math.min(chars, DT.BATCH_NEAR_CHARS) : soon ? Math.min(chars, DT.BATCH_SOON_CHARS) : chars
+    };
+  };
+
+  // 失败退避表：同一段文本连续失败依次等 5s / 15s / 45s，第 4 次返回 0 表示放弃
+  DT.RETRY_DELAYS = [5000, 15000, 45000];
+
+  DT.nextRetry = function (prev, text, now) {
+    var count = prev && prev.text === text ? prev.count + 1 : 1;
+    var delay = DT.RETRY_DELAYS[count - 1] || 0;
+    return { count: count, delay: delay, until: (Number(now) || Date.now()) + delay };
+  };
+
+  // 长段落被切成多段后拼回去：丢掉空段，用空格连接
+  DT.joinSlots = function (slots) {
+    return (slots || [])
+      .filter(function (part) {
+        return part;
+      })
+      .join(' ')
+      .trim();
+  };
+
+  // 是否正在可编辑控件里（输入框 / 文本域 / 下拉 / contenteditable）。
+  // 浏览器快捷键是浏览器层触发的，页面内守卫拦不住，内容脚本这里再判一次。
+  DT.isEditableTarget = function (el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.isContentEditable) return true;
+    return /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+  };
+
+  // 物理键位上的字母 / 数字（"KeyA" → "a"）
+  DT.keyFromCode = function (code) {
+    var m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(String(code || ''));
+    return m ? (m[1] || m[2]).toLowerCase() : '';
+  };
+
+  // 解析 "alt+a" / "alt+shift+a" / "ctrl+shift+a" 这类配置。
+  // event 只用到 altKey / ctrlKey / shiftKey / metaKey / key / code 这几个字段
+  DT.matchesHotkey = function (event, spec) {
+    if (!event) return false;
+    var parts = String(spec || 'alt+a').toLowerCase().split('+');
+    var key = parts.pop();
+    if (!key) return false;
+    var wantAlt = parts.indexOf('alt') >= 0;
+    var wantCtrl = parts.indexOf('ctrl') >= 0;
+    var wantShift = parts.indexOf('shift') >= 0;
+    if (wantAlt !== !!event.altKey) return false;
+    if (wantCtrl !== !!event.ctrlKey) return false;
+    if (wantShift !== !!event.shiftKey) return false;
+    if (event.metaKey) return false;
+    var pressed = String(event.key || '').toLowerCase();
+    if (pressed === key) return true;
+    // macOS 上 Option+A 的 event.key 是 "å"（Option+E 是 "Dead"），俄语布局下是 "ф"：
+    // 按出来的不是 ASCII 字母数字时，退回看物理键位
+    return !/^[a-z0-9]$/.test(pressed) && DT.keyFromCode(event.code) === key;
   };
 
   // 轻量提示条（不依赖页面样式）
