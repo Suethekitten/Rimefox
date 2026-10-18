@@ -472,10 +472,13 @@
     return enable();
   }
 
-  // Alt+A 的页面级兜底。
-  // 浏览器的 commands 一旦被别的扩展占用，onCommand 就永远不触发。
-  // 这里在页面里再抓一次，两者用 lastToggleAt 去重，不会翻两次。
+  // 页面内快捷键（设置页可录制，默认 Alt+A）。
+  // 浏览器快捷键（manifest commands）没分配到我们时，按键会直接传给网页，这里能接住；
+  // 但如果同一组合键被别的扩展注册成了浏览器快捷键，按键在浏览器层就被它拿走，网页收不到，
+  // 这里也无能为力——只能到 chrome://extensions/shortcuts 换键（设置页会提示）。
+  // 两条路径用 lastToggleAt 去重，不会"开了又关"。
   var lastToggleAt = 0;
+  var TOGGLE_DEDUPE_MS = 500;
 
   // 物理键位上的字母 / 数字（"KeyA" → "a"）
   function keyFromCode(code) {
@@ -515,7 +518,7 @@
         }
         event.preventDefault();
         var now = Date.now();
-        if (now - lastToggleAt < 400) return; // 和浏览器命令去重
+        if (now - lastToggleAt < TOGGLE_DEDUPE_MS) return; // 和浏览器快捷键去重
         toggle().catch(function (err) {
           DT.log('hotkey toggle failed', err);
         });
@@ -728,6 +731,11 @@
     if (!msg || !msg.type) return false;
 
     if (msg.type === 'dt:toggle') {
+      // 浏览器快捷键刚和页面内快捷键一起触发过：忽略这一次（弹窗按钮不带 source，不受影响）
+      if (msg.source === 'command' && Date.now() - lastToggleAt < TOGGLE_DEDUPE_MS) {
+        sendResponse(summarize());
+        return false;
+      }
       toggle()
         .then(sendResponse)
         .catch(function (err) {

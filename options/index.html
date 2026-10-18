@@ -27,11 +27,15 @@
           <span class="hint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
         </label>
 
-        <label class="field">
+        <div class="field">
           <span class="name">模型名</span>
-          <input id="model" type="text" spellcheck="false" placeholder="deepseek-chat" />
-          <span class="hint">例如 deepseek-chat、glm-4-flash、Qwen2.5-72B-Instruct。</span>
-        </label>
+          <div class="hotkey-row model-row">
+            <input id="model" type="text" spellcheck="false" placeholder="deepseek-chat" autocomplete="off" />
+            <select id="modelSelect" hidden></select>
+            <button type="button" id="refreshModels" class="btn">获取模型列表</button>
+          </div>
+          <span class="hint" id="modelHint">填好 API 地址和 Key 后会自动获取可用模型；也可以直接手填，例如 deepseek-chat、glm-4-flash。</span>
+        </div>
 
         <div class="actions">
           <button id="test" class="btn">测试连接</button>
@@ -71,11 +75,15 @@
             <span class="hint">单段超过该字符数时按句子切开分别翻译。</span>
           </label>
 
-          <div class="field">
+          <div class="field wide">
             <span class="name">快捷键</span>
             <div class="hotkey-row">
+              <span id="browserShortcut" class="result">浏览器快捷键：检测中…</span>
+              <button type="button" id="openShortcuts" class="btn">去浏览器里设置</button>
+            </div>
+            <div class="hotkey-row">
               <button type="button" id="hotkeyBtn" class="hotkey-btn">Alt + A</button>
-              <span class="hint" id="hotkeyHint">点击按钮，然后直接按下你想要的组合键（Esc 取消）</span>
+              <span class="hint" id="hotkeyHint">页面内快捷键：点击按钮，然后直接按下组合键（Esc 取消）</span>
             </div>
           </div>
 

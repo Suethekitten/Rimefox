@@ -1,4 +1,15 @@
-import { DEFAULTS, getConfig, saveConfig, LANGUAGES, THEMES, IS_MAC, hotkeyLabel } from '../lib/config.js';
+import {
+  DEFAULTS,
+  getConfig,
+  saveConfig,
+  LANGUAGES,
+  THEMES,
+  IS_MAC,
+  hotkeyLabel,
+  browserShortcut,
+  openShortcutsPage
+} from '../lib/config.js';
+import { listModels } from '../lib/provider.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -152,6 +163,122 @@ function readForm() {
   };
 }
 
+// ---------------- 浏览器快捷键 ----------------
+// manifest 里的 Alt+A 只是"建议"：被别的扩展占用时浏览器不会分配给我们，按了没反应，
+// 而且按键在浏览器层就被那个扩展拿走了，页面内快捷键也收不到。这里显示浏览器实际分配的结果。
+async function renderBrowserShortcut() {
+  const node = $('browserShortcut');
+  const shortcut = await browserShortcut();
+  if (shortcut === null) {
+    setResult(node, '浏览器快捷键：读取失败', '');
+  } else if (shortcut) {
+    setResult(node, '浏览器快捷键：' + shortcut, 'ok');
+  } else {
+    setResult(
+      node,
+      '浏览器快捷键：未设置。' + hotkeyLabel('alt+a') + ' 可能已被其它扩展占用，点右边按钮给「翻译 / 还原当前页面」设一个键。',
+      'bad'
+    );
+  }
+}
+
+$('openShortcuts').addEventListener('click', openShortcutsPage);
+// 从快捷键设置页切回来时刷新
+window.addEventListener('focus', renderBrowserShortcut);
+
+// ---------------- 模型列表 ----------------
+// 只留能对话的：嵌入、重排、语音、画图这类模型不能拿来翻译
+const NON_CHAT = /embed|rerank|whisper|tts|speech|audio|dall-?e|moderation|bge-|stable-diffusion|flux|kolors|cogview|cogvideo|video|image/i;
+// 带"思考"过程的模型：能用，但整页翻译会慢很多倍
+const REASONING = /reason|thinking|qwq|(^|[-/])[rz]1([-.]|$)|(^|[-/])o[134](-|$)/i;
+
+const modelSelect = $('modelSelect');
+const modelHint = $('modelHint');
+let modelSeq = 0;
+let modelTimer = 0;
+
+function scheduleModelFetch() {
+  clearTimeout(modelTimer);
+  modelTimer = setTimeout(fetchModels, 800);
+}
+
+async function fetchModels(manual) {
+  const baseUrl = fields.baseUrl.value.trim();
+  const apiKey = fields.apiKey.value.trim();
+  if (!baseUrl || !apiKey) {
+    if (manual === true) setResult(modelHint, '先填好 API 地址和 Key。', 'bad');
+    return;
+  }
+  const seq = ++modelSeq;
+  setResult(modelHint, '正在获取模型列表…');
+  try {
+    const ids = (await listModels({ baseUrl, apiKey })).filter((id) => !NON_CHAT.test(id)).sort();
+    if (seq !== modelSeq) return; // 期间地址或 Key 又改了，以最新一次为准
+    renderModelList(ids);
+  } catch (err) {
+    if (seq !== modelSeq) return;
+    renderModelList([]);
+    // "接口不提供模型列表"本身已经说了要手填，别再重复一遍
+    const text = /手填/.test(err.message)
+      ? err.message + '。'
+      : '获取模型列表失败：' + err.message + '。可以直接手填模型名。';
+    setResult(modelHint, text, 'bad');
+  }
+}
+
+function renderModelList(ids) {
+  modelSelect.innerHTML = '';
+  modelSelect.hidden = !ids.length;
+  if (!ids.length) return;
+
+  const head = document.createElement('option');
+  head.value = '';
+  head.textContent = '从 ' + ids.length + ' 个模型中选择…';
+  modelSelect.appendChild(head);
+  ids.forEach((id) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = REASONING.test(id) ? id + '（带思考，翻译慢）' : id;
+    modelSelect.appendChild(opt);
+  });
+
+  // 没填过模型就自动选一个：优先默认模型，其次第一个不带思考的。填过的不动
+  let picked = '';
+  if (!fields.model.value.trim()) {
+    picked = ids.includes(DEFAULTS.model) ? DEFAULTS.model : ids.find((id) => !REASONING.test(id)) || ids[0];
+    fields.model.value = picked;
+  }
+  syncModelSelect(ids.length, picked);
+}
+
+// 输入框是唯一的真值；下拉框只跟着显示，并提示"填的模型不在列表里"
+function syncModelSelect(count, picked) {
+  const current = fields.model.value.trim();
+  const listed = Array.from(modelSelect.options).some((o) => o.value && o.value === current);
+  modelSelect.value = listed ? current : '';
+  if (current && !listed) {
+    setResult(modelHint, '已获取 ' + count + ' 个模型，但当前填的「' + current + '」不在列表里，请确认拼写或从右边选一个。', 'bad');
+  } else {
+    setResult(
+      modelHint,
+      '已获取 ' + count + ' 个模型' + (picked ? '，已自动选好「' + picked + '」' : '') + '。可以从右边的列表换一个，别忘了保存。',
+      'ok'
+    );
+  }
+}
+
+modelSelect.addEventListener('change', () => {
+  if (!modelSelect.value) return;
+  fields.model.value = modelSelect.value;
+  syncModelSelect(modelSelect.options.length - 1, '');
+});
+fields.model.addEventListener('input', () => {
+  if (!modelSelect.hidden) syncModelSelect(modelSelect.options.length - 1, '');
+});
+fields.baseUrl.addEventListener('input', scheduleModelFetch);
+fields.apiKey.addEventListener('input', scheduleModelFetch);
+$('refreshModels').addEventListener('click', () => fetchModels(true));
+
 async function init() {
   fillSelect(fields.targetLang, LANGUAGES);
   fillSelect(fields.theme, THEMES);
@@ -159,6 +286,8 @@ async function init() {
   const cfg = await getConfig();
   applyConfig(cfg);
   $('saveResult').textContent = '';
+  renderBrowserShortcut();
+  fetchModels(); // 已经保存过地址和 Key 时，打开设置页就把列表准备好
 }
 
 $('save').addEventListener('click', async () => {

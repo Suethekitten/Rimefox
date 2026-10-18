@@ -1,7 +1,7 @@
 # DualTrans 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.4.5 ｜ 目录：`edge-bilingual/`
+> 版本：0.4.6 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -101,7 +101,7 @@ DT.collect()  收集待翻单元
 
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
-| `dt:toggle` | — | 状态快照 | 开/关翻译（**立即返回**，不等翻完） |
+| `dt:toggle` | `{source?}` | 状态快照 | 开/关翻译（**立即返回**，不等翻完）。`source: 'command'` = 浏览器快捷键触发，0.5 秒内和页面内快捷键去重 |
 | `dt:status` | — | 状态快照 | `{enabled, mode, target, total, translated, failed, skipped, lastError, busy}` |
 | `dt:setMode` | `{mode}` | 快照 | `dual` / `translation`，会重建 |
 | `dt:setTarget` | `{target}` | 快照 | 切换目标语言，会重建 |
@@ -177,6 +177,8 @@ DT.collect()  收集待翻单元
 | 18 | 请求超时按总时长算（0.4.2） | DeepSeek 非流式先回响应头、生成期间发空行保活；生成超过 60s 的批次全被中止重试，永远不成功 | 按"多久没收到数据"计时（每块数据重置），另设 180s 总上限 |
 | 19 | 内容侧并发写死 3、按文档顺序从头翻、一批 2000 字符 | 设置里的并发不生效；人在页面中间要等上面全翻完；首屏要等一整批生成完 | 并发跟设置走；每次取批按离屏幕距离排序；屏幕内批次 ≤3 条 / ≤500 字符 |
 | 20 | 收集上限把"不送翻"的单元也算进去 + 观察器不再被自己的译文触发（0.4.2） | 超长页面（>上限）后半段永远不翻 | `collect(root, accept)` 只算送翻的；收满了本轮结束后接着收 |
+| 21 | 以为页面内快捷键能兜底"被其它扩展占用的 Alt+A" | 装了其它默认 Alt+A 的扩展时，Option+A / Alt+A 完全没反应 | 占用发生在浏览器层，页面收不到按键；改为显示 `chrome.commands.getAll()` 的实际绑定，没绑定就引导去快捷键设置页 |
+| 22 | service worker 里用 `tabs.query({currentWindow})` 找当前标签页 | 快捷键偶尔找不到标签页 | 用 `onCommand` 传进来的 `tab`，退回 `lastFocusedWindow` |
 
 ---
 
@@ -236,7 +238,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 4. **没有图标**，工具栏显示默认占位图。
 5. **没有 i18n**，界面固定中文。
 6. **没有站点规则库**，全部靠通用启发式；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
-7. **浏览器命令（Alt+A）写死在 manifest**，用户只能在 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）改；页面级快捷键可以录制。
+7. **浏览器快捷键（manifest 里的 Alt+A）只是建议**：被其它扩展占用时浏览器不会分配给我们，而且按键在浏览器层就被那个扩展拿走，页面内快捷键也收不到。扩展没法自己改浏览器快捷键，只能引导用户去 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）；设置页和弹窗会用 `chrome.commands.getAll()` 显示实际绑定结果
 
 ---
 

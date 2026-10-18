@@ -5,7 +5,8 @@ import {
   hotkeyLabel,
   KEYS,
   EXTENSIONS_PAGE,
-  FILE_ACCESS_LABEL
+  FILE_ACCESS_LABEL,
+  browserShortcut
 } from '../lib/config.js';
 
 const el = {
@@ -30,6 +31,8 @@ let tabUrl = '';
 let supported = false;
 let injectFailed = false;
 let currentCfg = { targetLang: 'zh-CN' };
+// 浏览器实际分配的快捷键（空 = 没分配到，多半被其它扩展占用）；null = 还没查
+let shortcut = null;
 let status = { enabled: false, mode: 'dual', target: 'zh-CN', total: 0, translated: 0, failed: 0, busy: false };
 
 function sendToTab(msg) {
@@ -101,7 +104,12 @@ function render() {
   el.target.value = status.target || 'zh-CN';
 
   if (!status.enabled) {
-    el.stat.textContent = '未开启。快捷键 ' + hotkeyLabel(currentCfg.hotkey) + ' 可直接翻译。';
+    if (shortcut === '') {
+      el.stat.textContent =
+        '未开启。浏览器快捷键没有设置成功（' + hotkeyLabel('alt+a') + ' 可能被其它扩展占用），可在「设置」里重新设置。';
+    } else {
+      el.stat.textContent = '未开启。按 ' + (shortcut || hotkeyLabel(currentCfg.hotkey)) + ' 可直接翻译。';
+    }
   } else if (status.busy) {
     var total = status.total || '?';
     var pct = status.total ? Math.round((status.translated / status.total) * 100) : 0;
@@ -182,6 +190,7 @@ async function refresh() {
 async function init() {
   const cfg = await getConfig();
   currentCfg = cfg;
+  shortcut = await browserShortcut();
 
   LANGUAGES.forEach((lang) => {
     const opt = document.createElement('option');

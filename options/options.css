@@ -107,6 +107,19 @@ body {
   flex-wrap: wrap;
 }
 
+/* 占满整行（网格里两栏都用） */
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+.model-row input {
+  flex: 2 1 200px;
+}
+
+.model-row select {
+  flex: 1 1 160px;
+}
+
 .hotkey-btn {
   min-width: 180px;
   padding: 9px 14px;

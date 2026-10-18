@@ -375,12 +375,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // 快捷键：Alt+A
-chrome.commands.onCommand.addListener(async (command) => {
+// 注意：Chrome 只在没有别的扩展占用时才把 manifest 里的 Alt+A 分配给我们
+// （沉浸式翻译等默认也是 Alt+A），没分配到时这里永远不会触发。
+// 实际绑定结果用 chrome.commands.getAll() 查，弹窗和设置页会显示。
+chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command !== 'toggle-translate') return;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab && tab.id) {
-      await sendOrInject(tab.id, { type: 'dt:toggle' });
+    // Chrome 会把当前标签页传进来；service worker 没有"当前窗口"，查 currentWindow 不可靠
+    let target = tab;
+    if (!target || target.id == null) {
+      [target] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    }
+    if (target && target.id != null) {
+      // source 让内容脚本和页面内快捷键去重（两边都触发时会"开了又关"）
+      await sendOrInject(target.id, { type: 'dt:toggle', source: 'command' });
     }
   } catch (err) {
     /* 页面不支持时静默 */
