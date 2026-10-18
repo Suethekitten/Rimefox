@@ -231,7 +231,7 @@
 
   function enabled() {
     var c = cfg();
-    return !!DT.state.config && c.subtitleTranslate !== false && !!c.hasKey;
+    return !!DT.state.config && c.subtitleTranslate === true && !!c.hasKey; // 默认关闭，用户打开才接管
   }
 
   function target() {

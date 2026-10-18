@@ -358,7 +358,7 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 | `selectionMenu` | true | 划词：右键菜单「翻译所选文字」 |
 | `selectionButton` | true | 划词：选区旁「译」小按钮 |
 | `selectionImmediate` | false | 划词：选中即翻译（会消耗额度，默认关） |
-| `subtitleTranslate` | true | YouTube 字幕双语：打开 CC 时接管字幕，只翻播放位置往后约 90 秒 |
+| `subtitleTranslate` | false | YouTube 字幕双语：打开 CC 时接管字幕，只翻播放位置往后约 90 秒（0.5.2 起默认关闭；已保存过设置的用户保持原值） |
 | `hoverCompare` | true | 悬停对照：高亮同一处的原文和译文 |
 | `debug` | false | 输出调试日志 |
 | `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |

@@ -216,7 +216,7 @@ function applyConfig(cfg) {
   fields.selectionMenu.checked = cfg.selectionMenu !== false;
   fields.selectionButton.checked = cfg.selectionButton !== false;
   fields.selectionImmediate.checked = cfg.selectionImmediate === true;
-  fields.subtitleTranslate.checked = cfg.subtitleTranslate !== false;
+  fields.subtitleTranslate.checked = cfg.subtitleTranslate === true;
   fields.hoverCompare.checked = cfg.hoverCompare !== false;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.debug.checked = !!cfg.debug;
