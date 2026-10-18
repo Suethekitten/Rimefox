@@ -1,0 +1,21 @@
+# 上架材料验证记录
+
+日期：2026-10-18。输入为用户提供的 Rimefox-v0.6.2.zip。
+
+| 检查 | 结果 |
+|---|---|
+| 指定初始文件 | 已读 AGENTS.md、HANDOFF.md、PRIVACY.md、manifest.json、README.md；附件缺 package.ps1 与 .github/workflows/release.yml，无法审计原打包/CI |
+| git status -sb && git log --oneline -5 | 已执行，fatal: not a git repository；附件无 .git，无法确认原仓库 main/远端/未推送记录，未创建替代历史、未本地提交 |
+| 原有 Node 测试 | 完整执行 for f in test/*.test.mjs; do node "$f" || exit 1; done，原有 9 个测试文件共 160 条通过 |
+| 新增打包测试 | 同一循环执行 test/package-store.test.mjs 通过；验证白名单、嵌套排除、跨工作目录、逐文件解压比对、可重复输出、版本不一致/图标缺失拒绝及失败不覆盖已有包 |
+| ZIP 独立验证 | unzip -t 与 Python zipfile.testzip 均通过，41 个文件，manifest 在根目录，无开发目录 |
+| manifest 检查 | 移除 tabs，通用内容脚本有 3 条 exclude_matches；其余内容脚本与版本不变 |
+| 版本/CHANGELOG | 与输入逐项比较：manifest 与 DT.VERSION 保持 0.6.2；CHANGELOG 字节完全一致 |
+| 浏览器 selftest | 未通过运行验证：Playwright 可用，但环境缺 Chrome/Chromium 可执行文件，启动失败。附件 HANDOFF 没有可用的无头命令。需在原电脑打开 selftest/index.html，确认 88/88 |
+| 扩展权限、真实页面/API | 未验证，需原电脑检查取消 tabs 后的快捷键/广播/补注入、排除域名、划词、设置、YouTube。无真实 Key，未调用收费接口 |
+| Git diff 检查与提交 | 原仓库不可用；提供补丁及独立修改文件，不宣称原仓库 clean 或 commit 已完成 |
+| 发布与 Demo | 未 push、未改版本、未改 CHANGELOG、未注册/登录账号、未上传、未提交审核、未实现 Demo |
+
+源码变更仅为 manifest.json、PRIVACY.md，以及新增 tools/package-store.mjs、test/package-store.test.mjs、docs/privacy.en.md、docs/STORE.md、docs/STORE-VALIDATION.md。docs/STORE.md 说明真实支持链接、公开政策、审核访问路径与素材仍待人工补充。
+
+补丁仅相对于上传快照，不能直接覆盖电脑上可能更新的源码。请先 git apply --check，审阅并解决差异，跑 Node 与浏览器自检后以本人 GitHub noreply 身份做本地提交，再停下来决定下一步。任何推送均另行授权。

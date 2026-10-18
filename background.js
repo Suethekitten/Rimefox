@@ -275,11 +275,28 @@ async function handleTest() {
 
 // ---------------- 保命注入 ----------------
 // 页面在安装扩展之前就打开、或注入失败时，主动补注入一次再重试
-async function ensureInjected(tabId) {
+async function ensureInjected(tabId, frameId = 0) {
   if (!tabId) return false;
+  // Declarative exclusions do not cover scripting. Pin the checked document
+  // so navigation cannot change the destination between checking and injection.
+  let target;
+  try {
+    const [frame] = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [frameId] },
+      func: () => {
+        const u = new URL(location.href);
+        return /^(https?:|file:)$/.test(u.protocol) &&
+          u.hostname !== 'accounts.google.com' &&
+          u.hostname !== 'chromewebstore.google.com' &&
+          !(u.hostname === 'chrome.google.com' && u.pathname.startsWith('/webstore/'));
+      }
+    });
+    if (!frame?.result || !frame.documentId) return false;
+    target = { tabId, documentIds: [frame.documentId] };
+  } catch { return false; }
   try {
     await chrome.scripting.insertCSS({
-      target: { tabId: tabId },
+      target,
       files: ['content/styles/inject.css']
     });
   } catch (err) {
@@ -287,8 +304,8 @@ async function ensureInjected(tabId) {
   }
   try {
     await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      files: ['content/core.js', 'content/dom.js', 'content/main.js', 'content/hover.js']
+      target,
+      files: ['content/core.js', 'content/dom.js', 'content/main.js', 'content/selection.js', 'content/hover.js']
     });
     return true;
   } catch (err) {
@@ -302,7 +319,7 @@ async function sendOrInject(tabId, msg, frameId) {
   try {
     return await chrome.tabs.sendMessage(tabId, msg, options);
   } catch (err) {
-    const ok = await ensureInjected(tabId);
+    const ok = await ensureInjected(tabId, options.frameId);
     if (!ok) throw err;
     return chrome.tabs.sendMessage(tabId, msg, options);
   }
@@ -469,8 +486,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
   chrome.tabs.sendMessage(tab.id, payload, options).catch(() => {
     // 页面在安装扩展之前就打开了：补注入后再试一次
-    ensureInjected(tab.id)
-      .then(() => chrome.tabs.sendMessage(tab.id, payload, options))
+    ensureInjected(tab.id, info.frameId ?? 0)
+      .then((ok) => ok && chrome.tabs.sendMessage(tab.id, payload, options))
       .catch(() => {});
   });
 });

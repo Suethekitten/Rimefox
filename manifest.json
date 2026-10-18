@@ -9,7 +9,6 @@
     "storage",
     "activeTab",
     "scripting",
-    "tabs",
     "contextMenus"
   ],
   "host_permissions": [
@@ -51,6 +50,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "exclude_matches": ["*://chromewebstore.google.com/*", "*://chrome.google.com/webstore/*", "*://accounts.google.com/*"],
       "js": [
         "content/core.js",
         "content/dom.js",
