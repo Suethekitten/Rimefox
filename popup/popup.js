@@ -46,7 +46,9 @@ function sendToTab(msg) {
       reject(new Error('没有可用标签页'));
       return;
     }
-    chrome.tabs.sendMessage(tabId, msg, (res) => {
+    // 只发主框架：页面里的 iframe（Twitter 挂件、广告位）也跑着内容脚本，
+    // 不带 frameId 时谁先应答就用谁，诊断/状态会拿到 iframe 的空结果
+    chrome.tabs.sendMessage(tabId, msg, { frameId: 0 }, (res) => {
       const err = chrome.runtime.lastError;
       if (err) reject(new Error(err.message));
       else resolve(res);

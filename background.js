@@ -295,13 +295,15 @@ async function ensureInjected(tabId) {
   }
 }
 
-async function sendOrInject(tabId, msg) {
+// frameId 默认 0（主框架）：iframe 里也有内容脚本，广播式发消息会被 iframe 抢先应答
+async function sendOrInject(tabId, msg, frameId) {
+  const options = { frameId: frameId == null ? 0 : frameId };
   try {
-    return await chrome.tabs.sendMessage(tabId, msg);
+    return await chrome.tabs.sendMessage(tabId, msg, options);
   } catch (err) {
     const ok = await ensureInjected(tabId);
     if (!ok) throw err;
-    return chrome.tabs.sendMessage(tabId, msg);
+    return chrome.tabs.sendMessage(tabId, msg, options);
   }
 }
 
