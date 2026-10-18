@@ -53,18 +53,43 @@
       'user-select:text'
     ].join(';');
 
+    // 内层：左边译文，右下角品牌 logo
+    var body = document.createElement('div');
+    body.style.cssText = 'display:flex;align-items:flex-end;gap:8px;';
+
+    var textEl = document.createElement('div');
+    textEl.style.cssText = 'flex:1 1 auto;min-width:0;';
+    bubble._textEl = textEl;
+
+    var logo = document.createElement('img');
+    logo.alt = '';
+    logo.title = '凛狐 Rimefox';
+    logo.style.cssText = 'width:14px;height:14px;flex:none;opacity:.45;display:block;';
+    logo.addEventListener('error', function () {
+      logo.style.display = 'none'; // 取不到图标就不显示，别留个破图
+    });
+    try {
+      logo.src = chrome.runtime.getURL('icons/icon32.png');
+    } catch (err) {
+      logo.style.display = 'none';
+    }
+
+    body.appendChild(textEl);
+    body.appendChild(logo);
+    bubble.appendChild(body);
+
     bubble.addEventListener('mousedown', function (event) {
       event.stopPropagation();
     });
     bubble.addEventListener('click', function () {
       if (bubble.dataset.state !== 'done') return;
-      var text = bubble.textContent || '';
+      var text = bubble._textEl.textContent || '';
       if (!text) return;
       try {
         navigator.clipboard.writeText(text).then(function () {
-          bubble.textContent = '已复制';
+          bubble._textEl.textContent = '已复制';
           setTimeout(function () {
-            if (bubble && bubble.textContent === '已复制') bubble.textContent = text;
+            if (bubble && bubble._textEl.textContent === '已复制') bubble._textEl.textContent = text;
           }, 600);
         });
       } catch (err) {
@@ -102,7 +127,7 @@
     hideButton();
     ensureBubble();
     bubble.dataset.state = state || 'done';
-    bubble.textContent = text;
+    bubble._textEl.textContent = text;
     bubble.style.display = 'block';
     bubble.style.visibility = 'hidden'; // 先量尺寸再定位
     placeBubble(rect);
