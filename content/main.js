@@ -288,9 +288,15 @@
           return;
         }
 
-        // 译文与原文完全一致（用户名、数字、专有名词等）就不插入了，
-        // 否则会叠成一条"删除线"，看着像渲染 bug。
-        if (DT.normalizeText(text) === DT.normalizeText(unit.text)) {
+        // 译文与原文相同或近似重复就不插入：
+        // 完全一致的（用户名、数字、专有名词）会叠成一条"删除线"，看着像渲染 bug；
+        // 原文本来就是目标语言、模型只改写了几个词（feat: → 新功能:）会多出一行几乎一样的字。
+        // 趣味翻译的单元只拦完全一致：风格改写（句末加个「喵」）本来就和原文很像
+        var dup =
+          unit.style && unit.style !== 'plain'
+            ? DT.normalizeText(text) === DT.normalizeText(unit.text)
+            : DT.isNearDuplicate(unit.text, text, target);
+        if (dup) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
           settled.set(unit.el, unit.text);
           return;

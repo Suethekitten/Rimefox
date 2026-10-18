@@ -169,6 +169,59 @@
     return false;
   };
 
+  // ---------------- 近似重复闸门 ----------------
+  // 这段文字是不是「主要已经是目标语言」：比 looksLikeTarget 宽松（中英混排也算），只给近似重复闸门用。
+  // 收集阶段不能用它 —— 中英混排的段落会被当成已是中文整段不翻（HANDOFF 记过的坑）。
+  // 中文目标同样排除假名 / 谚文：日文原文和中文译文共用大量汉字，相似度会虚高
+  DT.isMostlyTargetLanguage = function (text, lang) {
+    var s = String(text || '');
+    var letters = (s.match(/\p{L}/gu) || []).length;
+    if (letters < 4) return false;
+    var han = (s.match(/[\u3400-\u9fff]/g) || []).length;
+    var kana = (s.match(/[\u3040-\u30ff]/g) || []).length;
+    var hangul = (s.match(/[\uac00-\ud7af\u1100-\u11ff]/g) || []).length;
+    var code = String(lang || '');
+    if (code.indexOf('zh') === 0) return kana === 0 && hangul === 0 && han / letters >= 0.4;
+    if (code.indexOf('ja') === 0) return kana > 0 && (kana + han) / letters >= 0.4;
+    if (code.indexOf('ko') === 0) return hangul / letters >= 0.4;
+    return false;
+  };
+
+  // 两段文字有多像：字符多重集的 Dice 系数，O(n)。超过 300 字或长度差超过 40% 直接判不像
+  DT.similarity = function (a, b) {
+    a = DT.normalizeText(a);
+    b = DT.normalizeText(b);
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    var longer = Math.max(a.length, b.length);
+    if (longer > 300) return 0;
+    if (Math.abs(a.length - b.length) / longer > 0.4) return 0;
+    var bag = new Map();
+    var hit = 0;
+    var i;
+    var c;
+    for (i = 0; i < a.length; i += 1) bag.set(a[i], (bag.get(a[i]) || 0) + 1);
+    for (i = 0; i < b.length; i += 1) {
+      c = bag.get(b[i]);
+      if (c) {
+        bag.set(b[i], c - 1);
+        hit += 1;
+      }
+    }
+    return (2 * hit) / (a.length + b.length);
+  };
+
+  // 译文是不是原文的「近似重复」：完全相同；或者原文本来就主要是目标语言，模型只改写了几个词
+  // （GitHub 提交列表里 "feat: 界面美化" 被改成 "新功能: 界面美化"）—— 插进去就是一行几乎一样的字。
+  // 原文不是目标语言时只认完全相同：Settings → 设置（Settings）这类合法译文和原文很像，不能误杀
+  DT.NEAR_DUP_THRESHOLD = 0.75;
+  DT.isNearDuplicate = function (source, output, lang) {
+    var a = DT.normalizeText(source);
+    var b = DT.normalizeText(output);
+    if (a === b) return true;
+    return DT.isMostlyTargetLanguage(a, lang) && DT.similarity(a, b) >= DT.NEAR_DUP_THRESHOLD;
+  };
+
   // 长段落按句切开，避免单条请求过大
   DT.splitLong = function (text, max) {
     var limit = Math.max(200, Number(max) || 1200);

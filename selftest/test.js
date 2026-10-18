@@ -676,6 +676,29 @@
     return bad.length ? bad.join(' / ') : true;
   });
 
+  // ---------------- 近似重复闸门（DT.isNearDuplicate） ----------------
+  check('近似重复：已是中文的提交信息只改了前缀 → 跳过', function () {
+    var cases = [
+      ['feat: v0.4.7 - 界面美化', '新功能: v0.4.7 - 界面美化'],
+      ['revert: 撤回 CRX 打包，恢复 v0.4.7 的发布流程', '回退: 撤回 CRX 打包，恢复 v0.4.7 的发布流程'],
+      ['完全一样的一句话', '完全一样的一句话']
+    ];
+    var bad = cases.filter(function (c) { return !DT.isNearDuplicate(c[0], c[1], 'zh-CN'); });
+    if (bad.length) return '应判为重复：' + JSON.stringify(bad);
+    return DT.similarity(cases[0][0], cases[0][1]) >= 0.75 ? true : '相似度算低了：' + DT.similarity(cases[0][0], cases[0][1]);
+  });
+
+  check('近似重复：正常译文不误杀（英文原文 / 原文+括注 / 日文原文）', function () {
+    var cases = [
+      ['Total 42 commits', '共 42 次提交'],
+      ['Settings', '设置（Settings）'],
+      ['東京の天気は晴れです', '东京的天气晴朗'],
+      ['我们发布了 new version，欢迎 try it out', '我们发布了新版本，欢迎试用']
+    ];
+    var bad = cases.filter(function (c) { return DT.isNearDuplicate(c[0], c[1], 'zh-CN'); });
+    return bad.length ? '被误判为重复：' + JSON.stringify(bad) : true;
+  });
+
   // ---------------- 趣味翻译（DT.unitStyle） ----------------
   check('趣味翻译：只改写正文里够长的段落', function () {
     var long = 'This paragraph is long enough to be rewritten.';
