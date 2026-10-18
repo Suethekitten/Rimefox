@@ -10,7 +10,8 @@ const core = await readFile(resolve(root, 'content/core.js'), 'utf8');
 if (core.match(/DT\.VERSION\s*=\s*['"]([^'"]+)['"]/)?.[1] !== manifest.version) throw Error('manifest / DT.VERSION mismatch');
 if (!/^\d+(?:\.\d+){0,3}$/.test(manifest.version)) throw Error('Invalid version');
 const entries = [];
-const excluded = /^(?:\.git|\.github|test|selftest|docs|tools|node_modules|package\.(?:json|ps1|bat)|README.*|HANDOFF.*|AGENTS.*|PRIVACY.*|CHANGELOG.*|\.DS_Store)$/i;
+// 注意：文档类只排除 .md 本身，不能写成 PRIVACY.*——那会把 lib/privacy.js 一起排掉。
+const excluded = /^(?:\.git|\.github|test|selftest|docs|tools|node_modules|package\.(?:json|ps1|bat)|README\.md|HANDOFF\.md|AGENTS\.md|PRIVACY\.md|CHANGELOG\.md|SECURITY\.md|THIRD-PARTY-NOTICES\.md|\.DS_Store)$/i;
 async function collect(name) {
   const stat = await lstat(resolve(root, name));
   if (stat.isSymbolicLink()) throw Error(`Symlinks are not allowed: ${name}`);

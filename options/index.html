@@ -28,6 +28,7 @@
           <a class="nav-item" href="#sec-translate"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" /></svg></span>翻译</a>
           <a class="nav-item" href="#sec-appearance"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5c0-4.3-4-7.7-9-7.7Z" /><circle cx="7.5" cy="11.5" r="1" /><circle cx="10.5" cy="7.5" r="1" /><circle cx="15.5" cy="8.5" r="1" /></svg></span>外观</a>
           <a class="nav-item" href="#sec-reading"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg></span>划词与字幕</a>
+          <a class="nav-item" href="#sec-privacy"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /><path d="M12 15v2" /></svg></span>隐私保护</a>
           <a class="nav-item" href="#sec-compat"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v6c0 4.4 3.2 8.2 7.5 9 4.3-.8 7.5-4.6 7.5-9V6Z" /><path d="m9 12 2 2 4-4" /></svg></span>站点与兼容性</a>
           <a class="nav-item" href="#sec-hotkey"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3Z" /></svg></span>快捷键</a>
           <a class="nav-item" href="#sec-data"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5" /><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3" /></svg></span>缓存与迁移</a>
@@ -461,6 +462,67 @@
                 <span class="row-desc">在悬浮入口或划词气泡里点「置顶」，划词译文会固定在一个始终在最上层的小窗里，看 PDF、全屏视频或多窗口阅读时用。需要 Chrome 116 以上；不支持时改用普通小窗。</span>
               </span>
             </div>
+          </div>
+        </section>
+
+        <!-- ================= 隐私保护 ================= -->
+        <section class="section" id="sec-privacy">
+          <header class="section-head">
+            <h2>隐私保护</h2>
+            <p>可选：发请求前先在本地把敏感信息换成占位符，译文回来后再换回原文。默认关闭。</p>
+          </header>
+
+          <div class="card">
+            <div class="card-title">本地脱敏</div>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">AI 隐私保护翻译</span>
+                <span class="row-desc">翻译前用占位符替换能可靠识别的敏感信息，翻译在本地还原。映射只存在本次请求的内存里，不上传、不写入设置或缓存。</span>
+                <span class="row-desc">只覆盖有固定格式的数据；姓名和地址仍需人工确认，模型漏掉占位符时对应段落会按翻译失败处理，不会输出错乱内容。</span>
+              </span>
+              <input id="privacyEnabled" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row sub">
+              <span class="row-text">
+                <span class="row-title">邮箱地址</span>
+                <span class="row-desc">例如 user@example.com。</span>
+              </span>
+              <input id="privacyMaskEmail" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row sub">
+              <span class="row-text">
+                <span class="row-title">电话号码</span>
+                <span class="row-desc">中国手机号、座机、带 + 的国际号码；日期和订单号不会被当成电话。</span>
+              </span>
+              <input id="privacyMaskPhone" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row sub">
+              <span class="row-text">
+                <span class="row-title">身份证号</span>
+                <span class="row-desc">18 位，校验位不正确的号码不会脱敏。</span>
+              </span>
+              <input id="privacyMaskIdCard" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row sub">
+              <span class="row-text">
+                <span class="row-title">银行卡号</span>
+                <span class="row-desc">13–19 位，通过 Luhn 校验才脱敏；订单号一般不会被误判。</span>
+              </span>
+              <input id="privacyMaskBankCard" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row sub">
+              <span class="row-text">
+                <span class="row-title">中文姓名</span>
+                <span class="row-desc">只识别「姓名：」「联系人：」「我叫」等明确上下文里的姓名，默认关闭，避免把普通词当人名。</span>
+              </span>
+              <input id="privacyMaskUserName" type="checkbox" class="switch" />
+            </label>
           </div>
         </section>
 

@@ -6,9 +6,21 @@ This policy describes Rimefox 0.6.2. Rimefox is a bring-your-own-key browser tra
 
 Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, and YouTube caption text when subtitle translation is enabled. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page.
 
+When the optional local masking feature is enabled, reliably detectable values (email addresses, phone numbers, ID card numbers and bank card numbers, optionally Chinese names in explicit contexts) are replaced with `__PII_<TYPE>_<n>__` placeholders before the request is sent; only the placeholder text is transmitted. See “Optional local masking” below.
+
 Requests also include the target language, translation instructions including your custom prompt, and matching glossary source terms and specified translations. Your API key is sent to the configured endpoint in authentication headers. Connection tests send fixed sample sentences; model-list requests also authenticate to that endpoint. The provider receives normal network metadata such as your IP address. Do not translate sensitive content or put secrets into prompts unless you trust the configured endpoint.
 
 DeepSeek, OpenAI or OpenAI-compatible services, Anthropic, Gemini and custom gateways handle requests under their own privacy policies and retention practices. A compatible gateway is not necessarily operated by the named model vendor. Review the policy of the actual endpoint operator, including training, logging, retention and deletion terms.
+
+## Optional local masking
+
+Off by default. When enabled in Settings → Privacy, the extension masks sensitive values locally before translation and restores them locally afterwards:
+
+- The placeholder-to-value mapping exists only in memory for the duration of one translation request. It is never written to chrome.storage or the configuration, never exported, never logged, and never sent with any request.
+- No permission is added and no WASM, ONNX runtime or remote model is downloaded.
+- If the model drops, rewrites or invents a placeholder, the affected segment is treated as a failed translation: the page keeps the source text and retries with the existing backoff, rather than displaying corrupted content or using source text as a translation.
+- Scope is limited to fixed-format data. Addresses, organizations, passwords, seed phrases and private keys are not masked. Chinese names are detected only in explicit contexts such as “Name:” or “I am …”, are off by default, and may still be missed or misidentified.
+- Translation caching is unchanged: short source/translation pairs may still be stored in the local disk cache under the existing rules; the mapping itself is never cached.
 
 ## YouTube captions
 

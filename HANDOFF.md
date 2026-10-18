@@ -57,6 +57,7 @@ edge-bilingual/
 │   ├── parse.js           模型返回值解析（JSON 数组容错）+ 输出长度护栏
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格），纯函数
 │   ├── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
+│   ├── privacy.js         可选的本地脱敏 / 恢复（纯 JS，无依赖）：识别、占位符、fail-closed 恢复
 │   ├── appearance.js      强调色预设、译文排版变量、译文自定义 CSS 清洗（纯函数，后台按网址算 page 对象用）
 │   ├── site-rules.js      站点规则：内置规则、校验、按网址匹配；夜间模式网站名单
 │   ├── ui-appearance.js   设置页/弹窗共用：强调色等写到 <html>、深浅色圆形过渡、跨页面配置同步、空闲执行
@@ -76,7 +77,7 @@ edge-bilingual/
 │   └── styles/inject.css  译文样式与主题、页面明暗适配、夜间模式反色
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
-├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言）
+├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏）
 └── selftest/              离线自检（96 条用例）
 ```
 
@@ -104,6 +105,23 @@ DT.collect()  收集待翻单元
    ├─ 每批回来立即注入（渐进渲染）
    └─ 页面上直接出现译文
 ```
+
+### 可选：本地脱敏（`lib/privacy.js`）
+
+只在 `background.js` 的 `translate` 路由里挂钩，因此整页、划词、弹窗、YouTube 字幕、批量翻译共用同一套逻辑：
+
+```
+texts ──► 缓存查找（原文） ──► privacy.maskTexts()
+                                  └─ 占位符文本 ──► provider.chat()（敏感值不上行）
+                                                          │
+        results ◄── privacy.restoreText()（fail-closed）◄─┘
+```
+
+- 默认关闭（`privacyEnabled: false`）；关闭时整段分支跳过，行为与改动前一致。
+- 占位符沿用 OneAIFW 的 `__PII_<TYPE>_<n>__`。映射（占位符 → 原文）只存在于本次调用的内存里，不写 storage、不进缓存、不进日志。
+- 恢复要求「该段出现过的占位符至少出现一次」；缺失、改写后认不出、出现映射表外的占位符，都返回失败，该段结果为 `null`（内容脚本按失败退避重试），不会输出半截译文。
+- 只做固定格式：邮箱 / 电话 / 身份证（校验位）/ 银行卡（Luhn）/ 带标签的银行账号；中文姓名需要显式开启。地址、机构、密码、助记词不处理。
+- 评估与体积 / 许可证说明见 [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md)、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 ### 消息协议（content → background）
 
@@ -375,6 +393,12 @@ node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间�
 | `selectionImmediate` | false | 划词：选中即翻译（会消耗额度，默认关） |
 | `subtitleTranslate` | false | YouTube 字幕双语：打开 CC 时接管字幕，只翻播放位置往后约 90 秒（0.5.2 起默认关闭；已保存过设置的用户保持原值） |
 | `hoverCompare` | true | 悬停对照：高亮同一处的原文和译文 |
+| `privacyEnabled` | false | 可选：翻译前在本地把敏感信息换成占位符，回包后还原（映射只在请求内存里） |
+| `privacyMaskEmail` | true | 脱敏邮箱地址 |
+| `privacyMaskPhone` | true | 脱敏电话号码 |
+| `privacyMaskIdCard` | true | 脱敏 18 位身份证号（校验位通过才算） |
+| `privacyMaskBankCard` | true | 脱敏银行卡号（Luhn）与带标签的银行账号 |
+| `privacyMaskUserName` | false | 脱敏「姓名：」「联系人：」「我叫」等上下文里的中文姓名 |
 | `uiTheme` | `auto` | 设置页 / 弹窗配色：`auto` 跟随系统，`light` / `dark` 固定；弹窗右上角按钮直接改这一项 |
 | `uiLang` | `zh` | 设置页 / 弹窗界面语言：`zh` / `en`；网页里的悬浮入口和置顶小窗也跟着它 |
 | `accentColor` | `violet` | 强调色：预设 id（`violet` / `blue` / `teal` / `green` / `amber` / `rose` / `slate`）或 `#rrggbb`；`violet` = 不改网页译文颜色 |
@@ -520,3 +544,11 @@ node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间�
 - **置顶翻译窗**（`content/pip.js`）：`documentPictureInPicture.requestWindow`，失败退回 `window.open('', 'rimefox-pinned', 'popup,…')`；两种都要用户手势。小窗是空白文档，内容全部 `textContent` 写入，样式是自己的一段 CSS（不搬网页样式）；`selection.js` 每次翻完通过 `DT.onSelectionResult` 推给它。
 - **界面语言**：新增文案的英文、带编号 / 原文的校验提示用正则；几条错误用「；」连接时逐条翻（整句自带「；」的文案仍先整句匹配）；顺手补了 0.6.2 起漏掉的服务商名、模型获取结果、缓存统计、浏览器快捷键行。
 - **测试**：Node 181 条（新增 appearance 8、site-rules 8，i18n 8 → 13：校验器产生的每条错误都要有英文）；自检 88 → 96（站点规则 2、外观 2、悬浮入口 4）。另外用无头 Chrome + DevTools 协议跑了设置页（35 项）、弹窗（12 项）、悬浮入口与置顶小窗（16 项）的交互场景，脚本不在仓库里。
+
+### 未发版分支：AI 隐私保护翻译（`feat/aifw-privacy`）
+
+- **来源与取舍**：复用 OneAIFW（MIT）的占位符契约与 span 去重语义，用纯 JS 重写；不引入上游 WASM / ORT / NER 模型（模型资产私有、公开备选 GPL-3.0）。评估见 [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md)。
+- **实现**：`lib/privacy.js`（无依赖，约 9 KB 源码）；`background.js` 在 `translate` 路由里 mask → 请求 → restore；缓存只写恢复后的译文。
+- **安全语义**：映射不落盘；占位符缺失 / 改写 / 未知一律 fail-closed，该段 `null`，沿用现有失败退避重试。
+- **设置页**：新增「隐私保护」分区（总开关 + 5 个分项），英文文案同步。
+- **测试**：`test/privacy.test.mjs`（27 条）+ `test/privacy-pipeline.test.mjs`（13 条，假 `chrome.*` + 假 `fetch` 驱动 `background.js`，断言请求体不含原文、回包还原、失败不输出、映射不落盘）。

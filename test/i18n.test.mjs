@@ -65,6 +65,12 @@ t('设置页新增文案已覆盖', () => {
   });
 });
 
+t('隐私设置文案已覆盖', () => {
+  ['隐私保护', '本地脱敏', 'AI 隐私保护翻译', '邮箱地址', '电话号码', '身份证号', '银行卡号', '中文姓名'].forEach((key) => {
+    assert.notEqual(translateText(key), key, key + ' 没有英文');
+  });
+});
+
 t('弹窗主题切换文案已覆盖', () => {
   ['切换到深色', '切换到浅色'].forEach((key) => {
     assert.notEqual(translateText(key), key, key + ' 没有英文');

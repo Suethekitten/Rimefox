@@ -8,6 +8,7 @@ import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
 import { resolveSiteRule, hostListed } from './lib/site-rules.js';
 import { providerById } from './lib/providers.js';
+import { maskTexts, restoreText, optionsFromConfig } from './lib/privacy.js';
 
 // ---------------- 并发闸门 ----------------
 let running = 0;
@@ -170,9 +171,38 @@ async function handleTranslate(msg, sender) {
       groups.set(text, [index]);
     }
   });
-  const todo = Array.from(groups.keys());
+  let todo = Array.from(groups.keys());
+  let firstError = null;
+
+  // 可选：本地脱敏。映射只活在这个请求里，不落盘、不进缓存、不写日志。
+  // 关闭时下面的分支整段跳过，行为与改动前完全一致。
+  let privacyRows = null;
+  let privacyValues = null;
+  if (cfg.privacyEnabled === true && todo.length) {
+    const masked = maskTexts(todo, optionsFromConfig(cfg));
+    privacyRows = new Map();
+    privacyValues = masked.values;
+    const usable = [];
+    masked.rows.forEach((row, i) => {
+      const original = todo[i];
+      if (!row.ok) {
+        // 脱敏失败（例如原文本身就带占位符）：这一段判失败，绝不把原文发出去
+        groups.get(original).forEach((index) => {
+          results[index] = null;
+        });
+        if (!firstError) firstError = new ApiError('本地隐私保护无法为这段文字生成占位符，已跳过', 0, row.reason || '');
+        return;
+      }
+      privacyRows.set(original, { masked: row.masked, tokens: row.tokens });
+      usable.push(original);
+    });
+    todo = usable;
+  }
 
   if (todo.length === 0) {
+    if (results.some((r) => r === null)) {
+      return { ok: false, error: describeError(firstError), results };
+    }
     return { ok: true, results, failed: 0, cached };
   }
 
@@ -183,7 +213,7 @@ async function handleTranslate(msg, sender) {
   let current = [];
   let chars = 0;
   todo.forEach((text) => {
-    const len = text.length;
+    const len = privacyRows ? privacyRows.get(text).masked.length : text.length;
     if (current.length > 0 && (current.length >= maxItems || chars + len > maxChars)) {
       batches.push(current);
       current = [];
@@ -194,17 +224,29 @@ async function handleTranslate(msg, sender) {
   });
   if (current.length > 0) batches.push(current);
 
-  let firstError = null;
-
   await Promise.all(
     batches.map((payload) =>
       (async () => {
         await acquire();
         try {
-          const out = await translateBatchWithRetry(payload, target, cfg, style, glossary);
+          // 发出去的是脱敏后的文本；映射只在本地
+          const wire = privacyRows ? payload.map((text) => privacyRows.get(text).masked) : payload;
+          const out = await translateBatchWithRetry(wire, target, cfg, style, glossary);
           if (!out) throw new ApiError('模型返回无法解析', 0, '');
           payload.forEach((text, k) => {
-            const value = out[k];
+            let value = out[k];
+            if (privacyRows) {
+              const back = restoreText(String(value == null ? '' : value), privacyRows.get(text).tokens, privacyValues);
+              if (!back.ok) {
+                // 占位符丢失 / 被改写 / 对不上：这一段判失败，不输出半截译文，也不缓存
+                groups.get(text).forEach((index) => {
+                  results[index] = null;
+                });
+                if (!firstError) firstError = new ApiError('本地隐私保护无法还原这段译文，已跳过', 0, back.reason || '');
+                return;
+              }
+              value = back.text;
+            }
             let result = '';
             if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {
               result = value;

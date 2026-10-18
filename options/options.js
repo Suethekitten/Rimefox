@@ -76,6 +76,12 @@ const fields = {
   selectionMenu: $('selectionMenu'),
   selectionButton: $('selectionButton'),
   selectionImmediate: $('selectionImmediate'),
+  privacyEnabled: $('privacyEnabled'),
+  privacyMaskEmail: $('privacyMaskEmail'),
+  privacyMaskPhone: $('privacyMaskPhone'),
+  privacyMaskIdCard: $('privacyMaskIdCard'),
+  privacyMaskBankCard: $('privacyMaskBankCard'),
+  privacyMaskUserName: $('privacyMaskUserName'),
   subtitleTranslate: $('subtitleTranslate'),
   hoverCompare: $('hoverCompare'),
   chromeBilingual: $('chromeBilingual'),
@@ -290,6 +296,12 @@ function applyConfig(cfg) {
   fields.selectionMenu.checked = cfg.selectionMenu !== false;
   fields.selectionButton.checked = cfg.selectionButton !== false;
   fields.selectionImmediate.checked = cfg.selectionImmediate === true;
+  fields.privacyEnabled.checked = cfg.privacyEnabled === true;
+  fields.privacyMaskEmail.checked = cfg.privacyMaskEmail !== false;
+  fields.privacyMaskPhone.checked = cfg.privacyMaskPhone !== false;
+  fields.privacyMaskIdCard.checked = cfg.privacyMaskIdCard !== false;
+  fields.privacyMaskBankCard.checked = cfg.privacyMaskBankCard !== false;
+  fields.privacyMaskUserName.checked = cfg.privacyMaskUserName === true;
   fields.subtitleTranslate.checked = cfg.subtitleTranslate === true;
   fields.hoverCompare.checked = cfg.hoverCompare !== false;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
@@ -368,6 +380,12 @@ function readForm() {
     selectionMenu: fields.selectionMenu.checked,
     selectionButton: fields.selectionButton.checked,
     selectionImmediate: fields.selectionImmediate.checked,
+    privacyEnabled: fields.privacyEnabled.checked,
+    privacyMaskEmail: fields.privacyMaskEmail.checked,
+    privacyMaskPhone: fields.privacyMaskPhone.checked,
+    privacyMaskIdCard: fields.privacyMaskIdCard.checked,
+    privacyMaskBankCard: fields.privacyMaskBankCard.checked,
+    privacyMaskUserName: fields.privacyMaskUserName.checked,
     subtitleTranslate: fields.subtitleTranslate.checked,
     hoverCompare: fields.hoverCompare.checked,
     chromeBilingual: fields.chromeBilingual.checked,

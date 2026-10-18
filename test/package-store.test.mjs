@@ -25,7 +25,7 @@ try {
     assert.deepEqual(data,await readFile(resolve(temp,name)));
     p+=30+n+x+size;
   }
-  assert(names.includes('manifest.json')); assert(!names.some(n=>/DS_Store|Thumbs|desktop.ini|\.env|debug.log|private.key|\.map$|\/test\/|^tools\/|icons\/(source|preview-|icon512)/.test(n)));
+  assert(names.includes('manifest.json')); assert(names.includes('lib/privacy.js'), 'privacy module must be packaged'); assert(!names.some(n=>/DS_Store|Thumbs|desktop.ini|\.env|debug.log|private.key|\.map$|\/test\/|^tools\/|icons\/(source|preview-|icon512)/.test(n)));
   assert.equal(zip.readUInt32LE(p),0x02014b50);
   assert.equal(run().status,0); assert.deepEqual(await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`)),zip);
   const core=await readFile(resolve(temp,'content/core.js'),'utf8');
