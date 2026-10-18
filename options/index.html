@@ -23,13 +23,19 @@
         <label class="field">
           <span class="name">提供商</span>
           <select id="provider"></select>
-          <span class="hint">选中后自动填好地址和协议；所有字段都还能再改。</span>
+          <span class="hint">选中后自动填好地址和协议；自定义服务商保存后会出现在列表里，随时可以切回来。</span>
         </label>
+
+        <div class="field" id="providerNameField" hidden>
+          <span class="name">服务商名称<a id="deleteProvider" class="key-link danger" href="#">删除</a></span>
+          <input id="providerName" type="text" maxlength="40" spellcheck="false" placeholder="例如：我的中转 A" />
+          <span class="hint">改完点底部「保存」；名称只影响列表里怎么显示。</span>
+        </div>
 
         <label class="field">
           <span class="name">接口协议</span>
           <select id="engine"></select>
-          <span class="hint">每个协议单独保存自己的地址、Key 和模型，切换不会丢。</span>
+          <span class="hint">地址、Key、模型都按服务商分别保存，切换不会丢。</span>
         </label>
 
         <label class="field">

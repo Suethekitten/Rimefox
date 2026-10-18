@@ -65,7 +65,7 @@ t('旧结构字段被清掉', () => {
   assert.equal(next.engineConfig, undefined);
   assert.equal(next.engine, undefined);
   assert.equal(next._v, CONFIG_VERSION);
-  assert.equal(CONFIG_VERSION, 5);
+  assert.equal(CONFIG_VERSION, 6);
 });
 
 t('行为项原样保留', () => {
@@ -202,6 +202,62 @@ t('旧扁平结构仍可导入', () => {
     })
   );
   assert.equal(config.providerConfig.siliconflow.apiKey, 'sk-sf');
+});
+
+// ---------------- 自定义服务商（可命名、可多个） ----------------
+console.log('\n[自定义服务商]');
+
+t('v5 配置里的 __custom__ 槽会自动补进列表', () => {
+  const next = migrateConfig({
+    _v: 5,
+    currentProvider: '__custom__',
+    providerConfig: { __custom__: { engine: 'openai', baseUrl: 'https://relay.example/v1', apiKey: 'sk-r', model: 'm' } }
+  });
+  assert.equal(next.customProviders.length, 1);
+  assert.equal(next.customProviders[0].id, '__custom__');
+  assert.equal(next.customProviders[0].name, '自定义 1');
+});
+
+t('v6 已命名的列表原样保留', () => {
+  const next = migrateConfig({
+    _v: 6,
+    providerConfig: { 'custom:2': { engine: 'openai', baseUrl: 'https://a/v1', apiKey: 'k' } },
+    customProviders: [{ id: 'custom:2', name: '我的中转 A' }]
+  });
+  assert.equal(next.customProviders[0].name, '我的中转 A');
+});
+
+t('自定义 id 被认作合法服务商', () => {
+  assert.equal(slotFor({}, 'custom:2').provider, 'custom:2');
+  assert.equal(slotFor({}, '__custom__').provider, '__custom__');
+});
+
+t('导入带自定义服务商的配置', () => {
+  const { config } = pickImportedConfig(
+    envelope({
+      currentProvider: 'custom:2',
+      customProviders: [{ id: 'custom:2', name: '我的中转 A' }],
+      providerConfig: { 'custom:2': { engine: 'openai', baseUrl: 'https://relay.example/v1', apiKey: 'sk-r' } },
+      targetLang: 'zh-CN',
+      theme: 'underline',
+      batchSize: 8
+    })
+  );
+  assert.equal(config.currentProvider, 'custom:2');
+  assert.equal(config.customProviders[0].name, '我的中转 A');
+  assert.equal(config.providerConfig['custom:2'].apiKey, 'sk-r');
+});
+
+t('非法自定义 id 会被拒绝', () => {
+  const { rejected } = pickImportedConfig(
+    envelope({
+      customProviders: [{ id: 'evil/id', name: 'x' }],
+      targetLang: 'zh-CN',
+      theme: 'underline',
+      batchSize: 8
+    })
+  );
+  assert.ok(rejected.indexOf('customProviders') >= 0);
 });
 
 t('未知服务商被拒绝并记入 rejected', () => {

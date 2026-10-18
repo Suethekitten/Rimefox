@@ -60,6 +60,7 @@ function fillSelect(select, items) {
     const opt = document.createElement('option');
     opt.value = item.value;
     opt.textContent = item.label;
+    if (item.disabled) opt.disabled = true;
     select.appendChild(opt);
   });
 }
@@ -183,6 +184,8 @@ function updateThinkingUI() {
 }
 
 function applyConfig(cfg) {
+  fillProviderSelect();
+
   const slot = slotFor(cfg, cfg.currentProvider);
   currentProvider = slot.provider;
   providerSelect.value = slot.provider;
@@ -213,6 +216,7 @@ function applyConfig(cfg) {
   updateEngineHints();
   updateThinkingUI();
   updateKeyLink(providerById(slot.provider));
+  updateProviderNameUI();
   updateModelHint();
 }
 
@@ -234,6 +238,10 @@ function readForm() {
   return {
     currentProvider,
     providerConfig,
+    customProviders: ((currentCfg && currentCfg.customProviders) || []).map((p) => ({
+      id: p.id,
+      name: p.name || '自定义'
+    })),
     thinkingMode: fields.thinkingMode.value,
     thinkingExtra: fields.thinkingExtra.value.trim(),
 
@@ -453,10 +461,48 @@ document.addEventListener('mousedown', (event) => {
 fields.model.addEventListener('input', updateModelHint);
 
 // ---------------- 提供商模板 ----------------
+const NEW_CUSTOM_ID = '__new_custom__';
+const SEP_ID = '__sep__';
+
+function isCustomProvider(id) {
+  return id === CUSTOM_PROVIDER_ID || /^custom:/.test(String(id || ''));
+}
+
 function fillProviderSelect() {
   const items = PROVIDERS.map((p) => ({ value: p.id, label: p.name }));
-  items.push({ value: CUSTOM_PROVIDER_ID, label: '使用自定义提供商' });
+  const customs = (currentCfg && currentCfg.customProviders) || [];
+  if (customs.length) {
+    items.push({ value: SEP_ID, label: '────────────', disabled: true });
+    customs.forEach((p) => items.push({ value: p.id, label: p.name || '自定义' }));
+  }
+  items.push({ value: NEW_CUSTOM_ID, label: '＋ 新建自定义服务商' });
   fillSelect(providerSelect, items);
+}
+
+// 自定义服务商才显示「名称 / 删除」
+function updateProviderNameUI() {
+  const custom = isCustomProvider(currentProvider);
+  $('providerNameField').hidden = !custom;
+  if (!custom) return;
+  const entry = ((currentCfg && currentCfg.customProviders) || []).find((p) => p.id === currentProvider);
+  $('providerName').value = (entry && entry.name) || '';
+}
+
+// 新建一个自定义服务商槽位（第一个沿用老 id，后面依次 custom:2、custom:3…）
+function createCustomProvider() {
+  const list = ((currentCfg && currentCfg.customProviders) || []).slice();
+  const has = (id) => list.some((p) => p.id === id);
+
+  let id = CUSTOM_PROVIDER_ID;
+  if (has(id)) {
+    let n = 2;
+    while (has('custom:' + n)) n += 1;
+    id = 'custom:' + n;
+  }
+
+  list.push({ id, name: '自定义 ' + (list.length + 1) });
+  currentCfg.customProviders = list;
+  return id;
 }
 
 function updateKeyLink(provider) {
@@ -500,19 +546,27 @@ function loadProvider(id) {
 // 切换服务商：各用各的地址 / Key / 模型
 providerSelect.addEventListener('change', () => {
   const id = providerSelect.value;
-  if (!id) return;
+  if (!id || id === SEP_ID) return;
 
   stashCurrentProvider(); // 先把上一个服务商的编辑存住
+
+  if (id === NEW_CUSTOM_ID) {
+    const newId = createCustomProvider();
+    fillProviderSelect();
+    loadProvider(newId);
+    updateProviderNameUI();
+    setResult(modelHint, '新的自定义服务商：填地址和 Key，测试通过后改个名字点「保存」。');
+    return;
+  }
+
   loadProvider(id);
+  updateProviderNameUI();
   setResult($('testResult'), '');
 
-  if (id === CUSTOM_PROVIDER_ID) {
-    // 自定义/第三方兼容接口默认按 OpenAI 通用协议处理（槽位默认值）；
-    // 已保存过的自定义配置会原样恢复，对方是 Anthropic 格式时可在「接口协议」里改
-    updateEngineHints();
+  if (isCustomProvider(id)) {
     setResult(
       modelHint,
-      '自定义：填第三方兼容接口或自建网关的地址，默认按 OpenAI 通用协议处理；没有模型列表时直接手填模型名。'
+      '自定义服务商：地址、Key、模型都会单独记住；默认按 OpenAI 通用协议，需要时可改「接口协议」。'
     );
     return;
   }
@@ -527,6 +581,32 @@ providerSelect.addEventListener('change', () => {
       : '已套用「' + provider.name + '」的地址，模型请点「获取模型列表」后选一个。'
   );
   if (fields.apiKey.value) fetchModels();
+});
+
+// 自定义服务商改名：同步下拉里的文字（保存后持久化）
+$('providerName').addEventListener('input', () => {
+  const list = (currentCfg && currentCfg.customProviders) || [];
+  const entry = list.find((p) => p.id === currentProvider);
+  if (!entry) return;
+  entry.name = $('providerName').value.trim() || '自定义';
+  const opt = Array.from(providerSelect.options).find((o) => o.value === currentProvider);
+  if (opt) opt.textContent = entry.name;
+});
+
+// 删除当前自定义服务商
+$('deleteProvider').addEventListener('click', (event) => {
+  event.preventDefault();
+  if (!isCustomProvider(currentProvider)) return;
+
+  currentCfg.customProviders = ((currentCfg && currentCfg.customProviders) || []).filter(
+    (p) => p.id !== currentProvider
+  );
+  if (currentCfg.providerConfig) delete currentCfg.providerConfig[currentProvider];
+
+  fillProviderSelect();
+  loadProvider('deepseek');
+  updateProviderNameUI();
+  setResult(modelHint, '已删除该自定义服务商（点底部「保存」后生效）。');
 });
 
 // 改协议：只改当前服务商使用的协议，地址 / Key / 模型保留

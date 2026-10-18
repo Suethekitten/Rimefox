@@ -280,6 +280,10 @@ select {
   text-decoration: underline;
 }
 
+.key-link.danger {
+  color: var(--bad);
+}
+
 /* ---- 可搜索的模型选择器 ---- */
 .model-toggle {
   flex: none;
