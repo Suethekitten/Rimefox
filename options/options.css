@@ -235,6 +235,15 @@ select {
   margin-top: 6px;
 }
 
+/* 从属选项：缩进一级，视觉上归属上面的主开关 */
+.sub-check {
+  padding-left: 40px;
+}
+
+.sub-check .name-note {
+  color: var(--muted);
+}
+
 .check input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;

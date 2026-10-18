@@ -1,6 +1,10 @@
-// 划词翻译：选中一段文字，在选区下方弹一个小气泡显示译文。
-// 独立文件，不依赖 main.js 的调度；只复用 core.js 的 DT.send 与后台缓存。
-// 设置项：selectionTranslate（设置页「选中文字后弹出气泡翻译」）。
+// 划词翻译：三种触发方式共用同一套取词 / 气泡逻辑。
+//   A 右键菜单      —— 由 background.js 的 chrome.contextMenus 触发，消息进来才翻
+//   B 选区小按钮    —— 选中后旁边出现「译」，点击才翻（默认）
+//   D 选中即翻译    —— 打开后选中立刻翻（旧行为）
+//   C 快捷键        —— 暂缓（监听在 main.js，等 P0-d 合并后统一做）
+//
+// 设置项：selectionTranslate（总开关）、selectionMenu、selectionButton、selectionImmediate。
 (function () {
   'use strict';
 
@@ -11,10 +15,18 @@
 
   var MAX_CHARS = 800;
   var bubble = null;
+  var btn = null;
   var seq = 0;
   var lastAt = 0;
 
-  // ---------------- 气泡 UI ----------------
+  function cfg() {
+    return DT.state.config || {};
+  }
+  function masterOn() {
+    return cfg().selectionTranslate !== false;
+  }
+
+  // ---------------- 气泡 ----------------
   function ensureBubble() {
     if (bubble && bubble.isConnected) return bubble;
 
@@ -38,7 +50,6 @@
       'user-select:text'
     ].join(';');
 
-    // 点击气泡复制译文
     bubble.addEventListener('mousedown', function (event) {
       event.stopPropagation();
     });
@@ -48,11 +59,9 @@
       if (!text) return;
       try {
         navigator.clipboard.writeText(text).then(function () {
-          var old = text;
           bubble.textContent = '已复制';
           setTimeout(function () {
-            // 期间可能已经有新的译文了，别把新内容覆盖掉
-            if (bubble && bubble.textContent === '已复制') bubble.textContent = old;
+            if (bubble && bubble.textContent === '已复制') bubble.textContent = text;
           }, 600);
         });
       } catch (err) {
@@ -69,7 +78,7 @@
     if (bubble) bubble.style.display = 'none';
   }
 
-  function place(rect) {
+  function placeBubble(rect) {
     var pad = 8;
     var bw = bubble.offsetWidth;
     var bh = bubble.offsetHeight;
@@ -78,9 +87,7 @@
 
     var left = Math.min(Math.max(pad, rect.left), Math.max(pad, vw - bw - pad));
     var top = rect.bottom + 8;
-    if (top + bh > vh - pad) {
-      top = rect.top - bh - 8;
-    }
+    if (top + bh > vh - pad) top = rect.top - bh - 8;
     if (top < pad) top = pad;
 
     bubble.style.left = Math.round(left) + 'px';
@@ -88,14 +95,73 @@
   }
 
   function showBubble(rect, text, state) {
+    hideButton();
     ensureBubble();
     bubble.dataset.state = state || 'done';
     bubble.textContent = text;
     bubble.style.display = 'block';
-    // 先显示再量尺寸，否则 offsetWidth 为 0
-    bubble.style.visibility = 'hidden';
-    place(rect);
+    bubble.style.visibility = 'hidden'; // 先量尺寸再定位
+    placeBubble(rect);
     bubble.style.visibility = 'visible';
+  }
+
+  // ---------------- 选区小按钮（B 方案） ----------------
+  function ensureButton() {
+    if (btn && btn.isConnected) return btn;
+
+    btn = document.createElement('div');
+    btn.setAttribute('data-dt-ui', '1');
+    btn.textContent = '译';
+    btn.title = '翻译所选文字';
+    btn.style.cssText = [
+      'position:fixed',
+      'z-index:2147483645',
+      'display:none',
+      'width:26px',
+      'height:26px',
+      'line-height:26px',
+      'text-align:center',
+      'border-radius:6px',
+      'background:#2563eb',
+      'color:#ffffff',
+      'font:600 13px/26px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif',
+      'box-shadow:0 4px 12px rgba(0,0,0,.22)',
+      'cursor:pointer',
+      'user-select:none'
+    ].join(';');
+
+    btn.addEventListener('mousedown', function (event) {
+      event.stopPropagation();
+      event.preventDefault(); // 别清掉选区
+    });
+    btn.addEventListener('click', function (event) {
+      event.stopPropagation();
+      var info = currentSelection();
+      hideButton();
+      if (info) run(info);
+    });
+
+    (document.body || document.documentElement).appendChild(btn);
+    return btn;
+  }
+
+  function hideButton() {
+    if (btn) btn.style.display = 'none';
+  }
+
+  function showButton(rect) {
+    ensureButton();
+    var pad = 6;
+    var size = 26;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+
+    var left = Math.min(Math.max(pad, rect.right + 6), vw - size - pad);
+    var top = Math.min(Math.max(pad, rect.bottom + 6), vh - size - pad);
+
+    btn.style.left = Math.round(left) + 'px';
+    btn.style.top = Math.round(top) + 'px';
+    btn.style.display = 'block';
   }
 
   // ---------------- 选区 ----------------
@@ -111,7 +177,6 @@
     var el = node.nodeType === 1 ? node : node.parentElement;
     if (!el || !el.closest) return null;
 
-    // 输入类元素、我们自己的 UI、以及我们已经插入的译文，都不参与划词
     if (el.closest('input,textarea,select,[contenteditable=""],[contenteditable="true"]')) return null;
     if (el.closest('[data-dt-ui]')) return null;
     if (el.closest('[data-dt-target]')) return null;
@@ -122,18 +187,17 @@
     return { text: text, rect: rect };
   }
 
-  function cfg() {
-    return DT.state.config || {};
-  }
-
   function eligible(info) {
-    if (cfg().selectionTranslate === false) return false;
+    if (!masterOn()) return false;
+    if (!info || !info.text) return false;
     if (info.text.length < 2 || info.text.length > MAX_CHARS) return false;
     if (!/[\p{L}]/u.test(info.text)) return false; // 纯数字 / 纯符号不翻
     return true;
   }
 
-  async function translateSelection(info) {
+  // ---------------- 翻译 ----------------
+  async function run(info) {
+    hideButton();
     var mySeq = ++seq;
     showBubble(info.rect, '翻译中…', 'loading');
 
@@ -168,16 +232,26 @@
 
       // 让浏览器先把选区落定
       setTimeout(function () {
+        if (!masterOn()) {
+          hideButton();
+          return;
+        }
         var info = currentSelection();
-        if (!info) return;
         if (!eligible(info)) {
-          hideBubble();
+          hideButton();
           return;
         }
         var now = Date.now();
         if (now - lastAt < 120) return;
         lastAt = now;
-        translateSelection(info);
+
+        // D 方案：选中立刻翻
+        if (cfg().selectionImmediate === true) {
+          run(info);
+          return;
+        }
+        // B 方案：只出小按钮，等用户点
+        if (cfg().selectionButton !== false) showButton(info.rect);
       }, 10);
     },
     true
@@ -186,9 +260,9 @@
   document.addEventListener(
     'mousedown',
     function (event) {
-      if (!bubble || bubble.style.display === 'none') return;
       if (event.target && event.target.closest && event.target.closest('[data-dt-ui]')) return;
-      hideBubble();
+      hideButton();
+      if (bubble && bubble.style.display !== 'none') hideBubble();
     },
     true
   );
@@ -196,14 +270,49 @@
   document.addEventListener(
     'keydown',
     function (event) {
-      if (event.key === 'Escape') hideBubble();
+      if (event.key === 'Escape') {
+        hideButton();
+        hideBubble();
+      }
     },
     true
   );
 
-  // 滚动后选区位置就对不上了，直接收起
+  // 滚动 / 改窗口大小后，选区位置就对不上了，直接收起
+  window.addEventListener('scroll', hideButton, true);
   window.addEventListener('scroll', hideBubble, true);
-  window.addEventListener('resize', hideBubble, true);
+  window.addEventListener('resize', function () {
+    hideButton();
+    hideBubble();
+  });
+
+  // A 方案：右键菜单点击后由 background 发进来
+  chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (!msg || msg.type !== 'dt:translateSelection') return false;
+    if (!masterOn()) return false;
+
+    var info = currentSelection();
+    var text = String(msg.text || (info && info.text) || '').trim();
+    if (!text) return false;
+
+    // 右侧菜单触发的场景下也要能定位气泡：优先用当前选区，取不到就退到屏幕上方中间
+    var rect =
+      info && info.rect
+        ? info.rect
+        : {
+            left: Math.round(window.innerWidth / 2 - 120),
+            right: Math.round(window.innerWidth / 2 + 120),
+            top: 80,
+            bottom: 100,
+            width: 240,
+            height: 20
+          };
+
+    var payload = { text: text, rect: rect };
+    if (!eligible(payload)) return false;
+    run(payload);
+    return false;
+  });
 
   DT.log('selection translate ready');
 })();

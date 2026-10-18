@@ -31,6 +31,9 @@ const fields = {
   translateOnLoad: $('translateOnLoad'),
   lazy: $('lazy'),
   selectionTranslate: $('selectionTranslate'),
+  selectionMenu: $('selectionMenu'),
+  selectionButton: $('selectionButton'),
+  selectionImmediate: $('selectionImmediate'),
   chromeBilingual: $('chromeBilingual'),
   debug: $('debug')
 };
@@ -148,6 +151,9 @@ function applyConfig(cfg) {
   fields.translateOnLoad.checked = !!cfg.translateOnLoad;
   fields.lazy.checked = cfg.lazy !== false;
   fields.selectionTranslate.checked = cfg.selectionTranslate !== false;
+  fields.selectionMenu.checked = cfg.selectionMenu !== false;
+  fields.selectionButton.checked = cfg.selectionButton !== false;
+  fields.selectionImmediate.checked = cfg.selectionImmediate === true;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.debug.checked = !!cfg.debug;
 }
@@ -168,6 +174,9 @@ function readForm() {
     translateOnLoad: fields.translateOnLoad.checked,
     lazy: fields.lazy.checked,
     selectionTranslate: fields.selectionTranslate.checked,
+    selectionMenu: fields.selectionMenu.checked,
+    selectionButton: fields.selectionButton.checked,
+    selectionImmediate: fields.selectionImmediate.checked,
     chromeBilingual: fields.chromeBilingual.checked,
     debug: fields.debug.checked
   };

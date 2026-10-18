@@ -377,11 +377,54 @@ function restrictStorage() {
 restrictStorage();
 chrome.runtime.onStartup.addListener(restrictStorage);
 
+// ---------------- 划词：右键菜单（A 方案） ----------------
+const SELECTION_MENU_ID = 'rimefox-translate-selection';
+
+// 菜单是否显示跟随设置：总开关或「右键菜单」关掉时移除
+function syncSelectionMenu() {
+  getConfig()
+    .then((cfg) => {
+      const want = cfg.selectionTranslate !== false && cfg.selectionMenu !== false;
+      chrome.contextMenus.removeAll(() => {
+        void chrome.runtime.lastError;
+        if (!want) return;
+        chrome.contextMenus.create(
+          {
+            id: SELECTION_MENU_ID,
+            title: '凛狐：翻译所选文字',
+            contexts: ['selection']
+          },
+          () => void chrome.runtime.lastError
+        );
+      });
+    })
+    .catch(() => {});
+}
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== SELECTION_MENU_ID) return;
+  if (!tab || tab.id == null) return;
+
+  const payload = { type: 'dt:translateSelection', text: info.selectionText || '' };
+  // info.frameId 让请求只发给选中的那个 iframe
+  const options = info.frameId != null ? { frameId: info.frameId } : {};
+
+  chrome.tabs.sendMessage(tab.id, payload, options).catch(() => {
+    // 页面在安装扩展之前就打开了：补注入后再试一次
+    ensureInjected(tab.id)
+      .then(() => chrome.tabs.sendMessage(tab.id, payload, options))
+      .catch(() => {});
+  });
+});
+
+chrome.runtime.onStartup.addListener(syncSelectionMenu);
+
 // 配置变了（设置页保存、弹窗切模式）就通知所有标签页重新拉一次（去掉 Key 的）配置。
 // 以前内容脚本自己监听 storage.onChanged，但那样事件里带着完整配置（含 Key），
 // 而且 local 收紧访问后内容脚本也收不到了。
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes.config) return;
+  syncSelectionMenu();
   chrome.tabs.query({}).then(
     (tabs) => {
       tabs.forEach((tab) => {
@@ -395,6 +438,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // 首次安装且没有 key 时，直接拉开设置页
 chrome.runtime.onInstalled.addListener(async () => {
+  syncSelectionMenu();
   const cfg = await getConfig();
   if (!cfg.apiKey) {
     chrome.runtime.openOptionsPage();

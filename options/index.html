@@ -112,7 +112,22 @@
 
         <label class="check">
           <input id="selectionTranslate" type="checkbox" />
-          <span>划词翻译：选中一段文字后，在选区下方弹气泡显示译文（点击气泡复制）</span>
+          <span>划词翻译：选中文字后按下面的方式触发，气泡里显示译文（点击气泡复制）</span>
+        </label>
+
+        <label class="check sub-check">
+          <input id="selectionMenu" type="checkbox" />
+          <span>右键菜单「凛狐：翻译所选文字」——只有选中文字时才出现</span>
+        </label>
+
+        <label class="check sub-check">
+          <input id="selectionButton" type="checkbox" />
+          <span>选区旁边显示「译」小按钮，点击才翻译（推荐，不误触）</span>
+        </label>
+
+        <label class="check sub-check">
+          <input id="selectionImmediate" type="checkbox" />
+          <span>选中后立即翻译——选中就发请求，会消耗额度，默认关闭</span>
         </label>
 
         <label class="check">
