@@ -527,6 +527,20 @@
     return eq([1500, 3200, 6000, 6450, 9500, 11500].map(function (ms) { return DT.subs.unitAt(units, ms); }), [0, 1, 1, -1, -1, 4]);
   });
 
+  check('字幕：句末 1.5s 内继续显示上一句', function () {
+    var last = { start: 1000, end: 2000 };
+    return DT.subs.shouldLinger(last, 2400, 1500) === true ? true : '应保留上一句';
+  });
+
+  check('字幕：超过 1.5s / 句末之前 / 没有上一句都不保留', function () {
+    var last = { start: 1000, end: 2000 };
+    var bad = [];
+    if (DT.subs.shouldLinger(last, 3600, 1500)) bad.push('超过 1.5s');
+    if (DT.subs.shouldLinger(last, 1500, 1500)) bad.push('句末之前');
+    if (DT.subs.shouldLinger(null, 2500, 1500)) bad.push('没有上一句');
+    return bad.length ? bad.join(' / ') : true;
+  });
+
   check('字幕：机翻轨道去掉 tlang 拿原文；语言比较认 zh-Hans ≈ zh-CN', function () {
     var url = 'https://www.youtube.com/api/timedtext?v=abc&lang=en&kind=asr&pot=TOKEN&tlang=zh-Hans&fmt=json3';
     var p = DT.subs.paramsOf(url);

@@ -209,20 +209,31 @@
     return hit >= 0 && ms < units[hit].end ? hit : -1;
   };
 
+  // 句间空档：上一句刚结束不久（默认 1.5s）时继续显示它，避免字幕闪一下就没。
+  // 往前的空档（拖动到上一句之前）不保留；没有上一句也不保留。
+  subs.shouldLinger = function (prev, ms, gapMs) {
+    if (!prev) return false;
+    var now = Number(ms) || 0;
+    var gap = now - prev.end;
+    return gap >= 0 && gap < (Number(gapMs) || 1500) && now >= prev.start;
+  };
+
   // ---------------- 运行时（只在 YouTube 上） ----------------
   if (!/(^|\.)youtube(-nocookie)?\.com$/.test(location.hostname)) return;
 
   var LOOK_AHEAD_MS = 90000; // 只翻播放位置往后这么长
   var LOOK_BEHIND_MS = 3000;
-  var BATCH_ITEMS = 20;
-  var BATCH_CHARS = 2000;
+  var BATCH_ITEMS = 8; // 小批优先：当前句的译文更快回来
+  var BATCH_CHARS = 1000;
   var RETRY_MS = 15000;
+  var LINGER_MS = 1500; // 句末后再停留这么久，等下一句或等译文
 
   var pendingRaw = null; // 收到但还没处理的字幕回包
-  var track = null; // { key, v, units, trans: [], failedAt: [], pending: {} }
+  var track = null; // { key, v, units, trans: [], failedAt: [], pending: {}, style }
   var inflight = 0;
   var overlay = null;
   var shown = '';
+  var last = null; // 上一句已显示的内容，句间空档时用来兜底
   var warned = false;
 
   function cfg() {
@@ -236,6 +247,12 @@
 
   function target() {
     return DT.state.target || cfg().targetLang || 'zh-CN';
+  }
+
+  // 当前页面的趣味风格（弹窗里选的，只对当前页生效）
+  function styleId() {
+    var s = DT.state && DT.state.style;
+    return DT.STYLE_IDS && DT.STYLE_IDS.indexOf(s) >= 0 ? s : 'plain';
   }
 
   function currentVideoId() {
@@ -284,20 +301,42 @@
     }
     var units = subs.unitsOf(json, url);
     if (!units.length) return;
-    track = { key: key, v: p.v, units: units, trans: new Array(units.length), failedAt: [], pending: {} };
+    track = {
+      key: key,
+      v: p.v,
+      units: units,
+      trans: new Array(units.length),
+      failedAt: [],
+      pending: {},
+      style: styleId()
+    };
     shown = '';
+    last = null;
     DT.log('subtitles:', units.length, 'units', p.kind === 'asr' ? '(asr)' : '', p.tlang ? '(from tlang)' : '');
   }
 
   function reset() {
     track = null;
     shown = '';
+    last = null;
     render(null);
   }
 
   // ---------------- 翻译调度 ----------------
   function pump(nowMs) {
-    if (!track || inflight > 0) return;
+    if (!track) return;
+    // 趣味风格切换：旧译文的措辞不能继续用，清掉重翻（缓存键带 style，不会串）
+    var style = styleId();
+    if (track.style !== style) {
+      track.style = style;
+      track.trans = new Array(track.units.length);
+      track.failedAt = [];
+      track.pending = {};
+      warned = false;
+      shown = '';
+      last = null;
+    }
+    if (inflight > 0) return;
     var units = track.units;
     var batch = [];
     var chars = 0;
@@ -315,6 +354,7 @@
     if (!batch.length) return;
 
     var mine = track;
+    var batchStyle = track.style;
     inflight += 1;
     batch.forEach(function (i) {
       mine.pending[i] = true;
@@ -324,10 +364,12 @@
       texts: batch.map(function (i) {
         return mine.units[i].text;
       }),
-      target: target()
+      target: target(),
+      style: batchStyle
     })
       .then(
         function (res) {
+          if (mine.style !== batchStyle) return; // 风格在请求途中变了：这批结果作废
           var results = (res && res.results) || [];
           batch.forEach(function (i, k) {
             var value = results[k];
@@ -340,6 +382,7 @@
           }
         },
         function () {
+          if (mine.style !== batchStyle) return;
           batch.forEach(function (i) {
             mine.failedAt[i] = Date.now();
           });
@@ -405,8 +448,11 @@
     document.querySelectorAll('.rimefox-subs-on').forEach(function (el) {
       if (el !== player) el.classList.remove('rimefox-subs-on');
     });
-    if (!state) {
+    // 没有可显示的内容就交还给原生字幕：以前先加隐藏类再判空，句间空档会两边都没有
+    if (!state || !state.orig) {
+      if (player) player.classList.remove('rimefox-subs-on');
       if (overlay) overlay.style.display = 'none';
+      shown = '';
       return;
     }
     ensureStyle();
@@ -424,10 +470,6 @@
     var sig = state.orig + '\u0000' + state.trans + '\u0000' + size;
     if (sig === shown) return;
     shown = sig;
-    if (!state.orig) {
-      overlay.style.display = 'none';
-      return;
-    }
     overlay._orig.textContent = state.orig;
     overlay._trans.textContent = state.trans;
     overlay._trans.style.display = state.trans ? 'table' : 'none';
@@ -446,7 +488,10 @@
       pendingRaw = null;
       process(raw);
     }
-    if (!track) return;
+    if (!track) {
+      render(null);
+      return;
+    }
     if (!enabled()) {
       reset();
       return;
@@ -467,13 +512,24 @@
     pump(ms);
     var i = subs.unitAt(track.units, ms);
     if (i < 0) {
-      render({ player: player, orig: '', trans: '' });
+      // 句间空档：上一句刚结束不久就继续留着（最多 1.5s），否则交还原生字幕
+      if (last && last.v === track.v && subs.shouldLinger(last, ms, LINGER_MS)) {
+        var late = track.trans[last.i];
+        render({
+          player: player,
+          orig: last.orig,
+          trans: late && clean(late) !== clean(last.orig) ? late : ''
+        });
+      } else {
+        render({ player: player, orig: '', trans: '' });
+      }
       return;
     }
     var unit = track.units[i];
     var trans = track.trans[i];
     // 译文和原文一样（或模型判定无需翻译）就只显示一行
     if (!trans || clean(trans) === clean(unit.text)) trans = '';
+    last = { v: track.v, i: i, start: unit.start, end: unit.end, orig: unit.text };
     render({ player: player, orig: unit.text, trans: trans });
   }
 
