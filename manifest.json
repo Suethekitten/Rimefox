@@ -56,13 +56,18 @@
         "content/dom.js",
         "content/main.js",
         "content/selection.js",
-        "content/subtitles.js",
         "content/hover.js"
       ],
       "css": ["content/styles/inject.css"],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": false
+    },
+    {
+      "matches": ["*://www.youtube.com/*", "*://m.youtube.com/*", "*://www.youtube-nocookie.com/*"],
+      "js": ["content/subtitles-core.js", "content/subtitles.js"],
+      "run_at": "document_idle",
+      "all_frames": true
     },
     {
       "matches": ["*://www.youtube.com/*", "*://m.youtube.com/*", "*://www.youtube-nocookie.com/*"],

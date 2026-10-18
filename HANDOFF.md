@@ -60,13 +60,14 @@ edge-bilingual/
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）
 │   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗
 │   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡
-│   ├── subtitles.js       YouTube 字幕双语：解析 json3、拼句、懒翻译、叠层显示
+│   ├── subtitles-core.js  YouTube 字幕纯函数（解析 json3、拼句）；自检页与 YouTube 运行时共用
+│   ├── subtitles.js       YouTube 字幕运行时：懒翻译、叠层显示（只在 YouTube 加载）
 │   ├── youtube-hook.js    页面主环境（world: MAIN）：捕获播放器的字幕请求，转给 subtitles.js
 │   ├── hover.js           悬停对照：高亮同一处的原文和译文，替换型单元弹原文气泡
 │   └── styles/inject.css  译文样式与主题
 ├── popup/                 工具栏面板（含随手翻译）
-├── options/               设置页（提供商模板、模型选择器、快捷键录制）
-├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存）
+├── options/               设置页（提供商模板、模型选择器、快捷键录制；拆分见 options/ 下各模块）
+├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词）
 └── selftest/              离线自检（87 条用例）
 ```
 
@@ -245,13 +246,13 @@ lib/
 `textOf(el)` 递归时跳过 `[data-dt-target]` 和 `[data-dt-ui]` 子树。
 **否则**增量重扫时会把"原文 + 已注入的译文"当成新文本再翻一次，表现为同一段译文出现两遍。
 
-### 5.4 YouTube 字幕（`subtitles.js` + `youtube-hook.js`）
+### 5.4 YouTube 字幕（`subtitles-core.js` + `subtitles.js` + `youtube-hook.js`）
 
 ```
 播放器 XHR /api/timedtext?…&pot=…&fmt=json3
    │  youtube-hook.js（world: MAIN）挂钩 XHR / fetch，postMessage 原样转出；留最后一份，扩展脚本晚到时发 replay 再要
    ▼
-subtitles.js（扩展环境）
+subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-core.js）
    ├─ 地址带 tlang（YouTube 机翻）→ 去掉 tlang 同源再请求一次，拿原文轨道
    ├─ 字幕语言 = 目标语言 → 不接管
    ├─ 人工字幕：按句末标点合并相邻事件；自动生成：逐词按停顿拼句（短句要长停顿才断）
