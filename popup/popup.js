@@ -111,6 +111,13 @@ function render() {
         '自动补注入失败。请在网页上按 ' + KEYS.reload + ' 刷新后重新打开本面板；仍然失败请按 ' +
           KEYS.console + ' 打开控制台看红色报错。'
       );
+    } else if (!url) {
+      // 没有 tabs 权限时，扩展读不到无权访问页面的地址：可能是浏览器内置页，也可能是没开文件访问的本地文件，两种都提示
+      el.toggle.textContent = t('当前页面不支持');
+      el.stat.textContent = t(
+        '浏览器内置页、扩展商店页无法翻译。如果这是本地文件，请打开 ' + EXTENSIONS_PAGE + ' → 本扩展的「详细信息」→ 开启「' +
+          FILE_ACCESS_LABEL + '」，然后按 ' + KEYS.reload + ' 刷新。'
+      );
     } else {
       el.toggle.textContent = t('当前页面不支持');
       el.stat.textContent = t(

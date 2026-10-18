@@ -616,6 +616,17 @@ function bindNav() {
   if (sections[0]) highlight(sections[0].id);
 }
 
+// 商店包不带自检页（只收运行时文件）：找不到就把「打开自检页」那一行藏起来，免得点开是 404
+function hideSelftestIfMissing() {
+  fetch('../selftest/index.html')
+    .then((res) => {
+      if (!res.ok) $('selftestRow').hidden = true;
+    })
+    .catch(() => {
+      $('selftestRow').hidden = true;
+    });
+}
+
 async function init() {
   try {
     $('appVersion').textContent = 'v' + chrome.runtime.getManifest().version;
@@ -626,6 +637,7 @@ async function init() {
     $(id).dataset.default = $(id).textContent;
   });
   bindNav();
+  hideSelftestIfMissing();
   refreshProviderList();
   fillSelect(fields.engine, engineList().map((e) => ({ value: e.id, label: e.label })));
   fillSelect(fields.thinkingMode, THINKING_MODES);

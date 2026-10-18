@@ -78,5 +78,13 @@ t('t()：按当前界面语言输出', () => {
   assert.equal(translateFor('开始翻译'), '开始翻译');
 });
 
+t('弹窗：读不到页面地址时的本地文件提示有英文', () => {
+  const zh = '浏览器内置页、扩展商店页无法翻译。如果这是本地文件，请打开 chrome://extensions → 本扩展的「详细信息」→ 开启「允许访问文件网址」，然后按 ⌘R 刷新。';
+  const en = translateText(zh);
+  assert.notEqual(en, zh);
+  assert.match(en, /local file/);
+  assert.match(en, /chrome:\/\/extensions/);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);
