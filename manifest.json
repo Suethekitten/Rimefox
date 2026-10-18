@@ -53,7 +53,8 @@
       "js": [
         "content/core.js",
         "content/dom.js",
-        "content/main.js"
+        "content/main.js",
+        "content/selection.js"
       ],
       "css": ["content/styles/inject.css"],
       "run_at": "document_idle",

@@ -30,6 +30,7 @@ const fields = {
   skipSameLang: $('skipSameLang'),
   translateOnLoad: $('translateOnLoad'),
   lazy: $('lazy'),
+  selectionTranslate: $('selectionTranslate'),
   chromeBilingual: $('chromeBilingual'),
   debug: $('debug')
 };
@@ -146,6 +147,7 @@ function applyConfig(cfg) {
   fields.skipSameLang.checked = cfg.skipSameLang !== false;
   fields.translateOnLoad.checked = !!cfg.translateOnLoad;
   fields.lazy.checked = cfg.lazy !== false;
+  fields.selectionTranslate.checked = cfg.selectionTranslate !== false;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.debug.checked = !!cfg.debug;
 }
@@ -165,6 +167,7 @@ function readForm() {
     skipSameLang: fields.skipSameLang.checked,
     translateOnLoad: fields.translateOnLoad.checked,
     lazy: fields.lazy.checked,
+    selectionTranslate: fields.selectionTranslate.checked,
     chromeBilingual: fields.chromeBilingual.checked,
     debug: fields.debug.checked
   };
