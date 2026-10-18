@@ -244,6 +244,24 @@ select {
   color: var(--muted);
 }
 
+/* 多行自定义参数输入 */
+.field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: 12px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace;
+  resize: vertical;
+}
+
+.field textarea:focus {
+  outline: none;
+  border-color: var(--primary, #3b82f6);
+}
+
 .check input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;

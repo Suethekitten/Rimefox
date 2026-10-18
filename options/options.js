@@ -11,16 +11,31 @@ import {
   IMPORT_APP,
   IMPORT_SCHEMA,
   pickImportedConfig,
-  localIso
+  localIso,
+  activeConfig,
+  ENGINE_DEFAULTS
 } from '../lib/config.js';
-import { listModels } from '../lib/provider.js';
+import { listModels, engineList } from '../lib/provider.js';
 
 const $ = (id) => document.getElementById(id);
 
+// 思考模式的三种取值（与 lib/config.js 的 DEFAULTS.thinkingMode 对应）
+const THINKING_MODES = [
+  { value: 'auto', label: '自动（不发额外参数）' },
+  { value: 'off', label: '尽量关闭' },
+  { value: 'custom', label: '自定义参数' }
+];
+
+// 当前正在编辑的协议（每个协议各自保存地址 / Key / 模型）
+let currentEngine = 'openai';
+
 const fields = {
+  engine: $('engine'),
   baseUrl: $('baseUrl'),
   apiKey: $('apiKey'),
   model: $('model'),
+  thinkingMode: $('thinkingMode'),
+  thinkingExtra: $('thinkingExtra'),
   targetLang: $('targetLang'),
   theme: $('theme'),
   batchSize: $('batchSize'),
@@ -136,10 +151,42 @@ document.addEventListener(
   true
 );
 
+// 不同协议下地址 / Key 的说明不一样
+const ENGINE_HINTS = {
+  openai: {
+    baseUrl: 'OpenAI 兼容的 base URL，通常以 /v1 结尾。程序会自动补 /chat/completions。',
+    key: 'DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。'
+  },
+  anthropic: {
+    baseUrl: 'Anthropic 的地址，通常填 https://api.anthropic.com/v1（程序会自动补 /messages）。',
+    key: '在 console.anthropic.com 申请，形如 sk-ant-...'
+  },
+  gemini: {
+    baseUrl: 'Google 的地址，通常填 https://generativelanguage.googleapis.com/v1beta（模型名会拼进 URL）。',
+    key: '在 aistudio.google.com 申请，形如 AIza...'
+  }
+};
+
+function updateEngineHints() {
+  const hint = ENGINE_HINTS[currentEngine] || ENGINE_HINTS.openai;
+  $('baseUrlHint').textContent = hint.baseUrl;
+  $('apiKeyHint').textContent = hint.key;
+}
+
+function updateThinkingUI() {
+  $('thinkingExtraField').hidden = fields.thinkingMode.value !== 'custom';
+}
+
 function applyConfig(cfg) {
-  fields.baseUrl.value = cfg.baseUrl || '';
-  fields.apiKey.value = cfg.apiKey || '';
-  fields.model.value = cfg.model || '';
+  const active = activeConfig(cfg);
+  currentEngine = active.engine;
+  fields.engine.value = active.engine;
+  fields.baseUrl.value = active.baseUrl || '';
+  fields.apiKey.value = active.apiKey || '';
+  fields.model.value = active.model || '';
+  fields.thinkingMode.value = cfg.thinkingMode || 'auto';
+  fields.thinkingExtra.value = cfg.thinkingExtra || '';
+
   fields.targetLang.value = cfg.targetLang || 'zh-CN';
   fields.theme.value = cfg.theme || 'underline';
   fields.batchSize.value = cfg.batchSize;
@@ -156,13 +203,25 @@ function applyConfig(cfg) {
   fields.selectionImmediate.checked = cfg.selectionImmediate === true;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.debug.checked = !!cfg.debug;
+
+  updateEngineHints();
+  updateThinkingUI();
 }
 
 function readForm() {
-  return {
+  const engineConfig = {};
+  engineConfig[currentEngine] = {
     baseUrl: fields.baseUrl.value.trim(),
     apiKey: fields.apiKey.value.trim(),
-    model: fields.model.value.trim(),
+    model: fields.model.value.trim()
+  };
+
+  return {
+    engine: currentEngine,
+    engineConfig,
+    thinkingMode: fields.thinkingMode.value,
+    thinkingExtra: fields.thinkingExtra.value.trim(),
+
     targetLang: fields.targetLang.value,
     theme: fields.theme.value,
     batchSize: Number(fields.batchSize.value) || DEFAULTS.batchSize,
@@ -207,7 +266,7 @@ window.addEventListener('focus', renderBrowserShortcut);
 
 // ---------------- 模型列表 ----------------
 // 只留能对话的：嵌入、重排、语音、画图这类模型不能拿来翻译
-const NON_CHAT = /embed|rerank|whisper|tts|speech|audio|dall-?e|moderation|bge-|stable-diffusion|flux|kolors|cogview|cogvideo|video|image/i;
+const NON_CHAT = /embed|rerank|whisper|tts|speech|audio|dall-?e|moderation|bge-|stable-diffusion|flux|kolors|cogview|cogvideo|video|image|realtime|transcribe/i;
 // 带"思考"过程的模型：能用，但整页翻译会慢很多倍
 const REASONING = /reason|thinking|qwq|(^|[-/])[rz]1([-.]|$)|(^|[-/])o[134](-|$)/i;
 
@@ -231,7 +290,7 @@ async function fetchModels(manual) {
   const seq = ++modelSeq;
   setResult(modelHint, '正在获取模型列表…');
   try {
-    const ids = (await listModels({ baseUrl, apiKey })).filter((id) => !NON_CHAT.test(id)).sort();
+    const ids = (await listModels({ engine: currentEngine, baseUrl, apiKey })).filter((id) => !NON_CHAT.test(id)).sort();
     if (seq !== modelSeq) return; // 期间地址或 Key 又改了，以最新一次为准
     renderModelList(ids);
   } catch (err) {
@@ -294,11 +353,41 @@ modelSelect.addEventListener('change', () => {
 fields.model.addEventListener('input', () => {
   if (!modelSelect.hidden) syncModelSelect(modelSelect.options.length - 1, '');
 });
+
+// 切换协议：换成该协议单独保存的地址 / Key / 模型
+fields.engine.addEventListener('change', () => {
+  const target = fields.engine.value;
+  if (!target || target === currentEngine) return;
+
+  currentEngine = target;
+  const cfg = currentCfg || {};
+  const conf = (cfg.engineConfig && cfg.engineConfig[target]) || {
+    baseUrl: (ENGINE_DEFAULTS[target] || {}).baseUrl || '',
+    apiKey: '',
+    model: ''
+  };
+
+  fields.baseUrl.value = conf.baseUrl || '';
+  fields.apiKey.value = conf.apiKey || '';
+  fields.model.value = conf.model || '';
+
+  modelSelect.innerHTML = '';
+  modelSelect.hidden = true;
+  const label = (engineList().find((e) => e.id === target) || {}).label || target;
+  setResult(modelHint, '已切换到「' + label + '」，填好 Key 后会拉取该协议的模型列表。');
+  updateEngineHints();
+
+  if (fields.baseUrl.value && fields.apiKey.value) fetchModels();
+});
+
+fields.thinkingMode.addEventListener('change', updateThinkingUI);
 fields.baseUrl.addEventListener('input', scheduleModelFetch);
 fields.apiKey.addEventListener('input', scheduleModelFetch);
 $('refreshModels').addEventListener('click', () => fetchModels(true));
 
 async function init() {
+  fillSelect(fields.engine, engineList().map((e) => ({ value: e.id, label: e.label })));
+  fillSelect(fields.thinkingMode, THINKING_MODES);
   fillSelect(fields.targetLang, LANGUAGES);
   fillSelect(fields.theme, THEMES);
   renderHotkey();
@@ -312,10 +401,11 @@ async function init() {
 
 $('save').addEventListener('click', async () => {
   const patch = readForm();
-  if (!patch.apiKey) {
+  const active = activeConfig(patch);
+  if (!active.apiKey) {
     setResult($('saveResult'), '还没有填 API Key，保存后翻译会失败。', 'bad');
   }
-  await saveConfig(patch);
+  currentCfg = await saveConfig(patch);
   setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
 });
 
@@ -369,7 +459,13 @@ $('clearCache').addEventListener('click', async () => {
 // 解析与校验在 lib/config.js 的 pickImportedConfig 里（纯函数，可被 node 直接测试）。
 function buildExport(includeKey) {
   const cfg = { ...currentCfg };
-  if (!includeKey) delete cfg.apiKey;
+  // Key 藏在每个引擎的配置里：导出时逐个处理
+  cfg.engineConfig = {};
+  Object.keys(currentCfg.engineConfig || {}).forEach((id) => {
+    const one = { ...(currentCfg.engineConfig[id] || {}) };
+    if (!includeKey) delete one.apiKey;
+    cfg.engineConfig[id] = one;
+  });
   return {
     app: IMPORT_APP,
     schema: IMPORT_SCHEMA,
@@ -435,7 +531,10 @@ $('importFile').addEventListener('change', async (event) => {
     if (parsed.rejected.length) {
       msg += '；' + parsed.rejected.length + ' 项取值不合法已忽略（' + parsed.rejected.join('、') + '）';
     }
-    if (!patch.apiKey) msg += '（文件里没有 API Key，请手动填）';
+    const importedKey = Object.keys(patch.engineConfig || {}).some(
+      (id) => patch.engineConfig[id] && patch.engineConfig[id].apiKey
+    );
+    if (!importedKey) msg += '（文件里没有 API Key，请手动填）';
     setResult($('cfgResult'), msg, parsed.rejected.length ? 'bad' : 'ok');
   } catch (err) {
     setResult($('cfgResult'), '导入失败：' + err.message, 'bad');

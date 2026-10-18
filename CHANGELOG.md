@@ -1,7 +1,13 @@
 # 变更日志
 
 ## 0.4.9（待发布）— 划词翻译 + 配置迁移
-- **内部重构：抽出引擎层** `lib/engines/`（openai / anthropic / gemini），`lib/provider.js` 改为按 `engine` 分发。本版行为不变（默认仍走 OpenAI 兼容）；新增 32 条 Node 单测：`node test/engines.test.mjs`。为此给仓库加了 `package.json`（`type: module`，仅供测试脚本，扩展本身仍零构建）
+- **多引擎**：接口配置改为按协议分别保存（OpenAI 兼容 / Anthropic Claude / Google Gemini），切换协议不会丢各自的地址、Key 和模型
+  - 旧配置自动迁移到新结构，迁移前原样备份到 `storage.config_backup_v3`，可回退
+  - 新增 Anthropic 协议：`x-api-key`、`system` 提到顶层、temperature 自动夹到 0–1、浏览器直连头
+  - 新增 Gemini 协议：`x-goog-api-key`、`contents/parts`、模型列表动态拉取（不内置模型名）；地区限制给明确提示
+  - 模型列表按协议分别拉取
+- **思考模式**：设置页「接口」新增三态开关（自动 / 尽量关闭 / 自定义参数）。尽量关闭时按协议发送关闭参数；服务不认这个参数（400）会自动去掉并重试一次，不会让整页翻译挂掉。自定义参数用于千问 `enable_thinking`、GLM `thinking` 这类非标准写法
+- **内部重构：抽出引擎层** `lib/engines/`（openai / anthropic / gemini），`lib/provider.js` 改为按 `engine` 分发。新增 56 条 Node 单测（`test/engines.test.mjs`、`test/config.test.mjs`）。为此给仓库加了 `package.json`（`type: module`，仅供测试脚本，扩展本身仍零构建）
 - **「扩展已重新加载」时给出可读提示**：重载扩展后旧页面里的内容脚本会失去宿主，之前直接弹 `Extension context invalidated`；现在提前检测并提示「请刷新页面（F5）后再试」，同时不再重复发起无效请求
 - **修划词报「模型没有按 JSON 数组返回」**：只请求一条时，模型常把一段拆成好几句放进数组，严格的条数校验会判失败。现在单条命中多条数组时自动拼回一段；解析逻辑抽到 `lib/parse.js`（纯函数，可离线跑用例）
 - **划词翻译（三种触发方式，默认不自动发请求）**：

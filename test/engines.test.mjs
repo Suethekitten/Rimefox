@@ -228,5 +228,58 @@ t('engineList 暴露三个引擎', () => {
   assert.deepEqual(ids, ['openai', 'anthropic', 'gemini']);
 });
 
+// ---------------- 思考模式 ----------------
+console.log('\n[思考模式]');
+
+t('OpenAI：off 时发送 reasoning_effort=none', () => {
+  const req = openai.buildRequest(
+    { baseUrl: 'https://a.com/v1', apiKey: 'k', model: 'm' },
+    { messages: [], temperature: 0.2, maxTokens: 10, thinking: { mode: 'off', extra: {} } }
+  );
+  assert.equal(json(req.body).reasoning_effort, 'none');
+});
+
+t('OpenAI：custom 会把自定义 JSON 合并进请求体', () => {
+  const req = openai.buildRequest(
+    { baseUrl: 'https://a.com/v1', apiKey: 'k', model: 'm' },
+    { messages: [], thinking: { mode: 'custom', extra: { enable_thinking: false } } }
+  );
+  assert.equal(json(req.body).enable_thinking, false);
+});
+
+t('Anthropic：off 时不带 thinking 字段', () => {
+  const req = anthropic.buildRequest(
+    { baseUrl: 'https://a.com/v1', apiKey: 'k', model: 'm' },
+    { messages: [], thinking: { mode: 'off', extra: {} } }
+  );
+  assert.equal(json(req.body).thinking, undefined);
+});
+
+t('Anthropic：custom 可开启扩展思考', () => {
+  const req = anthropic.buildRequest(
+    { baseUrl: 'https://a.com/v1', apiKey: 'k', model: 'm' },
+    { messages: [], thinking: { mode: 'custom', extra: { thinking: { type: 'enabled', budget_tokens: 1024 } } } }
+  );
+  assert.equal(json(req.body).thinking.budget_tokens, 1024);
+});
+
+t('Gemini：off 时 thinkingBudget=0', () => {
+  const req = gemini.buildRequest(
+    { baseUrl: 'https://g/v1beta', apiKey: 'k', model: 'm' },
+    { messages: [], thinking: { mode: 'off', extra: {} } }
+  );
+  assert.equal(json(req.body).generationConfig.thinkingConfig.thinkingBudget, 0);
+});
+
+t('Gemini：custom 的 generationConfig 会合并进去', () => {
+  const req = gemini.buildRequest(
+    { baseUrl: 'https://g/v1beta', apiKey: 'k', model: 'm' },
+    { messages: [], temperature: 0.5, thinking: { mode: 'custom', extra: { generationConfig: { thinkingConfig: { thinkingBudget: 128 } } } } }
+  );
+  const body = json(req.body);
+  assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, 128);
+  assert.equal(body.generationConfig.temperature, 0.5); // 原有字段不能被覆盖掉
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

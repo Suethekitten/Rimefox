@@ -21,15 +21,21 @@
         <p class="card-sub">填好地址和 Key 会自动获取可用模型。</p>
 
         <label class="field">
+          <span class="name">接口协议</span>
+          <select id="engine"></select>
+          <span class="hint">每个协议单独保存自己的地址、Key 和模型，切换不会丢。</span>
+        </label>
+
+        <label class="field">
           <span class="name">API 地址</span>
           <input id="baseUrl" type="text" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
-          <span class="hint">OpenAI 兼容的 base URL，通常以 /v1 结尾。程序会自动补 /chat/completions。</span>
+          <span class="hint" id="baseUrlHint">OpenAI 兼容的 base URL，通常以 /v1 结尾。程序会自动补 /chat/completions。</span>
         </label>
 
         <label class="field">
           <span class="name">API Key</span>
           <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." autocomplete="off" />
-          <span class="hint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
+          <span class="hint" id="apiKeyHint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
         </label>
 
         <div class="field">
@@ -41,6 +47,18 @@
           </div>
           <span class="hint" id="modelHint">填好 API 地址和 Key 后会自动获取可用模型；也可以直接手填，例如 deepseek-chat、glm-4-flash。</span>
         </div>
+
+        <label class="field">
+          <span class="name">思考模式</span>
+          <select id="thinkingMode"></select>
+          <span class="hint">自动：不发送额外参数。尽量关闭：按当前协议发送关闭思考的参数（部分服务不支持，会自动退回并发请求）。</span>
+        </label>
+
+        <label class="field" id="thinkingExtraField" hidden>
+          <span class="name">自定义参数（JSON）</span>
+          <textarea id="thinkingExtra" rows="3" spellcheck="false" placeholder='{"enable_thinking": false}'></textarea>
+          <span class="hint">会原样合并进请求体，用于千问 / GLM 这类非标准参数；写错会被忽略。</span>
+        </label>
 
         <div class="actions">
           <button id="test" class="btn">测试连接</button>

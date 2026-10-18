@@ -1,5 +1,5 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
-import { getConfig, langLabel } from './lib/config.js';
+import { getConfig, activeConfig, langLabel } from './lib/config.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray } from './lib/parse.js';
 import * as cache from './lib/cache.js';
@@ -58,11 +58,15 @@ async function translateBatchWithRetry(texts, target, cfg) {
   while (attempt < 3 && !mismatch) {
     attempt += 1;
     try {
+      const active = activeConfig(cfg);
       const raw = await chat({
-        baseUrl: cfg.baseUrl,
-        apiKey: cfg.apiKey,
-        model: cfg.model,
+        engine: active.engine,
+        baseUrl: active.baseUrl,
+        apiKey: active.apiKey,
+        model: active.model,
         temperature,
+        thinkingMode: cfg.thinkingMode,
+        thinkingExtra: cfg.thinkingExtra,
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
@@ -115,7 +119,7 @@ async function handleTranslate(msg) {
   const texts = rawTexts.map((t) => (t == null ? '' : String(t)));
   const results = new Array(texts.length).fill(null);
 
-  if (!cfg.apiKey) {
+  if (!activeConfig(cfg).apiKey) {
     return { ok: false, error: '还没有配置 API Key，请先打开「设置」填写。', results };
   }
 
@@ -198,17 +202,21 @@ async function handleTranslate(msg) {
 
 async function handleTest() {
   const cfg = await getConfig();
-  if (!cfg.apiKey) return { ok: false, error: '还没有填写 API Key' };
+  const active = activeConfig(cfg);
+  if (!active.apiKey) return { ok: false, error: '还没有填写 API Key' };
   const started = Date.now();
   const meta = {};
   try {
     const raw = await chat({
-      baseUrl: cfg.baseUrl,
-      apiKey: cfg.apiKey,
-      model: cfg.model,
+      engine: active.engine,
+      baseUrl: active.baseUrl,
+      apiKey: active.apiKey,
+      model: active.model,
       temperature: 0,
       maxTokens: 256,
       timeoutMs: Math.min(30000, Number(cfg.timeoutMs) || 30000),
+      thinkingMode: cfg.thinkingMode,
+      thinkingExtra: cfg.thinkingExtra,
       meta,
       messages: [
         { role: 'system', content: '你是一个翻译引擎。只输出 JSON 字符串数组，不要任何解释。' },
@@ -219,7 +227,8 @@ async function handleTest() {
     return {
       ok: true,
       ms: Date.now() - started,
-      model: cfg.model,
+      engine: active.engine,
+      model: active.model,
       reasoning: !!meta.reasoning,
       sample: parsed ? parsed.join(' / ') : String(raw).slice(0, 120)
     };
@@ -272,8 +281,15 @@ const ROUTES = {
   // 只给内容脚本用：去掉 API Key，换成 hasKey。
   // 内容脚本跑在网页的渲染进程里，渲染进程一旦被攻破，它手里的东西都可能被读走。
   'config:get': async () => {
-    const { apiKey, ...safe } = await getConfig();
-    return { ok: true, config: { ...safe, hasKey: !!apiKey } };
+    const cfg = await getConfig();
+    // 嵌套的 engineConfig 里也有 Key：逐个剥掉，只留地址和模型
+    const engineConfig = {};
+    Object.keys(cfg.engineConfig || {}).forEach((id) => {
+      const one = cfg.engineConfig[id] || {};
+      engineConfig[id] = { baseUrl: one.baseUrl, model: one.model };
+    });
+    const { engineConfig: _omit, ...rest } = cfg;
+    return { ok: true, config: { ...rest, engineConfig, hasKey: !!activeConfig(cfg).apiKey } };
   },
   'stats': async () => ({ ok: true, cacheSize: cache.size() }),
   // 标签页级"翻译中"记忆：返回/刷新后自动恢复翻译（同一站点才恢复）
@@ -440,7 +456,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 chrome.runtime.onInstalled.addListener(async () => {
   syncSelectionMenu();
   const cfg = await getConfig();
-  if (!cfg.apiKey) {
+  if (!activeConfig(cfg).apiKey) {
     chrome.runtime.openOptionsPage();
   }
 });
