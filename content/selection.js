@@ -18,6 +18,9 @@
   var btn = null;
   var seq = 0;
   var lastAt = 0;
+  // 选区所在的元素：有些站点（比如 X）一滚动就把选区清掉，
+  // 这时没法再用 getSelection 定位，改用这个元素跟着走
+  var anchorEl = null;
 
   function cfg() {
     return DT.state.config || {};
@@ -75,6 +78,7 @@
 
   function hideBubble() {
     seq += 1; // 作废进行中的请求
+    anchorEl = null;
     if (bubble) bubble.style.display = 'none';
   }
 
@@ -184,7 +188,7 @@
     var rect = range.getBoundingClientRect();
     if (!rect || (!rect.width && !rect.height)) return null;
 
-    return { text: text, rect: rect };
+    return { text: text, rect: rect, el: el };
   }
 
   function eligible(info) {
@@ -198,6 +202,7 @@
   // ---------------- 翻译 ----------------
   async function run(info) {
     hideButton();
+    anchorEl = info.el || null;
     var mySeq = ++seq;
     showBubble(info.rect, '翻译中…', 'loading');
 
@@ -301,22 +306,40 @@
     );
   }
 
+  // 选区被站点清掉时的兜底锚点：取元素顶部一小段，
+  // 避免大块元素的底边把气泡甩到很远
+  function anchorRect(el) {
+    if (!el || !el.isConnected) return null;
+    var r = el.getBoundingClientRect();
+    if (!r || (!r.width && !r.height)) return null;
+    return {
+      top: r.top,
+      bottom: r.top + 20,
+      left: r.left,
+      right: r.left + 200,
+      width: r.width,
+      height: 20
+    };
+  }
+
   var followRaf = 0;
   function followSelection() {
     if (followRaf) return;
     followRaf = requestAnimationFrame(function () {
       followRaf = 0;
-      var rect = selectionRect();
-      var visible = rect && inViewport(rect);
+      var live = selectionRect();
 
+      // 气泡：优先跟随选区；选区被站点清掉了就跟随锚点元素（X 这类站点会清选区）
       if (bubble && bubble.style.display !== 'none') {
-        if (!visible) hideBubble();
+        var rect = live || anchorRect(anchorEl);
+        if (!rect || !inViewport(rect)) hideBubble();
         else placeBubble(rect);
       }
 
+      // 小按钮：只在真的有选区时显示，选区没了就该消失
       if (btn && btn.style.display !== 'none') {
-        if (!visible) hideButton();
-        else showButton(rect);
+        if (!live || !inViewport(live)) hideButton();
+        else showButton(live);
       }
     });
   }
