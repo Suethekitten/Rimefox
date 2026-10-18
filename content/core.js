@@ -26,9 +26,33 @@
   // 与后台通信。
   // 必须自带超时：MV3 的 service worker 可能被回收，此时 sendMessage 的
   // 回调永远不会触发，Promise 会挂死（表现为"一直翻译中、0 段"）。
+  // 扩展被重新加载 / 更新后，旧页面里的内容脚本会"失去宿主"：
+  // chrome.runtime.id 变成 undefined，任何调用都会抛 "Extension context invalidated"。
+  // 这种情况只能刷新页面，所以给一句人能看懂的话，而不是把原始错误弹给用户。
+  var CONTEXT_LOST = '扩展已重新加载，请刷新页面（F5）后再试';
+
+  function friendlyError(message) {
+    var text = String(message || '');
+    if (/Extension context invalidated|message port closed|receiving end does not exist/i.test(text)) {
+      return CONTEXT_LOST;
+    }
+    return text;
+  }
+
   DT.send = function (msg, timeoutMs) {
     var limit = timeoutMs || 90000;
     return new Promise(function (resolve, reject) {
+      // 上下文已失效时直接给出结论，不再白跑一次调用
+      try {
+        if (!chrome || !chrome.runtime || !chrome.runtime.id) {
+          reject(new Error(CONTEXT_LOST));
+          return;
+        }
+      } catch (err) {
+        reject(new Error(CONTEXT_LOST));
+        return;
+      }
+
       var settled = false;
       var timer = setTimeout(function () {
         if (settled) return;
@@ -46,11 +70,11 @@
       try {
         chrome.runtime.sendMessage(msg, function (res) {
           var err = chrome.runtime.lastError;
-          if (err) finish(reject, new Error(err.message));
+          if (err) finish(reject, new Error(friendlyError(err.message)));
           else finish(resolve, res);
         });
       } catch (e) {
-        finish(reject, e);
+        finish(reject, new Error(friendlyError(e && e.message ? e.message : String(e))));
       }
     });
   };
