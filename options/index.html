@@ -321,7 +321,7 @@
           <div class="card">
             <div class="card-title">翻译缓存</div>
             <p class="card-desc">
-              翻过的文字会记下来，再遇到直接用，不再请求接口。本次会话的缓存在关闭浏览器时清空；短文本（按钮、标题、导航）另存一份到磁盘，重启浏览器后还能用。缓存按网站和模型分开存。
+              翻过的文字会记下来，再遇到直接用，不再请求接口。本次会话的缓存在关闭浏览器时清空；短文本（按钮、标题、导航）另存一份到磁盘，重启浏览器后还能用。缓存按网站和模型分开存；换了模型后旧译文不会再命中，会按新模型重新翻译。
             </p>
             <div class="row">
               <span class="row-text">
@@ -384,6 +384,14 @@
                 <span class="row-desc">把表单填回默认值（已保存的 API Key 保留），确认后点底部「保存」才生效。</span>
               </span>
               <button id="reset" class="btn danger">恢复默认</button>
+            </div>
+
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">离线自检</span>
+                <span class="row-desc">不联网、不调接口；改完代码后跑一遍，应显示「全部通过」。</span>
+              </span>
+              <a class="btn" href="../selftest/index.html" target="_blank" rel="noopener">打开自检页</a>
             </div>
           </div>
         </section>

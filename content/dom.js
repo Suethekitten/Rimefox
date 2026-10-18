@@ -579,11 +579,19 @@
 
   DT.diagnose = function (limit) {
     var max = limit || 120;
+    var cfg = DT.state.config || {};
+    var cur = cfg.currentProvider || '';
+    var slot = (cfg.providerConfig || {})[cur] || {};
     var report = {
       version: DT.VERSION,
       url: location.href,
       target: DT.state.target,
       mode: DT.state.mode,
+      // 报 bug 时能直接看出用的哪家、哪个模型、思考模式（不含 Key）
+      provider: cur,
+      engine: slot.engine || '',
+      model: slot.model || '',
+      thinkingMode: cfg.thinkingMode || '',
       units: [],
       skipped: []
     };

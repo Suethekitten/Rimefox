@@ -166,6 +166,10 @@
       var cfg = DT.state.config || {};
       var target = DT.state.target;
       var maxUnit = Number(cfg.maxUnitChars) || 1200;
+      // 日文页面翻成中文时，纯汉字短语（進捗状況 / 無料）会被 looksLikeTarget 当成"已是中文"跳过；
+      // 页面自己声明了日语就关掉这条判定，宁可多翻几句
+      var docLang = String((document.documentElement && document.documentElement.lang) || '').toLowerCase();
+      var jaPageToZh = docLang.indexOf('ja') === 0 && String(target || '').indexOf('zh') === 0;
 
       // 仅译文 / 控件替换过的元素，如果站点又改了它的文字，先放回待翻译
       DT.releaseReplaced();
@@ -185,7 +189,7 @@
         if (DT.skipText(unit.text)) return false;
         // 趣味翻译：正文里够长的段落按风格改写；中文页面也要改写，所以风格单元不跳过「已是目标语言」
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
-        if (unit.style === 'plain' && cfg.skipSameLang !== false && DT.looksLikeTarget(unit.text, target)) return false;
+        if (unit.style === 'plain' && cfg.skipSameLang !== false && !jaPageToZh && DT.looksLikeTarget(unit.text, target)) return false;
         if (settled.get(unit.el) === unit.text) return false;
         // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
         // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
@@ -472,6 +476,27 @@
 
   // 物理键位 / 快捷键解析在 core.js：DT.keyFromCode / DT.matchesHotkey（纯函数，自检可测）
 
+  function selectedText() {
+    try {
+      var sel = window.getSelection();
+      return sel ? String(sel.toString()).trim() : '';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  // 自适应：有选区就翻选区，没有就整页
+  function hotkeyAction() {
+    var cfg = DT.state.config || {};
+    lastToggleAt = Date.now();
+    if (cfg.selectionTranslate !== false && DT.selectionTranslate && selectedText()) {
+      if (DT.selectionTranslate() !== false) return;
+    }
+    toggle().catch(function (err) {
+      DT.log('hotkey toggle failed', err);
+    });
+  }
+
   function bindHotkey() {
     document.addEventListener(
       'keydown',
@@ -483,9 +508,7 @@
         event.preventDefault();
         var now = Date.now();
         if (now - lastToggleAt < TOGGLE_DEDUPE_MS) return; // 和浏览器快捷键去重
-        toggle().catch(function (err) {
-          DT.log('hotkey toggle failed', err);
-        });
+        hotkeyAction();
       },
       true
     );
@@ -704,6 +727,19 @@
       if (msg.source === 'command' && DT.isEditableTarget(document.activeElement)) {
         sendResponse(summarize());
         return false;
+      }
+      // 浏览器快捷键也自适应：有选区时表现为划词翻译，没有选区才翻整页
+      if (
+        msg.source === 'command' &&
+        (DT.state.config || {}).selectionTranslate !== false &&
+        DT.selectionTranslate &&
+        selectedText()
+      ) {
+        lastToggleAt = Date.now();
+        if (DT.selectionTranslate() !== false) {
+          sendResponse(summarize());
+          return false;
+        }
       }
       toggle()
         .then(sendResponse)

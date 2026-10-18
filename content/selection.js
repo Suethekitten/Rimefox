@@ -388,6 +388,16 @@
   window.addEventListener('scroll', followSelection, true);
   window.addEventListener('resize', followSelection);
 
+  // 让整页快捷键复用划词：有选区时由 main.js 调用（返回 false 表示没有可翻的选区）
+  DT.selectionTranslate = function () {
+    var info = currentSelection();
+    if (!info || !info.text) return false;
+    var payload = { text: info.text, rect: info.rect };
+    if (!eligible(payload)) return false;
+    run(payload);
+    return true;
+  };
+
   // A 方案：右键菜单点击后由 background 发进来
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || msg.type !== 'dt:translateSelection') return false;
