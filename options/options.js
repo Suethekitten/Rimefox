@@ -608,9 +608,13 @@ $('save').addEventListener('click', async () => {
 });
 
 // 恢复默认：只填进表单，确认后点「保存」才生效（可以「放弃更改」反悔）。
-// 已保存的各服务商地址 / Key / 模型和自定义服务商保留，其它项回到默认值
+// 只重置翻译 / 显示设置：不切走当前服务商，也不动已保存的地址 / Key / 模型和自定义服务商
 $('reset').addEventListener('click', () => {
-  currentCfg = mergeConfig(currentCfg, { ...DEFAULTS, customProviders: (currentCfg && currentCfg.customProviders) || [] });
+  currentCfg = mergeConfig(currentCfg, {
+    ...DEFAULTS,
+    currentProvider: currentCfg.currentProvider,
+    customProviders: (currentCfg && currentCfg.customProviders) || []
+  });
   applyConfig(currentCfg);
   updateDirty();
   setResult($('saveResult'), '已填入默认值，点「保存」后生效');
