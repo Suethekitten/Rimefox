@@ -8,7 +8,7 @@
 
 ## 打包与合并
 
-安装 Node 18 或以上，在源码目录执行 `node tools/package-store.mjs`。脚本也可从其他工作目录通过绝对路径执行，无 npm 安装或外部 zip 命令依赖。输出 dist/Rimefox-v<manifest版本>-store.zip，打印每个文件。只收录 manifest.json、background.js、lib/、content/、options/、popup/、icons/；校验 DT.VERSION、四种 PNG 图标尺寸及 manifest 引用。拒绝符号链接，排除开发文件，固定 ZIP 时间戳。dist 不进入运行包。
+安装 Node 18 或以上，在源码目录执行 `node tools/package-store.mjs`。脚本也可从其他工作目录通过绝对路径执行，无 npm 安装或外部 zip 命令依赖。输出 dist/Rimefox-v<manifest版本>-store.zip，打印每个文件。收录运行时文件（manifest.json、background.js、lib/、content/、options/、popup/、icons/）以及 LICENSE、THIRD-PARTY-NOTICES.md、licenses/；manifest.json 在 ZIP 根目录。校验 DT.VERSION、四种 PNG 图标尺寸及 manifest 引用，并硬校验三份许可文件都在包内。拒绝符号链接，排除开发文件，固定 ZIP 时间戳。dist 不进入运行包。
 
 实际验证见 [STORE-VALIDATION.md](STORE-VALIDATION.md)。本任务仅本地提交，不 reset/rebase/push。普通发布包与商店包用途不同，不要上传材料包。
 

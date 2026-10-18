@@ -19,3 +19,11 @@
 源码变更仅为 manifest.json、PRIVACY.md，以及新增 tools/package-store.mjs、test/package-store.test.mjs、docs/privacy.en.md、docs/STORE.md、docs/STORE-VALIDATION.md。docs/STORE.md 说明真实支持链接、公开政策、审核访问路径与素材仍待人工补充。
 
 补丁仅相对于上传快照，不能直接覆盖电脑上可能更新的源码。请先 git apply --check，审阅并解决差异，跑 Node 与浏览器自检后以本人 GitHub noreply 身份做本地提交，再停下来决定下一步。任何推送均另行授权。
+
+## 0.7.1 许可文件补充验证
+
+- 商店包已包含 LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt
+- 构建命令：`node tools/package-store.mjs`
+- 验证命令：`unzip -l dist/Rimefox-v0.7.1-store.zip`、`unzip -t dist/Rimefox-v0.7.1-store.zip`
+- 测试：`node test/package-store.test.mjs`
+- 结果：53 个文件、248,250 B；ZIP 根目录含 manifest.json、LICENSE、THIRD-PARTY-NOTICES.md，`licenses/oneaifw-MIT.txt` 位于 licenses/ 下；`unzip -t` 无错误；打包测试 PASS；全套 14 个 Node 测试文件通过；自检 96 / 96。

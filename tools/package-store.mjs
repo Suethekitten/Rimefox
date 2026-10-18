@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// 商店包：运行时文件 + 许可文件（LICENSE / THIRD-PARTY-NOTICES.md / licenses/）。
+// manifest.json 仍在 ZIP 根目录，扩展文件夹结构不变。
 // Node 18+, no npm packages or external zip executable required.
 import { readFile, readdir, lstat, mkdir, writeFile, rename, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
@@ -11,7 +13,7 @@ if (core.match(/DT\.VERSION\s*=\s*['"]([^'"]+)['"]/)?.[1] !== manifest.version) 
 if (!/^\d+(?:\.\d+){0,3}$/.test(manifest.version)) throw Error('Invalid version');
 const entries = [];
 // 注意：文档类只排除 .md 本身，不能写成 PRIVACY.*——那会把 lib/privacy.js 一起排掉。
-const excluded = /^(?:\.git|\.github|test|selftest|docs|tools|node_modules|package\.(?:json|ps1|bat)|README\.md|HANDOFF\.md|AGENTS\.md|PRIVACY\.md|CHANGELOG\.md|SECURITY\.md|THIRD-PARTY-NOTICES\.md|\.DS_Store)$/i;
+const excluded = /^(?:\.git|\.github|test|selftest|docs|tools|node_modules|package\.(?:json|ps1|bat)|README\.md|HANDOFF\.md|AGENTS\.md|PRIVACY\.md|CHANGELOG\.md|SECURITY\.md|\.DS_Store)$/i;
 async function collect(name) {
   const stat = await lstat(resolve(root, name));
   if (stat.isSymbolicLink()) throw Error(`Symlinks are not allowed: ${name}`);
@@ -25,7 +27,10 @@ async function collect(name) {
   } else if (stat.isFile()) entries.push({ name, data: await readFile(resolve(root, name)) });
   else throw Error(`Unsupported file: ${name}`);
 }
-for (const name of ['manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'icons']) await collect(name);
+for (const name of [
+  'manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'icons',
+  'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses'
+]) await collect(name);
 for (const size of [16, 32, 48, 128]) {
   const icon = entries.find(e => e.name === manifest.icons?.[size]);
   if (!icon || icon.data.length < 24 || icon.data.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || icon.data.readUInt32BE(16) !== size || icon.data.readUInt32BE(20) !== size) throw Error(`Missing or invalid ${size}px PNG icon`);
@@ -36,6 +41,10 @@ const refs = [manifest.background.service_worker, manifest.action.default_popup,
   ...manifest.content_scripts.flatMap(s => [...(s.js || []), ...(s.css || [])]),
   ...manifest.web_accessible_resources.flatMap(r => r.resources)];
 for (const ref of refs) if (!entries.some(e => e.name === ref)) throw Error(`Missing runtime reference: ${ref}`);
+// MIT 等许可证要求版权与许可声明随副本分发：商店 ZIP 也是一次分发，缺一个就拒绝出包。
+for (const name of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt']) {
+  if (!entries.some((e) => e.name === name)) throw Error(`Missing legal file: ${name}`);
+}
 function crc32(data) {
   let c = 0xffffffff;
   for (const b of data) { c ^= b; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ ((c & 1) ? 0xedb88320 : 0); }
@@ -68,4 +77,4 @@ try { await writeFile(temporary, Buffer.concat([...local, directory, end]), { fl
 finally { await rm(temporary, { force: true }); }
 console.log(destination);
 for (const e of entries) console.log(`${e.data.length.toString().padStart(8)}  ${e.name}`);
-console.log(`${entries.length} files; manifest.json is at the ZIP root.`);
+console.log(`${entries.length} files; runtime files + LICENSE / THIRD-PARTY-NOTICES.md / licenses/; manifest.json is at the ZIP root.`);

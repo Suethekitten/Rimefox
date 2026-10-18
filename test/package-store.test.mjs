@@ -8,7 +8,7 @@ import { inflateRawSync } from 'node:zlib';
 const source = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const temp = await mkdtemp(resolve(tmpdir(), 'rimefox-store-test-'));
 try {
-  for (const name of ['manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'icons', 'tools']) await cp(resolve(source,name), resolve(temp,name), {recursive:true});
+  for (const name of ['manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'icons', 'tools', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses']) await cp(resolve(source,name), resolve(temp,name), {recursive:true});
   await writeFile(resolve(temp,'lib/.DS_Store'),'exclude me');
   for (const name of ['Thumbs.db', 'desktop.ini', '.env', 'debug.log', 'private.key', 'bundle.js.map']) await writeFile(resolve(temp,'lib',name),'exclude me');
   await mkdir(resolve(temp,'lib/test')); await writeFile(resolve(temp,'lib/test/private.txt'),'exclude me');
@@ -25,7 +25,9 @@ try {
     assert.deepEqual(data,await readFile(resolve(temp,name)));
     p+=30+n+x+size;
   }
-  assert(names.includes('manifest.json')); assert(names.includes('lib/privacy.js'), 'privacy module must be packaged'); assert(!names.some(n=>/DS_Store|Thumbs|desktop.ini|\.env|debug.log|private.key|\.map$|\/test\/|^tools\/|icons\/(source|preview-|icon512)/.test(n)));
+  assert(names.includes('manifest.json')); assert(names.includes('lib/privacy.js'), 'privacy module must be packaged');
+  assert(names.includes('LICENSE')); assert(names.includes('THIRD-PARTY-NOTICES.md')); assert(names.includes('licenses/oneaifw-MIT.txt'));
+  assert(!names.some(n=>/DS_Store|Thumbs|desktop.ini|\.env|debug.log|private.key|\.map$|\/test\/|^tools\/|icons\/(source|preview-|icon512)/.test(n)));
   assert.equal(zip.readUInt32LE(p),0x02014b50);
   assert.equal(run().status,0); assert.deepEqual(await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`)),zip);
   const core=await readFile(resolve(temp,'content/core.js'),'utf8');
