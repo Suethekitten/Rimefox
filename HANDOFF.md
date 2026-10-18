@@ -527,29 +527,16 @@ node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间�
 
 ---
 
-## 14. 本版技术记录（0.7.0）
+## 14. 本版技术记录（0.7.1）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 > 参考项目 BewlyBewly-AveMujica 是 AGPL-3.0：只借鉴思路（色板派生、Dock 交互、设置项「底部展开区」），代码全部独立实现，没有复制。
 
-- **外观底层**（`lib/appearance.js`）：7 个强调色预设 + 自定义 `#rrggbb`；`typographyVars(cfg)` 全默认时返回 `null`（网页上什么都不写）；`sanitizeTranslationCss` 只放行 `属性: 值`，拒绝 `{ } @ < \`、`url()` / `image-set()`、`expression` / `javascript:` / `behavior` / `-moz-binding`、注释，最多 2000 字 / 40 条声明。
-- **按网址算外观**（`background.js` 的 `pageAppearance`）：`config:get` 带回 `page = {accent, customCss, typo, site, night, provider}`，内容脚本不用自己匹配规则、也拿不到原始 CSS 文本；`content/appearance.js` 写到 `<html>`（`--dt-accent`、`data-dt-typo` + 变量、`#dt-custom-css`、`data-dt-night`）。
-- **页面明暗**：`DT.pageScheme()` 取 body → html 的实际背景亮度（< 0.18 判深色），都透明时看 `color-scheme`；加载 2 秒后和系统明暗变化时再判一次；夜间模式开着时不判断（页面已反色）。`inject.css` 里所有强调色派生都用 `color-mix`，深色换一套。
-- **夜间模式**：`html[data-dt-night="on"]` 整页 `invert(1) hue-rotate(180deg)`，`img / picture / video / canvas / iframe / embed / object / svg image / [style*="background-image"] / body > [data-dt-ui]` 反向回正。只在 `nightMode && hostListed(host, nightSites)` 时开。`normalizeHosts` 去掉协议、路径、`*.` 和端口，单个词不算域名。
-- **站点规则**（`lib/site-rules.js` + `content/dom.js`）：内置规则（GitHub 文件名列、Wikipedia 语言列表，都在保存的真实页面上验证过）+ 用户规则，用户规则优先、同一网址取第一条命中；`excludeSelectors` 进 `isSkipped`，`textSelectors` 限定收集根（嵌套的只留最外层），选择器逐个用 `DocumentFragment.querySelector` 试，写错的单独忽略；规则里的 `mode` / `theme` 覆盖这个网站的显示方式。换网址（SPA）时重新取一次配置。
-- **设置页**：新增「外观」「站点与兼容性」两个分区（`options/appearance-ui.js`）；风险提示徽标；翻译分区的并发 / 批量参数收进 `<details class="more">`；侧栏搜索（`options/search.js`）按当前语言的显示文字过滤行 / 卡片 / 分区，命中折叠区里的项自动展开、清空时收回。站点规则 JSON / 自定义 CSS 实时校验，写错时拦下保存并滚动到出错处；点保存前先把还在防抖的「改动数」更新做掉，避免它稍后把拦截提示冲掉。
-- **跨页面同步**（`lib/ui-appearance.js`）：`watchConfig` 监听 `storage.onChanged`，`rememberSaved` 记住自己最近写入的 JSON，相同就不回调（防回写循环）；`chrome.runtime.id` 没了（扩展被重载）就摘掉监听。设置页没有未保存改动时整页刷新成新值，有改动时只同步外观并提示。只在扩展自己的页面用，内容脚本仍然只走后台的 `dt:configChanged` 广播。
-- **深浅色过渡**：`document.startViewTransition` + `::view-transition-new(root)` 上的 `clip-path: circle()` 动画，从按钮位置扩散；不支持或 `prefers-reduced-motion` 时直接切。首帧缓存（`dt.uiLook`）也带上强调色 / 减少透明 / 关闭阴影。
-- **弹窗**：应用外观、动画切换主题、实时同步；「夜间」一行：打开 = 当前网站进名单并打开总开关，关闭 = 去掉能匹配当前网站的名单项（总开关不动）。只在 http(s) 页面显示。
-- **悬浮入口**（`content/dock.js`）：只在顶层页面；closed Shadow DOM；`:host` 和收起的面板都是 `pointer-events: none`，只有小球和展开后的面板接收鼠标（否则看不见的面板会挡住网页边缘的点击）；状态靠 `MutationObserver` 看 `<html>` 的 `data-dt / data-dt-mode / data-dt-scheme / data-dt-night`；按钮 `mousedown` 时 `preventDefault` 保住网页选区；切显示方式走后台 `mode:set` 记进配置（否则下次配置广播会把状态改回去、和页面显示对不上）。服务商标签由后台在 `page.provider` 里给（名 + 模型，不含 Key）。
-- **置顶翻译窗**（`content/pip.js`）：`documentPictureInPicture.requestWindow`，失败退回 `window.open('', 'rimefox-pinned', 'popup,…')`；两种都要用户手势。小窗是空白文档，内容全部 `textContent` 写入，样式是自己的一段 CSS（不搬网页样式）；`selection.js` 每次翻完通过 `DT.onSelectionResult` 推给它。
-- **界面语言**：新增文案的英文、带编号 / 原文的校验提示用正则；几条错误用「；」连接时逐条翻（整句自带「；」的文案仍先整句匹配）；顺手补了 0.6.2 起漏掉的服务商名、模型获取结果、缓存统计、浏览器快捷键行。
-- **测试**：Node 181 条（新增 appearance 8、site-rules 8，i18n 8 → 13：校验器产生的每条错误都要有英文）；自检 88 → 96（站点规则 2、外观 2、悬浮入口 4）。另外用无头 Chrome + DevTools 协议跑了设置页（35 项）、弹窗（12 项）、悬浮入口与置顶小窗（16 项）的交互场景，脚本不在仓库里。
-
-### 未发版分支：AI 隐私保护翻译（`feat/aifw-privacy`）
-
-- **来源与取舍**：复用 OneAIFW（MIT）的占位符契约与 span 去重语义，用纯 JS 重写；不引入上游 WASM / ORT / NER 模型（模型资产私有、公开备选 GPL-3.0）。评估见 [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md)。
-- **实现**：`lib/privacy.js`（无依赖，13.7 KB 源码）；`background.js` 在 `translate` 路由里 mask → 请求 → restore；缓存只写恢复后的译文；开启时提示词追加占位符保留说明。
-- **安全语义**：映射不落盘；占位符缺失 / 改写 / 未知一律 fail-closed，该段 `null`，沿用现有失败退避重试。
-- **设置页**：新增「隐私保护」分区（总开关 + 5 个分项），英文文案同步。
-- **测试**：`test/privacy.test.mjs`（27 条）+ `test/privacy-pipeline.test.mjs`（13 条，假 `chrome.*` + 假 `fetch` 驱动 `background.js`，断言请求体不含原文、回包还原、失败不输出、映射不落盘）。
+- **隐私保护来源**（`lib/privacy.js`）：复用 OneAIFW（MIT，Copyright (c) 2025 Funstory.ai Limited）的占位符契约 `__PII_<TYPE>_<n>__`、span 打分 / 去重与「先脱敏、回包还原」流程；识别与恢复为独立 JS 重写，未引入上游 Zig / WASM / ORT / ONNX 或 Python 服务。上游默认模型私有、公开备选是 GPL-3.0，因此不做 NER。评估见 [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md)。
+- **识别范围**：邮箱；中国手机 / 座机 / 带 + 的国际号码（排除「日期 + 小时」、ISBN、订单号）；18 位身份证（校验位）；银行卡（Luhn）与「账号 / 卡号」标签后的银行账号；可选中文姓名（标签 + 姓氏 + 常见复姓，默认关闭）。
+- **管线接入**（`background.js`）：只在 `translate` 路由里 mask → provider.chat → restore，整页 / 划词 / 弹窗 / 字幕 / 批量共用；映射只存在于本次请求内存，不写 storage、不进缓存、不进日志；缓存只写恢复后的译文；开启时 `lib/prompt.js` 追加「占位符原样保留」，关闭时提示词逐字不变。
+- **失败语义**：占位符缺失、被改写后认不出、映射表外、模型返回空 → 该段 `null`，沿用现有 5s / 15s / 45s 退避重试，不输出半截译文；原文本身含 `__PII_` 时拒绝脱敏（fail-closed）。
+- **设置页**：新增「隐私保护」分区（总开关 + 5 个分项），`privacyEnabled` 等 6 个扁平布尔配置项，导入 / 导出自动覆盖；中英文文案同步；未新增任何权限。
+- **打包修复**：`tools/package-store.mjs` 的 `PRIVACY.*` 排除规则会误伤 `lib/privacy.js`，已改为只排除 `PRIVACY.md` 等具体文档，并在 `test/package-store.test.mjs` 加了「模块必须在包里」的断言。
+- **测试**：Node 新增 `test/privacy.test.mjs` 27 条 + `test/privacy-pipeline.test.mjs` 13 条（假 `chrome.*` + 假 `fetch` 驱动真实 `background.js`，断言请求体不含原文、回包还原、失败不输出、映射不落盘）；全套 14 个测试文件通过，自检 96 / 96。基准见 `tools/bench-privacy.mjs`：52,774 字符约 2 ms；Store 包 235,861 → 245,101 B（+9,240 B，+3.92%）。
+- **文档重组**：README 136 → 85 行；旧版升级 → `docs/UPGRADING.md`，YouTube 字幕 → `docs/YOUTUBE.md`，已知限制并入 `docs/DESIGN.md` §7，长文本拆分补 §2.4；目录结构与关键设计由 HANDOFF / DESIGN 承载；README 与 docs 链接检查 33 个，0 失效。

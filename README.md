@@ -24,6 +24,7 @@
 - **动态页面** —— MutationObserver 补翻新内容，SPA 路由切换后自动重翻
 - **阅读辅助** —— 悬停对照、划词翻译、置顶翻译小窗、网页悬浮入口（默认关闭）
 - **YouTube 字幕双语** —— 打开 CC 时显示「原文 + 译文」（非官方功能，默认关闭）
+- **可选隐私保护** —— 发请求前在本地把邮箱、电话、身份证号、银行卡号换成占位符，译文回来后还原（默认关闭）
 - **术语表与提示词** —— 指定词条必须怎么翻，追加自己的措辞要求；还能把当前页改写成文言文 / 猫娘口吻
 - **外观可调** —— 浅色 / 深夜配色、强调色、译文字号与行高、深色网页适配、站点规则、网页夜间模式（Beta）、译文自定义 CSS
 - **中英文界面** —— 设置页与弹窗支持中文 / English
@@ -61,6 +62,7 @@
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 优先级、已完成 / 待办、明确不做的清单 |
 | [docs/UPGRADING.md](docs/UPGRADING.md) | 从旧版 DualTrans 升级与配置迁移 |
 | [docs/YOUTUBE.md](docs/YOUTUBE.md) | YouTube 字幕双语的限制、风险与隐私说明 |
+| [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md) | 隐私保护的来源、取舍、体积与性能评估 |
 | [PRIVACY.md](PRIVACY.md) · [English](docs/privacy.en.md) | 隐私说明：会发送什么、保存在哪里 |
 | [SECURITY.md](SECURITY.md) | 安全问题如何私下报告 |
 | [docs/STORE.md](docs/STORE.md) | Chrome Web Store 上架材料与权限审计草稿 |
@@ -82,4 +84,4 @@
 
 ## 许可
 
-[MIT](LICENSE)。
+[MIT](LICENSE)。第三方来源与许可证说明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
