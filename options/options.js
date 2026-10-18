@@ -199,7 +199,7 @@ function applyConfig(cfg) {
   fields.baseUrl.value = slot.baseUrl || '';
   fields.apiKey.value = slot.apiKey || '';
   fields.model.value = slot.model || '';
-  fields.thinkingMode.value = cfg.thinkingMode || 'auto';
+  fields.thinkingMode.value = cfg.thinkingMode || DEFAULTS.thinkingMode;
   fields.thinkingExtra.value = cfg.thinkingExtra || '';
 
   fields.targetLang.value = cfg.targetLang || 'zh-CN';

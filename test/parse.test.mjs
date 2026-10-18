@@ -2,7 +2,7 @@
 // 运行：node test/parse.test.mjs
 import assert from 'node:assert/strict';
 
-import { parseArray, isRunaway } from '../lib/parse.js';
+import { parseArray, parseArrayFromReasoning, isRunaway } from '../lib/parse.js';
 
 let pass = 0;
 let fail = 0;
@@ -64,6 +64,31 @@ t('译文长出 4 倍以上 → 拦（回应了原文里的指令 / 复述提示
 
 t('空输出不算失控', () => {
   assert.equal(isRunaway('A sentence that is long enough to count.', ''), false);
+});
+
+// ---------------- parseArrayFromReasoning ----------------
+console.log('\n[parseArrayFromReasoning]');
+
+t('从思考过程里取最后一个条数对得上的数组', () => {
+  const reasoning = '输入是 ["Hello","World"]，要翻成中文。最终答案：["你好","世界"]';
+  assert.deepEqual(parseArrayFromReasoning(reasoning, ['Hello', 'World']), ['你好', '世界']);
+});
+
+t('只是复述了原文数组 → 不算答案', () => {
+  assert.equal(parseArrayFromReasoning('输入是 ["Hello","World"]，我想想怎么翻……', ['Hello', 'World']), null);
+});
+
+t('条数对不上 → 不算答案', () => {
+  assert.equal(parseArrayFromReasoning('结果：["你好"]', ['Hello', 'World']), null);
+});
+
+t('思考过程里的方括号不干扰', () => {
+  const reasoning = '注意 [Music] 这种标签要保留。["[音乐] 你好"]';
+  assert.deepEqual(parseArrayFromReasoning(reasoning, ['[Music] hello']), ['[音乐] 你好']);
+});
+
+t('没有思考过程 → null', () => {
+  assert.equal(parseArrayFromReasoning('', ['Hello']), null);
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

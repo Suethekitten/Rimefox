@@ -73,6 +73,15 @@ t('识别推理模型标记', () => {
   assert.equal(r.reasoning, true);
 });
 
+t('content 为空时带出 finish_reason 和思考过程（DeepSeek 默认开思考）', () => {
+  const r = openai.parseResponse({
+    choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: '先想想……["你好"]' } }]
+  });
+  assert.equal(r.text, '');
+  assert.equal(r.finishReason, 'length');
+  assert.equal(r.reasoningText, '先想想……["你好"]');
+});
+
 t('401 错误映射为 Key 相关文案', () => {
   const e = openai.parseError(401, JSON.stringify({ error: { message: 'bad key' } }));
   assert.match(e.message, /Key/);
@@ -137,6 +146,12 @@ t('多个 text 块拼接', () => {
   assert.equal(r.reasoning, true);
 });
 
+t('stop_reason 与 thinking 内容带出来', () => {
+  const r = anthropic.parseResponse({ stop_reason: 'max_tokens', content: [{ type: 'thinking', thinking: '想' }] });
+  assert.equal(r.finishReason, 'max_tokens');
+  assert.equal(r.reasoningText, '想');
+});
+
 t('529 映射为服务过载', () => {
   const e = anthropic.parseError(529, '');
   assert.match(e.message, /过载/);
@@ -192,6 +207,7 @@ t('安全策略拦截给出明确错误', () => {
 t('输出被截断时给出明确错误', () => {
   const r = gemini.parseResponse({ candidates: [{ content: { parts: [] }, finishReason: 'MAX_TOKENS' }] });
   assert.match(r.error, /截断/);
+  assert.equal(r.finishReason, 'MAX_TOKENS');
 });
 
 t('地区限制使用确认过的文案', () => {

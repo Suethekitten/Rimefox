@@ -2,7 +2,7 @@
 import { getConfig, activeConfig, styleById } from './lib/config.js';
 import { systemPrompt, temperatureFor } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
-import { parseArray, isRunaway } from './lib/parse.js';
+import { parseArray, parseArrayFromReasoning, isRunaway } from './lib/parse.js';
 import * as cache from './lib/cache.js';
 
 // ---------------- 并发闸门 ----------------
@@ -39,9 +39,11 @@ async function translateBatchWithRetry(texts, target, cfg, style) {
   let mismatch = false;
   while (attempt < 3 && !mismatch) {
     attempt += 1;
+    const meta = {};
     try {
       const active = activeConfig(cfg);
       const raw = await chat({
+        meta,
         engine: active.engine,
         baseUrl: active.baseUrl,
         apiKey: active.apiKey,
@@ -58,11 +60,21 @@ async function translateBatchWithRetry(texts, target, cfg, style) {
       });
       const parsed = parseArray(raw, texts.length);
       if (parsed) return parsed;
-      lastErr = new ApiError('模型没有按 JSON 数组返回', 0, String(raw).slice(0, 300));
+      // 错误信息带上 finish_reason 和长度：一眼看出是被截断（length）还是格式不对，不只截一段原始返回
+      lastErr = new ApiError(
+        '模型没有按 JSON 数组返回（finish_reason=' + (meta.finishReason || '未知') + '，content ' + String(raw).length + ' 字）',
+        0,
+        String(raw).slice(0, 120)
+      );
       // 多条时条数对不上（模型合并/拆分了段落）：整批原样重试多半还是对不上，
       // 每次又要等完整生成。跳出重试，下面对半拆开
       mismatch = texts.length > 1;
     } catch (err) {
+      // content 为空、但思考过程里有答案（推理模型偶尔把最终数组写进 reasoning_content）：从里面捞
+      if (err && err.code === 'empty_content') {
+        const salvaged = parseArrayFromReasoning(err.reasoningText, texts);
+        if (salvaged) return salvaged;
+      }
       lastErr = err;
       const status = err && err.status ? err.status : 0;
       const retriable = status === 0 || status === 429 || status >= 500;

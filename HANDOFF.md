@@ -165,7 +165,7 @@ lib/
 
 **迁移**：`lib/config.js` 的 `migrateConfig()` 是纯函数，v3 → v4 → v5 → v6 逐级升级；迁移前把原配置备份到 `storage.config_backup_v3`。加字段只加不删。
 
-**思考模式**（`thinkingMode`）三态：
+**思考模式**（`thinkingMode`）三态，**默认 `off`**（0.5.1 起；翻译不需要推理，开着既慢又可能把预算用光）：
 
 | 取值 | 行为 |
 |---|---|
@@ -174,6 +174,12 @@ lib/
 | `custom` | 把用户填的 JSON 合并进请求体 |
 
 服务不认该参数（400）时，`provider.js` 会**自动去掉参数重试一次**。
+
+**content 为空**（推理模型把预算花在思考上，或把答案写进了 `reasoning_content`）：
+1. `finish_reason` 是截断（`length` / `max_tokens` / `MAX_TOKENS`，见 `isLengthStop`）且这次没关思考 → `chat()` **关掉思考重试一次**
+2. 仍为空 → 抛 `code: 'empty_content'` 的错误，消息里有 `finish_reason`、content 长度和思考内容长度（不再截一段原始 JSON）
+3. 后台捕获后用 `parseArrayFromReasoning`（`lib/parse.js`）从思考过程里从后往前找「条数对得上、且不是复述原文」的 JSON 数组兜底
+老用户存储里的 `thinkingMode: 'auto'` 不会被强制改掉（分不清是主动选的还是旧默认值），靠上面这套兜底。
 
 各家关闭参数（来源：各家官方文档）：
 
@@ -301,12 +307,13 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 ### 7.1b Node 单测（接口层）
 ```
-node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射（43 条）
+node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射（45 条）
 node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（27 条）
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
-node test/parse.test.mjs       # 回包解析 parseArray + 输出长度护栏 isRunaway（10 条）
+node test/parse.test.mjs       # 回包解析 parseArray / 思考过程兜底 parseArrayFromReasoning / 输出长度护栏 isRunaway（15 条）
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、清空（11 条）
 node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度（8 条）
+node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息（5 条，假 fetch）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
@@ -333,7 +340,7 @@ node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度（8
 | `currentProvider` | `deepseek` | 当前服务商（内置模板 id，或 `__custom__` / `custom:N`） |
 | `providerConfig` | `{}` | 按服务商存的 `{engine, baseUrl, apiKey, model}`，**Key 不进内容脚本** |
 | `customProviders` | `[]` | 用户保存并命名的自定义服务商 `[{id, name}]` |
-| `thinkingMode` | `auto` | `auto` / `off` / `custom`，见接口层一节 |
+| `thinkingMode` | `off` | `auto` / `off` / `custom`，见接口层一节（0.5.1 前默认 `auto`） |
 | `thinkingExtra` | `''` | `custom` 时合并进请求体的 JSON 字符串 |
 | `targetLang` | `zh-CN` | |
 | `batchSize` | 8 | 单批条数（屏幕外的批次用。按离屏幕距离分级：屏幕内 ≤3 条 / ≤500 字符，一屏以内 ≤1000 字符，见 `takeBatch`） |
