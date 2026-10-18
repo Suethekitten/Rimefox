@@ -37,7 +37,7 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **87 / 87 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **88 / 88 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 
 ---
 
@@ -68,7 +68,7 @@ edge-bilingual/
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词）
-└── selftest/              离线自检（87 条用例）
+└── selftest/              离线自检（88 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -304,7 +304,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-87 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）。**改 `dom.js` 前后必跑。**
+88 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -403,7 +403,7 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 1. 改 `manifest.json` 的 `version`
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错）
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **87 / 87**
+4. 跑自检页：必须 **88 / 88**
 4b. 跑 Node 单测：`for f in test/*.test.mjs; do node $f; done`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -478,5 +478,5 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 - **设置页**（`options/glossary.js`）：两列表格；超过 30 行折叠（`展开全部 N 条`）；导入/导出 CSV（导出加 BOM，Excel 不乱码；文件名 `YYYYMMDD-HHmmss`）；「导入示例」是开关（记导入前快照，第二次点击收起）；收起/清空后 `scrollIntoView` 回卡片，避免页面高度骤减导致跳到下面几节
 - **示例数据**（`lib/glossary-sample.js`）：由 `docs/glossary/starter.csv` 生成 109 条，改数据要两边同步
 - **弹窗命令限定主框架**（`popup/popup.js` + `background.js` 的 `sendOrInject`）：`chrome.tabs.sendMessage` 不带 `frameId` 会发给所有 iframe，谁先 `sendResponse` 就用谁；页面内嵌 Twitter 挂件时诊断会拿到 iframe 的空结果。现在默认 `{ frameId: 0 }`；右键划词仍按 `info.frameId` 发给选中框架
-- 测试：术语表单测 14 条、缓存 +1、提示词 +2，Node 合计 141 条；自检仍是 87 条（术语表是 `lib/`，用 Node 单测覆盖）
+- 测试：术语表单测 14 条、缓存 +1、提示词 +2，Node 合计 141 条；自检 88 条（术语表是 `lib/`，用 Node 单测覆盖）
 

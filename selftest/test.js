@@ -432,6 +432,20 @@
     return eq(DT.areaOf(u.el), 'content');
   });
 
+  check('正文段落里的行内子元素（OWID）：整段一个单元，不逐句插', function () {
+    var p = document.getElementById('fx-inline-para');
+    var got = unitsIn('fx-inline-para');
+    if (got.length !== 1) {
+      return '应收集到 1 个单元，实际 ' + got.length + '：' + JSON.stringify(texts(got).map(function (t) {
+        return t.slice(0, 24);
+      }));
+    }
+    if (got[0].el !== p) return '单元不是整个 <p>，而是 <' + got[0].el.tagName.toLowerCase() + '>';
+    if (got[0].text.indexOf('Here, scaling means') < 0) return '缺第一句';
+    if (got[0].text.indexOf('Just a few years ago') < 0) return '缺第二句';
+    return true;
+  });
+
   check('整页 flex 布局：标题与正文不被替换', function () {
     var got = unitsIn('fx-pageflex');
     var names = eq(texts(got), ['Patch notes', 'Read more about this update']);

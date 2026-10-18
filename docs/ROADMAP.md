@@ -110,7 +110,7 @@
 
 ## 5. 改代码前的最低要求
 
-1. 动 `content/dom.js`（切分 / 注入）→ 先跑 `selftest/index.html`（当前 87 条，必须全部通过）
+1. 动 `content/dom.js`（切分 / 注入）→ 先跑 `selftest/index.html`（当前 88 条，必须全部通过）
 2. 动 `lib/`、`background.js`、`options/` → 跑 `test/*.test.mjs`
 3. 新增"跳过规则"→ 想清楚会不会把**可见内容**跳过（弹层、下拉菜单常被 `opacity` / `aria-hidden` 标记）
 4. 新增"替换规则"→ 想清楚会不会把**正文**替换掉

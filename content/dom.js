@@ -170,8 +170,9 @@
   // 该不该继续往下拆：
   // 1) flex/grid 容器 = 一排并列的条目，逐个当单元（导航项、头像+昵称行）
   // 2) 有真正的块级子元素 = 结构容器，继续拆
-  // 3) 有三个以上并列子元素 = 一列条目（列表、菜单），继续拆
-  // 4) 其余（如 <h1><span>Hello</span> <span>World</span></h1>）当一个整体
+  // 3) 正文块（p / h / li / td…）只有行内子元素 → 整段一个单元（句子 span、脚注、行内链接）
+  // 4) 其它容器有三个以上并列子元素 = 一列条目（列表、菜单），继续拆
+  // 5) 其余（如 <h1><span>Hello</span> <span>World</span></h1>）当一个整体
   function shouldDescend(el) {
     var kids = el.children;
     if (!kids.length) return false;
@@ -187,6 +188,9 @@
 
     if (isFlexOrGrid(el)) return true;
     if (structural > 0) return true;
+    // 正文块里的 3+ 个行内子元素（OWID 的 <p> 有 8 个：句子 span、脚注、行内链接）
+    // 以前会逐个子元素拆，译文插在句子中间；整段翻、追加到段末可读性更好。
+    if (CONTENT_TAGS[tagOf(el)]) return false;
     return usable >= 3;
   }
 
