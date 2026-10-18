@@ -1,0 +1,110 @@
+source,target,category,note
+Public profile,公开资料,通用UI,GitHub 界面里统一用这个；不要一会儿「公开个人资料」
+Profile,资料,通用UI,单独出现时用「资料」
+Account,账户,通用UI,比「账号」更正式；全项目统一用它
+Accounts,账户,通用UI,复数同样
+Social accounts,社交账号,通用UI,保留「账号」这一个写法；不要混用「帐号」
+Sign in,登录,通用UI,
+Sign out,退出登录,通用UI,
+Sign up,注册,通用UI,
+Settings,设置,通用UI,
+Save,保存,通用UI,
+Cancel,取消,通用UI,
+Delete,删除,通用UI,
+Edit,编辑,通用UI,
+Search,搜索,通用UI,
+Notification,通知,通用UI,
+Notifications,通知,通用UI,
+Password,密码,通用UI,
+Two-factor authentication,双重身份验证,通用UI,GitHub 官方译法
+Email address,邮箱地址,通用UI,
+Username,用户名,通用UI,
+Dashboard,仪表板,通用UI,
+Organization,组织,通用UI,
+Enterprise,企业,通用UI,
+Repository,仓库,通用UI,
+Repositories,仓库,通用UI,
+Issue,议题,通用UI,GitHub 官方译法
+Pull request,拉取请求,通用UI,GitHub 官方译法
+Fork,复刻,通用UI,GitHub 官方译法
+Star,星标,通用UI,GitHub 官方译法
+Watch,关注,通用UI,
+Branch,分支,通用UI,
+Commit,提交,通用UI,
+Merge,合并,通用UI,
+Release,发行版,通用UI,
+Wiki,Wiki,GitHub,保留原文
+Gist,Gist,GitHub,保留原文
+Codespaces,代码空间,GitHub,GitHub 官方译法
+Copilot,Copilot,GitHub,不要翻成「副驾驶」
+Actions,Actions,GitHub,保留原文
+Pages,Pages,GitHub,指 GitHub Pages 时保留；泛指网页时译「页面」
+Workflow,工作流,GitHub,
+Runner,运行器,GitHub,
+Secret,机密,GitHub,GitHub 官方译法
+Token,令牌,GitHub,指访问令牌；AI 语境的 token 建议另建「AI」范围术语库覆盖
+Dependabot,Dependabot,GitHub,保留原文
+Caveat,注意事项,WTRP,论坛里的 Caveat 意译，不是「警告」
+Camouflage,涂装,战争雷霆,不要用「迷彩」；全站统一「涂装」
+Decal,贴花,战争雷霆,
+Battle Pass,战令,战争雷霆,不要用「战斗通行证」
+Warbond Shop,战令商店,战争雷霆,
+Battle Task,战令任务,战争雷霆,
+Vehicle,载具,战争雷霆,
+Crew,乘员组,战争雷霆,
+Crew slot,乘员组槽位,战争雷霆,
+Spawn,出生点,战争雷霆,名词；动词「重生」另列
+Respawn,重生,战争雷霆,
+Matchmaking,匹配,战争雷霆,
+Battle Rating,战斗权重,战争雷霆,缩写 BR
+Silver Lions,银狮,战争雷霆,缩写 SL
+Golden Eagles,金鹰,战争雷霆,缩写 GE
+Research Points,研发点,战争雷霆,缩写 RP
+Free Repair,免费维修,战争雷霆,
+Armor,装甲,战争雷霆,
+Penetration,穿深,战争雷霆,
+Shell,炮弹,战争雷霆,
+APFSDS,尾翼稳定脱壳穿甲弹,战争雷霆,
+HEAT,破甲弹,战争雷霆,
+HESH,碎甲弹,战争雷霆,
+SAP,半穿甲弹,战争雷霆,
+APHE,穿甲爆破弹,战争雷霆,
+SPAA,自行防空炮,战争雷霆,
+Hangar,机库,战争雷霆,
+Uptier,提权重,战争雷霆,社区口语
+Downtier,降权重,战争雷霆,社区口语
+Leopard 2A6HEL,Leopard 2A6HEL,保留原文,型号名不要翻译
+BMP-3,BMP-3,保留原文,型号名不要翻译
+T-72B3,T-72B3,保留原文,型号名不要翻译
+M1A2 Abrams,M1A2 Abrams,保留原文,型号名不要翻译
+Raid,对局,塔科夫,塔科夫语境；不要译成「突袭」
+Extraction,撤离点,塔科夫,
+Extract,撤离,塔科夫,动词
+Scav,Scav,保留原文,社区口语常不译；第一次出现可注「拾荒者」
+PMC,PMC,保留原文,保留缩写
+Stash,仓库,塔科夫,
+Hideout,藏身处,塔科夫,
+Flea Market,跳蚤市场,塔科夫,
+Trader,商人,塔科夫,
+Quest,任务,塔科夫,
+Insurance,保险,塔科夫,
+Loot,战利品,塔科夫,
+Gear,装备,塔科夫,
+Ammo,弹药,塔科夫,
+Key,钥匙,塔科夫,注意与键盘 Key 区分
+Gacha,抽卡,二次元,
+Banner,卡池,二次元,抽卡语境
+Pity,保底,二次元,
+Event,活动,二次元,
+Login bonus,登录奖励,二次元,
+SSR,SSR,保留原文,抽卡稀有度不翻译
+Prompt,提示词,AI,不要用「提示语」
+Model,模型,AI,
+Context window,上下文窗口,AI,
+Temperature,温度,AI,采样温度
+Embedding,嵌入,AI,
+Fine-tuning,微调,AI,
+Inference,推理,AI,
+Benchmark,基准测试,AI,
+Hallucination,幻觉,AI,
+RAG,检索增强生成,AI,首次出现可保留缩写

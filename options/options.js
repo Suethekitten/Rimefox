@@ -31,6 +31,7 @@ import {
   stashCurrentProvider,
   providerSlot
 } from './provider-list.js';
+import { createGlossaryEditor } from './glossary.js';
 
 // 思考模式的三种取值（与 lib/config.js 的 DEFAULTS.thinkingMode 对应）
 const THINKING_MODES = [
@@ -70,6 +71,12 @@ const fields = {
 
 // 最近一次读到的配置（导出时用）
 let currentCfg = {};
+
+// 术语表编辑器：直接改 currentCfg.glossary，保存时统一清洗
+const glossaryEditor = createGlossaryEditor({
+  getConfig: () => currentCfg,
+  onChanged: () => scheduleDirty()
+});
 
 // ---------------- 快捷键录制 ----------------
 const hotkeyBtn = $('hotkeyBtn');
@@ -218,6 +225,7 @@ function applyConfig(cfg) {
   updateKeyLink(keyLink, providerById(slot.provider));
   syncProviderNameUI();
   picker.updateHint();
+  glossaryEditor.render();
 }
 
 function readForm() {
@@ -242,6 +250,7 @@ function readForm() {
       id: p.id,
       name: p.name || '自定义'
     })),
+    glossary: ((currentCfg && currentCfg.glossary) || []).slice(),
     thinkingMode: fields.thinkingMode.value,
     thinkingExtra: fields.thinkingExtra.value.trim(),
 
@@ -603,6 +612,7 @@ $('save').addEventListener('click', async () => {
   const active = activeConfig(patch);
   currentCfg = await saveConfig(patch);
   markSaved(currentCfg);
+  glossaryEditor.render(); // 清洗后的结果（去空行 / 去重）反映到表格
   if (active.apiKey) setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
   else setResult($('saveResult'), '已保存，但还没有填 API Key，翻译会失败。', 'bad');
 });

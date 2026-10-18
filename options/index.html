@@ -226,6 +226,23 @@
               <input id="maxUnitChars" type="number" min="200" max="6000" step="100" class="control num" />
             </label>
           </div>
+
+          <div class="card">
+            <div class="card-title">术语表</div>
+            <p class="card-desc">
+              指定某些词必须怎么翻（比如 Battle Pass → 战令）。全局一份，只把本页命中的词加进提示词，不会额外占太多 token。
+            </p>
+            <div class="glossary-list" id="glossaryList"></div>
+            <div class="glossary-actions">
+              <button id="glossaryAdd" type="button" class="btn">＋ 添加一行</button>
+              <button id="glossarySample" type="button" class="btn">导入示例</button>
+              <button id="glossaryImport" type="button" class="btn">导入 CSV</button>
+              <input id="glossaryFile" type="file" accept=".csv,text/csv" hidden />
+              <button id="glossaryExport" type="button" class="btn">导出 CSV</button>
+              <button id="glossaryClear" type="button" class="btn danger">清空</button>
+            </div>
+            <div class="result" id="glossaryResult"></div>
+          </div>
         </section>
 
         <!-- ================= 划词与字幕 ================= -->

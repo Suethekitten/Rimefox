@@ -3,6 +3,7 @@ import { getConfig, activeConfig, styleById } from './lib/config.js';
 import { systemPrompt, temperatureFor } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseArrayFromReasoning, isRunaway } from './lib/parse.js';
+import { matchGlossary, normalizeGlossary, glossaryFingerprint } from './lib/glossary.js';
 import * as cache from './lib/cache.js';
 
 // ---------------- 并发闸门 ----------------
@@ -32,11 +33,13 @@ function sleep(ms) {
 }
 
 // style：趣味翻译风格（lib/config.js 的 STYLES），普通翻译为 'plain'
-async function translateBatchWithRetry(texts, target, cfg, style) {
+async function translateBatchWithRetry(texts, target, cfg, style, glossary) {
   let attempt = 0;
   let lastErr = null;
   const temperature = temperatureFor(cfg, style);
   let mismatch = false;
+  // 本批命中的术语（没命中就是空数组，提示词里不会多出术语段）
+  const hits = matchGlossary(glossary, texts);
   while (attempt < 3 && !mismatch) {
     attempt += 1;
     const meta = {};
@@ -54,7 +57,7 @@ async function translateBatchWithRetry(texts, target, cfg, style) {
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
-          { role: 'system', content: systemPrompt(target, style) },
+          { role: 'system', content: systemPrompt(target, style, hits) },
           { role: 'user', content: JSON.stringify(texts) }
         ]
       });
@@ -87,8 +90,8 @@ async function translateBatchWithRetry(texts, target, cfg, style) {
     // 某一半失败时直接失败，不能再把整批重来一遍
     const mid = Math.ceil(texts.length / 2);
     const halves = await Promise.all([
-      translateBatchWithRetry(texts.slice(0, mid), target, cfg, style),
-      translateBatchWithRetry(texts.slice(mid), target, cfg, style)
+      translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary),
+      translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary)
     ]);
     return halves[0].concat(halves[1]);
   }
@@ -122,6 +125,7 @@ async function handleTranslate(msg, sender) {
 
   const target = msg.target || cfg.targetLang;
   const style = styleById(msg.style).value; // 不认识的风格按普通翻译
+  const glossary = normalizeGlossary(cfg.glossary);
   const rawTexts = Array.isArray(msg.texts) ? msg.texts : [];
   const texts = rawTexts.map((t) => (t == null ? '' : String(t)));
   const results = new Array(texts.length).fill(null);
@@ -131,7 +135,14 @@ async function handleTranslate(msg, sender) {
     return { ok: false, error: '还没有配置 API Key，请先打开「设置」填写。', results };
   }
 
-  const scope = { target, style, model: active.provider + ':' + active.model, host: hostOf(sender) };
+  // 缓存键带上术语表指纹：改了术语后旧译文不能再命中
+  const scope = {
+    target,
+    style,
+    model: active.provider + ':' + active.model,
+    host: hostOf(sender),
+    glossary: glossaryFingerprint(glossary)
+  };
   const keyOf = (text) => cache.makeKey(scope, text);
 
   // 同一批里重复的文本（页面上一排相同的按钮、"Reply"、"Share"）只翻一次、只付一次钱：
@@ -186,7 +197,7 @@ async function handleTranslate(msg, sender) {
       (async () => {
         await acquire();
         try {
-          const out = await translateBatchWithRetry(payload, target, cfg, style);
+          const out = await translateBatchWithRetry(payload, target, cfg, style, glossary);
           if (!out) throw new ApiError('模型返回无法解析', 0, '');
           payload.forEach((text, k) => {
             const value = out[k];
