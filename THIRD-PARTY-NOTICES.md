@@ -1,17 +1,17 @@
 # 第三方许可证与来源说明
 
-凛狐（Rimefox）自身以 [MIT](../LICENSE) 发布。本文件记录项目里实际复用的第三方代码、模型与素材。
+凛狐（Rimefox）自身以 [MIT](LICENSE) 发布。本文件记录项目里实际复用的第三方代码、模型与素材。
 
 ## OneAIFW
 
 - 项目：OneAIFW — <https://github.com/funstory-ai/aifw>
 - 版本：`main` @ `74ee556`（评估时）
 - 许可证：MIT，Copyright (c) 2025 Funstory.ai Limited
-- 许可证全文：[licenses/oneaifw-MIT.txt](oneaifw-MIT.txt)
+- 许可证全文：[licenses/oneaifw-MIT.txt](licenses/oneaifw-MIT.txt)
 
 ### 实际复用的内容
 
-实现位置：[`lib/privacy.js`](../lib/privacy.js)、[`docs/AIFW-PRIVACY-EVAL.md`](../docs/AIFW-PRIVACY-EVAL.md)。
+实现位置：[`lib/privacy.js`](lib/privacy.js)、[`docs/AIFW-PRIVACY-EVAL.md`](docs/AIFW-PRIVACY-EVAL.md)。
 
 | 上游文件 | 复用的内容 | 修改说明 |
 |---|---|---|
