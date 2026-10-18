@@ -52,6 +52,31 @@
     });
   };
 
+  // 线条小图标（悬浮入口、气泡上的按钮）：只用 createElementNS 拼，不写 innerHTML
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  DT.icon = function (d, size) {
+    var svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', String(size || 18));
+    svg.setAttribute('height', String(size || 18));
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.style.display = 'block';
+    var path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+    return svg;
+  };
+
+  // 我们自己加到网页上的界面（悬浮入口、置顶小窗）跟着「界面语言」走；正文提示仍是中文
+  DT.uiText = function (zh, en) {
+    return DT.state.config && DT.state.config.uiLang === 'en' ? en : zh;
+  };
+
   DT.log = function () {
     if (DT.state.config && DT.state.config.debug) {
       var args = Array.prototype.slice.call(arguments);

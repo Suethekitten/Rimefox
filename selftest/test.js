@@ -902,6 +902,59 @@
     return night ? '夜间模式下不该再判断明暗（页面已经反色）' : true;
   });
 
+  // ---------------- 悬浮入口 ----------------
+  // 和运行时一样：先放进 DT.state.config 再通知（main.js 的 loadConfig 就是这个顺序）
+  function emitConfig(cfg) {
+    DT.state.config = cfg;
+    DT.emitConfig(cfg);
+  }
+  check('悬浮入口：默认不显示，打开后挂在网页边上（Shadow DOM，带 data-dt-ui）', function () {
+    emitConfig({ page: {} });
+    if (document.getElementById('dt-dock')) return '默认关闭时不该出现';
+    emitConfig({ dockEnabled: true, page: { provider: 'DeepSeek · deepseek-chat' } });
+    var host = DT.dock.host();
+    if (!host || !host.isConnected) return '没有挂到页面上';
+    if (host.getAttribute('data-dt-ui') !== '1') return '缺 data-dt-ui，会被当成正文切分';
+    if (host.shadowRoot) return 'shadow 应该是 closed';
+    var acts = [].map.call(DT.dock.root().querySelectorAll('button'), function (b) {
+      return b.dataset.act;
+    });
+    return eq(acts, ['toggle', 'mode', 'selection', 'pin', 'provider', 'ball']);
+  });
+
+  check('悬浮入口：左右位置、自动隐藏、界面语言跟着配置走', function () {
+    emitConfig({ dockEnabled: true, dockSide: 'left', dockAutoHide: false, uiLang: 'en', page: { provider: 'Gemini · flash' } });
+    var host = DT.dock.host();
+    var root = DT.dock.root();
+    var dock = root.querySelector('.dock');
+    var provider = root.querySelector('[data-act="provider"]').getAttribute('aria-label');
+    var toggle = root.querySelector('[data-act="toggle"]').getAttribute('aria-label');
+    DT.state.config = null;
+    if (host.getAttribute('data-side') !== 'left') return '没切到左侧';
+    if (dock.hasAttribute('data-auto')) return '关掉自动隐藏后不该半藏';
+    if (toggle !== 'Translate this page') return '英文界面的说明不对：' + toggle;
+    return provider === 'Current provider: Gemini · flash' ? true : '服务商说明不对：' + provider;
+  });
+
+  check('悬浮入口：收起时只有小球接收鼠标，看不见的面板不挡网页', function () {
+    emitConfig({ dockEnabled: true, dockAutoHide: true, page: {} });
+    var root = DT.dock.root();
+    var panel = root.querySelector('.panel');
+    var ball = root.querySelector('.ball');
+    var closedPanel = getComputedStyle(panel).pointerEvents;
+    var hostPe = getComputedStyle(DT.dock.host()).pointerEvents;
+    DT.dock.setOpen(true);
+    var openPanel = getComputedStyle(panel).pointerEvents;
+    DT.dock.setOpen(false);
+    return eq([hostPe, closedPanel, getComputedStyle(ball).pointerEvents, openPanel], ['none', 'none', 'auto', 'auto']);
+  });
+
+  check('悬浮入口：关掉后从页面上移除', function () {
+    emitConfig({ dockEnabled: false, page: {} });
+    DT.state.config = null;
+    return document.getElementById('dt-dock') ? '关掉后还在' : true;
+  });
+
   // ---------------- 渲染 ----------------
   var list = document.getElementById('list');
   var passed = 0;

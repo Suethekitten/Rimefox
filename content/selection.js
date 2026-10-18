@@ -24,6 +24,22 @@
   // 小按钮相对选区左上角的偏移（松开鼠标时指针所在的位置）。
   // 记偏移而不是屏幕坐标：页面滚动后按钮还能跟着选区走
   var btnOffset = null;
+  // 最近一次划词结果：置顶小窗（pip.js）打开时先显示它，之后每翻一次就推过去
+  var resultHooks = [];
+  DT.lastSelection = null;
+  DT.onSelectionResult = function (fn) {
+    resultHooks.push(fn);
+  };
+  function emitResult(entry) {
+    DT.lastSelection = entry;
+    resultHooks.forEach(function (fn) {
+      try {
+        fn(entry);
+      } catch (err) {
+        DT.log('selection hook failed', err);
+      }
+    });
+  }
 
   function cfg() {
     return DT.state.config || {};
@@ -77,7 +93,25 @@
       logo.style.display = 'none';
     }
 
+    // 「置顶」：把这条译文放进始终在最上层的小窗（pip.js），翻完才显示
+    var pin = document.createElement('span');
+    pin.setAttribute('role', 'button');
+    pin.style.cssText = 'flex:none;display:none;width:14px;height:14px;opacity:.5;cursor:pointer;color:inherit;';
+    pin.appendChild(DT.icon('M9 3h6l-1 6 3 3H7l3-3-1-6zM12 15v6', 14));
+    pin.addEventListener('mouseenter', function () {
+      pin.style.opacity = '1';
+    });
+    pin.addEventListener('mouseleave', function () {
+      pin.style.opacity = '.55';
+    });
+    pin.addEventListener('click', function (event) {
+      event.stopPropagation(); // 别触发气泡的「点击复制」
+      if (DT.pip) DT.pip.open();
+    });
+    bubble._pinEl = pin;
+
     body.appendChild(textEl);
+    body.appendChild(pin);
     body.appendChild(logo);
     bubble.appendChild(body);
 
@@ -131,6 +165,10 @@
     ensureBubble();
     bubble.dataset.state = state || 'done';
     bubble._textEl.textContent = text;
+    var pinTitle = DT.uiText('置顶：放进始终在最上层的小窗', 'Pin to an always-on-top window');
+    bubble._pinEl.title = pinTitle;
+    bubble._pinEl.setAttribute('aria-label', pinTitle);
+    bubble._pinEl.style.display = (state || 'done') === 'done' && DT.pip && DT.pip.supported() ? 'block' : 'none';
     bubble.style.display = 'block';
     bubble.style.visibility = 'hidden'; // 先量尺寸再定位
     placeBubble(rect);
@@ -257,6 +295,7 @@
       var value = res && res.results && res.results[0];
       if (res && res.ok && typeof value === 'string' && value.trim()) {
         showBubble(info.rect, value.trim(), 'done');
+        emitResult({ source: info.text, result: value.trim(), at: Date.now() });
       } else if (res && res.ok && typeof value === 'string') {
         showBubble(info.rect, '与原文相同', 'done');
       } else {

@@ -720,6 +720,19 @@
     return note;
   }
 
+  // 给页面里的悬浮入口（dock.js）用：和弹窗按钮走同一套逻辑
+  function setMode(mode) {
+    DT.state.mode = mode === 'translation' ? 'translation' : 'dual';
+    // 注入策略跟模式相关（双语=追加，仅译文=原地替换），必须重建
+    startOver();
+    return summarize();
+  }
+  DT.control = {
+    toggle: toggle,
+    setMode: setMode,
+    status: summarize
+  };
+
   // ---------------- 消息 ----------------
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || !msg.type) return false;
@@ -762,10 +775,7 @@
     }
 
     if (msg.type === 'dt:setMode') {
-      DT.state.mode = msg.mode === 'translation' ? 'translation' : 'dual';
-      // 注入策略跟模式相关（双语=追加，仅译文=原地替换），必须重建
-      startOver();
-      sendResponse(summarize());
+      sendResponse(setMode(msg.mode));
       return false;
     }
 

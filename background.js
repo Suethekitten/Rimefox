@@ -1,5 +1,5 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
-import { getConfig, activeConfig, styleById } from './lib/config.js';
+import { getConfig, saveConfig, activeConfig, styleById } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseArrayFromReasoning, isRunaway } from './lib/parse.js';
@@ -7,6 +7,7 @@ import { matchGlossary, normalizeGlossary, glossaryFingerprint } from './lib/glo
 import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
 import { resolveSiteRule, hostListed } from './lib/site-rules.js';
+import { providerById } from './lib/providers.js';
 
 // ---------------- 并发闸门 ----------------
 let running = 0;
@@ -307,7 +308,16 @@ async function ensureInjected(tabId, frameId = 0) {
   try {
     await chrome.scripting.executeScript({
       target,
-      files: ['content/core.js', 'content/dom.js', 'content/appearance.js', 'content/main.js', 'content/selection.js', 'content/hover.js']
+      files: [
+        'content/core.js',
+        'content/dom.js',
+        'content/appearance.js',
+        'content/main.js',
+        'content/selection.js',
+        'content/hover.js',
+        'content/pip.js',
+        'content/dock.js'
+      ]
     });
     return true;
   } catch (err) {
@@ -342,8 +352,19 @@ function pageAppearance(cfg, sender) {
     customCss: sanitizeTranslationCss(cfg.customCss).css,
     typo: typographyVars(cfg),
     site: url ? resolveSiteRule(url, cfg.siteRules) : null,
-    night: !!cfg.nightMode && hostListed(host, cfg.nightSites)
+    night: !!cfg.nightMode && hostListed(host, cfg.nightSites),
+    provider: providerLabel(cfg)
   };
+}
+
+// 悬浮入口上显示「在用谁」：服务商名 + 模型（和弹窗状态卡底部一致）
+function providerLabel(cfg) {
+  const id = cfg.currentProvider || 'deepseek';
+  const custom = (cfg.customProviders || []).find((one) => one.id === id);
+  const tpl = providerById(id);
+  const name = (custom && custom.name) || (tpl && tpl.name) || id;
+  const model = ((cfg.providerConfig || {})[id] || {}).model || '';
+  return model ? name + ' · ' + model : name;
 }
 
 // ---------------- 消息路由 ----------------
@@ -366,6 +387,12 @@ const ROUTES = {
     });
     const { providerConfig: _omit, ...rest } = cfg;
     return { ok: true, config: { ...rest, providerConfig, hasKey: !!activeConfig(cfg).apiKey, page: pageAppearance(cfg, sender) } };
+  },
+  // 网页里的悬浮入口切显示方式：和弹窗一样记进配置（只接受两个取值，其它配置项内容脚本改不了）
+  'mode:set': async (msg) => {
+    if (msg.mode !== 'dual' && msg.mode !== 'translation') return { ok: false };
+    await saveConfig({ mode: msg.mode });
+    return { ok: true };
   },
   // 设置页的缓存统计：估算值（LRU 预算用）+ 浏览器实际记的占用
   'cache:stats': async () => {

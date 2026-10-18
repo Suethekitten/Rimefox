@@ -57,7 +57,9 @@
         "content/appearance.js",
         "content/main.js",
         "content/selection.js",
-        "content/hover.js"
+        "content/hover.js",
+        "content/pip.js",
+        "content/dock.js"
       ],
       "css": ["content/styles/inject.css"],
       "run_at": "document_idle",
