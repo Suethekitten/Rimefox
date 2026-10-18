@@ -63,6 +63,10 @@ export function createGlossaryEditor(opts) {
     return row;
   }
 
+  // 条数多时先折叠：导入示例有 109 条，全展开会把设置页拉得很长
+  const COLLAPSED_ROWS = 30;
+  let expanded = false;
+
   function render() {
     wrap.innerHTML = '';
     const list = current();
@@ -73,7 +77,20 @@ export function createGlossaryEditor(opts) {
       wrap.appendChild(empty);
       return;
     }
-    list.forEach((item, index) => wrap.appendChild(rowOf(item, index)));
+    const shown = expanded ? list : list.slice(0, COLLAPSED_ROWS);
+    shown.forEach((item, index) => wrap.appendChild(rowOf(item, index)));
+
+    if (list.length > COLLAPSED_ROWS) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'btn glossary-more';
+      more.textContent = expanded ? '收起' : '展开全部 ' + list.length + ' 条';
+      more.addEventListener('click', () => {
+        expanded = !expanded;
+        render();
+      });
+      wrap.appendChild(more);
+    }
   }
 
   // 合并导入：同一原文以导入的为准，其余追加
@@ -93,6 +110,7 @@ export function createGlossaryEditor(opts) {
     });
     const cfg = opts.getConfig();
     cfg.glossary = normalizeGlossary(Array.from(byKey.values()));
+    expanded = false;
     render();
     message('已导入 ' + entries.length + ' 条（新增 ' + added + ' 条，点「保存」后生效）', 'ok');
     changed();

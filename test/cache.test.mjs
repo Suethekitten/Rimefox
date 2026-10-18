@@ -55,6 +55,12 @@ await t('目标语言 / 风格 / 模型 / 域名不同 → 键不同', () => {
   assert.notEqual(makeKey({ ...scope, host: 'evil.example' }, 'Code'), base);
 });
 
+await t('术语表指纹不同 → 键不同（改了术语旧译文失效）', () => {
+  const base = makeKey(scope, 'Code');
+  assert.notEqual(makeKey({ ...scope, glossary: 'abc123' }, 'Code'), base);
+  assert.notEqual(makeKey({ ...scope, glossary: 'abc123' }, 'Code'), makeKey({ ...scope, glossary: 'def456' }, 'Code'));
+});
+
 // ---------------- 读写与恢复 ----------------
 console.log('\n[读写与恢复]');
 

@@ -711,3 +711,7 @@ input.switch:focus-visible {
     grid-column: 1 / -1;
   }
 }
+
+.glossary-more {
+  align-self: flex-start;
+}

@@ -77,5 +77,17 @@ t('风格列表：普通在第一个，id 与内容脚本 DT.STYLE_IDS 一致', 
   assert.deepEqual(STYLES.map((s) => s.value), ['plain', 'classical', 'catgirl']);
 });
 
+t('术语表：没有命中就不加术语段', () => {
+  const text = systemPrompt('zh-CN', 'plain', []);
+  assert.equal(text.includes('术语对照'), false);
+});
+
+t('术语表：命中时把译法写进提示词，并点明短文本也适用', () => {
+  const text = systemPrompt('zh-CN', 'plain', [{ source: 'Emails', target: '邮箱（测试）' }]);
+  assert.match(text, /术语对照/);
+  assert.match(text, /Emails → 邮箱（测试）/);
+  assert.match(text, /标题、按钮、导航等短文本同样适用/);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);
