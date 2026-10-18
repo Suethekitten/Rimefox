@@ -67,8 +67,18 @@ html[data-dt="on"][data-dt-theme="mask"] .dt-target {
    不再靠 CSS 隐藏原文，所以这里不需要额外规则。 */
 
 /* ---- 悬停对照（content/hover.js）----
-   鼠标移到已翻译单元上：原文一种底色、译文另一种底色，一眼看出哪句对哪句；移开取消。
-   原地替换的单元（仅译文 / 控件 / 导航）原文不在页面上，弹小气泡显示 */
+   鼠标停在哪一句，就只给这一句原文（黄）和对应的那句译文（蓝）上底色；移开取消。
+   用 CSS Custom Highlight API 直接给文字范围上色，不改页面 DOM。
+   原地替换的单元（仅译文 / 控件 / 导航）原文不在页面上，弹小气泡显示对应的那句原文 */
+::highlight(dt-hover-src) {
+  background-color: rgba(250, 204, 21, 0.38);
+}
+
+::highlight(dt-hover-target) {
+  background-color: rgba(59, 130, 246, 0.26);
+}
+
+/* 浏览器不支持 Highlight API 时的退路：整段高亮 */
 html[data-dt="on"] [data-dt-hover="src"] {
   background-color: rgba(250, 204, 21, 0.18);
   box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.45);

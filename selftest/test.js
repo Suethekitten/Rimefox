@@ -715,14 +715,13 @@
     return bad.length ? '判断错：' + JSON.stringify(bad) : true;
   });
 
-  // ---------------- 悬停对照（DT.hover） ----------------
-  function hoverOn(el) {
-    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-  }
+  // ---------------- 悬停对照（DT.hover，逐句） ----------------
+  // 夹具放在视口里：caretRangeFromPoint 只能命中屏幕上的文字（#fixture 在屏幕外）
   function withHoverFixture(html, fn) {
     var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;left:0;top:0;width:640px;z-index:2147483000;background:#fff;font:16px/1.6 sans-serif;padding:8px';
     box.innerHTML = html;
-    document.getElementById('fixture').appendChild(box);
+    document.body.appendChild(box);
     var wasEnabled = DT.state.enabled;
     DT.state.enabled = true;
     try {
@@ -734,38 +733,79 @@
       box.remove();
     }
   }
+  // 文本节点里第一次出现 word 的位置中心
+  function pointOf(textNode, word) {
+    var i = textNode.nodeValue.indexOf(word);
+    var r = document.createRange();
+    r.setStart(textNode, i);
+    r.setEnd(textNode, i + word.length);
+    var rect = r.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }
+  function highlighted(name) {
+    var h = CSS.highlights.get(name);
+    if (!h) return '';
+    var out = [];
+    h.forEach(function (range) { out.push(range.toString()); });
+    return out.join('|');
+  }
 
-  check('悬停对照：双语单元的原文和译文同时高亮，移开取消', function () {
-    return withHoverFixture('<p id="hv-a">Hover over <b>this</b> line</p><p id="hv-b">Not translated</p>', function (box) {
+  check('悬停对照：句子切分与对齐（句数不同按相对位置）', function () {
+    var text = 'First one. Version 3.5 is out! 第三句。第四句？';
+    var parts = DT.hover.sentencesOf(text).map(function (s) { return text.slice(s[0], s[1]); });
+    var r = eq(parts, ['First one.', 'Version 3.5 is out!', '第三句。', '第四句？']);
+    if (r !== true) return r;
+    var a = [[0, 10], [11, 20], [21, 30]];
+    var b = [[0, 15], [16, 30]];
+    var got = [0, 1, 2].map(function (i) { return DT.hover.alignSentence(a, 30, b, 30, i); });
+    if (JSON.stringify(got) !== '[0,1,1]') return '按位置对齐不对：' + JSON.stringify(got);
+    return DT.hover.alignSentence(a, 30, a, 30, 2) === 2 ? true : '句数相同应按序号';
+  });
+
+  check('悬停对照：鼠标在第二句上，只高亮这一句原文和对应译文', function () {
+    if (!window.Highlight || !CSS.highlights) return true; // 老浏览器走整段高亮的退路
+    return withHoverFixture('<p id="hv-a">First sentence here. Second sentence follows. Third one ends.</p><p id="hv-b">Not translated</p>', function (box) {
       var a = box.querySelector('#hv-a');
-      if (!DT.inject(a, '悬停这一行', 'zh-CN')) return 'inject 返回 false';
+      var srcText = a.firstChild;
+      if (!DT.inject(a, '第一句在这里。第二句跟着来。第三句结束。', 'zh-CN')) return 'inject 返回 false';
       var target = a.querySelector('[data-dt-target]');
-      hoverOn(a.querySelector('b')); // 鼠标在原文的行内元素上
-      if (a.getAttribute('data-dt-hover') !== 'src' || target.getAttribute('data-dt-hover') !== 'target') {
-        return '没有配对高亮：' + a.getAttribute('data-dt-hover') + ' / ' + target.getAttribute('data-dt-hover');
+      var p = pointOf(srcText, 'Second');
+      a.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: p.x, clientY: p.y }));
+      if (highlighted('dt-hover-src') !== 'Second sentence follows.') return '原文高亮的不是这一句：' + highlighted('dt-hover-src');
+      if (highlighted('dt-hover-target') !== '第二句跟着来。') return '译文高亮的不是对应句：' + highlighted('dt-hover-target');
+      if (a.hasAttribute('data-dt-hover')) return '不该再整段高亮';
+      p = pointOf(target.firstChild, '第三句');
+      DT.hover.updateAt(p.x, p.y, target); // 鼠标移到译文的第三句
+      if (highlighted('dt-hover-src') !== 'Third one ends.' || highlighted('dt-hover-target') !== '第三句结束。') {
+        return '移到译文上没对上：' + highlighted('dt-hover-src') + ' / ' + highlighted('dt-hover-target');
       }
-      hoverOn(target); // 移到译文上：仍是同一对
-      if (a.getAttribute('data-dt-hover') !== 'src') return '移到译文上高亮丢了';
-      hoverOn(box.querySelector('#hv-b')); // 移到没翻译的段落
-      if (a.hasAttribute('data-dt-hover') || target.hasAttribute('data-dt-hover')) return '移开后没取消高亮';
+      var b = box.querySelector('#hv-b');
+      p = pointOf(b.firstChild, 'Not');
+      DT.hover.updateAt(p.x, p.y, b); // 移到没翻译的段落
+      if (highlighted('dt-hover-src') || highlighted('dt-hover-target')) return '移开后高亮没取消';
       DT.state.enabled = false;
-      hoverOn(a);
-      return a.hasAttribute('data-dt-hover') ? '翻译关闭时不该高亮' : true;
+      p = pointOf(srcText, 'First');
+      DT.hover.updateAt(p.x, p.y, a);
+      return highlighted('dt-hover-src') ? '翻译关闭时不该高亮' : true;
     });
   });
 
-  check('悬停对照：原地替换的单元用 DT.replaced 的原值弹气泡', function () {
-    return withHoverFixture('<button id="hv-btn">Sign in now</button><p id="hv-c">Elsewhere</p>', function (box) {
+  check('悬停对照：原地替换的单元，气泡只显示鼠标所在这句的原文', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    return withHoverFixture('<button id="hv-btn">Sign in now. Then continue.</button><p id="hv-c">Elsewhere</p>', function (box) {
       var btn = box.querySelector('#hv-btn');
-      if (!DT.inject(btn, '立即登录', 'zh-CN')) return 'inject 返回 false';
+      if (!DT.inject(btn, '立即登录。然后继续。', 'zh-CN')) return 'inject 返回 false';
       if (!btn.hasAttribute('data-dt-replaced')) return '按钮应原地替换';
-      hoverOn(btn);
+      var p = pointOf(btn.firstChild, '然后');
+      DT.hover.updateAt(p.x, p.y, btn);
       var tip = document.querySelector('.dt-hover-tip');
       if (!tip || tip.hidden) return '没有弹出原文气泡';
-      if (tip.textContent !== 'Sign in now') return '气泡里不是原文：' + tip.textContent;
-      if (btn.getAttribute('data-dt-hover') !== 'replaced') return '替换单元没有标记';
-      hoverOn(box.querySelector('#hv-c'));
-      return tip.hidden && !btn.hasAttribute('data-dt-hover') ? true : '移开后气泡没收起';
+      if (tip.textContent !== 'Then continue.') return '气泡里不是这一句原文：' + tip.textContent;
+      if (highlighted('dt-hover-target') !== '然后继续。') return '页面上高亮的不是鼠标下这句：' + highlighted('dt-hover-target');
+      var c = box.querySelector('#hv-c');
+      p = pointOf(c.firstChild, 'Else');
+      DT.hover.updateAt(p.x, p.y, c);
+      return tip.hidden && !highlighted('dt-hover-target') ? true : '移开后气泡 / 高亮没收起';
     });
   });
 
