@@ -126,6 +126,25 @@
         </label>
       </section>
 
+      <section class="card">
+        <h2>配置迁移</h2>
+        <p class="hint" style="margin: -8px 0 14px">
+          把 API 地址、Key、模型和各项设置导出成一个 JSON 文件；换电脑或换扩展版本时导入，不用重填。
+        </p>
+
+        <label class="check">
+          <input id="exportKey" type="checkbox" />
+          <span>导出时包含 API Key —— 跨电脑 / 跨版本迁移必须勾选。文件里是明文，迁移完请删掉，不要外传</span>
+        </label>
+
+        <div class="actions" style="margin-top: 14px">
+          <button id="exportCfg" class="btn">导出配置文件</button>
+          <button id="importCfg" class="btn">导入配置文件</button>
+          <input id="importFile" type="file" accept=".json,application/json" hidden />
+          <span id="cfgResult" class="result"></span>
+        </div>
+      </section>
+
       <footer class="page-foot">
         <button id="save" class="btn primary">保存</button>
         <button id="reset" class="btn">恢复默认</button>

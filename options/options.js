@@ -40,6 +40,9 @@ function fillSelect(select, items) {
   });
 }
 
+// 最近一次读到的配置（导出时用）
+let currentCfg = {};
+
 function setResult(node, text, kind) {
   node.textContent = text || '';
   node.className = 'result' + (kind ? ' ' + kind : '');
@@ -284,6 +287,7 @@ async function init() {
   fillSelect(fields.theme, THEMES);
   renderHotkey();
   const cfg = await getConfig();
+  currentCfg = cfg;
   applyConfig(cfg);
   $('saveResult').textContent = '';
   renderBrowserShortcut();
@@ -341,6 +345,118 @@ $('clearCache').addEventListener('click', async () => {
     chrome.runtime.sendMessage({ type: 'cache:clear' }, () => resolve());
   });
   setResult($('saveResult'), '翻译缓存已清空', 'ok');
+});
+
+// ---------------- 配置导出 / 导入 ----------------
+// 用途：换电脑、或换扩展 ID（品牌改名、目录改名）时，把配置整份搬过去，
+// 不用重新填 Key 和各项设置。
+const EXPORT_APP = 'rimefox';
+const EXPORT_SCHEMA = 1;
+
+function buildExport(includeKey) {
+  const cfg = { ...currentCfg };
+  if (!includeKey) delete cfg.apiKey;
+  return {
+    app: EXPORT_APP,
+    schema: EXPORT_SCHEMA,
+    exportedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    config: cfg
+  };
+}
+
+// 只接受已知字段，并按默认值的类型转换；多余字段直接丢弃（避免把陌生键写进配置）
+function pickImportedConfig(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('文件内容不是一个 JSON 对象');
+  }
+  if (raw.app && raw.app !== EXPORT_APP) {
+    throw new Error('这不是凛狐的配置文件（app = ' + raw.app + '）');
+  }
+  if (raw.schema && Number(raw.schema) > EXPORT_SCHEMA) {
+    throw new Error('配置文件版本比当前扩展新，请先升级扩展');
+  }
+
+  const src = raw.config && typeof raw.config === 'object' ? raw.config : raw;
+  const out = {};
+
+  Object.keys(DEFAULTS).forEach((key) => {
+    const def = DEFAULTS[key];
+    const val = src[key];
+    if (val === undefined || val === null) return;
+    if (typeof def === 'boolean') {
+      out[key] = !!val;
+    } else if (typeof def === 'number') {
+      const n = Number(val);
+      if (Number.isFinite(n)) out[key] = n;
+    } else if (typeof def === 'string') {
+      if (typeof val === 'string') out[key] = val;
+    }
+  });
+
+  if (!Object.keys(out).length) throw new Error('文件里没有可识别的配置项');
+  return out;
+}
+
+$('exportCfg').addEventListener('click', () => {
+  try {
+    const includeKey = $('exportKey').checked;
+    const payload = buildExport(includeKey);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rimefox-config-' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    setResult(
+      $('cfgResult'),
+      includeKey
+        ? '已导出（含 API Key，用完请删除这个文件）'
+        : '已导出（不含 API Key，迁移后需要手动填 Key）',
+      'ok'
+    );
+  } catch (err) {
+    setResult($('cfgResult'), '导出失败：' + err.message, 'bad');
+  }
+});
+
+$('importCfg').addEventListener('click', () => {
+  $('importFile').value = '';
+  $('importFile').click();
+});
+
+$('importFile').addEventListener('change', async (event) => {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    let raw;
+    try {
+      raw = JSON.parse(text);
+    } catch (err) {
+      throw new Error('不是合法的 JSON 文件');
+    }
+
+    const patch = pickImportedConfig(raw);
+    const next = await saveConfig(patch);
+    currentCfg = next;
+    applyConfig(next);
+    renderBrowserShortcut();
+    if (next.baseUrl && next.apiKey) fetchModels();
+
+    const count = Object.keys(patch).length;
+    setResult(
+      $('cfgResult'),
+      '已导入 ' + count + ' 项设置' + (patch.apiKey ? '（含 API Key）' : '（文件里没有 API Key，请手动填）'),
+      'ok'
+    );
+  } catch (err) {
+    setResult($('cfgResult'), '导入失败：' + err.message, 'bad');
+  }
 });
 
 init();
