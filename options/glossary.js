@@ -88,6 +88,7 @@ export function createGlossaryEditor(opts) {
       more.addEventListener('click', () => {
         expanded = !expanded;
         render();
+        if (!expanded) showCard();
       });
       wrap.appendChild(more);
     }
@@ -132,6 +133,13 @@ export function createGlossaryEditor(opts) {
     return JSON.stringify(normalizeGlossary(list).map((one) => [one.source, one.target]));
   }
 
+  // 列表骤然变短（收起 / 清空）时页面高度会缩掉一大截，滚动位置不变就会“跳”到下面几节；
+  // 收起后把卡片滚回来，视线还停在这张卡上
+  function showCard() {
+    const card = wrap.closest('.card');
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
+  }
+
   $('glossarySample').addEventListener('click', () => {
     const list = current();
 
@@ -143,6 +151,7 @@ export function createGlossaryEditor(opts) {
       sampleAfterKey = '';
       expanded = false;
       render();
+      showCard();
       message('已收起示例（回到导入前，点「保存」后生效）', 'ok');
       changed();
       return;
@@ -160,6 +169,7 @@ export function createGlossaryEditor(opts) {
     const cfg = opts.getConfig();
     if (cfg) cfg.glossary = [];
     render();
+    showCard();
     message('已清空（点「保存」后生效）', 'ok');
     changed();
   });
