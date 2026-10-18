@@ -16,6 +16,7 @@ import {
   ENGINE_DEFAULTS
 } from '../lib/config.js';
 import { listModels, engineList } from '../lib/provider.js';
+import { PROVIDERS, CUSTOM_PROVIDER_ID, findProviderByBaseUrl, providerById } from '../lib/providers.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -210,15 +211,23 @@ function applyConfig(cfg) {
 
   updateEngineHints();
   updateThinkingUI();
+  syncProviderSelect();
+  updateModelHint();
 }
 
 function readForm() {
+  // 先把手上的编辑存回内存，避免切过协议后未保存的内容被丢掉
+  stashCurrentEngine();
+
   const engineConfig = {};
-  engineConfig[currentEngine] = {
-    baseUrl: fields.baseUrl.value.trim(),
-    apiKey: fields.apiKey.value.trim(),
-    model: fields.model.value.trim()
-  };
+  Object.keys((currentCfg && currentCfg.engineConfig) || {}).forEach((id) => {
+    const one = currentCfg.engineConfig[id] || {};
+    engineConfig[id] = {
+      baseUrl: one.baseUrl || '',
+      apiKey: one.apiKey || '',
+      model: one.model || ''
+    };
+  });
 
   return {
     engine: currentEngine,
@@ -274,10 +283,18 @@ const NON_CHAT = /embed|rerank|whisper|tts|speech|audio|dall-?e|moderation|bge-|
 // 带"思考"过程的模型：能用，但整页翻译会慢很多倍
 const REASONING = /reason|thinking|qwq|(^|[-/])[rz]1([-.]|$)|(^|[-/])o[134](-|$)/i;
 
-const modelSelect = $('modelSelect');
 const modelHint = $('modelHint');
+const picker = $('modelPicker');
+const pickerSearch = $('modelSearch');
+const pickerList = $('modelList');
+const pickerToggle = $('modelToggle');
+const providerSelect = $('provider');
+const keyLink = $('keyLink');
+
 let modelSeq = 0;
 let modelTimer = 0;
+let modelIds = [];
+let pickerIndex = -1;
 
 function scheduleModelFetch() {
   clearTimeout(modelTimer);
@@ -296,10 +313,13 @@ async function fetchModels(manual) {
   try {
     const ids = (await listModels({ engine: currentEngine, baseUrl, apiKey })).filter((id) => !NON_CHAT.test(id)).sort();
     if (seq !== modelSeq) return; // 期间地址或 Key 又改了，以最新一次为准
-    renderModelList(ids);
+    modelIds = ids;
+    if (!picker.hidden) renderPicker();
+    updateModelHint();
   } catch (err) {
     if (seq !== modelSeq) return;
-    renderModelList([]);
+    modelIds = [];
+    if (!picker.hidden) renderPicker();
     // "接口不提供模型列表"本身已经说了要手填，别再重复一遍
     const text = /手填/.test(err.message)
       ? err.message + '。'
@@ -308,54 +328,209 @@ async function fetchModels(manual) {
   }
 }
 
-function renderModelList(ids) {
-  modelSelect.innerHTML = '';
-  modelSelect.hidden = !ids.length;
-  if (!ids.length) return;
-
-  const head = document.createElement('option');
-  head.value = '';
-  head.textContent = '从 ' + ids.length + ' 个模型中选择…';
-  modelSelect.appendChild(head);
-  ids.forEach((id) => {
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = REASONING.test(id) ? id + '（带思考，翻译慢）' : id;
-    modelSelect.appendChild(opt);
-  });
-
-  // 没填过模型就自动选一个：优先默认模型，其次第一个不带思考的。填过的不动
-  let picked = '';
-  if (!fields.model.value.trim()) {
-    picked = ids.includes(DEFAULTS.model) ? DEFAULTS.model : ids.find((id) => !REASONING.test(id)) || ids[0];
-    fields.model.value = picked;
-  }
-  syncModelSelect(ids.length, picked);
-}
-
-// 输入框是唯一的真值；下拉框只跟着显示，并提示"填的模型不在列表里"
-function syncModelSelect(count, picked) {
+function updateModelHint() {
   const current = fields.model.value.trim();
-  const listed = Array.from(modelSelect.options).some((o) => o.value && o.value === current);
-  modelSelect.value = listed ? current : '';
-  if (current && !listed) {
-    setResult(modelHint, '已获取 ' + count + ' 个模型，但当前填的「' + current + '」不在列表里，请确认拼写或从右边选一个。', 'bad');
-  } else {
+  if (!modelIds.length) {
+    setResult(modelHint, '填好 API 地址和 Key 后会自动获取可用模型；也可以直接手填模型名。');
+    return;
+  }
+  if (current && modelIds.indexOf(current) < 0) {
     setResult(
       modelHint,
-      '已获取 ' + count + ' 个模型' + (picked ? '，已自动选好「' + picked + '」' : '') + '。可以从右边的列表换一个，别忘了保存。',
-      'ok'
+      '已获取 ' + modelIds.length + ' 个模型，但「' + current + '」不在列表里，请确认拼写或点「选择」挑一个。',
+      'bad'
     );
+    return;
+  }
+  setResult(modelHint, '已获取 ' + modelIds.length + ' 个模型。点「选择」挑一个，或直接手填；别忘了保存。', 'ok');
+}
+
+// ---------------- 可搜索的模型选择器 ----------------
+function pickerItems(query) {
+  const q = String(query || '').trim().toLowerCase();
+  const hit = q ? modelIds.filter((id) => id.toLowerCase().indexOf(q) >= 0) : modelIds;
+  return hit.slice(0, 100); // 列表可能几百条，只渲染前 100
+}
+
+function renderPicker() {
+  const items = pickerItems(pickerSearch.value);
+  pickerList.innerHTML = '';
+  pickerIndex = -1;
+
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'picker-empty';
+    empty.textContent = modelIds.length ? '没有匹配的模型' : '还没有拉取到模型列表';
+    pickerList.appendChild(empty);
+    return;
+  }
+
+  const current = fields.model.value.trim();
+  items.forEach((id) => {
+    const row = document.createElement('div');
+    row.className = 'picker-item' + (id === current ? ' is-current' : '');
+    row.dataset.id = id;
+    row.textContent = id;
+    if (REASONING.test(id)) {
+      const tag = document.createElement('span');
+      tag.className = 'picker-tag';
+      tag.textContent = '慢';
+      row.appendChild(tag);
+    }
+    row.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      chooseModel(id);
+    });
+    pickerList.appendChild(row);
+  });
+}
+
+function openPicker() {
+  if (!modelIds.length) {
+    setResult(modelHint, '先点「获取模型列表」把可用模型拉下来。', 'bad');
+    return;
+  }
+  picker.hidden = false;
+  pickerToggle.setAttribute('aria-expanded', 'true');
+  pickerSearch.value = '';
+  renderPicker();
+  pickerSearch.focus();
+}
+
+function closePicker() {
+  picker.hidden = true;
+  pickerToggle.setAttribute('aria-expanded', 'false');
+  pickerIndex = -1;
+}
+
+function chooseModel(id) {
+  fields.model.value = id;
+  closePicker();
+  updateModelHint();
+}
+
+function movePicker(step) {
+  const rows = Array.from(pickerList.querySelectorAll('.picker-item'));
+  if (!rows.length) return;
+  pickerIndex = (pickerIndex + step + rows.length) % rows.length;
+  rows.forEach((row, i) => row.classList.toggle('is-active', i === pickerIndex));
+  rows[pickerIndex].scrollIntoView({ block: 'nearest' });
+}
+
+pickerToggle.addEventListener('click', () => {
+  if (picker.hidden) openPicker();
+  else closePicker();
+});
+
+pickerSearch.addEventListener('input', renderPicker);
+
+pickerSearch.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    movePicker(1);
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    movePicker(-1);
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    const rows = Array.from(pickerList.querySelectorAll('.picker-item'));
+    const hit = rows[pickerIndex] || rows[0];
+    if (hit && hit.dataset.id) chooseModel(hit.dataset.id);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closePicker();
+  }
+});
+
+document.addEventListener('mousedown', (event) => {
+  if (picker.hidden) return;
+  if (picker.contains(event.target) || pickerToggle.contains(event.target)) return;
+  closePicker();
+});
+
+fields.model.addEventListener('input', updateModelHint);
+
+// ---------------- 提供商模板 ----------------
+function fillProviderSelect() {
+  const items = PROVIDERS.map((p) => ({ value: p.id, label: p.name }));
+  items.push({ value: CUSTOM_PROVIDER_ID, label: '使用自定义提供商' });
+  fillSelect(providerSelect, items);
+}
+
+function updateKeyLink(provider) {
+  if (provider && provider.keyUrl) {
+    keyLink.href = provider.keyUrl;
+    keyLink.hidden = false;
+  } else {
+    keyLink.hidden = true;
+    keyLink.removeAttribute('href');
   }
 }
 
-modelSelect.addEventListener('change', () => {
-  if (!modelSelect.value) return;
-  fields.model.value = modelSelect.value;
-  syncModelSelect(modelSelect.options.length - 1, '');
-});
-fields.model.addEventListener('input', () => {
-  if (!modelSelect.hidden) syncModelSelect(modelSelect.options.length - 1, '');
+// 根据地址反查模板，让下拉跟着当前地址走
+function syncProviderSelect() {
+  const hit = findProviderByBaseUrl(fields.baseUrl.value);
+  providerSelect.value = hit ? hit.id : CUSTOM_PROVIDER_ID;
+  updateKeyLink(hit);
+}
+
+// 把当前表单存回内存中的配置（切协议时不丢未保存的编辑）
+function stashCurrentEngine() {
+  if (!currentCfg) return;
+  currentCfg.engineConfig = currentCfg.engineConfig || {};
+  currentCfg.engineConfig[currentEngine] = {
+    baseUrl: fields.baseUrl.value.trim(),
+    apiKey: fields.apiKey.value.trim(),
+    model: fields.model.value.trim()
+  };
+}
+
+// 载入某个协议已保存的地址 / Key / 模型
+function loadEngine(id) {
+  const conf = (currentCfg && currentCfg.engineConfig && currentCfg.engineConfig[id]) || {
+    baseUrl: (ENGINE_DEFAULTS[id] || {}).baseUrl || '',
+    apiKey: '',
+    model: ''
+  };
+  currentEngine = id;
+  fields.engine.value = id;
+  fields.baseUrl.value = conf.baseUrl || '';
+  fields.apiKey.value = conf.apiKey || '';
+  fields.model.value = conf.model || '';
+  modelIds = [];
+  closePicker();
+  updateEngineHints();
+  syncProviderSelect();
+  updateModelHint();
+}
+
+providerSelect.addEventListener('change', () => {
+  const id = providerSelect.value;
+  stashCurrentEngine();
+
+  if (id === CUSTOM_PROVIDER_ID) {
+    fields.baseUrl.value = '';
+    fields.model.value = '';
+    modelIds = [];
+    closePicker();
+    updateKeyLink(null);
+    setResult(modelHint, '自定义：填第三方兼容接口或自建网关的地址；没有模型列表时直接手填模型名。');
+    return;
+  }
+
+  const provider = providerById(id);
+  if (!provider) return;
+
+  // 模板只负责填地址和协议；Key 用该协议自己保存的那份
+  if (provider.engine !== currentEngine) loadEngine(provider.engine);
+  fields.baseUrl.value = provider.baseUrl;
+  fields.model.value = '';
+  modelIds = [];
+  closePicker();
+  updateKeyLink(provider);
+  setResult($('testResult'), '');
+  setResult(modelHint, '已套用「' + provider.name + '」的地址，模型请点「获取模型列表」后选一个。');
+  if (fields.apiKey.value) fetchModels();
 });
 
 // 切换协议：换成该协议单独保存的地址 / Key / 模型
@@ -363,34 +538,30 @@ fields.engine.addEventListener('change', () => {
   const target = fields.engine.value;
   if (!target || target === currentEngine) return;
 
-  currentEngine = target;
-  const cfg = currentCfg || {};
-  const conf = (cfg.engineConfig && cfg.engineConfig[target]) || {
-    baseUrl: (ENGINE_DEFAULTS[target] || {}).baseUrl || '',
-    apiKey: '',
-    model: ''
-  };
-
-  fields.baseUrl.value = conf.baseUrl || '';
-  fields.apiKey.value = conf.apiKey || '';
-  fields.model.value = conf.model || '';
-
-  modelSelect.innerHTML = '';
-  modelSelect.hidden = true;
+  stashCurrentEngine();
+  loadEngine(target);
   setResult($('testResult'), ''); // 上一个协议的测试结果不能留在这里
+
   const label = (engineList().find((e) => e.id === target) || {}).label || target;
   setResult(modelHint, '已切换到「' + label + '」，填好 Key 后会拉取该协议的模型列表。');
-  updateEngineHints();
 
   if (fields.baseUrl.value && fields.apiKey.value) fetchModels();
 });
 
 fields.thinkingMode.addEventListener('change', updateThinkingUI);
-fields.baseUrl.addEventListener('input', scheduleModelFetch);
+
+// 手动改地址时，让提供商下拉跟着变（反查模板）+ 防抖拉模型
+let providerSyncTimer = 0;
+fields.baseUrl.addEventListener('input', () => {
+  clearTimeout(providerSyncTimer);
+  providerSyncTimer = setTimeout(syncProviderSelect, 300);
+  scheduleModelFetch();
+});
 fields.apiKey.addEventListener('input', scheduleModelFetch);
 $('refreshModels').addEventListener('click', () => fetchModels(true));
 
 async function init() {
+  fillProviderSelect();
   fillSelect(fields.engine, engineList().map((e) => ({ value: e.id, label: e.label })));
   fillSelect(fields.thinkingMode, THINKING_MODES);
   fillSelect(fields.targetLang, LANGUAGES);

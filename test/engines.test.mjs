@@ -281,5 +281,52 @@ t('Gemini：custom 的 generationConfig 会合并进去', () => {
   assert.equal(body.generationConfig.temperature, 0.5); // 原有字段不能被覆盖掉
 });
 
+// ---------------- 服务商专属关闭参数 ----------------
+console.log('\n[服务商专属关闭参数]');
+
+t('OpenAI 兼容：有服务商参数时不再发 reasoning_effort', () => {
+  const req = openai.buildRequest(
+    { baseUrl: 'https://api.deepseek.com/v1', apiKey: 'k', model: 'deepseek-chat' },
+    { messages: [], thinking: { mode: 'off', extra: { thinking: { type: 'disabled' } } } }
+  );
+  const body = json(req.body);
+  assert.equal(body.thinking.type, 'disabled');
+  assert.equal(body.reasoning_effort, undefined);
+});
+
+t('OpenAI 兼容：千问用 enable_thinking=false', () => {
+  const req = openai.buildRequest(
+    { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'k', model: 'qwen-plus' },
+    { messages: [], thinking: { mode: 'off', extra: { enable_thinking: false } } }
+  );
+  assert.equal(json(req.body).enable_thinking, false);
+});
+
+t('Anthropic：off 且带服务商参数时合并 thinking', () => {
+  const req = anthropic.buildRequest(
+    { baseUrl: 'https://api.anthropic.com/v1', apiKey: 'k', model: 'claude' },
+    { messages: [], thinking: { mode: 'off', extra: { thinking: { type: 'disabled' } } } }
+  );
+  assert.equal(json(req.body).thinking.type, 'disabled');
+});
+
+t('Gemini 2.5：off 用 thinkingBudget=0', () => {
+  const req = gemini.buildRequest(
+    { baseUrl: 'https://g/v1beta', apiKey: 'k', model: 'gemini-2.5-flash' },
+    { messages: [], thinking: { mode: 'off', extra: {} } }
+  );
+  assert.equal(json(req.body).generationConfig.thinkingConfig.thinkingBudget, 0);
+});
+
+t('Gemini 3：off 用 thinkingLevel=minimal', () => {
+  const req = gemini.buildRequest(
+    { baseUrl: 'https://g/v1beta', apiKey: 'k', model: 'gemini-3-flash-preview' },
+    { messages: [], thinking: { mode: 'off', extra: {} } }
+  );
+  const cfg = json(req.body).generationConfig.thinkingConfig;
+  assert.equal(cfg.thinkingLevel, 'minimal');
+  assert.equal(cfg.thinkingBudget, undefined);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

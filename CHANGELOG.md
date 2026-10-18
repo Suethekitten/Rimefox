@@ -6,7 +6,14 @@
   - 新增 Anthropic 协议：`x-api-key`、`system` 提到顶层、temperature 自动夹到 0–1、浏览器直连头
   - 新增 Gemini 协议：`x-goog-api-key`、`contents/parts`、模型列表动态拉取（不内置模型名）；地区限制给明确提示
   - 模型列表按协议分别拉取
-- **思考模式**：设置页「接口」新增三态开关（自动 / 尽量关闭 / 自定义参数）。尽量关闭时按协议发送关闭参数；服务不认这个参数（400）会自动去掉并重试一次，不会让整页翻译挂掉。自定义参数用于千问 `enable_thinking`、GLM `thinking` 这类非标准写法
+- **思考模式按服务商自动适配**（查各家官方文档后内置）：「尽量关闭」不再只发 OpenAI 的 `reasoning_effort`，而是按地址识别服务商发送对应参数 ——
+  - DeepSeek / 智谱 GLM / Kimi / Anthropic：`thinking: {"type":"disabled"}`
+  - 通义千问 / 硅基流动：`enable_thinking: false`
+  - OpenRouter：`reasoning: {"enabled": false}`
+  - Gemini 2.5：`thinkingConfig.thinkingBudget = 0`；Gemini 3：`thinkingConfig.thinkingLevel = "minimal"`
+  - 服务不支持该参数时（如 GLM-5.3 强制思考、OpenRouter 的 mandatory 模型）自动去掉参数重试一次
+- **提供商模板库**：内置 10 家（DeepSeek / 智谱 / Kimi / 阿里云百炼 / 硅基流动 / OpenRouter / Ollama / LM Studio / Anthropic / Gemini），选中后自动填地址与协议，底部固定「使用自定义提供商」；模型名一律从接口拉取，不再内置
+- **可搜索的模型选择器**：支持输入过滤、上下键选择、回车确认、直接手填模型名；模型过多时只渲染前 100 条并提示继续输入
 - 设置页细节：切换协议时清空上一次的测试结果；未选「自定义参数」时不再显示 JSON 输入框；模型名提示随协议变化；页头说明改为支持三种协议
 - **内部重构：抽出引擎层** `lib/engines/`（openai / anthropic / gemini），`lib/provider.js` 改为按 `engine` 分发。新增 56 条 Node 单测（`test/engines.test.mjs`、`test/config.test.mjs`）。为此给仓库加了 `package.json`（`type: module`，仅供测试脚本，扩展本身仍零构建）
 - **「扩展已重新加载」时给出可读提示**：重载扩展后旧页面里的内容脚本会失去宿主，之前直接弹 `Extension context invalidated`；现在提前检测并提示「请刷新页面（F5）后再试」，同时不再重复发起无效请求

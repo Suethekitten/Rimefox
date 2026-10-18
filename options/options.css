@@ -267,6 +267,98 @@ select {
   display: none !important;
 }
 
+/* ---- 提供商的 Key 申请链接 ---- */
+.key-link {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent-2);
+  text-decoration: none;
+}
+
+.key-link:hover {
+  text-decoration: underline;
+}
+
+/* ---- 可搜索的模型选择器 ---- */
+.model-toggle {
+  flex: none;
+}
+
+.picker {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.picker-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.picker-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.picker-item:hover,
+.picker-item.is-active {
+  background: var(--accent-soft);
+}
+
+.picker-item.is-current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.picker-item.is-current::before {
+  content: '✓';
+  color: var(--accent-2);
+}
+
+.picker-tag {
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.picker-empty {
+  padding: 14px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.picker-foot {
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .check input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;

@@ -21,6 +21,12 @@
         <p class="card-sub">填好地址和 Key 会自动获取可用模型。</p>
 
         <label class="field">
+          <span class="name">提供商</span>
+          <select id="provider"></select>
+          <span class="hint">选中后自动填好地址和协议；所有字段都还能再改。</span>
+        </label>
+
+        <label class="field">
           <span class="name">接口协议</span>
           <select id="engine"></select>
           <span class="hint">每个协议单独保存自己的地址、Key 和模型，切换不会丢。</span>
@@ -32,26 +38,32 @@
           <span class="hint" id="baseUrlHint">OpenAI 兼容的 base URL，通常以 /v1 结尾。程序会自动补 /chat/completions。</span>
         </label>
 
-        <label class="field">
-          <span class="name">API Key</span>
+        <div class="field">
+          <span class="name">API Key<a id="keyLink" class="key-link" target="_blank" rel="noreferrer" hidden>去申请 →</a></span>
           <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." autocomplete="off" />
           <span class="hint" id="apiKeyHint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
-        </label>
+        </div>
 
         <div class="field">
           <span class="name">模型名</span>
           <div class="hotkey-row model-row">
             <input id="model" type="text" spellcheck="false" placeholder="deepseek-chat" autocomplete="off" />
-            <select id="modelSelect" hidden></select>
+            <button type="button" id="modelToggle" class="btn model-toggle" aria-expanded="false">选择 ▾</button>
             <button type="button" id="refreshModels" class="btn">获取模型列表</button>
           </div>
-          <span class="hint" id="modelHint">填好 API 地址和 Key 后会自动获取可用模型；也可以直接手填，例如 deepseek-chat、glm-4-flash。</span>
+          <span class="hint" id="modelHint">填好 API 地址和 Key 后会自动获取可用模型；也可以直接手填。</span>
+
+          <div id="modelPicker" class="picker" hidden>
+            <input id="modelSearch" type="text" class="picker-search" placeholder="搜索模型…" spellcheck="false" autocomplete="off" />
+            <div id="modelList" class="picker-list"></div>
+            <div class="picker-foot">列表里没有？直接在上面输入模型名即可</div>
+          </div>
         </div>
 
         <label class="field">
           <span class="name">思考模式</span>
           <select id="thinkingMode"></select>
-          <span class="hint">自动：不发送额外参数。尽量关闭：按当前协议发送关闭思考的参数（部分服务不支持，会自动退回并发请求）。</span>
+          <span class="hint">自动：不发送额外参数。尽量关闭：按服务商发送对应的关闭参数（DeepSeek / GLM / Kimi / 千问 / OpenRouter / Gemini 各不相同）；服务不支持时会自动去掉参数重试。</span>
         </label>
 
         <label class="field" id="thinkingExtraField" hidden>
