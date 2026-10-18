@@ -1,7 +1,7 @@
 # DualTrans 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.4.4 ｜ 目录：`edge-bilingual/`
+> 版本：0.4.5 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -16,24 +16,25 @@
 - 弹窗内的随手翻译（不依赖页面）
 - 只用**自己的** OpenAI 兼容 API（DeepSeek / 智谱 / 硅基流动 / 通义 / 自建网关）
 
-**零构建**：纯原生 JS + ESM，没有 npm / webpack / tsc。改完文件直接在 Edge 里「重新加载扩展」即可，不需要任何编译步骤。这是刻意选择——降低接手门槛。
+**零构建**：纯原生 JS + ESM，没有 npm / webpack / tsc。改完文件直接在扩展管理页「重新加载扩展」即可，不需要任何编译步骤。这是刻意选择——降低接手门槛。
 
 ---
 
 ## 2. 快速开始
 
-1. 打开 `edge://extensions/`
-2. 左下角开启「开发人员模式」
-3. 点「加载解压缩的扩展」，选中 `edge-bilingual/` 文件夹
+1. 打开 `chrome://extensions/`（Edge：`edge://extensions/`）
+2. 开启开发者模式（Chrome：右上角「开发者模式」；Edge：左下角「开发人员模式」）
+3. 点「加载已解压的扩展程序」（Edge：「加载解压缩的扩展」），选中 `edge-bilingual/` 文件夹
 4. 首次安装会自动打开设置页
 5. 填 API 地址（默认 `https://api.deepseek.com/v1`）、Key、模型名（默认 `deepseek-chat`）
 6. 点「保存」→「测试连接」
-7. 打开任意英文网页 → `Alt+A`（或点工具栏图标 →「翻译此页」）
+7. 打开任意英文网页 → `Alt+A`（Mac：`Option+A`；或点工具栏图标 →「翻译此页」）
 
 **验证健康度**：
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
+扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
 应显示 **37 / 37 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 
 ---
@@ -199,7 +200,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 ### 7.3 日志
 - 设置页勾选「输出调试日志」→ 网页 Console 过滤 `[DualTrans]`
-- API 报错原文：`edge://extensions/` → 卡片 →「Service Worker」→ 控制台
+- API 报错原文：`chrome://extensions/`（Edge：`edge://extensions/`）→ 卡片 →「Service Worker」→ 控制台
 
 ---
 
@@ -235,7 +236,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 4. **没有图标**，工具栏显示默认占位图。
 5. **没有 i18n**，界面固定中文。
 6. **没有站点规则库**，全部靠通用启发式；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
-7. **浏览器命令（Alt+A）写死在 manifest**，用户只能在 `edge://extensions/shortcuts` 改；页面级快捷键可以录制。
+7. **浏览器命令（Alt+A）写死在 manifest**，用户只能在 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）改；页面级快捷键可以录制。
 
 ---
 
@@ -258,7 +259,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 1. 改 `manifest.json` 的 `version`
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致）
-3. `edge://extensions/` → 点重新加载 → 页面 `F5`
+3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
 4. 跑自检页：必须 **37 / 37**
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`

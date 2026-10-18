@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DualTrans 双语对照翻译",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "自己的 API，自己的翻译引擎：整页双语对照翻译、动态内容补翻、多主题显示。",
   "minimum_chrome_version": "114",
   "permissions": [

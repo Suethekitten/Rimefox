@@ -705,7 +705,8 @@
     var note = '';
 
     if (/(^|\s)translated-(ltr|rtl)/.test(cls) || document.getElementById('goog-gt-tt')) {
-      note = '检测到「浏览器自带翻译」已生效。请先把它关掉（地址栏翻译图标 → 显示原文），再按 Alt+A。';
+      var hotkey = DT.hotkeyLabel((DT.state.config && DT.state.config.hotkey) || 'alt+a');
+      note = '检测到「浏览器自带翻译」已生效。请先把它关掉（地址栏翻译图标 → 显示原文），再按 ' + hotkey + '。';
     } else if (
       html.getAttribute('imt-state') ||
       html.getAttribute('data-immersive-translate') ||

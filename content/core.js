@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.4.4';
+  DT.VERSION = '0.4.5';
 
   DT.state = {
     enabled: false,
@@ -53,6 +53,25 @@
         finish(reject, e);
       }
     });
+  };
+
+  // 快捷键显示名："alt+a" → Mac 上 "Option + A"，其它系统 "Alt + A"。
+  // 与 lib/config.js 的 hotkeyLabel 同一套逻辑（内容脚本不能 import）
+  var IS_MAC = /mac/i.test(
+    (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ''
+  );
+  DT.hotkeyLabel = function (spec) {
+    var names = IS_MAC ? { alt: 'Option', ctrl: 'Control', shift: 'Shift' } : { alt: 'Alt', ctrl: 'Ctrl', shift: 'Shift' };
+    return String(spec || 'alt+a')
+      .split('+')
+      .filter(Boolean)
+      .map(function (part) {
+        var p = part.trim().toLowerCase();
+        if (names[p]) return names[p];
+        if (p.length === 1) return p.toUpperCase();
+        return p.charAt(0).toUpperCase() + p.slice(1);
+      })
+      .join(' + ');
   };
 
   // 折叠空白

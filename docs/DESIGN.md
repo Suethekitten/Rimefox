@@ -23,7 +23,7 @@ service worker（ESM）
 内容脚本是 classic script，不能 `import`，所以三个文件按顺序加载、通过 `window.__DT` 共享命名空间。
 service worker 用 `type: "module"`，可以正常 import。
 
-**零构建**：没有打包器、没有依赖、没有转译。改完在 `edge://extensions/` 重新加载即可。
+**零构建**：没有打包器、没有依赖、没有转译。改完在 `chrome://extensions/`（Edge：`edge://extensions/`）重新加载即可。
 
 ---
 

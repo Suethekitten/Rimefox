@@ -1,4 +1,4 @@
-import { DEFAULTS, getConfig, saveConfig, LANGUAGES, THEMES } from '../lib/config.js';
+import { DEFAULTS, getConfig, saveConfig, LANGUAGES, THEMES, IS_MAC, hotkeyLabel } from '../lib/config.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -51,17 +51,9 @@ const KEY_NAMES = {
   tab: 'tab'
 };
 
-function prettyHotkey(spec) {
-  return String(spec || '')
-    .split('+')
-    .filter(Boolean)
-    .map((part) => {
-      const p = part.trim();
-      if (p.length === 1) return p.toUpperCase();
-      return p.charAt(0).toUpperCase() + p.slice(1);
-    })
-    .join(' + ');
-}
+// 必须带的修饰键：Mac 上叫 Option / Control
+const MODIFIERS_HINT = IS_MAC ? 'Option 或 Control' : 'Alt 或 Ctrl';
+const prettyHotkey = hotkeyLabel;
 
 function renderHotkey() {
   hotkeyBtn.textContent = recordingHotkey ? '按下组合键…' : prettyHotkey(hotkeyValue);
@@ -76,7 +68,7 @@ function setHotkeyValue(spec) {
 hotkeyBtn.addEventListener('click', () => {
   recordingHotkey = true;
   renderHotkey();
-  hotkeyHint.textContent = '现在按下组合键（必须包含 Alt 或 Ctrl，Esc 取消）';
+  hotkeyHint.textContent = '现在按下组合键（必须包含 ' + MODIFIERS_HINT + '，Esc 取消）';
 });
 
 document.addEventListener(
@@ -101,7 +93,7 @@ document.addEventListener(
     if (event.ctrlKey) parts.push('ctrl');
     if (event.shiftKey) parts.push('shift');
     if (!parts.length) {
-      hotkeyHint.textContent = '必须包含 Alt 或 Ctrl，否则会和页面本身的按键冲突。再试一次。';
+      hotkeyHint.textContent = '必须包含 ' + MODIFIERS_HINT + '，否则会和页面本身的按键冲突。再试一次。';
       return;
     }
 

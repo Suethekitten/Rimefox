@@ -1,4 +1,12 @@
-import { getConfig, saveConfig, LANGUAGES } from '../lib/config.js';
+import {
+  getConfig,
+  saveConfig,
+  LANGUAGES,
+  hotkeyLabel,
+  KEYS,
+  EXTENSIONS_PAGE,
+  FILE_ACCESS_LABEL
+} from '../lib/config.js';
 
 const el = {
   ver: document.getElementById('ver'),
@@ -53,10 +61,23 @@ function render() {
 
   if (!supported) {
     el.toggle.disabled = true;
-    const injectable = /^(https?|file):/i.test(tabUrl || '');
-    if (injectable) {
+    const url = tabUrl || '';
+    const injectable = /^(https?|file):/i.test(url);
+    if (/\.pdf($|[?#])/i.test(url)) {
+      // 浏览器自带的 PDF 阅读器里不能注入脚本，刷新也没用
+      el.toggle.textContent = 'PDF 暂不支持';
+      el.stat.textContent = '这是浏览器自带的 PDF 阅读器，扩展无法在里面翻译。';
+    } else if (/^file:/i.test(url)) {
+      // Chrome / Edge 默认不让扩展碰本地文件，要用户手动开开关
+      el.toggle.textContent = '本地文件需要授权';
+      el.stat.textContent =
+        '打开 ' + EXTENSIONS_PAGE + ' → 本扩展的「详细信息」→ 开启「' + FILE_ACCESS_LABEL + '」，然后按 ' +
+        KEYS.reload + ' 刷新这个页面。';
+    } else if (injectable) {
       el.toggle.textContent = '无法连接页面脚本';
-      el.stat.textContent = '自动补注入失败。请在网页上按 F5 刷新后重新打开本面板；仍然失败请按 F12 看 Console 的红色报错。';
+      el.stat.textContent =
+        '自动补注入失败。请在网页上按 ' + KEYS.reload + ' 刷新后重新打开本面板；仍然失败请按 ' +
+        KEYS.console + ' 打开控制台看红色报错。';
     } else {
       el.toggle.textContent = '当前页面不支持';
       el.stat.textContent = '浏览器内置页、扩展商店页、扩展自身页面无法注入脚本。请切换到普通网页（http/https）。';
@@ -80,7 +101,7 @@ function render() {
   el.target.value = status.target || 'zh-CN';
 
   if (!status.enabled) {
-    el.stat.textContent = '未开启。快捷键 Alt+A 可直接翻译。';
+    el.stat.textContent = '未开启。快捷键 ' + hotkeyLabel(currentCfg.hotkey) + ' 可直接翻译。';
   } else if (status.busy) {
     var total = status.total || '?';
     var pct = status.total ? Math.round((status.translated / status.total) * 100) : 0;
@@ -169,6 +190,8 @@ async function init() {
     el.target.appendChild(opt);
   });
   el.target.value = cfg.targetLang || 'zh-CN';
+  // Mac 上是 ⌘+Enter（keydown 里本来就同时认 Ctrl 和 ⌘）
+  el.quickInput.placeholder = '粘贴 / 输入要翻译的文字…（' + KEYS.submit + ' 翻译）';
 
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -258,7 +281,7 @@ el.diagnose.addEventListener('click', async () => {
     }
     const s = report && report.summary ? report.summary : { units: 0, skipped: 0 };
     el.stat.textContent =
-      (copied ? '诊断信息已复制到剪贴板，直接粘贴给我。' : '复制失败：请在网页 F12 控制台执行 copy(JSON.stringify(__DT_LAST_DIAG)) 再粘贴给我。') +
+      (copied ? '诊断信息已复制到剪贴板，直接粘贴给我。' : '复制失败：在网页上按 ' + KEYS.console + ' 打开控制台，把左上角的「top」切换成本扩展，再执行 copy(JSON.stringify(__DT_LAST_DIAG)) 然后粘贴给我。') +
       '\n翻译单元 ' + s.units + ' 个 · 被跳过 ' + s.skipped + ' 个' +
       '\n其中：文本过短 ' + s.wouldSkipByText + ' 个 · 判定为目标语言 ' + s.wouldSkipByLang + ' 个';
   } catch (err) {
