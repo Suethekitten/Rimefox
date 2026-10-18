@@ -30,7 +30,7 @@ Copy-Item -Path $src -Destination (Join-Path $staging 'Rimefox') -Recurse -Force
 
 # 清理不该进包的文件：.git 是整个仓库历史（项目文件夹本身就是 git 仓库），
 # 源图/预览图/生成脚本只对开发有用，不进发布包
-Get-ChildItem -Path (Join-Path $staging 'Rimefox') -Recurse -Force -Include '.git', '.DS_Store', 'Thumbs.db', '*.log', 'source.png', 'preview-*.png' |
+Get-ChildItem -Path (Join-Path $staging 'Rimefox') -Recurse -Force -Include '.git', '.DS_Store', 'Thumbs.db', '*.log', 'source.png', 'preview-*.png', 'icon512.png' |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 $toolsDir = Join-Path $staging 'Rimefox\tools'
 if (Test-Path $toolsDir) { Remove-Item $toolsDir -Recurse -Force }

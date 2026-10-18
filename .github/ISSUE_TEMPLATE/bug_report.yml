@@ -1,0 +1,59 @@
+name: 问题反馈
+description: 翻译出错、页面错位、功能不工作
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请确认：
+        - **不要贴出 API Key**（截图里也要打码）
+        - 安全漏洞请不要在这里提，按 [SECURITY.md](../blob/main/SECURITY.md) 私下报告
+  - type: input
+    id: version
+    attributes:
+      label: 扩展版本
+      description: 弹窗右上角或设置页左上角显示的版本号
+      placeholder: v0.5.1
+    validations:
+      required: true
+  - type: dropdown
+    id: browser
+    attributes:
+      label: 浏览器
+      options:
+        - Chrome
+        - Edge
+        - 其它 Chromium 内核浏览器
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: 服务商与模型
+      description: 例如 DeepSeek / deepseek-chat。只写名字，不要写 Key
+  - type: input
+    id: url
+    attributes:
+      label: 出问题的网页
+      description: 可以公开的地址；含个人信息的页面请写站点名即可
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤与现象
+      description: 做了什么、期望看到什么、实际看到什么。截图很有帮助
+    validations:
+      required: true
+  - type: textarea
+    id: diag
+    attributes:
+      label: 诊断信息（可选）
+      description: 弹窗底部「诊断」会把 JSON 复制到剪贴板。里面有页面地址和部分文字片段，贴之前请检查并删去隐私内容
+      render: json
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我没有在这里贴出 API Key 或其它密钥
+          required: true
+        - label: 我已经在最新版本上复现过

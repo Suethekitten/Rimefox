@@ -676,6 +676,76 @@
     return bad.length ? bad.join(' / ') : true;
   });
 
+  // ---------------- 趣味翻译（DT.unitStyle） ----------------
+  check('趣味翻译：只改写正文里够长的段落', function () {
+    var long = 'This paragraph is long enough to be rewritten.';
+    var cases = [
+      [DT.unitStyle('classical', long, 'content'), 'classical'],
+      [DT.unitStyle('catgirl', long, 'content'), 'catgirl'],
+      [DT.unitStyle('catgirl', 'Short', 'content'), 'plain'],
+      [DT.unitStyle('catgirl', long, 'control'), 'plain'],
+      [DT.unitStyle('catgirl', long, 'chrome'), 'plain'],
+      [DT.unitStyle('plain', long, 'content'), 'plain'],
+      [DT.unitStyle('unknown', long, 'content'), 'plain']
+    ];
+    var bad = cases.filter(function (c) { return c[0] !== c[1]; });
+    return bad.length ? '判断错：' + JSON.stringify(bad) : true;
+  });
+
+  // ---------------- 悬停对照（DT.hover） ----------------
+  function hoverOn(el) {
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  }
+  function withHoverFixture(html, fn) {
+    var box = document.createElement('div');
+    box.innerHTML = html;
+    document.getElementById('fixture').appendChild(box);
+    var wasEnabled = DT.state.enabled;
+    DT.state.enabled = true;
+    try {
+      return fn(box);
+    } finally {
+      DT.hover.clear();
+      DT.restore();
+      DT.state.enabled = wasEnabled;
+      box.remove();
+    }
+  }
+
+  check('悬停对照：双语单元的原文和译文同时高亮，移开取消', function () {
+    return withHoverFixture('<p id="hv-a">Hover over <b>this</b> line</p><p id="hv-b">Not translated</p>', function (box) {
+      var a = box.querySelector('#hv-a');
+      if (!DT.inject(a, '悬停这一行', 'zh-CN')) return 'inject 返回 false';
+      var target = a.querySelector('[data-dt-target]');
+      hoverOn(a.querySelector('b')); // 鼠标在原文的行内元素上
+      if (a.getAttribute('data-dt-hover') !== 'src' || target.getAttribute('data-dt-hover') !== 'target') {
+        return '没有配对高亮：' + a.getAttribute('data-dt-hover') + ' / ' + target.getAttribute('data-dt-hover');
+      }
+      hoverOn(target); // 移到译文上：仍是同一对
+      if (a.getAttribute('data-dt-hover') !== 'src') return '移到译文上高亮丢了';
+      hoverOn(box.querySelector('#hv-b')); // 移到没翻译的段落
+      if (a.hasAttribute('data-dt-hover') || target.hasAttribute('data-dt-hover')) return '移开后没取消高亮';
+      DT.state.enabled = false;
+      hoverOn(a);
+      return a.hasAttribute('data-dt-hover') ? '翻译关闭时不该高亮' : true;
+    });
+  });
+
+  check('悬停对照：原地替换的单元用 DT.replaced 的原值弹气泡', function () {
+    return withHoverFixture('<button id="hv-btn">Sign in now</button><p id="hv-c">Elsewhere</p>', function (box) {
+      var btn = box.querySelector('#hv-btn');
+      if (!DT.inject(btn, '立即登录', 'zh-CN')) return 'inject 返回 false';
+      if (!btn.hasAttribute('data-dt-replaced')) return '按钮应原地替换';
+      hoverOn(btn);
+      var tip = document.querySelector('.dt-hover-tip');
+      if (!tip || tip.hidden) return '没有弹出原文气泡';
+      if (tip.textContent !== 'Sign in now') return '气泡里不是原文：' + tip.textContent;
+      if (btn.getAttribute('data-dt-hover') !== 'replaced') return '替换单元没有标记';
+      hoverOn(box.querySelector('#hv-c'));
+      return tip.hidden && !btn.hasAttribute('data-dt-hover') ? true : '移开后气泡没收起';
+    });
+  });
+
   // ---------------- 渲染 ----------------
   var list = document.getElementById('list');
   var passed = 0;

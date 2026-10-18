@@ -37,7 +37,7 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **51 / 51 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **82 / 82 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 
 ---
 
@@ -52,7 +52,8 @@ edge-bilingual/
 │   ├── provider.js        接口门面：chat() / listModels()，按 engine 分发
 │   ├── engines/           各协议实现（openai / anthropic / gemini）
 │   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
-│   ├── parse.js           模型返回值解析（JSON 数组容错）
+│   ├── parse.js           模型返回值解析（JSON 数组容错）+ 输出长度护栏
+│   ├── prompt.js          翻译提示词（普通 / 趣味风格），纯函数
 │   └── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
@@ -61,11 +62,12 @@ edge-bilingual/
 │   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡
 │   ├── subtitles.js       YouTube 字幕双语：解析 json3、拼句、懒翻译、叠层显示
 │   ├── youtube-hook.js    页面主环境（world: MAIN）：捕获播放器的字幕请求，转给 subtitles.js
+│   ├── hover.js           悬停对照：高亮同一处的原文和译文，替换型单元弹原文气泡
 │   └── styles/inject.css  译文样式与主题
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存）
-└── selftest/              离线自检（51 条用例）
+└── selftest/              离线自检（82 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -97,7 +99,7 @@ DT.collect()  收集待翻单元
 
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
-| `translate` | `{texts: string[], target: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败 |
+| `translate` | `{texts: string[], target: string, style?: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败 |
 | `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本） |
 | `test` | — | `{ok, ms, model, sample}` / `{ok:false,error}` | 测试连接 |
 | `cache:clear` | — | `{ok}` | 清空三层缓存（storage 里的 `dt.cache.v1` 一并删掉） |
@@ -114,6 +116,7 @@ DT.collect()  收集待翻单元
 | `dt:status` | — | 状态快照 | `{enabled, mode, target, total, translated, failed, skipped, lastError, busy}` |
 | `dt:setMode` | `{mode}` | 快照 | `dual` / `translation`，会重建 |
 | `dt:setTarget` | `{target}` | 快照 | 切换目标语言，会重建 |
+| `dt:setStyle` | `{style}` | 快照 | 趣味翻译：`plain` / `classical` / `catgirl`，当前页按风格重建（没开翻译就顺带打开），不写进配置；还原后回到 `plain` |
 | `dt:retranslate` | — | 快照 | 清空重翻 |
 | `dt:diagnose` | — | 诊断报告对象 | 见第 7 节 |
 | `dt:configChanged` | — | 无 | 后台在 `storage.onChanged` 时广播；内容脚本重拉配置、清零失败退避并补扫。内容脚本**不要**自己监听 `storage.onChanged`（事件里带完整配置含 Key） |
@@ -128,7 +131,8 @@ lib/
 │   ├── anthropic.js  原生 Messages 协议
 │   └── gemini.js     原生 generateContent 协议
 ├── providers.js      内置 10 家模板（地址 + 协议 + 关闭思考的参数）
-└── parse.js          模型返回值解析（JSON 数组容错）
+├── parse.js          模型返回值解析（JSON 数组容错）
+└── prompt.js         翻译提示词：普通翻译 / 趣味风格（风格表在 config.js 的 STYLES）
 ```
 
 每个引擎导出同一套接口，其中前三个必须是**纯函数**（这样能脱离浏览器跑单测）：
@@ -293,7 +297,7 @@ subtitles.js（扩展环境）
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-51 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、YouTube 字幕解析与拼句（`DT.subs`）。**改 `dom.js` 前后必跑。**
+82 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、悬停对照（`DT.hover`）。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -302,6 +306,7 @@ node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校�
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
 node test/parse.test.mjs       # 回包解析 parseArray + 输出长度护栏 isRunaway（10 条）
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、清空（11 条）
+node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度（8 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
@@ -347,6 +352,7 @@ node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、�
 | `selectionButton` | true | 划词：选区旁「译」小按钮 |
 | `selectionImmediate` | false | 划词：选中即翻译（会消耗额度，默认关） |
 | `subtitleTranslate` | true | YouTube 字幕双语：打开 CC 时接管字幕，只翻播放位置往后约 90 秒 |
+| `hoverCompare` | true | 悬停对照：高亮同一处的原文和译文 |
 | `debug` | false | 输出调试日志 |
 | `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |
 
@@ -389,7 +395,7 @@ node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、�
 1. 改 `manifest.json` 的 `version`
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错）
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **51 / 51**
+4. 跑自检页：必须 **82 / 82**
 4b. 跑 Node 单测：`node test/engines.test.mjs`、`node test/config.test.mjs`、`node test/providers.test.mjs`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，Release 说明就从这里摘

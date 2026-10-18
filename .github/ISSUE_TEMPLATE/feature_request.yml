@@ -1,0 +1,20 @@
+name: 功能建议
+description: 想要的新功能或改进
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么问题
+      description: 在什么场景下遇到了什么不方便
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 希望怎么做
+      description: 设想的做法；有参考的产品或截图也可以贴
+  - type: markdown
+    attributes:
+      value: |
+        动手前可以先看 [docs/ROADMAP.md](../blob/main/docs/ROADMAP.md)：里面有已排期的任务和「明确暂不做」的清单。

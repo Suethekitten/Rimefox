@@ -25,7 +25,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # 第三方 Action 钉到 commit SHA（标签可以被改指向，SHA 不能）；升级时一起改后面的版本注释
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false # 发布用的是下面的 GH_TOKEN，不需要把令牌留在 git 配置里
 
       - name: 读取并校验版本号
         id: ver
@@ -74,7 +77,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/pkg/Rimefox"
           rsync -a --exclude '.git' --exclude '.github' --exclude '.gitignore' \
             --exclude 'package.ps1' --exclude 'package.bat' \
-            --exclude 'icons/source.png' --exclude 'icons/preview-*.png' --exclude 'tools' \
+            --exclude 'icons/source.png' --exclude 'icons/preview-*.png' --exclude 'icons/icon512.png' --exclude 'tools' \
             ./ "$RUNNER_TEMP/pkg/Rimefox/"
           (cd "$RUNNER_TEMP/pkg" && zip -qr "$GITHUB_WORKSPACE/$ZIP" Rimefox)
           unzip -l "$ZIP" | tail -1

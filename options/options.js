@@ -52,6 +52,7 @@ const fields = {
   selectionButton: $('selectionButton'),
   selectionImmediate: $('selectionImmediate'),
   subtitleTranslate: $('subtitleTranslate'),
+  hoverCompare: $('hoverCompare'),
   chromeBilingual: $('chromeBilingual'),
   debug: $('debug')
 };
@@ -216,6 +217,7 @@ function applyConfig(cfg) {
   fields.selectionButton.checked = cfg.selectionButton !== false;
   fields.selectionImmediate.checked = cfg.selectionImmediate === true;
   fields.subtitleTranslate.checked = cfg.subtitleTranslate !== false;
+  fields.hoverCompare.checked = cfg.hoverCompare !== false;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.debug.checked = !!cfg.debug;
 
@@ -266,6 +268,7 @@ function readForm() {
     selectionButton: fields.selectionButton.checked,
     selectionImmediate: fields.selectionImmediate.checked,
     subtitleTranslate: fields.subtitleTranslate.checked,
+    hoverCompare: fields.hoverCompare.checked,
     chromeBilingual: fields.chromeBilingual.checked,
     debug: fields.debug.checked
   };

@@ -6,13 +6,15 @@ import {
   KEYS,
   EXTENSIONS_PAGE,
   FILE_ACCESS_LABEL,
-  browserShortcut
+  browserShortcut,
+  STYLES
 } from '../lib/config.js';
 
 const el = {
   ver: document.getElementById('ver'),
   toggle: document.getElementById('toggle'),
   modeSeg: document.getElementById('modeSeg'),
+  styleSeg: document.getElementById('styleSeg'),
   target: document.getElementById('target'),
   stat: document.getElementById('stat'),
   statusBox: document.getElementById('statusBox'),
@@ -106,6 +108,7 @@ function render() {
       el.stat.textContent = '浏览器内置页、扩展商店页、扩展自身页面无法注入脚本。请切换到普通网页（http/https）。';
     }
     el.modeSeg.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    el.styleSeg.querySelectorAll('button').forEach((b) => (b.disabled = true));
     el.target.disabled = true;
     return;
   }
@@ -120,6 +123,9 @@ function render() {
 
   el.modeSeg.querySelectorAll('button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.mode === status.mode);
+  });
+  el.styleSeg.querySelectorAll('button').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.style === (status.style || 'plain'));
   });
   el.target.value = status.target || 'zh-CN';
 
@@ -219,6 +225,13 @@ async function init() {
     el.target.appendChild(opt);
   });
   el.target.value = cfg.targetLang || 'zh-CN';
+  STYLES.forEach((style) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.style = style.value;
+    btn.textContent = style.label;
+    el.styleSeg.appendChild(btn);
+  });
   // Mac 上是 ⌘+Enter（keydown 里本来就同时认 Ctrl 和 ⌘）
   el.quickInput.placeholder = '粘贴 / 输入要翻译的文字…（' + KEYS.submit + ' 翻译）';
 
@@ -260,6 +273,20 @@ el.modeSeg.addEventListener('click', async (event) => {
     status = await sendToTab({ type: 'dt:setMode', mode });
     stopPolling();
     await saveConfig({ mode });
+  } catch (err) {
+    el.stat.textContent = '切换失败：' + err.message;
+  }
+  render();
+  if (status && status.busy) startPolling();
+});
+
+// 趣味翻译：当前页按风格重翻（不保存到配置，还原后回到普通）
+el.styleSeg.addEventListener('click', async (event) => {
+  const btn = event.target.closest('button[data-style]');
+  if (!btn) return;
+  try {
+    status = await sendToTab({ type: 'dt:setStyle', style: btn.dataset.style });
+    stopPolling();
   } catch (err) {
     el.stat.textContent = '切换失败：' + err.message;
   }

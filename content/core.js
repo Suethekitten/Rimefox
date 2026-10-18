@@ -3,17 +3,31 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.5.0';
+  DT.VERSION = '0.5.1';
 
   DT.state = {
     enabled: false,
     mode: 'dual',
     theme: 'underline',
     target: 'zh-CN',
+    style: 'plain', // 趣味翻译：只对当前页生效（弹窗选），还原后回到 plain
     config: null,
     total: 0,
     translated: 0,
     failed: 0
+  };
+
+  // 趣味翻译风格的 id（文案与提示词在 lib/config.js 的 STYLES，内容脚本只认 id）
+  DT.STYLE_IDS = ['plain', 'classical', 'catgirl'];
+  DT.STYLE_MIN_CHARS = 12;
+
+  // 这个单元按什么风格翻：只改写正文里够长的段落；导航、按钮、短标签照常普通翻译，
+  // 免得菜单也变成文言文 / 带「喵」。area 是 DT.areaOf 的结果
+  DT.unitStyle = function (style, text, area) {
+    if (!style || style === 'plain' || DT.STYLE_IDS.indexOf(style) < 0) return 'plain';
+    if (String(text || '').length < DT.STYLE_MIN_CHARS) return 'plain';
+    if (area && area !== 'content') return 'plain';
+    return style;
   };
 
   DT.log = function () {

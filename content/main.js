@@ -87,6 +87,7 @@
       enabled: DT.state.enabled,
       mode: DT.state.mode,
       target: DT.state.target,
+      style: DT.state.style || 'plain',
       total: DT.state.total,
       translated: DT.state.translated,
       failed: DT.state.failed,
@@ -179,9 +180,12 @@
       var lazy = cfg.lazy !== false;
       var viewH = window.innerHeight || 800;
       var deferred = 0; // 离屏幕太远、留到滚过去再翻的单元数
+      var pageStyle = DT.state.style || 'plain';
       var queue = DT.collect(document.body, function (unit) {
         if (DT.skipText(unit.text)) return false;
-        if (cfg.skipSameLang !== false && DT.looksLikeTarget(unit.text, target)) return false;
+        // 趣味翻译：正文里够长的段落按风格改写；中文页面也要改写，所以风格单元不跳过「已是目标语言」
+        unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
+        if (unit.style === 'plain' && cfg.skipSameLang !== false && DT.looksLikeTarget(unit.text, target)) return false;
         if (settled.get(unit.el) === unit.text) return false;
         // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
         // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
@@ -215,7 +219,7 @@
         unit.slots = new Array(parts.length);
         unit.done = false;
         parts.forEach(function (part, k) {
-          pending.push({ ui: ui, k: k, text: part });
+          pending.push({ ui: ui, k: k, text: part, style: unit.style || 'plain' });
         });
       });
 
@@ -261,6 +265,7 @@
         while (pending.length) {
           var seg = pending[0];
           if (batch.length && (batch.length >= limitItems || chars + seg.text.length > limitChars)) break;
+          if (batch.length && seg.style !== batch[0].style) break; // 同一批不混风格：后台按批选提示词
           batch.push(pending.shift());
           chars += seg.text.length;
         }
@@ -309,7 +314,7 @@
         });
         var res = null;
         try {
-          res = await DT.send({ type: 'translate', texts: texts, target: target });
+          res = await DT.send({ type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain' });
         } catch (err) {
           if (cancelled()) return;
           lastBeat = Date.now();
@@ -435,6 +440,7 @@
     // 旧一轮却带着过期的队列继续往页面里插译文
     cancelRun();
     DT.state.enabled = false;
+    DT.state.style = 'plain'; // 趣味翻译是一次性的：还原后回到普通翻译
     DT.send({ type: 'resume:set', value: false }).catch(function () {});
     DT.restore();
     settled = new WeakMap();
@@ -712,6 +718,20 @@
       startOver();
       sendResponse(summarize());
       return false;
+    }
+
+    // 趣味翻译：当前页按风格重翻（不写进配置）；还没开翻译就顺带打开
+    if (msg.type === 'dt:setStyle') {
+      DT.state.style = DT.STYLE_IDS.indexOf(msg.style) >= 0 ? msg.style : 'plain';
+      if (DT.state.enabled) {
+        startOver();
+        sendResponse(summarize());
+        return false;
+      }
+      enable().then(sendResponse, function (err) {
+        sendResponse({ error: String(err) });
+      });
+      return true;
     }
 
     if (msg.type === 'dt:setTarget') {

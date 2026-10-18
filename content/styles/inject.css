@@ -65,3 +65,44 @@ html[data-dt="on"][data-dt-theme="mask"] .dt-target {
 /* ---- 仅译文模式 ----
    现在"仅译文"是注入时原地替换文本节点（保留元素盒子），
    不再靠 CSS 隐藏原文，所以这里不需要额外规则。 */
+
+/* ---- 悬停对照（content/hover.js）----
+   鼠标移到已翻译单元上：原文一种底色、译文另一种底色，一眼看出哪句对哪句；移开取消。
+   原地替换的单元（仅译文 / 控件 / 导航）原文不在页面上，弹小气泡显示 */
+html[data-dt="on"] [data-dt-hover="src"] {
+  background-color: rgba(250, 204, 21, 0.18);
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.45);
+  border-radius: 3px;
+}
+
+/* 译文在源元素内部：底色会叠在原文的黄色上，再加一条蓝色竖线区分 */
+html[data-dt="on"] [data-dt-hover="target"] {
+  background-color: rgba(59, 130, 246, 0.2);
+  box-shadow: inset 3px 0 0 rgba(59, 130, 246, 0.75);
+  border-radius: 3px;
+  opacity: 1;
+}
+
+html[data-dt="on"] [data-dt-hover="replaced"] {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.45);
+  border-radius: 3px;
+}
+
+html[data-dt="on"] .dt-hover-tip {
+  position: fixed;
+  z-index: 2147483646;
+  max-width: 360px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(22, 24, 30, 0.94);
+  color: #fff;
+  font: 12.5px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+html[data-dt="on"] .dt-hover-tip[hidden] {
+  display: none;
+}

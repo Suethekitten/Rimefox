@@ -152,6 +152,14 @@
 
             <label class="row">
               <span class="row-text">
+                <span class="row-title">悬停对照</span>
+                <span class="row-desc">鼠标移到已翻译的段落上，同时高亮这一处的原文和译文；仅译文模式下弹气泡显示原文。</span>
+              </span>
+              <input id="hoverCompare" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row">
+              <span class="row-text">
                 <span class="row-title">跳过已是目标语言的段落</span>
                 <span class="row-desc">比如中文页翻中文时不重复翻。</span>
               </span>
@@ -270,6 +278,7 @@
               <span class="row-text">
                 <span class="row-title">字幕双语</span>
                 <span class="row-desc">打开字幕（CC）时显示「原文 + 译文」，支持人工、自动生成和 YouTube 机翻字幕；只翻播放位置往后约 90 秒，看多少翻多少。</span>
+                <span class="row-desc">非 YouTube 官方功能，与 YouTube / Google 无关联；依赖其未公开的接口，改版后可能失效。</span>
               </span>
               <input id="subtitleTranslate" type="checkbox" class="switch" />
             </label>
