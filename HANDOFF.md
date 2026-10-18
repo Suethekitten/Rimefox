@@ -37,7 +37,7 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **84 / 84 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **85 / 85 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 
 ---
 
@@ -67,7 +67,7 @@ edge-bilingual/
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存）
-└── selftest/              离线自检（84 条用例）
+└── selftest/              离线自检（85 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -303,7 +303,7 @@ subtitles.js（扩展环境）
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-84 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、悬停对照（`DT.hover`）。**改 `dom.js` 前后必跑。**
+85 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -402,11 +402,13 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 1. 改 `manifest.json` 的 `version`
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错）
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **84 / 84**
-4b. 跑 Node 单测：`node test/engines.test.mjs`、`node test/config.test.mjs`、`node test/providers.test.mjs`（应全绿）
+4. 跑自检页：必须 **85 / 85**
+4b. 跑 Node 单测：`for f in test/*.test.mjs; do node $f; done`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
-6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，Release 说明就从这里摘
-   - **每版控制在 3–6 条，只写用户能感知的变化**；实现细节、重构过程、内部取舍写进本文件，不要塞进 CHANGELOG（0.4.9/0.5.0 写得太长，协作者提过）
+6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
+   每版 3–6 条、每条一句话且 ≤ 90 字、不许有子项、只写用户会感觉到什么、只写这一版。
+   发版前跑 `python3 tools/check-release-notes.py <版本号>`，CI 也会跑，不合规就不发布
+6b. 实现细节、取舍、内部重构、测试变化写进本文件末尾的「本版技术记录」（整节替换成这一版），以及 commit message
 7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检、打包 `Rimefox-v<版本号>.zip`、创建 `v<版本号>` 的 Release。
    同一版本只发一次；没改版本号的推送不会发版。也可以在 GitHub 的 Actions 页面手动运行
 
@@ -459,3 +461,20 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 - Gemini 3 用 `thinkingLevel`、2.5 用 `thinkingBudget`，由模型名自动选择
 - 「尽量关闭」发送的参数：Anthropic `thinking.type=disabled`、Gemini `thinkingConfig`
 - 服务返回 400 且提示不认识参数时，扩展会自动去掉参数重试一次（会成功，但思考没关掉）
+
+---
+
+## 14. 本版技术记录（0.5.2）
+
+> 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
+
+- **悬停对照改为逐句**（`content/hover.js`）：用 CSS Custom Highlight API（`CSS.highlights` + `::highlight(dt-hover-src / dt-hover-target)`，样式在 `inject.css`）只给一句话的 Range 上色，不拆分、不改动页面文本节点；`document.caretRangeFromPoint` 找鼠标下的字，监听 `mousemove`。
+  句子切分 `DT.hover.sentencesOf`：西文 `.!?…` 后面要跟空白或结尾（避开 3.5、e.g.），中日文 `。！？；` 直接断。原文与译文句数相同按序号对应，不同按句子中点的相对位置对齐（`alignSentence`）。
+  原地替换的单元：高亮鼠标下那句译文，气泡只显示对齐到的那句原文（原文取自 `DT.replaced`）。不支持 Highlight API 的浏览器退回整段高亮（`data-dt-hover` 属性）
+- **YouTube 字幕默认关闭**：`subtitleTranslate` 默认 `false`，`subtitles.js` / 设置页改为 `=== true` 才开启；已保存过设置的用户存储里是 `true`，保持原样
+- **`icons/source.png` 缩到 1024×1024**（592 KB → 139 KB）：生成的最大图标是 512，够用两倍；`tools/make-icons.ps1` 按 `Width / 256` 缩放，不受影响
+- **重写 git 历史，去掉个人邮箱**：所有提交里旧的个人邮箱（作者和提交者）改成 GitHub noreply 地址，所有提交的 SHA 都变了，标签 v0.4.7–v0.5.1 跟着改指向新提交后强制推送（Release 按标签名挂靠，不受影响）。
+  协作者本地要重新同步：`git fetch origin && git reset --hard origin/main && git fetch --tags --force`（有未推送的改动先另存）。旧提交在 GitHub 上可能还能按 SHA 直接访问，要彻底清除需联系 GitHub Support
+- **发版说明规范**：新增 `AGENTS.md`（规则）、`CLAUDE.md`（引用 AGENTS.md）、`tools/check-release-notes.py`（检查条数 / 字数 / 子项 / 实现用语），`release.yml` 发版前跑它
+- 自检 84 → 85：悬停相关改为 3 条（句子切分与对齐、逐句高亮、替换单元的逐句气泡），夹具临时放进视口（`caretRangeFromPoint` 只命中屏幕上的文字）
+

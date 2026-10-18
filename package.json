@@ -1,6 +1,6 @@
 {
   "name": "rimefox-extension",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "description": "凛狐 · 双语对照翻译（MV3 扩展）—— 仅供本地测试脚本使用，扩展本身零构建"

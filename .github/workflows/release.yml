@@ -54,6 +54,11 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # 发版说明格式（规则见 AGENTS.md「发版说明」）：每版 3–6 条、每条一句话 ≤ 90 字、不许子项、只写用户能感觉到的变化
+      - name: 检查更新说明格式
+        if: steps.check.outputs.skip == 'false'
+        run: python3 tools/check-release-notes.py "${{ steps.ver.outputs.version }}"
+
       # 自检页是纯前端页面，不需要加载扩展：用无头 Chrome 打开 file:// 地址，读出结果
       - name: 跑离线自检
         if: steps.check.outputs.skip == 'false'
