@@ -122,7 +122,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 联系方式和素材 | 填写真实支持邮箱/仓库/Issues；补真实截图和小宣传图 |
 | 最后提交 | 原仓库本地提交并人工审阅，再由人决定上传与提交审核；本任务不上传 |
 
-真实 remote 是 `https://github.com/Suethekitten/rimefox`，但 2026-10-18 匿名访问仓库及 Issues 均为 HTTP 404，因此保留公开链接占位，不能当成已可用支持入口。
+真实 remote 是 `https://github.com/Suethekitten/Rimefox`。仓库公开前匿名访问仓库及 Issues 会返回 HTTP 404；公开后该地址即可作为支持入口。
 
 建议公开 URL（均未部署、未经验证）：`https://OWNER.github.io/REPO/privacy/`；或 `https://github.com/OWNER/REPO/blob/main/docs/privacy.en.md` 与中文 `https://github.com/OWNER/REPO/blob/main/PRIVACY.md`。仓库必须公开，无需登录。英文政策联系段也要替换为真实 Issues 链接。
 

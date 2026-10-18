@@ -7,7 +7,7 @@ body:
       value: |
         感谢反馈！提交前请确认：
         - **不要贴出 API Key**（截图里也要打码）
-        - 安全漏洞请不要在这里提，按 [SECURITY.md](../blob/main/SECURITY.md) 私下报告
+        - 安全漏洞请不要在这里提，按 [SECURITY.md](https://github.com/Suethekitten/Rimefox/blob/main/SECURITY.md) 私下报告
   - type: input
     id: version
     attributes:
