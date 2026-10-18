@@ -1,6 +1,6 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
 import { getConfig, activeConfig, styleById } from './lib/config.js';
-import { systemPrompt, temperatureFor } from './lib/prompt.js';
+import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseArrayFromReasoning, isRunaway } from './lib/parse.js';
 import { matchGlossary, normalizeGlossary, glossaryFingerprint } from './lib/glossary.js';
@@ -57,7 +57,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary) {
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
-          { role: 'system', content: systemPrompt(target, style, hits) },
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt) },
           { role: 'user', content: JSON.stringify(texts) }
         ]
       });
@@ -135,13 +135,14 @@ async function handleTranslate(msg, sender) {
     return { ok: false, error: '还没有配置 API Key，请先打开「设置」填写。', results };
   }
 
-  // 缓存键带上术语表指纹：改了术语后旧译文不能再命中
+  // 缓存键带上术语表 / 自定义提示词指纹：改了之后旧译文不能再命中
   const scope = {
     target,
     style,
     model: active.provider + ':' + active.model,
     host: hostOf(sender),
-    glossary: glossaryFingerprint(glossary)
+    glossary: glossaryFingerprint(glossary),
+    prompt: promptFingerprint(cfg.customPrompt)
   };
   const keyOf = (text) => cache.makeKey(scope, text);
 

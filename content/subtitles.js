@@ -1,11 +1,13 @@
-// YouTube 字幕运行时：监听页面钩子的字幕回包、拼句、按进度懒翻译、叠层显示。
-// 只在 YouTube 加载；纯函数在 content/subtitles-core.js（必须先加载）。
+// YouTube 字幕运行时：消费字幕来源适配层、拼句、按进度懒翻译、叠层显示。
+// 只在 YouTube 加载；纯函数在 content/subtitles-core.js，来源适配在 content/subtitles-source.js（都必须先加载）。
 (function () {
   'use strict';
 
   var DT = window.__DT;
   if (!DT || !DT.subs) return; // 依赖 subtitles-core.js
   var subs = DT.subs;
+  var source = DT.subtitleSource;
+  if (!source) return; // 依赖 subtitles-source.js
   // ---------------- 运行时（只在 YouTube 上） ----------------
   if (!/(^|\.)youtube(-nocookie)?\.com$/.test(location.hostname)) return;
 
@@ -16,7 +18,6 @@
   var RETRY_MS = 15000;
   var LINGER_MS = 1500; // 句末后再停留这么久，等下一句或等译文
 
-  var pendingRaw = null; // 收到但还没处理的字幕回包
   var track = null; // { key, v, units, trans: [], failedAt: [], pending: {}, style }
   var inflight = 0;
   var overlay = null;
@@ -48,14 +49,6 @@
     return m ? m[1] : '';
   }
 
-  window.addEventListener('message', function (event) {
-    if (event.source !== window) return;
-    var d = event.data;
-    if (!d || d.source !== 'rimefox-yt' || d.type !== 'captions') return;
-    if (typeof d.url !== 'string' || typeof d.body !== 'string') return;
-    pendingRaw = { url: d.url, body: d.body };
-  });
-
   async function process(raw) {
     var p = subs.paramsOf(raw.url);
     var url = raw.url;
@@ -66,8 +59,7 @@
     if (p.tlang) {
       url = subs.withoutTlang(raw.url);
       try {
-        var res = await fetch(url, { credentials: 'include' });
-        body = await res.text();
+        body = await source.fetchText(url);
       } catch (err) {
         body = '';
       }
@@ -283,10 +275,9 @@
 
   function tick() {
     // 没开开关 / 没配 Key 时先留着，开了再处理（播放器不会为同一条轨道再请求一次）
-    if (pendingRaw && enabled()) {
-      var raw = pendingRaw;
-      pendingRaw = null;
-      process(raw);
+    if (enabled()) {
+      var raw = source.take();
+      if (raw) process(raw);
     }
     if (!track) {
       render(null);
@@ -334,6 +325,6 @@
   }
 
   setInterval(tick, 200);
-  // 播放器可能在本脚本加载前就拉完了字幕：让主环境的钩子把最后一份再发一次
-  window.postMessage({ source: 'rimefox-ext', type: 'replay' }, location.origin);
+  // 播放器可能在本脚本加载前就拉完了字幕：让适配层请求主环境钩子再发一次
+  source.replay();
 })();

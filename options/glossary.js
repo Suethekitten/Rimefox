@@ -129,6 +129,7 @@ export function createGlossaryEditor(opts) {
       empty.className = 'glossary-empty';
       empty.textContent = '还没有术语。可以「添加一行」手动加，或「导入示例」用现成的 109 条。';
       wrap.appendChild(empty);
+      if (window.__rimefoxI18nRefresh) window.__rimefoxI18nRefresh();
       return;
     }
     if (!renderedOnce) resetOpen(list);
@@ -150,7 +151,13 @@ export function createGlossaryEditor(opts) {
       head.type = 'button';
       head.className = 'glossary-group-head';
       const open = openCats.has(cat);
-      head.textContent = (open ? '▾ ' : '▸ ') + cat + '（' + items.length + '）';
+      const arrow = document.createElement('span');
+      arrow.textContent = open ? '▾ ' : '▸ ';
+      const label = document.createElement('span');
+      label.textContent = cat;
+      const count = document.createElement('span');
+      count.textContent = '（' + items.length + '）';
+      head.append(arrow, label, count);
       head.setAttribute('aria-expanded', open ? 'true' : 'false');
       head.addEventListener('click', () => {
         if (openCats.has(cat)) openCats.delete(cat);
@@ -181,6 +188,7 @@ export function createGlossaryEditor(opts) {
       });
       wrap.appendChild(all);
     }
+    if (window.__rimefoxI18nRefresh) window.__rimefoxI18nRefresh();
   }
 
   // 合并导入：同一原文以导入的为准，其余追加；两列 CSV 不会冲掉已有分类

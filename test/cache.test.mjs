@@ -61,6 +61,12 @@ await t('术语表指纹不同 → 键不同（改了术语旧译文失效）', 
   assert.notEqual(makeKey({ ...scope, glossary: 'abc123' }, 'Code'), makeKey({ ...scope, glossary: 'def456' }, 'Code'));
 });
 
+await t('自定义提示词指纹不同 → 键不同（改了提示词旧译文失效）', () => {
+  const base = makeKey(scope, 'Code');
+  assert.notEqual(makeKey({ ...scope, prompt: 'abc123' }, 'Code'), base);
+  assert.notEqual(makeKey({ ...scope, prompt: 'abc123' }, 'Code'), makeKey({ ...scope, prompt: 'def456' }, 'Code'));
+});
+
 // ---------------- 读写与恢复 ----------------
 console.log('\n[读写与恢复]');
 

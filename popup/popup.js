@@ -9,6 +9,7 @@ import {
   browserShortcut,
   STYLES
 } from '../lib/config.js';
+import { applyI18n } from '../lib/i18n.js';
 
 const el = {
   ver: document.getElementById('ver'),
@@ -215,9 +216,21 @@ async function refresh() {
   }
 }
 
+function applyUiTheme(value) {
+  const root = document.documentElement;
+  if (value === 'light' || value === 'dark') {
+    root.dataset.theme = value;
+    root.style.colorScheme = value;
+  } else {
+    delete root.dataset.theme;
+    root.style.colorScheme = '';
+  }
+}
+
 async function init() {
   const cfg = await getConfig();
   currentCfg = cfg;
+  applyUiTheme(cfg.uiTheme);
   shortcut = await browserShortcut();
 
   LANGUAGES.forEach((lang) => {
@@ -250,6 +263,7 @@ async function init() {
   await refresh();
   if (status.target) el.target.value = status.target;
   if (status.busy) startPolling();
+  applyI18n(document, cfg.uiLang);
 }
 
 el.toggle.addEventListener('click', async () => {

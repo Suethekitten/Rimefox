@@ -25,7 +25,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #0f1116;
     --sidebar: #13161c;
     --card: #181b22;
@@ -45,6 +45,33 @@
     --switch-off: #3a404d;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   }
+}
+
+/* 手动深色：覆盖系统浅色；手动浅色直接用上面的 :root 值 */
+:root[data-theme="dark"] {
+  --bg: #0f1116;
+  --sidebar: #13161c;
+  --card: #181b22;
+  --field: #11141a;
+  --line: #2a2f3a;
+  --line-soft: #222731;
+  --text: #e8eaf0;
+  --text-2: #c5cad4;
+  --muted: #9aa1ad;
+  --accent: #7c74ff;
+  --accent-2: #4f8bff;
+  --accent-soft: rgba(124, 116, 255, 0.18);
+  --ok: #34d399;
+  --bad: #f87171;
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.14);
+  --switch-off: #3a404d;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {

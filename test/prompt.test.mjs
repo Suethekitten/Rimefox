@@ -2,7 +2,7 @@
 // 运行：node test/prompt.test.mjs
 import assert from 'node:assert/strict';
 
-import { systemPrompt, temperatureFor } from '../lib/prompt.js';
+import { systemPrompt, temperatureFor, promptFingerprint } from '../lib/prompt.js';
 import { STYLES, styleById } from '../lib/config.js';
 
 let pass = 0;
@@ -87,6 +87,27 @@ t('术语表：命中时把译法写进提示词，并点明短文本也适用',
   assert.match(text, /术语对照/);
   assert.match(text, /Emails → 邮箱（测试）/);
   assert.match(text, /标题、按钮、导航等短文本同样适用/);
+});
+
+t('自定义提示词：追加在末尾，并重申格式/条数/语言不变', () => {
+  const custom = '产品名统一译作「凛狐」；代码注释保持原文。';
+  const text = systemPrompt('zh-CN', 'plain', [], custom);
+  assert.ok(text.includes(custom));
+  assert.ok(text.includes('不得改变输出 JSON 数组的格式、元素数量或目标语言'));
+  assert.ok(text.trim().endsWith(custom));
+});
+
+t('自定义提示词：空或纯空白不追加', () => {
+  const base = systemPrompt('zh-CN', 'plain', []);
+  assert.equal(systemPrompt('zh-CN', 'plain', [], ''), base);
+  assert.equal(systemPrompt('zh-CN', 'plain', [], '   '), base);
+});
+
+t('promptFingerprint：空为 none，去空白后稳定，改内容变化', () => {
+  assert.equal(promptFingerprint(''), 'none');
+  assert.equal(promptFingerprint('  '), 'none');
+  assert.equal(promptFingerprint(' 术语统一 '), promptFingerprint('术语统一'));
+  assert.notEqual(promptFingerprint('术语统一'), promptFingerprint('术语不统一'));
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

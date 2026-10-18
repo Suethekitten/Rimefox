@@ -228,6 +228,12 @@
           </div>
 
           <div class="card">
+            <div class="card-title">自定义提示词</div>
+            <p class="card-desc">追加到系统提示词末尾；只影响措辞和术语，不会改变输出格式、条数或目标语言。留空不生效。</p>
+            <textarea id="customPrompt" rows="5" placeholder="例如：保留代码注释原文；产品名统一译作……" spellcheck="false"></textarea>
+          </div>
+
+          <div class="card">
             <div class="card-title">术语表</div>
             <p class="card-desc">
               指定某些词必须怎么翻（比如 Battle Pass → 战令）。全局一份，只把本页命中的词加进提示词。术语按「分类」分组折叠，CSV 第三列可以写分类。
@@ -393,6 +399,29 @@
                 <span class="row-desc">网页控制台会打印 [凛狐] 前缀的段落切分 / 批处理信息。</span>
               </span>
               <input id="debug" type="checkbox" class="switch" />
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">界面主题</span>
+                <span class="row-desc">设置页和弹窗的配色；自动会跟随系统。不改网页内译文的样式。</span>
+              </span>
+              <select id="uiTheme" class="control">
+                <option value="auto">自动</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+              </select>
+            </label>
+
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">界面语言</span>
+                <span class="row-desc">只影响设置页和弹窗的界面文字；网页正文的翻译目标语言在上面的「翻译」里设置。</span>
+              </span>
+              <select id="uiLang" class="control">
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
             </label>
 
             <div class="row">

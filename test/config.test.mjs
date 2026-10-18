@@ -279,6 +279,39 @@ t('错误的 thinkingMode 被拒绝', () => {
   assert.ok(rejected.indexOf('thinkingMode') >= 0);
 });
 
+t('uiTheme 只接受 auto / light / dark', () => {
+  const ok = pickImportedConfig(
+    envelope({ uiTheme: 'dark', targetLang: 'zh-CN', theme: 'underline', batchSize: 8 })
+  ).config;
+  assert.equal(ok.uiTheme, 'dark');
+  const { rejected } = pickImportedConfig(
+    envelope({ uiTheme: 'sepia', targetLang: 'zh-CN', theme: 'underline', batchSize: 8 })
+  );
+  assert.ok(rejected.indexOf('uiTheme') >= 0);
+});
+
+t('uiLang 只接受 zh / en', () => {
+  const ok = pickImportedConfig(
+    envelope({ uiLang: 'en', targetLang: 'zh-CN', theme: 'underline', batchSize: 8 })
+  ).config;
+  assert.equal(ok.uiLang, 'en');
+  const { rejected } = pickImportedConfig(
+    envelope({ uiLang: 'fr', targetLang: 'zh-CN', theme: 'underline', batchSize: 8 })
+  );
+  assert.ok(rejected.indexOf('uiLang') >= 0);
+});
+
+t('customPrompt 超过 2000 字被拒绝，正常长度保留', () => {
+  const ok = pickImportedConfig(
+    envelope({ customPrompt: '术语统一', targetLang: 'zh-CN', theme: 'underline', batchSize: 8 })
+  ).config;
+  assert.equal(ok.customPrompt, '术语统一');
+  const { rejected } = pickImportedConfig(
+    envelope({ customPrompt: 'x'.repeat(2001), targetLang: 'zh-CN', theme: 'underline', batchSize: 8 })
+  );
+  assert.ok(rejected.indexOf('customPrompt') >= 0);
+});
+
 t('格式不对的外部 JSON 仍被拒绝', () => {
   assert.throws(() => pickImportedConfig({ theme: 'system' }), /rimefox/);
 });

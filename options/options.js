@@ -19,6 +19,7 @@ import {
 import { listModels, engineList } from '../lib/provider.js';
 import { providerById } from '../lib/providers.js';
 import { $, fillSelect, setResult } from './ui.js';
+import { applyI18n } from '../lib/i18n.js';
 import { createModelPicker } from './model-picker.js';
 import {
   NEW_CUSTOM_ID,
@@ -50,6 +51,7 @@ const fields = {
   model: $('model'),
   thinkingMode: $('thinkingMode'),
   thinkingExtra: $('thinkingExtra'),
+  customPrompt: $('customPrompt'),
   targetLang: $('targetLang'),
   theme: $('theme'),
   batchSize: $('batchSize'),
@@ -66,8 +68,25 @@ const fields = {
   subtitleTranslate: $('subtitleTranslate'),
   hoverCompare: $('hoverCompare'),
   chromeBilingual: $('chromeBilingual'),
+  uiTheme: $('uiTheme'),
+  uiLang: $('uiLang'),
   debug: $('debug')
 };
+
+// 设置页 / 弹窗的界面主题；auto 交给 CSS 的 prefers-color-scheme
+function applyUiTheme(value) {
+  const root = document.documentElement;
+  if (value === 'light' || value === 'dark') {
+    root.dataset.theme = value;
+    root.style.colorScheme = value;
+  } else {
+    delete root.dataset.theme;
+    root.style.colorScheme = '';
+  }
+}
+
+fields.uiTheme.addEventListener('change', () => applyUiTheme(fields.uiTheme.value));
+fields.uiLang.addEventListener('change', () => applyI18n(document, fields.uiLang.value));
 
 // 最近一次读到的配置（导出时用）
 let currentCfg = {};
@@ -200,6 +219,7 @@ function applyConfig(cfg) {
   fields.model.value = slot.model || '';
   fields.thinkingMode.value = cfg.thinkingMode || DEFAULTS.thinkingMode;
   fields.thinkingExtra.value = cfg.thinkingExtra || '';
+  fields.customPrompt.value = cfg.customPrompt || '';
 
   fields.targetLang.value = cfg.targetLang || 'zh-CN';
   fields.theme.value = cfg.theme || 'underline';
@@ -218,6 +238,9 @@ function applyConfig(cfg) {
   fields.subtitleTranslate.checked = cfg.subtitleTranslate === true;
   fields.hoverCompare.checked = cfg.hoverCompare !== false;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
+  fields.uiTheme.value = cfg.uiTheme || 'auto';
+  applyUiTheme(fields.uiTheme.value);
+  fields.uiLang.value = cfg.uiLang || 'zh';
   fields.debug.checked = !!cfg.debug;
 
   updateEngineHints();
@@ -226,6 +249,7 @@ function applyConfig(cfg) {
   syncProviderNameUI();
   picker.updateHint();
   glossaryEditor.render();
+  applyI18n(document, fields.uiLang.value);
 }
 
 function readForm() {
@@ -253,9 +277,12 @@ function readForm() {
     glossary: ((currentCfg && currentCfg.glossary) || []).slice(),
     thinkingMode: fields.thinkingMode.value,
     thinkingExtra: fields.thinkingExtra.value.trim(),
+    customPrompt: fields.customPrompt.value.trim().slice(0, 2000),
 
     targetLang: fields.targetLang.value,
     theme: fields.theme.value,
+    uiTheme: fields.uiTheme.value,
+    uiLang: fields.uiLang.value,
     batchSize: Number(fields.batchSize.value) || DEFAULTS.batchSize,
     maxCharsPerBatch: Number(fields.maxCharsPerBatch.value) || DEFAULTS.maxCharsPerBatch,
     maxUnitChars: Number(fields.maxUnitChars.value) || DEFAULTS.maxUnitChars,
