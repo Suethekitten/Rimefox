@@ -1,7 +1,7 @@
 # DualTrans 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.4.6 ｜ 目录：`edge-bilingual/`
+> 版本：0.4.7 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -235,7 +235,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 1. **仅译文模式下短中文会留下空白** —— 站点给容器写了固定高度，中文比英文短 40%，填不满。无通用解，只能按站点写规则或改用双语。
 2. **行内标签不在译文里保留** —— 段落里的 `<b>` / `<a>` 会被整段重写，译文是纯文本，不带原格式。
 3. **`<br>` 分隔的长帖**读起来是"一整段"，没做逐行对照（route 在图中的 `roadmap`）。
-4. **没有图标**，工具栏显示默认占位图。
+4. ~~没有图标~~（0.4.7 已加：`icons/`，源文件是 `icon.svg` / `icon-small.svg`，PNG 用无头 Chrome 渲染）
 5. **没有 i18n**，界面固定中文。
 6. **没有站点规则库**，全部靠通用启发式；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
 7. **浏览器快捷键（manifest 里的 Alt+A）只是建议**：被其它扩展占用时浏览器不会分配给我们，而且按键在浏览器层就被那个扩展拿走，页面内快捷键也收不到。扩展没法自己改浏览器快捷键，只能引导用户去 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）；设置页和弹窗会用 `chrome.commands.getAll()` 显示实际绑定结果
@@ -252,7 +252,7 @@ chrome-extension://<扩展ID>/selftest/index.html
 | P1 | **输入框翻译**：`Alt+I` 翻译当前输入框内容并回填 | 小 | 中（要处理 IME） |
 | P2 | **站点规则**：`{matches, textSelectors, excludeSelectors}` 配置化 | 中 | 中 |
 | P2 | **按 `<br>` 拆行**：长帖逐行对照 | 小 | 低 |
-| P3 | **图标 + i18n** | 小 | 低 |
+| P3 | ~~图标~~（0.4.7）+ **i18n** | 小 | 低 |
 | P3 | PDF / 视频字幕 / 图片 OCR | 大 | 高（单独立项，别混进这个仓库） |
 
 ---
@@ -260,11 +260,13 @@ chrome-extension://<扩展ID>/selftest/index.html
 ## 11. 发版流程
 
 1. 改 `manifest.json` 的 `version`
-2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致）
+2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错）
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
 4. 跑自检页：必须 **37 / 37**
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
-6. 更新 `CHANGELOG.md`
+6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，Release 说明就从这里摘
+7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检、打包 `DualTrans-v<版本号>.zip`、创建 `v<版本号>` 的 Release。
+   同一版本只发一次；没改版本号的推送不会发版。也可以在 GitHub 的 Actions 页面手动运行
 
 ---
 

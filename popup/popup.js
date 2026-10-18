@@ -15,6 +15,9 @@ const el = {
   modeSeg: document.getElementById('modeSeg'),
   target: document.getElementById('target'),
   stat: document.getElementById('stat'),
+  statusBox: document.getElementById('statusBox'),
+  progress: document.getElementById('progress'),
+  progressBar: document.getElementById('progressBar'),
   retranslate: document.getElementById('retranslate'),
   clearCache: document.getElementById('clearCache'),
   diagnose: document.getElementById('diagnose'),
@@ -59,8 +62,25 @@ function sendToBg(msg) {
   });
 }
 
+// 状态点颜色 + 进度条（文字仍由下面的 render 填）
+function renderState() {
+  let state = 'idle';
+  if (!supported) state = 'unsupported';
+  else if (status.busy) state = 'busy';
+  else if (status.failed && status.lastError) state = 'error';
+  else if (status.enabled) state = 'on';
+  el.statusBox.dataset.state = state;
+
+  const showProgress = state === 'busy' && status.total > 0;
+  el.progress.hidden = !showProgress;
+  if (showProgress) {
+    el.progressBar.style.width = Math.min(100, Math.round((status.translated / status.total) * 100)) + '%';
+  }
+}
+
 function render() {
   el.ver.textContent = 'v' + (chrome.runtime.getManifest().version || '0.1.0');
+  renderState();
 
   if (!supported) {
     el.toggle.disabled = true;

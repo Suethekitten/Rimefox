@@ -2,34 +2,48 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
     <title>DualTrans</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <header class="head">
-      <div class="brand"><span class="dot"></span> DualTrans</div>
+      <img class="logo" src="../icons/icon48.png" alt="" width="30" height="30" />
+      <div class="brand">
+        <div class="name">DualTrans</div>
+        <div class="tagline">双语对照翻译</div>
+      </div>
       <span class="ver" id="ver"></span>
     </header>
 
     <main class="main">
       <button id="toggle" class="primary">翻译此页</button>
 
-      <div class="row">
-        <span class="label">显示</span>
-        <div class="seg" id="modeSeg">
-          <button type="button" data-mode="dual" class="active">双语</button>
-          <button type="button" data-mode="translation">仅译文(实验)</button>
+      <!-- data-state：idle / busy / on / error / unsupported，由 popup.js 设置 -->
+      <div class="status" id="statusBox" data-state="idle">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="status-body">
+          <div class="stat" id="stat">检测中…</div>
+          <div class="progress" id="progress" hidden><span id="progressBar"></span></div>
         </div>
       </div>
 
-      <div class="row">
-        <span class="label">目标</span>
-        <select id="target"></select>
+      <div class="card">
+        <div class="row">
+          <span class="label">显示</span>
+          <div class="seg" id="modeSeg">
+            <button type="button" data-mode="dual" class="active">双语对照</button>
+            <button type="button" data-mode="translation">仅译文</button>
+          </div>
+        </div>
+        <div class="row">
+          <span class="label">译成</span>
+          <select id="target"></select>
+        </div>
       </div>
 
-      <div class="stat" id="stat">检测中…</div>
-
-      <section class="quick">
+      <section class="card quick">
+        <div class="card-title">随手翻译</div>
         <textarea id="quickInput" rows="3" placeholder="粘贴 / 输入要翻译的文字…（Ctrl+Enter 翻译）"></textarea>
         <div class="quick-actions">
           <button type="button" id="quickGo" class="mini primary-mini">翻译</button>
@@ -41,7 +55,7 @@
     </main>
 
     <footer class="foot">
-      <button type="button" id="retranslate" class="link">重翻</button>
+      <button type="button" id="retranslate" class="link">重新翻译</button>
       <button type="button" id="clearCache" class="link">清缓存</button>
       <button type="button" id="diagnose" class="link">诊断</button>
       <button type="button" id="openOptions" class="link">设置</button>

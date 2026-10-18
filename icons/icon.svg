@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- DualTrans 图标：两组"原文（实心）+ 译文（浅色）"的文字行，表示逐段双语对照 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#bg)"/>
+  <rect x="27" y="30" width="74" height="13" rx="6.5" fill="#ffffff"/>
+  <rect x="27" y="50" width="54" height="13" rx="6.5" fill="#a5f3fc"/>
+  <rect x="27" y="72" width="74" height="13" rx="6.5" fill="#ffffff"/>
+  <rect x="27" y="92" width="40" height="13" rx="6.5" fill="#a5f3fc"/>
+</svg>
