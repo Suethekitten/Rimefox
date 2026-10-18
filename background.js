@@ -37,7 +37,7 @@ function sleep(ms) {
 }
 
 // style：趣味翻译风格（lib/config.js 的 STYLES），普通翻译为 'plain'
-async function translateBatchWithRetry(texts, target, cfg, style, glossary) {
+async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked) {
   let attempt = 0;
   let lastErr = null;
   const temperature = temperatureFor(cfg, style);
@@ -61,7 +61,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary) {
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
-          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt) },
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked) },
           { role: 'user', content: JSON.stringify(texts) }
         ]
       });
@@ -94,8 +94,8 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary) {
     // 某一半失败时直接失败，不能再把整批重来一遍
     const mid = Math.ceil(texts.length / 2);
     const halves = await Promise.all([
-      translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary),
-      translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary)
+      translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked),
+      translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked)
     ]);
     return halves[0].concat(halves[1]);
   }
@@ -231,7 +231,7 @@ async function handleTranslate(msg, sender) {
         try {
           // 发出去的是脱敏后的文本；映射只在本地
           const wire = privacyRows ? payload.map((text) => privacyRows.get(text).masked) : payload;
-          const out = await translateBatchWithRetry(wire, target, cfg, style, glossary);
+          const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows);
           if (!out) throw new ApiError('模型返回无法解析', 0, '');
           payload.forEach((text, k) => {
             let value = out[k];

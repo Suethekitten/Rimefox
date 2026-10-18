@@ -147,6 +147,7 @@ t('请求体里就是原文（与改动前一致）', () => {
   const payload = JSON.parse(calls[0].body.messages[1].content);
   assert.deepEqual(payload, ['请联系 test@example.com。']);
   assert.equal(calls[0].body.messages[0].content.indexOf('保留 PII 占位符') >= 0, true);
+  assert.equal(calls[0].body.messages[0].content.indexOf('隐私占位符（必须原样保留）'), -1);
 });
 t('返回译文，不经过脱敏/恢复', () => {
   assert.deepEqual(res.results, ['EN: 请联系 test@example.com。']);
@@ -167,6 +168,7 @@ t('请求体不含任何原始敏感值', () => {
     assert.equal(all.indexOf(secret), -1, 'leaked: ' + secret);
   });
   assert.equal(all.indexOf('__PII_') >= 0, true);
+  assert.equal(calls[0].body.messages[0].content.indexOf('隐私占位符（必须原样保留）') >= 0, true);
 });
 t('回包后完整还原原文', () => {
   assert.deepEqual(res.results, [

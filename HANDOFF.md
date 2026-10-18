@@ -121,6 +121,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 - 占位符沿用 OneAIFW 的 `__PII_<TYPE>_<n>__`。映射（占位符 → 原文）只存在于本次调用的内存里，不写 storage、不进缓存、不进日志。
 - 恢复要求「该段出现过的占位符至少出现一次」；缺失、改写后认不出、出现映射表外的占位符，都返回失败，该段结果为 `null`（内容脚本按失败退避重试），不会输出半截译文。
 - 只做固定格式：邮箱 / 电话 / 身份证（校验位）/ 银行卡（Luhn）/ 带标签的银行账号；中文姓名需要显式开启。地址、机构、密码、助记词不处理。
+- 开启时 `lib/prompt.js` 会追加一段「`__PII_<类型>_<数字>__` 是占位符，原样保留」；关闭时提示词与改动前逐字一致。
 - 评估与体积 / 许可证说明见 [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md)、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 ### 消息协议（content → background）
@@ -548,7 +549,7 @@ node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间�
 ### 未发版分支：AI 隐私保护翻译（`feat/aifw-privacy`）
 
 - **来源与取舍**：复用 OneAIFW（MIT）的占位符契约与 span 去重语义，用纯 JS 重写；不引入上游 WASM / ORT / NER 模型（模型资产私有、公开备选 GPL-3.0）。评估见 [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md)。
-- **实现**：`lib/privacy.js`（无依赖，约 9 KB 源码）；`background.js` 在 `translate` 路由里 mask → 请求 → restore；缓存只写恢复后的译文。
+- **实现**：`lib/privacy.js`（无依赖，13.7 KB 源码）；`background.js` 在 `translate` 路由里 mask → 请求 → restore；缓存只写恢复后的译文；开启时提示词追加占位符保留说明。
 - **安全语义**：映射不落盘；占位符缺失 / 改写 / 未知一律 fail-closed，该段 `null`，沿用现有失败退避重试。
 - **设置页**：新增「隐私保护」分区（总开关 + 5 个分项），英文文案同步。
 - **测试**：`test/privacy.test.mjs`（27 条）+ `test/privacy-pipeline.test.mjs`（13 条，假 `chrome.*` + 假 `fetch` 驱动 `background.js`，断言请求体不含原文、回包还原、失败不输出、映射不落盘）。
