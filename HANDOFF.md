@@ -471,5 +471,6 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 - **字幕跟随趣味风格**（`content/subtitles.js`）：`DT.send` 带上 `style: DT.state.style || 'plain'`；`track.style` 记住当前风格，`pump()` 发现风格变了就清空 `trans` / `failedAt` / `pending` 重新翻。请求途中风格又变了的话，回包按 `batchStyle` 丢弃，避免旧措辞写进新风格。缓存键本来带 style，互不串用
 - **句间空档不再闪没**：`render()` 先判 `state.orig`，没有内容就移除 `.rimefox-subs-on`（把原生字幕交还），不再“先藏原生再判空”；`tick()` 在 `unitAt` 返回 -1 时用 `DT.subs.shouldLinger(prev, ms, 1500)` 保留上一句最多 1.5s；`track` 为空时也 `render(null)`，避免留下旧的隐藏类
 - **当前句优先**：字幕批从 20 条 / 2000 字降到 8 条 / 1000 字，当前句的译文回来更快；`inflight` 仍是串行，不改后台并发
+- **猫娘提示词重写**（`lib/config.js`）：明确“不要每句句尾加喵”，混用自称「本喵 / 人家」、语气词与傲娇句式，每段「喵」最多 1–2 次；非中文目标用当地猫娘说法；信息不增不减。`test/prompt.test.mjs` 的猫娘用例加了对应断言
 - 自检 85 → 87：新增 `shouldLinger` 的保留 / 不保留两条（句末、超时、句末之前、没有上一句）
 

@@ -36,8 +36,13 @@ t('文言文：去掉「原样返回」，换成风格要求，并要求中文�
   assert.ok(p.includes('包括本来就是简体中文的文本'));
 });
 
-t('猫娘：同样有风格要求', () => {
-  assert.ok(systemPrompt('zh-CN', 'catgirl').includes('本喵'));
+t('猫娘：不是只加句尾喵，要求混用自称 / 语气词并限制频率', () => {
+  const p = systemPrompt('zh-CN', 'catgirl');
+  assert.ok(p.includes('本喵'));
+  assert.ok(p.includes('不要每句都加'));
+  assert.ok(p.includes('最多 1–2 次'));
+  assert.ok(p.includes('傲娇'));
+  assert.ok(p.includes('不增不减'));
 });
 
 t('风格模式仍保留防注入和 JSON 输出规则', () => {
