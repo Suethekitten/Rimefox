@@ -433,7 +433,8 @@ node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间�
 ## 11. 发版流程
 
 1. 改 `manifest.json` 的 `version`
-2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错）
+2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
+   取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
 4. 跑自检页：必须 **96 / 96**
 4b. 跑 Node 单测：`for f in test/*.test.mjs; do node $f; done`（应全绿）

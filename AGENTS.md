@@ -5,7 +5,7 @@
 ## 改代码
 
 - 改 `content/dom.js` 前后都要跑离线自检 `selftest/index.html`（必须全部通过）；改 `lib/` 跑 `test/*.test.mjs`
-- 版本号两处同步：`manifest.json` 的 `version` 和 `content/core.js` 的 `DT.VERSION`，CI 会校验
+- 版本号三处同步：`manifest.json` 的 `version`、`content/core.js` 的 `DT.VERSION`（这两处 CI 会校验）、`package.json` 的 `version`；怎么取号见下面「版本号规则」
 - 内容脚本用 ES5 风格；译文只用 `textContent` 写入，不用 `innerHTML`；其余约定见 HANDOFF「代码约定」
 - 提交用 GitHub 的 noreply 邮箱（`<ID>+<用户名>@users.noreply.github.com`），不要把个人邮箱写进提交记录
 
@@ -31,6 +31,17 @@
 大改动开分支，验证完再合回 main 推一次。
 推 main 且改了 `manifest.json` 会触发 Release，推送前确认版本号和 CHANGELOG 是最终版。
 不要用 `git push --mirror`（本地有 `refs/stash`），也不要在没有明确要求时 force push。
+
+## 版本号规则
+
+在用户明确提出发布 **1.0 正式版**之前，一律用 `0.x.y`，不要自己升到 `1.0.0`。
+
+- 新功能、较大改动：升中间位，末位归零（`0.7.0` → `0.8.0`）
+- 只修 bug、小调整：升末位（`0.7.0` → `0.7.1`）
+- 中间位不封顶：`0.9.x` 之后是 **`0.10.0`**、`0.11.0`、`0.12.0`……，不是 `1.0.0`
+  （Chrome 和语义化版本都按点分数字逐段比较，`0.10.0` 比 `0.9.9` 新，自动更新不受影响）
+- 之后可能用到的号码：`0.7.1`（0.7.0 的修复）→ `0.8.0` → `0.9.0` → `0.10.0` → `0.11.0` → …
+- `1.0.0` 只在用户要求时使用；到那时承诺配置结构稳定、迁移可回退
 
 ## 发版说明（CHANGELOG → Release 页面）
 
