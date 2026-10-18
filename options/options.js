@@ -13,10 +13,10 @@ import {
   pickImportedConfig,
   localIso,
   activeConfig,
-  ENGINE_DEFAULTS
+  slotFor
 } from '../lib/config.js';
 import { listModels, engineList } from '../lib/provider.js';
-import { PROVIDERS, CUSTOM_PROVIDER_ID, findProviderByBaseUrl, providerById } from '../lib/providers.js';
+import { PROVIDERS, CUSTOM_PROVIDER_ID, providerById } from '../lib/providers.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -27,8 +27,8 @@ const THINKING_MODES = [
   { value: 'custom', label: '自定义参数' }
 ];
 
-// 当前正在编辑的协议（每个协议各自保存地址 / Key / 模型）
-let currentEngine = 'openai';
+// 当前正在编辑的服务商（每个服务商各自保存地址 / Key / 模型）
+let currentProvider = 'deepseek';
 
 const fields = {
   engine: $('engine'),
@@ -172,7 +172,7 @@ const ENGINE_HINTS = {
 };
 
 function updateEngineHints() {
-  const hint = ENGINE_HINTS[currentEngine] || ENGINE_HINTS.openai;
+  const hint = ENGINE_HINTS[fields.engine.value] || ENGINE_HINTS.openai;
   $('baseUrlHint').textContent = hint.baseUrl;
   $('apiKeyHint').textContent = hint.key;
   fields.model.placeholder = hint.model;
@@ -183,12 +183,13 @@ function updateThinkingUI() {
 }
 
 function applyConfig(cfg) {
-  const active = activeConfig(cfg);
-  currentEngine = active.engine;
-  fields.engine.value = active.engine;
-  fields.baseUrl.value = active.baseUrl || '';
-  fields.apiKey.value = active.apiKey || '';
-  fields.model.value = active.model || '';
+  const slot = slotFor(cfg, cfg.currentProvider);
+  currentProvider = slot.provider;
+  providerSelect.value = slot.provider;
+  fields.engine.value = slot.engine;
+  fields.baseUrl.value = slot.baseUrl || '';
+  fields.apiKey.value = slot.apiKey || '';
+  fields.model.value = slot.model || '';
   fields.thinkingMode.value = cfg.thinkingMode || 'auto';
   fields.thinkingExtra.value = cfg.thinkingExtra || '';
 
@@ -211,18 +212,19 @@ function applyConfig(cfg) {
 
   updateEngineHints();
   updateThinkingUI();
-  syncProviderSelect();
+  updateKeyLink(providerById(slot.provider));
   updateModelHint();
 }
 
 function readForm() {
-  // 先把手上的编辑存回内存，避免切过协议后未保存的内容被丢掉
-  stashCurrentEngine();
+  // 先把手上的编辑存回内存，避免切过服务商后未保存的内容被丢掉
+  stashCurrentProvider();
 
-  const engineConfig = {};
-  Object.keys((currentCfg && currentCfg.engineConfig) || {}).forEach((id) => {
-    const one = currentCfg.engineConfig[id] || {};
-    engineConfig[id] = {
+  const providerConfig = {};
+  Object.keys((currentCfg && currentCfg.providerConfig) || {}).forEach((id) => {
+    const one = currentCfg.providerConfig[id] || {};
+    providerConfig[id] = {
+      engine: one.engine || 'openai',
       baseUrl: one.baseUrl || '',
       apiKey: one.apiKey || '',
       model: one.model || ''
@@ -230,8 +232,8 @@ function readForm() {
   });
 
   return {
-    engine: currentEngine,
-    engineConfig,
+    currentProvider,
+    providerConfig,
     thinkingMode: fields.thinkingMode.value,
     thinkingExtra: fields.thinkingExtra.value.trim(),
 
@@ -311,7 +313,7 @@ async function fetchModels(manual) {
   const seq = ++modelSeq;
   setResult(modelHint, '正在获取模型列表…');
   try {
-    const ids = (await listModels({ engine: currentEngine, baseUrl, apiKey })).filter((id) => !NON_CHAT.test(id)).sort();
+    const ids = (await listModels({ engine: fields.engine.value, baseUrl, apiKey })).filter((id) => !NON_CHAT.test(id)).sort();
     if (seq !== modelSeq) return; // 期间地址或 Key 又改了，以最新一次为准
     modelIds = ids;
     if (!picker.hidden) renderPicker();
@@ -467,56 +469,47 @@ function updateKeyLink(provider) {
   }
 }
 
-// 根据地址反查模板，让下拉跟着当前地址走
-function syncProviderSelect() {
-  const hit = findProviderByBaseUrl(fields.baseUrl.value);
-  providerSelect.value = hit ? hit.id : CUSTOM_PROVIDER_ID;
-  updateKeyLink(hit);
-}
-
-// 把当前表单存回内存中的配置（切协议时不丢未保存的编辑）
-function stashCurrentEngine() {
+// 把当前表单存回内存中的配置（切换服务商时不丢未保存的编辑）
+function stashCurrentProvider() {
   if (!currentCfg) return;
-  currentCfg.engineConfig = currentCfg.engineConfig || {};
-  currentCfg.engineConfig[currentEngine] = {
+  currentCfg.providerConfig = currentCfg.providerConfig || {};
+  currentCfg.providerConfig[currentProvider] = {
+    engine: fields.engine.value || 'openai',
     baseUrl: fields.baseUrl.value.trim(),
     apiKey: fields.apiKey.value.trim(),
     model: fields.model.value.trim()
   };
 }
 
-// 载入某个协议已保存的地址 / Key / 模型
-function loadEngine(id) {
-  const conf = (currentCfg && currentCfg.engineConfig && currentCfg.engineConfig[id]) || {
-    baseUrl: (ENGINE_DEFAULTS[id] || {}).baseUrl || '',
-    apiKey: '',
-    model: ''
-  };
-  currentEngine = id;
-  fields.engine.value = id;
-  fields.baseUrl.value = conf.baseUrl || '';
-  fields.apiKey.value = conf.apiKey || '';
-  fields.model.value = conf.model || '';
+// 载入某个服务商自己的地址 / Key / 模型（没保存过就用模板默认值）
+function loadProvider(id) {
+  const slot = slotFor(currentCfg || {}, id);
+  currentProvider = slot.provider;
+  providerSelect.value = slot.provider;
+  fields.engine.value = slot.engine;
+  fields.baseUrl.value = slot.baseUrl || '';
+  fields.apiKey.value = slot.apiKey || '';
+  fields.model.value = slot.model || '';
   modelIds = [];
   closePicker();
   updateEngineHints();
-  syncProviderSelect();
+  updateKeyLink(providerById(slot.provider));
   updateModelHint();
 }
 
+// 切换服务商：各用各的地址 / Key / 模型
 providerSelect.addEventListener('change', () => {
   const id = providerSelect.value;
-  stashCurrentEngine();
+  if (!id) return;
+
+  stashCurrentProvider(); // 先把上一个服务商的编辑存住
+  loadProvider(id);
+  setResult($('testResult'), '');
 
   if (id === CUSTOM_PROVIDER_ID) {
-    // 自定义/第三方兼容接口默认按 OpenAI 通用协议处理；
-    // 如果对方是 Anthropic 格式，用户仍可以在「接口协议」里改
-    if (currentEngine !== 'openai') loadEngine('openai');
-    fields.baseUrl.value = '';
-    fields.model.value = '';
-    modelIds = [];
-    closePicker();
-    updateKeyLink(null);
+    // 自定义/第三方兼容接口默认按 OpenAI 通用协议处理（槽位默认值）；
+    // 已保存过的自定义配置会原样恢复，对方是 Anthropic 格式时可在「接口协议」里改
+    updateEngineHints();
     setResult(
       modelHint,
       '自定义：填第三方兼容接口或自建网关的地址，默认按 OpenAI 通用协议处理；没有模型列表时直接手填模型名。'
@@ -526,43 +519,25 @@ providerSelect.addEventListener('change', () => {
 
   const provider = providerById(id);
   if (!provider) return;
-
-  // 模板只负责填地址和协议；Key 用该协议自己保存的那份
-  if (provider.engine !== currentEngine) loadEngine(provider.engine);
-  fields.baseUrl.value = provider.baseUrl;
   fields.model.value = '';
-  modelIds = [];
-  closePicker();
-  updateKeyLink(provider);
-  setResult($('testResult'), '');
   setResult(modelHint, '已套用「' + provider.name + '」的地址，模型请点「获取模型列表」后选一个。');
   if (fields.apiKey.value) fetchModels();
 });
 
-// 切换协议：换成该协议单独保存的地址 / Key / 模型
+// 改协议：只改当前服务商使用的协议，地址 / Key / 模型保留
 fields.engine.addEventListener('change', () => {
   const target = fields.engine.value;
-  if (!target || target === currentEngine) return;
-
-  stashCurrentEngine();
-  loadEngine(target);
-  setResult($('testResult'), ''); // 上一个协议的测试结果不能留在这里
-
+  if (!target) return;
+  stashCurrentProvider();
+  setResult($('testResult'), '');
   const label = (engineList().find((e) => e.id === target) || {}).label || target;
-  setResult(modelHint, '已切换到「' + label + '」，填好 Key 后会拉取该协议的模型列表。');
-
+  setResult(modelHint, '协议已切换为「' + label + '」，地址和模型请确认后保存。');
+  updateEngineHints();
   if (fields.baseUrl.value && fields.apiKey.value) fetchModels();
 });
 
 fields.thinkingMode.addEventListener('change', updateThinkingUI);
-
-// 手动改地址时，让提供商下拉跟着变（反查模板）+ 防抖拉模型
-let providerSyncTimer = 0;
-fields.baseUrl.addEventListener('input', () => {
-  clearTimeout(providerSyncTimer);
-  providerSyncTimer = setTimeout(syncProviderSelect, 300);
-  scheduleModelFetch();
-});
+fields.baseUrl.addEventListener('input', scheduleModelFetch);
 fields.apiKey.addEventListener('input', scheduleModelFetch);
 $('refreshModels').addEventListener('click', () => fetchModels(true));
 
@@ -641,12 +616,12 @@ $('clearCache').addEventListener('click', async () => {
 // 解析与校验在 lib/config.js 的 pickImportedConfig 里（纯函数，可被 node 直接测试）。
 function buildExport(includeKey) {
   const cfg = { ...currentCfg };
-  // Key 藏在每个引擎的配置里：导出时逐个处理
-  cfg.engineConfig = {};
-  Object.keys(currentCfg.engineConfig || {}).forEach((id) => {
-    const one = { ...(currentCfg.engineConfig[id] || {}) };
+  // Key 藏在每个服务商的配置里：导出时逐个处理
+  cfg.providerConfig = {};
+  Object.keys(currentCfg.providerConfig || {}).forEach((id) => {
+    const one = { ...(currentCfg.providerConfig[id] || {}) };
     if (!includeKey) delete one.apiKey;
-    cfg.engineConfig[id] = one;
+    cfg.providerConfig[id] = one;
   });
   return {
     app: IMPORT_APP,
@@ -713,8 +688,8 @@ $('importFile').addEventListener('change', async (event) => {
     if (parsed.rejected.length) {
       msg += '；' + parsed.rejected.length + ' 项取值不合法已忽略（' + parsed.rejected.join('、') + '）';
     }
-    const importedKey = Object.keys(patch.engineConfig || {}).some(
-      (id) => patch.engineConfig[id] && patch.engineConfig[id].apiKey
+    const importedKey = Object.keys(patch.providerConfig || {}).some(
+      (id) => patch.providerConfig[id] && patch.providerConfig[id].apiKey
     );
     if (!importedKey) msg += '（文件里没有 API Key，请手动填）';
     setResult($('cfgResult'), msg, parsed.rejected.length ? 'bad' : 'ok');

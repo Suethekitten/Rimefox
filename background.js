@@ -282,14 +282,14 @@ const ROUTES = {
   // 内容脚本跑在网页的渲染进程里，渲染进程一旦被攻破，它手里的东西都可能被读走。
   'config:get': async () => {
     const cfg = await getConfig();
-    // 嵌套的 engineConfig 里也有 Key：逐个剥掉，只留地址和模型
-    const engineConfig = {};
-    Object.keys(cfg.engineConfig || {}).forEach((id) => {
-      const one = cfg.engineConfig[id] || {};
-      engineConfig[id] = { baseUrl: one.baseUrl, model: one.model };
+    // 嵌套的 providerConfig 里也有 Key：逐个剥掉，只留协议、地址和模型
+    const providerConfig = {};
+    Object.keys(cfg.providerConfig || {}).forEach((id) => {
+      const one = cfg.providerConfig[id] || {};
+      providerConfig[id] = { engine: one.engine, baseUrl: one.baseUrl, model: one.model };
     });
-    const { engineConfig: _omit, ...rest } = cfg;
-    return { ok: true, config: { ...rest, engineConfig, hasKey: !!activeConfig(cfg).apiKey } };
+    const { providerConfig: _omit, ...rest } = cfg;
+    return { ok: true, config: { ...rest, providerConfig, hasKey: !!activeConfig(cfg).apiKey } };
   },
   'stats': async () => ({ ok: true, cacheSize: cache.size() }),
   // 标签页级"翻译中"记忆：返回/刷新后自动恢复翻译（同一站点才恢复）

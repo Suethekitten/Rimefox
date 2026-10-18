@@ -1,4 +1,4 @@
-// 配置层单测：v3→v4 迁移、引擎取值、深合并、导入校验。
+// 配置层单测：v4→v5 迁移、按服务商的 Key 隔离、深合并、导入校验。
 // 运行：node test/config.test.mjs
 import assert from 'node:assert/strict';
 
@@ -9,6 +9,7 @@ import {
   migrateConfig,
   mergeConfig,
   activeConfig,
+  slotFor,
   pickImportedConfig
 } from '../lib/config.js';
 
@@ -27,115 +28,129 @@ function t(name, fn) {
 }
 
 // ---------------- 迁移 ----------------
-console.log('\n[迁移 v3 → v4]');
+console.log('\n[迁移 v4 → v5：按协议 → 按服务商]');
 
-const legacyV3 = {
-  baseUrl: 'https://api.deepseek.com/v1',
-  apiKey: 'sk-old',
-  model: 'deepseek-chat',
-  batchSize: 8,
-  concurrency: 6,
+const v4Openai = {
+  _v: 4,
+  engine: 'openai',
+  engineConfig: {
+    openai: { baseUrl: 'https://api.siliconflow.cn/v1', apiKey: 'sk-sf', model: 'Qwen/Qwen2.5-7B' },
+    anthropic: { baseUrl: 'https://api.anthropic.com/v1', apiKey: 'sk-ant', model: 'claude' },
+    gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiKey: '', model: '' }
+  },
   targetLang: 'ja',
   theme: 'mask',
-  hotkey: 'alt+q',
-  _v: 3
+  _v: 4
 };
 
-t('扁平的地址/Key/模型 归到 openai 名下', () => {
-  const next = migrateConfig(legacyV3);
-  assert.equal(next.engineConfig.openai.baseUrl, 'https://api.deepseek.com/v1');
-  assert.equal(next.engineConfig.openai.apiKey, 'sk-old');
-  assert.equal(next.engineConfig.openai.model, 'deepseek-chat');
+t('OpenAI 槽里的地址能识别成对应服务商', () => {
+  const next = migrateConfig(v4Openai);
+  assert.equal(next.providerConfig.siliconflow.apiKey, 'sk-sf');
+  assert.equal(next.providerConfig.siliconflow.engine, 'openai');
 });
 
-t('顶层不再保留 baseUrl / apiKey / model', () => {
-  const next = migrateConfig(legacyV3);
-  assert.equal(next.baseUrl, undefined);
-  assert.equal(next.apiKey, undefined);
-  assert.equal(next.model, undefined);
+t('Anthropic 槽迁到 anthropic 服务商', () => {
+  const next = migrateConfig(v4Openai);
+  assert.equal(next.providerConfig.anthropic.apiKey, 'sk-ant');
+  assert.equal(next.providerConfig.anthropic.engine, 'anthropic');
+});
+
+t('当前服务商跟原来的 engine 走', () => {
+  assert.equal(migrateConfig(v4Openai).currentProvider, 'siliconflow');
+  assert.equal(migrateConfig({ ...v4Openai, engine: 'anthropic' }).currentProvider, 'anthropic');
+});
+
+t('旧结构字段被清掉', () => {
+  const next = migrateConfig(v4Openai);
+  assert.equal(next.engineConfig, undefined);
+  assert.equal(next.engine, undefined);
+  assert.equal(next._v, CONFIG_VERSION);
+  assert.equal(CONFIG_VERSION, 5);
 });
 
 t('行为项原样保留', () => {
-  const next = migrateConfig(legacyV3);
+  const next = migrateConfig(v4Openai);
   assert.equal(next.targetLang, 'ja');
   assert.equal(next.theme, 'mask');
-  assert.equal(next.hotkey, 'alt+q');
-  assert.equal(next.batchSize, 8);
 });
 
-t('版本号升到当前版本', () => {
-  const next = migrateConfig(legacyV3);
-  assert.equal(next._v, CONFIG_VERSION);
-  assert.equal(CONFIG_VERSION, 4);
+t('认不出的地址落到「自定义」', () => {
+  const next = migrateConfig({
+    _v: 4,
+    engineConfig: { openai: { baseUrl: 'https://example.com/v1', apiKey: 'sk-x', model: 'm' } }
+  });
+  assert.equal(next.providerConfig.__custom__.apiKey, 'sk-x');
 });
 
-t('engine 默认 openai', () => {
-  assert.equal(migrateConfig(legacyV3).engine, 'openai');
-});
-
-t('其它引擎填默认地址、空 Key', () => {
-  const next = migrateConfig(legacyV3);
-  assert.equal(next.engineConfig.anthropic.baseUrl, ENGINE_DEFAULTS.anthropic.baseUrl);
-  assert.equal(next.engineConfig.anthropic.apiKey, '');
-  assert.equal(next.engineConfig.gemini.baseUrl, ENGINE_DEFAULTS.gemini.baseUrl);
+t('v3 扁平字段迁到对应服务商', () => {
+  const next = migrateConfig({ _v: 3, baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-ds', model: 'deepseek-chat' });
+  assert.equal(next.providerConfig.deepseek.apiKey, 'sk-ds');
+  assert.equal(next.currentProvider, 'deepseek');
 });
 
 t('v3 以下会纠偏并发/批量', () => {
-  const next = migrateConfig({ baseUrl: 'u', apiKey: 'k', model: 'm', batchSize: 1, concurrency: 2, _v: 1 });
+  const next = migrateConfig({ _v: 1, baseUrl: 'https://api.deepseek.com/v1', apiKey: 'k', model: 'm', batchSize: 1, concurrency: 2 });
   assert.equal(next.batchSize, DEFAULTS.batchSize);
   assert.equal(next.concurrency, DEFAULTS.concurrency);
 });
 
-t('迁移是幂等的（再迁移一次不变）', () => {
-  const once = migrateConfig(legacyV3);
+t('迁移是幂等的', () => {
+  const once = migrateConfig(v4Openai);
   const twice = migrateConfig(once);
-  assert.deepEqual(twice.engineConfig, once.engineConfig);
-  assert.equal(twice._v, once._v);
+  assert.deepEqual(twice.providerConfig, once.providerConfig);
 });
 
-// ---------------- 取当前引擎 ----------------
-console.log('\n[activeConfig]');
+// ---------------- 按服务商隔离（本次修复的核心） ----------------
+console.log('\n[同一协议下的 Key 隔离]');
 
-t('默认取 openai', () => {
-  const active = activeConfig({ engineConfig: { openai: { baseUrl: 'u1', apiKey: 'k1', model: 'm1' } } });
-  assert.equal(active.engine, 'openai');
-  assert.equal(active.apiKey, 'k1');
+const twoProviders = {
+  currentProvider: 'deepseek',
+  providerConfig: {
+    deepseek: { engine: 'openai', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-deepseek', model: 'deepseek-chat' },
+    siliconflow: { engine: 'openai', baseUrl: 'https://api.siliconflow.cn/v1', apiKey: 'sk-sf', model: 'qwen' }
+  }
+};
+
+t('两个 OpenAI 协议的服务商各记各的 Key', () => {
+  assert.equal(slotFor(twoProviders, 'deepseek').apiKey, 'sk-deepseek');
+  assert.equal(slotFor(twoProviders, 'siliconflow').apiKey, 'sk-sf');
 });
 
-t('切到 anthropic 取它自己的配置', () => {
-  const active = activeConfig({
-    engine: 'anthropic',
-    engineConfig: {
-      openai: { baseUrl: 'u1', apiKey: 'k1', model: 'm1' },
-      anthropic: { baseUrl: 'u2', apiKey: 'k2', model: 'm2' }
-    }
-  });
-  assert.equal(active.engine, 'anthropic');
-  assert.equal(active.baseUrl, 'u2');
-  assert.equal(active.apiKey, 'k2');
+t('切到硅基流动不会影响 DeepSeek', () => {
+  const switched = { ...twoProviders, currentProvider: 'siliconflow' };
+  assert.equal(activeConfig(switched).apiKey, 'sk-sf');
+  assert.equal(slotFor(switched, 'deepseek').apiKey, 'sk-deepseek');
 });
 
-t('未知引擎回退 openai', () => {
-  assert.equal(activeConfig({ engine: 'nope' }).engine, 'openai');
+t('没配置过的服务商用模板默认地址、空 Key', () => {
+  const slot = slotFor({}, 'deepseek');
+  assert.equal(slot.baseUrl, 'https://api.deepseek.com/v1');
+  assert.equal(slot.engine, 'openai');
+  assert.equal(slot.apiKey, '');
+});
+
+t('自定义服务商默认 OpenAI 协议、地址为空', () => {
+  const slot = slotFor({}, '__custom__');
+  assert.equal(slot.engine, 'openai');
+  assert.equal(slot.baseUrl, '');
+});
+
+t('未知服务商回退到默认', () => {
+  assert.equal(slotFor({}, 'nope').provider, DEFAULTS.currentProvider);
 });
 
 // ---------------- 深合并 ----------------
 console.log('\n[mergeConfig]');
 
-t('只改 anthropic 不影响 openai', () => {
-  const base = {
-    engine: 'openai',
-    engineConfig: { openai: { baseUrl: 'u1', apiKey: 'k1', model: 'm1' } }
-  };
-  const next = mergeConfig(base, { engineConfig: { anthropic: { apiKey: 'k2' } } });
-  assert.equal(next.engineConfig.openai.apiKey, 'k1');
-  assert.equal(next.engineConfig.anthropic.apiKey, 'k2');
-  assert.equal(next.engineConfig.anthropic.baseUrl, ENGINE_DEFAULTS.anthropic.baseUrl);
+t('只改 siliconflow 不影响 deepseek', () => {
+  const next = mergeConfig(twoProviders, { providerConfig: { siliconflow: { apiKey: 'sk-new' } } });
+  assert.equal(next.providerConfig.deepseek.apiKey, 'sk-deepseek');
+  assert.equal(next.providerConfig.siliconflow.apiKey, 'sk-new');
+  assert.equal(next.providerConfig.siliconflow.baseUrl, 'https://api.siliconflow.cn/v1');
 });
 
 t('标量字段直接覆盖', () => {
-  const next = mergeConfig({ targetLang: 'zh-CN' }, { targetLang: 'ja' });
-  assert.equal(next.targetLang, 'ja');
+  assert.equal(mergeConfig({ targetLang: 'zh-CN' }, { targetLang: 'ja' }).targetLang, 'ja');
 });
 
 // ---------------- 导入校验 ----------------
@@ -145,57 +160,66 @@ function envelope(config) {
   return { app: 'rimefox', schema: 1, config };
 }
 
-t('接受新的嵌套结构', () => {
+t('接受新的按服务商结构', () => {
   const { config } = pickImportedConfig(
     envelope({
-      engine: 'gemini',
-      engineConfig: { gemini: { baseUrl: 'https://g/v1beta', apiKey: 'gk', model: 'gemini-x' } },
+      currentProvider: 'siliconflow',
+      providerConfig: {
+        siliconflow: { engine: 'openai', baseUrl: 'https://api.siliconflow.cn/v1', apiKey: 'sk-sf', model: 'qwen' }
+      },
       targetLang: 'en',
       theme: 'dashed',
       batchSize: 8
     })
   );
-  assert.equal(config.engine, 'gemini');
-  assert.equal(config.engineConfig.gemini.apiKey, 'gk');
+  assert.equal(config.currentProvider, 'siliconflow');
+  assert.equal(config.providerConfig.siliconflow.apiKey, 'sk-sf');
 });
 
-t('旧扁平结构仍可导入（归到 openai）', () => {
+t('兼容 v4 导入文件（engine + engineConfig）', () => {
   const { config } = pickImportedConfig(
     envelope({
-      baseUrl: 'https://api.deepseek.com/v1',
-      apiKey: 'sk',
-      model: 'deepseek-chat',
+      engine: 'openai',
+      engineConfig: { openai: { baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-ds', model: 'deepseek-chat' } },
       targetLang: 'zh-CN',
       theme: 'underline',
       batchSize: 8
     })
   );
-  // 旧的扁平字段不属于 DEFAULTS 里要处理的键，会被忽略；但其余设置能进来
-  assert.equal(config.targetLang, 'zh-CN');
-  assert.equal(config.batchSize, 8);
+  assert.equal(config.providerConfig.deepseek.apiKey, 'sk-ds');
+  assert.equal(config.currentProvider, 'deepseek');
 });
 
-t('未知引擎被拒绝并记入 rejected', () => {
+t('旧扁平结构仍可导入', () => {
+  const { config } = pickImportedConfig(
+    envelope({
+      baseUrl: 'https://api.siliconflow.cn/v1',
+      apiKey: 'sk-sf',
+      model: 'qwen',
+      targetLang: 'zh-CN',
+      theme: 'underline',
+      batchSize: 8
+    })
+  );
+  assert.equal(config.providerConfig.siliconflow.apiKey, 'sk-sf');
+});
+
+t('未知服务商被拒绝并记入 rejected', () => {
   const { rejected } = pickImportedConfig(
     envelope({
-      engine: 'skynet',
+      currentProvider: 'skynet',
       targetLang: 'zh-CN',
       theme: 'underline',
       batchSize: 8,
       concurrency: 6
     })
   );
-  assert.ok(rejected.indexOf('engine') >= 0);
+  assert.ok(rejected.indexOf('currentProvider') >= 0);
 });
 
 t('错误的 thinkingMode 被拒绝', () => {
   const { rejected } = pickImportedConfig(
-    envelope({
-      thinkingMode: 'sometimes',
-      targetLang: 'zh-CN',
-      theme: 'underline',
-      batchSize: 8
-    })
+    envelope({ thinkingMode: 'sometimes', targetLang: 'zh-CN', theme: 'underline', batchSize: 8 })
   );
   assert.ok(rejected.indexOf('thinkingMode') >= 0);
 });
