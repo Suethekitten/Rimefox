@@ -9,7 +9,8 @@ import {
   browserShortcut,
   STYLES
 } from '../lib/config.js';
-import { applyI18n, translateText } from '../lib/i18n.js';
+import { providerById } from '../lib/providers.js';
+import { applyI18n, t } from '../lib/i18n.js';
 
 const el = {
   ver: document.getElementById('ver'),
@@ -18,6 +19,7 @@ const el = {
   styleSeg: document.getElementById('styleSeg'),
   target: document.getElementById('target'),
   stat: document.getElementById('stat'),
+  meta: document.getElementById('meta'),
   statusBox: document.getElementById('statusBox'),
   progress: document.getElementById('progress'),
   progressBar: document.getElementById('progressBar'),
@@ -45,7 +47,7 @@ let status = { enabled: false, mode: 'dual', target: 'zh-CN', total: 0, translat
 function sendToTab(msg) {
   return new Promise((resolve, reject) => {
     if (tabId == null) {
-      reject(new Error('没有可用标签页'));
+      reject(new Error(t('没有可用标签页')));
       return;
     }
     // 只发主框架：页面里的 iframe（Twitter 挂件、广告位）也跑着内容脚本，
@@ -94,22 +96,26 @@ function render() {
     const injectable = /^(https?|file):/i.test(url);
     if (/\.pdf($|[?#])/i.test(url)) {
       // 浏览器自带的 PDF 阅读器里不能注入脚本，刷新也没用
-      el.toggle.textContent = 'PDF 暂不支持';
-      el.stat.textContent = '这是浏览器自带的 PDF 阅读器，扩展无法在里面翻译。';
+      el.toggle.textContent = t('PDF 暂不支持');
+      el.stat.textContent = t('这是浏览器自带的 PDF 阅读器，扩展无法在里面翻译。');
     } else if (/^file:/i.test(url)) {
       // Chrome / Edge 默认不让扩展碰本地文件，要用户手动开开关
-      el.toggle.textContent = '本地文件需要授权';
-      el.stat.textContent =
+      el.toggle.textContent = t('本地文件需要授权');
+      el.stat.textContent = t(
         '打开 ' + EXTENSIONS_PAGE + ' → 本扩展的「详细信息」→ 开启「' + FILE_ACCESS_LABEL + '」，然后按 ' +
-        KEYS.reload + ' 刷新这个页面。';
+          KEYS.reload + ' 刷新这个页面。'
+      );
     } else if (injectable) {
-      el.toggle.textContent = '无法连接页面脚本';
-      el.stat.textContent =
+      el.toggle.textContent = t('无法连接页面脚本');
+      el.stat.textContent = t(
         '自动补注入失败。请在网页上按 ' + KEYS.reload + ' 刷新后重新打开本面板；仍然失败请按 ' +
-        KEYS.console + ' 打开控制台看红色报错。';
+          KEYS.console + ' 打开控制台看红色报错。'
+      );
     } else {
-      el.toggle.textContent = '当前页面不支持';
-      el.stat.textContent = '浏览器内置页、扩展商店页、扩展自身页面无法注入脚本。请切换到普通网页（http/https）。';
+      el.toggle.textContent = t('当前页面不支持');
+      el.stat.textContent = t(
+        '浏览器内置页、扩展商店页、扩展自身页面无法注入脚本。请切换到普通网页（http/https）。'
+      );
     }
     el.modeSeg.querySelectorAll('button').forEach((b) => (b.disabled = true));
     el.styleSeg.querySelectorAll('button').forEach((b) => (b.disabled = true));
@@ -119,11 +125,9 @@ function render() {
 
   el.toggle.disabled = false;
   el.toggle.classList.toggle('on', !!status.enabled);
-  el.toggle.textContent = status.busy
-    ? '翻译中…（点此停止）'
-    : status.enabled
-    ? '还原原文'
-    : '翻译此页';
+  el.toggle.textContent = t(
+    status.busy ? '翻译中…（点此停止）' : status.enabled ? '还原原文' : '翻译此页'
+  );
 
   el.modeSeg.querySelectorAll('button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.mode === status.mode);
@@ -135,26 +139,45 @@ function render() {
 
   if (!status.enabled) {
     if (shortcut === '') {
-      el.stat.textContent =
-        '未开启。浏览器快捷键没有设置成功（' + hotkeyLabel('alt+a') + ' 可能被其它扩展占用），可在「设置」里重新设置。';
+      el.stat.textContent = t(
+        '未开启。浏览器快捷键没有设置成功（' + hotkeyLabel('alt+a') + ' 可能被其它扩展占用），可在「设置」里重新设置。'
+      );
     } else {
-      el.stat.textContent = '未开启。按 ' + (shortcut || hotkeyLabel(currentCfg.hotkey)) + ' 可直接翻译。';
+      el.stat.textContent = t('未开启。按 ' + (shortcut || hotkeyLabel(currentCfg.hotkey)) + ' 可直接翻译。');
     }
   } else if (status.busy) {
     var total = status.total || '?';
     var pct = status.total ? Math.round((status.translated / status.total) * 100) : 0;
-    el.stat.textContent =
-      '翻译中… 已译 ' + status.translated + ' / ' + total + ' 段' + (status.total ? '（' + pct + '%）' : '');
+    el.stat.textContent = t(
+      '翻译中… 已译 ' + status.translated + ' / ' + total + ' 段' + (status.total ? '（' + pct + '%）' : '')
+    );
   } else {
-    const parts = ['已译 ' + status.translated + ' 段'];
-    if (status.skipped) parts.push('与原文相同 ' + status.skipped + ' 段');
-    if (status.failed) parts.push('失败 ' + status.failed + ' 段');
-    if (status.total) parts.push('共 ' + status.total + ' 段');
+    const parts = [t('已译 ' + status.translated + ' 段')];
+    if (status.skipped) parts.push(t('与原文相同 ' + status.skipped + ' 段'));
+    if (status.failed) parts.push(t('失败 ' + status.failed + ' 段'));
+    if (status.total) parts.push(t('共 ' + status.total + ' 段'));
     el.stat.textContent = parts.join(' · ');
     if (status.failed && status.lastError) {
-      el.stat.textContent += '\n失败原因：' + status.lastError;
+      el.stat.textContent += '\n' + t('失败原因：') + status.lastError;
     }
   }
+}
+
+// 当前服务商 + 模型：放在状态卡底部，省得为了确认"在用谁"再进设置
+function providerName(cfg) {
+  const id = cfg.currentProvider || 'deepseek';
+  const custom = (cfg.customProviders || []).find((one) => one.id === id);
+  if (custom && custom.name) return custom.name;
+  const tpl = providerById(id);
+  return (tpl && tpl.name) || id;
+}
+
+function renderMeta() {
+  const id = currentCfg.currentProvider || 'deepseek';
+  const model = ((currentCfg.providerConfig || {})[id] || {}).model || '';
+  const name = providerName(currentCfg);
+  el.meta.textContent = model ? name + ' · ' + model : name;
+  el.meta.title = t('当前服务商和模型');
 }
 
 // 轮询：翻译过程中实时刷新进度（内容脚本每插一段就更新计数）
@@ -184,7 +207,7 @@ function startPolling() {
       pollFailures += 1;
       if (pollFailures >= 4) {
         stopPolling();
-        el.stat.textContent = '状态同步失败（页面可能正在切换）。重新打开本面板即可。';
+        el.stat.textContent = t('状态同步失败（页面可能正在切换）。重新打开本面板即可。');
       }
     }
   }, 400);
@@ -249,8 +272,7 @@ function effectiveUiTheme() {
 function renderThemeToggle() {
   const next = effectiveUiTheme() === 'dark' ? 'light' : 'dark';
   el.themeToggle.dataset.next = next;
-  const zh = next === 'dark' ? '切换到深色' : '切换到浅色';
-  const label = currentCfg.uiLang === 'en' ? translateText(zh) : zh;
+  const label = t(next === 'dark' ? '切换到深色' : '切换到浅色');
   el.themeToggle.title = label;
   el.themeToggle.setAttribute('aria-label', label);
 }
@@ -295,7 +317,7 @@ async function init() {
     el.styleSeg.appendChild(btn);
   });
   // Mac 上是 ⌘+Enter（keydown 里本来就同时认 Ctrl 和 ⌘）
-  el.quickInput.placeholder = '粘贴 / 输入要翻译的文字…（' + KEYS.submit + ' 翻译）';
+  el.quickInput.placeholder = t('粘贴 / 输入要翻译的文字…（' + KEYS.submit + ' 翻译）');
 
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -311,18 +333,21 @@ async function init() {
   if (status.target) el.target.value = status.target;
   if (status.busy) startPolling();
   applyI18n(document, cfg.uiLang);
+  // 状态文案是在切语言之前拼的，重画一遍才会按新语言走
+  render();
+  renderMeta();
   renderThemeToggle();
 }
 
 el.toggle.addEventListener('click', async () => {
   el.toggle.disabled = true;
   // 先给即时反馈，再等后台真正开始
-  el.stat.textContent = status.enabled ? '正在还原…' : '正在开始翻译…';
+  el.stat.textContent = t(status.enabled ? '正在还原…' : '正在开始翻译…');
   try {
     status = await sendToTab({ type: 'dt:toggle' });
     supported = true;
   } catch (err) {
-    el.stat.textContent = '操作失败：' + err.message;
+    el.stat.textContent = t('操作失败：') + err.message;
   }
   el.toggle.disabled = false;
   render();
@@ -338,7 +363,7 @@ el.modeSeg.addEventListener('click', async (event) => {
     stopPolling();
     await saveConfig({ mode });
   } catch (err) {
-    el.stat.textContent = '切换失败：' + err.message;
+    el.stat.textContent = t('切换失败：') + err.message;
   }
   render();
   if (status && status.busy) startPolling();
@@ -352,7 +377,7 @@ el.styleSeg.addEventListener('click', async (event) => {
     status = await sendToTab({ type: 'dt:setStyle', style: btn.dataset.style });
     stopPolling();
   } catch (err) {
-    el.stat.textContent = '切换失败：' + err.message;
+    el.stat.textContent = t('切换失败：') + err.message;
   }
   render();
   if (status && status.busy) startPolling();
@@ -365,7 +390,7 @@ el.target.addEventListener('change', async () => {
     status = await sendToTab({ type: 'dt:setTarget', target });
     stopPolling();
   } catch (err) {
-    el.stat.textContent = '切换失败：' + err.message;
+    el.stat.textContent = t('切换失败：') + err.message;
   }
   render();
   if (status && status.busy) startPolling();
@@ -376,7 +401,7 @@ el.retranslate.addEventListener('click', async () => {
     status = await sendToTab({ type: 'dt:retranslate' });
     stopPolling();
   } catch (err) {
-    el.stat.textContent = '操作失败：' + err.message;
+    el.stat.textContent = t('操作失败：') + err.message;
   }
   render();
   if (status && status.busy) startPolling();
@@ -384,11 +409,11 @@ el.retranslate.addEventListener('click', async () => {
 
 el.clearCache.addEventListener('click', async () => {
   await sendToBg({ type: 'cache:clear' }).catch(() => {});
-  el.stat.textContent = '缓存已清空，下次翻译会重新请求。';
+  el.stat.textContent = t('缓存已清空，下次翻译会重新请求。');
 });
 
 el.diagnose.addEventListener('click', async () => {
-  el.stat.textContent = '正在生成诊断信息…';
+  el.stat.textContent = t('正在生成诊断信息…');
   try {
     const report = await sendToTab({ type: 'dt:diagnose' });
     const text = JSON.stringify(report, null, 1);
@@ -401,11 +426,15 @@ el.diagnose.addEventListener('click', async () => {
     }
     const s = report && report.summary ? report.summary : { units: 0, skipped: 0 };
     el.stat.textContent =
-      (copied ? '诊断信息已复制到剪贴板，直接粘贴给我。' : '复制失败：在网页上按 ' + KEYS.console + ' 打开控制台，把左上角的「top」切换成本扩展，再执行 copy(JSON.stringify(__DT_LAST_DIAG)) 然后粘贴给我。') +
-      '\n翻译单元 ' + s.units + ' 个 · 被跳过 ' + s.skipped + ' 个' +
-      '\n其中：文本过短 ' + s.wouldSkipByText + ' 个 · 判定为目标语言 ' + s.wouldSkipByLang + ' 个';
+      t(
+        copied
+          ? '诊断信息已复制到剪贴板，直接粘贴给我。'
+          : '复制失败：在网页上按 ' + KEYS.console + ' 打开控制台，把左上角的「top」切换成本扩展，再执行 copy(JSON.stringify(__DT_LAST_DIAG)) 然后粘贴给我。'
+      ) +
+      t('\n翻译单元 ' + s.units + ' 个 · 被跳过 ' + s.skipped + ' 个') +
+      t('\n其中：文本过短 ' + s.wouldSkipByText + ' 个 · 判定为目标语言 ' + s.wouldSkipByLang + ' 个');
   } catch (err) {
-    el.stat.textContent = '诊断失败：' + err.message;
+    el.stat.textContent = t('诊断失败：') + err.message;
   }
 });
 
@@ -418,7 +447,7 @@ async function runQuickTranslate() {
   }
 
   el.quickGo.disabled = true;
-  el.quickGo.textContent = '翻译中…';
+  el.quickGo.textContent = t('翻译中…');
   el.quickOut.hidden = false;
   el.quickOut.textContent = '……';
 
@@ -431,14 +460,14 @@ async function runQuickTranslate() {
     if (res && res.ok && res.results && typeof res.results[0] === 'string' && res.results[0]) {
       el.quickOut.textContent = res.results[0];
     } else {
-      el.quickOut.textContent = '翻译失败：' + ((res && res.error) || '未知错误');
+      el.quickOut.textContent = t('翻译失败：') + ((res && res.error) || t('未知错误'));
     }
   } catch (err) {
-    el.quickOut.textContent = '翻译失败：' + err.message;
+    el.quickOut.textContent = t('翻译失败：') + err.message;
   }
 
   el.quickGo.disabled = false;
-  el.quickGo.textContent = '翻译';
+  el.quickGo.textContent = t('开始翻译');
 }
 
 el.quickGo.addEventListener('click', runQuickTranslate);
@@ -455,12 +484,12 @@ el.quickCopy.addEventListener('click', async () => {
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
-    el.quickCopy.textContent = '已复制';
+    el.quickCopy.textContent = t('已复制');
     setTimeout(() => {
-      el.quickCopy.textContent = '复制结果';
+      el.quickCopy.textContent = t('复制结果');
     }, 1200);
   } catch (err) {
-    el.quickOut.textContent = '复制失败，请手动选中复制。';
+    el.quickOut.textContent = t('复制失败，请手动选中复制。');
   }
 });
 

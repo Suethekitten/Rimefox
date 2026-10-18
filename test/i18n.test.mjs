@@ -2,7 +2,7 @@
 // 运行：node test/i18n.test.mjs
 import assert from 'node:assert/strict';
 
-import { translateText, UI_LANGS } from '../lib/i18n.js';
+import { translateText, t as translateFor, applyI18n, UI_LANGS } from '../lib/i18n.js';
 
 let pass = 0;
 let fail = 0;
@@ -37,6 +37,11 @@ t('translateText：动态状态文案按模式翻译', () => {
     'Imported 109 term(s) (109 new); click Save to apply'
   );
   assert.equal(translateText('切换失败：network error'), 'Switch failed: network error');
+  assert.equal(translateText('未开启。按 Alt + A 可直接翻译。'), 'Off. Press Alt + A to translate the page.');
+  assert.equal(translateText('翻译中… 已译 42 / 118 段（36%）'), 'Translating… 42 / 118 paragraphs (36%)');
+  assert.equal(translateText('已译 42 段'), '42 paragraphs translated');
+  assert.equal(translateText('失败原因：'), 'Last error: ');
+  assert.equal(translateText('开始翻译'), 'Translate');
 });
 
 t('核心入口文案已覆盖', () => {
@@ -62,6 +67,15 @@ t('弹窗主题切换文案已覆盖', () => {
   ['切换到深色', '切换到浅色'].forEach((key) => {
     assert.notEqual(translateText(key), key, key + ' 没有英文');
   });
+});
+
+t('t()：按当前界面语言输出', () => {
+  assert.equal(translateFor('开始翻译'), '开始翻译');
+  applyI18n(null, 'en');
+  assert.equal(translateFor('开始翻译'), 'Translate');
+  assert.equal(translateFor('未开启。按 Alt + A 可直接翻译。'), 'Off. Press Alt + A to translate the page.');
+  applyI18n(null, 'zh');
+  assert.equal(translateFor('开始翻译'), '开始翻译');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
