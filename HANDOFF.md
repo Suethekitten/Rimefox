@@ -527,16 +527,15 @@ node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间�
 
 ---
 
-## 14. 本版技术记录（0.7.1）
+## 14. 本版技术记录（0.7.2）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 参考项目 BewlyBewly-AveMujica 是 AGPL-3.0：只借鉴思路（色板派生、Dock 交互、设置项「底部展开区」），代码全部独立实现，没有复制。
 
-- **隐私保护来源**（`lib/privacy.js`）：复用 OneAIFW（MIT，Copyright (c) 2025 Funstory.ai Limited）的占位符契约 `__PII_<TYPE>_<n>__`、span 打分 / 去重与「先脱敏、回包还原」流程；识别与恢复为独立 JS 重写，未引入上游 Zig / WASM / ORT / ONNX 或 Python 服务。上游默认模型私有、公开备选是 GPL-3.0，因此不做 NER。评估见 [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md)。
-- **识别范围**：邮箱；中国手机 / 座机 / 带 + 的国际号码（排除「日期 + 小时」、ISBN、订单号）；18 位身份证（校验位）；银行卡（Luhn）与「账号 / 卡号」标签后的银行账号；可选中文姓名（标签 + 姓氏 + 常见复姓，默认关闭）。
-- **管线接入**（`background.js`）：只在 `translate` 路由里 mask → provider.chat → restore，整页 / 划词 / 弹窗 / 字幕 / 批量共用；映射只存在于本次请求内存，不写 storage、不进缓存、不进日志；缓存只写恢复后的译文；开启时 `lib/prompt.js` 追加「占位符原样保留」，关闭时提示词逐字不变。
-- **失败语义**：占位符缺失、被改写后认不出、映射表外、模型返回空 → 该段 `null`，沿用现有 5s / 15s / 45s 退避重试，不输出半截译文；原文本身含 `__PII_` 时拒绝脱敏（fail-closed）。
-- **设置页**：新增「隐私保护」分区（总开关 + 5 个分项），`privacyEnabled` 等 6 个扁平布尔配置项，导入 / 导出自动覆盖；中英文文案同步；未新增任何权限。
-- **打包修复**：`tools/package-store.mjs` 的 `PRIVACY.*` 排除规则会误伤 `lib/privacy.js`，已改为只排除 `PRIVACY.md` 等具体文档，并在 `test/package-store.test.mjs` 加了「模块必须在包里」的断言。
-- **测试**：Node 新增 `test/privacy.test.mjs` 27 条 + `test/privacy-pipeline.test.mjs` 13 条（假 `chrome.*` + 假 `fetch` 驱动真实 `background.js`，断言请求体不含原文、回包还原、失败不输出、映射不落盘）；全套 14 个测试文件通过，自检 96 / 96。基准见 `tools/bench-privacy.mjs`：52,774 字符约 2 ms；Store 包 235,861 → 245,101 B（+9,240 B，+3.92%）。
+- **问题现场**（GitHub 仓库设置页）：`<form>`、`<action-menu>` 被当成一个翻译单元，`textOf` 把按钮文字和隐藏的确认对话框 / 菜单项拼成一段；仅译文模式下 `injectOnly` 又把这段写进第一个文本节点，按钮被撑成竖排，对话框标题变成整段文字。
+- **修复一：`textOf` 跳过隐藏子树**（`content/dom.js`）：遇到 `hidden` 或计算样式 `display:none` 的子元素直接跳过。以前隐藏对话框的文案会拼进父级单元的文本。
+- **修复二：`shouldDescend` 对交互容器强制下钻**：非正文块里如果含 `button / input / select / textarea / summary / [role=button] / [role=menuitem] / [role=menu] / [role=dialog] / [role=alertdialog] / [role=toolbar]`，或标签名带 `-`（自定义元素，如 `action-menu`）且可见子元素 ≥ 2，一律返回 true，按钮 / 标签 / 说明各自成单元。
+- **修复三：`collectTextNodes` 跳过隐藏子树**：替换型注入不会再把译文写进看不见的对话框。
+- **取舍**：正文块（`CONTENT_TAGS`）不受新规则影响，0.6.1 的「段落整段对照」保持不变；`<a>` 也不触发下钻，正文里的行内链接仍留在段落里。
+- **回归测试**：`selftest` 96 → 98，新增「表单里的按钮单独成单元，不整块替换」「隐藏子树不产出单元」两条；Node 222 条不变。
+- 已知剩余：页面里**已经译错的旧文本**需要刷新重翻才能修复（译文替换后原文已不在 DOM 里）。
 - **文档重组**：README 136 → 85 行；旧版升级 → `docs/UPGRADING.md`，YouTube 字幕 → `docs/YOUTUBE.md`，已知限制并入 `docs/DESIGN.md` §7，长文本拆分补 §2.4；目录结构与关键设计由 HANDOFF / DESIGN 承载；README 与 docs 链接检查 33 个，0 失效。
