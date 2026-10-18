@@ -1,6 +1,7 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
 import { getConfig, langLabel } from './lib/config.js';
 import { chat, ApiError } from './lib/provider.js';
+import { parseArray } from './lib/parse.js';
 import * as cache from './lib/cache.js';
 
 // ---------------- 并发闸门 ----------------
@@ -46,50 +47,6 @@ function systemPrompt(target) {
     '7) 只有代码、URL、型号编号这类确实不该翻的内容才保留原文；标题、正文、说明文字一律要翻。',
     '8) 标题、活动名、品牌名、产品名也要翻成' + name + '；没有通用译名时可用「原名（译名）」或音译，不要因为“是专有名词”就整句原样返回英文。'
   ].join('\n');
-}
-
-function parseArray(raw, expected) {
-  let text = String(raw || '').trim();
-  if (!text) return null;
-
-  text = text.replace(/^```[a-zA-Z]*\s*/, '').replace(/```\s*$/, '').trim();
-
-  const start = text.indexOf('[');
-  const end = text.lastIndexOf(']');
-  if (start >= 0 && end > start) {
-    let arr = null;
-    try {
-      arr = JSON.parse(text.slice(start, end + 1));
-    } catch (err) {
-      /* 落到下面的兜底 */
-    }
-    if (Array.isArray(arr)) {
-      if (arr.length === expected) return arr.map((x) => (x == null ? '' : String(x)));
-      // 合法数组但条数不对（模型合并/拆分了段落）：不能再按行拆，
-      // 多行 JSON 按行拆出来是 `[`、`"xx",` 这种碎片，会被当成译文插进页面。交给重试。
-      return null;
-    }
-  }
-
-  // 只有一条时，模型常常直接回译文本身、不包数组：整段就是译文
-  if (expected === 1 && text[0] !== '[') {
-    try {
-      const s = JSON.parse(text);
-      if (typeof s === 'string') return [s];
-    } catch (err) {
-      /* 不是 JSON 字符串，原样当译文 */
-    }
-    return [text];
-  }
-
-  // 兜底：按行拆（有些模型会输出 "1. xxx" 形式）
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\s*[-*\d]+[.、)]\s*/, '').trim())
-    .filter((line) => line.length > 0);
-
-  if (lines.length === expected) return lines;
-  return null;
 }
 
 async function translateBatchWithRetry(texts, target, cfg) {
