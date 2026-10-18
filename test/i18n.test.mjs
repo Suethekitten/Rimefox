@@ -58,5 +58,11 @@ t('设置页新增文案已覆盖', () => {
   });
 });
 
+t('弹窗主题切换文案已覆盖', () => {
+  ['切换到深色', '切换到浅色'].forEach((key) => {
+    assert.notEqual(translateText(key), key, key + ' 没有英文');
+  });
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

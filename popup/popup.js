@@ -9,7 +9,7 @@ import {
   browserShortcut,
   STYLES
 } from '../lib/config.js';
-import { applyI18n } from '../lib/i18n.js';
+import { applyI18n, translateText } from '../lib/i18n.js';
 
 const el = {
   ver: document.getElementById('ver'),
@@ -29,7 +29,8 @@ const el = {
   quickGo: document.getElementById('quickGo'),
   quickCopy: document.getElementById('quickCopy'),
   quickClear: document.getElementById('quickClear'),
-  quickOut: document.getElementById('quickOut')
+  quickOut: document.getElementById('quickOut'),
+  themeToggle: document.getElementById('themeToggle')
 };
 
 let tabId = null;
@@ -234,9 +235,48 @@ function applyUiTheme(value) {
   }
 }
 
+// ---------------- 深色 / 浅色一键切换 ----------------
+// 图标显示"点下去会变成哪边"：浅色时显示月亮（切深色），深色时显示太阳。
+// 点一次就写成明确取值（不再留在 auto），下次打开弹窗和设置页都跟着走。
+let uiTheme = 'auto';
+const darkMedia = window.matchMedia('(prefers-color-scheme: dark)');
+
+function effectiveUiTheme() {
+  if (uiTheme === 'light' || uiTheme === 'dark') return uiTheme;
+  return darkMedia.matches ? 'dark' : 'light';
+}
+
+function renderThemeToggle() {
+  const next = effectiveUiTheme() === 'dark' ? 'light' : 'dark';
+  el.themeToggle.dataset.next = next;
+  const zh = next === 'dark' ? '切换到深色' : '切换到浅色';
+  const label = currentCfg.uiLang === 'en' ? translateText(zh) : zh;
+  el.themeToggle.title = label;
+  el.themeToggle.setAttribute('aria-label', label);
+}
+
+darkMedia.addEventListener('change', () => {
+  // auto 时随系统变化，图标要跟着换
+  if (uiTheme === 'auto') renderThemeToggle();
+});
+
+el.themeToggle.addEventListener('click', async () => {
+  const next = el.themeToggle.dataset.next === 'light' ? 'light' : 'dark';
+  uiTheme = next;
+  applyUiTheme(next);
+  renderThemeToggle();
+  try {
+    const saved = await saveConfig({ uiTheme: next });
+    if (saved) currentCfg = saved;
+  } catch (err) {
+    /* 存不进配置也不影响这次显示，下次打开会回到之前的设置 */
+  }
+});
+
 async function init() {
   const cfg = await getConfig();
   currentCfg = cfg;
+  uiTheme = cfg.uiTheme || 'auto';
   applyUiTheme(cfg.uiTheme);
   shortcut = await browserShortcut();
 
@@ -271,6 +311,7 @@ async function init() {
   if (status.target) el.target.value = status.target;
   if (status.busy) startPolling();
   applyI18n(document, cfg.uiLang);
+  renderThemeToggle();
 }
 
 el.toggle.addEventListener('click', async () => {

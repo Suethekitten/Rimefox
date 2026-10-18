@@ -173,9 +173,14 @@ textarea:focus-visible {
 .tagline {
   color: var(--muted);
   font-size: 11.5px;
+  /* 英文副标题更长：头部多了一键切换后也不能把布局撑破 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ver {
+  flex: none;
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--card);
@@ -183,6 +188,54 @@ textarea:focus-visible {
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 一键切换深色 / 浅色：图标显示"点了会变哪边"（浅色时月亮、深色时太阳） */
+.theme-toggle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, transform 0.06s ease;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--muted) 55%, var(--line));
+}
+
+.theme-toggle:active {
+  transform: translateY(1px);
+}
+
+.theme-toggle svg {
+  grid-area: 1 / 1;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.theme-toggle .ico-sun {
+  display: none;
+}
+
+.theme-toggle[data-next="light"] .ico-moon {
+  display: none;
+}
+
+.theme-toggle[data-next="light"] .ico-sun {
+  display: block;
 }
 
 /* ---- 主体 ---- */
@@ -347,6 +400,12 @@ textarea:focus-visible {
   width: 30px;
   color: var(--muted);
   font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* 英文标签更长：固定列宽，避免 "Display / Translate to" 换行压到右边的控件 */
+:root[lang="en"] .label {
+  width: 64px;
 }
 
 .seg {
