@@ -1,7 +1,7 @@
 # 凛狐 Rimefox 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.5.3 ｜ 目录：`edge-bilingual/`
+> 版本：0.6.1 ｜ 目录：`edge-bilingual/`
 
 ---
 
@@ -465,18 +465,11 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 
 ---
 
-## 14. 本版技术记录（0.6.0）
+## 14. 本版技术记录（0.6.1）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **术语表纯函数**（`lib/glossary.js`）：`parseGlossaryCsv`（逐字符解析，支持引号内逗号/换行、BOM、多余列忽略、表头跳过）、`normalizeGlossary`（去空/去重/截断/上限 500）、`matchGlossary`（英文按词边界、含中日韩字符按子串；每批最多注入 20 条，按出现次数排序）、`glossaryPrompt`（拼提示词片段）、`toGlossaryCsv`、`glossaryFingerprint`（FNV-1a）
-- **匹配器的边界坑**：用消费边界的 `(^|[^\w])Term([^\w]|$)` 会漏掉连续出现（`Gamma Gamma` 只数到 1 次）；改成零宽断言 `(?<![\w])Term(?![\w])`，并用 try/catch 兜底不支持 lookbehind 的环境
-- **配置**（`lib/config.js`）：`DEFAULTS.glossary = []`；`mergeConfig` 统一 `normalizeGlossary`，不管来自旧配置还是设置页；老配置没有该字段时自然得到空数组
-- **提示词**（`lib/prompt.js`）：`systemPrompt(target, style, glossaryHits)`，术语段放在最后（模型对末尾指令更敏感），并点明标题/按钮/导航等短文本同样适用
-- **后台**（`background.js`）：`handleTranslate` 每批用 `matchGlossary(glossary, texts)` 找命中，传给 `translateBatchWithRetry`；递归拆批时把 glossary 一起传下去
-- **缓存键修复**（`lib/cache.js`）：`makeKey` 之前只拼 target/style/model/host，`scope.glossary` 加了等于没加；现在把指纹拼进键，术语增删改后旧译文全部失效（这就是「改了术语标题没变」的根因）
-- **设置页**（`options/glossary.js`）：两列表格；超过 30 行折叠（`展开全部 N 条`）；导入/导出 CSV（导出加 BOM，Excel 不乱码；文件名 `YYYYMMDD-HHmmss`）；「导入示例」是开关（记导入前快照，第二次点击收起）；收起/清空后 `scrollIntoView` 回卡片，避免页面高度骤减导致跳到下面几节
-- **示例数据**（`lib/glossary-sample.js`）：由 `docs/glossary/starter.csv` 生成 109 条，改数据要两边同步
-- **弹窗命令限定主框架**（`popup/popup.js` + `background.js` 的 `sendOrInject`）：`chrome.tabs.sendMessage` 不带 `frameId` 会发给所有 iframe，谁先 `sendResponse` 就用谁；页面内嵌 Twitter 挂件时诊断会拿到 iframe 的空结果。现在默认 `{ frameId: 0 }`；右键划词仍按 `info.frameId` 发给选中框架
-- 测试：术语表单测 14 条、缓存 +1、提示词 +2，Node 合计 141 条；自检 88 条（术语表是 `lib/`，用 Node 单测覆盖）
+- **正文段落里的行内子元素整段翻译**（`content/dom.js`）：`shouldDescend` 对正文块（p/h/li/td…）在“没有块级子元素”时直接返回 false，不再因为 3+ 并列子元素下钻。OWID 的 `<p>` 有 8 个行内子元素（句子 span、脚注、行内链接），以前会逐句拆、译文插在句子中间；现在整段一个单元，译文追加到段末。
+- **回归**：新增 OWID 形状夹具（8 个行内子元素），断言只产生 1 个单元且是整段文本；自检 87 → 88。导航 / 按钮 / 卡片链接 / flex / 目录的用例全部保持通过。
+- Node 单测 141 条不变；0.6.0 的术语表实现细节看 git log 与上一版记录。
 
