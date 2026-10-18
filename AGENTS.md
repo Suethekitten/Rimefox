@@ -9,6 +9,24 @@
 - 内容脚本用 ES5 风格；译文只用 `textContent` 写入，不用 `innerHTML`；其余约定见 HANDOFF「代码约定」
 - 提交用 GitHub 的 noreply 邮箱（`<ID>+<用户名>@users.noreply.github.com`），不要把个人邮箱写进提交记录
 
+## 提交与推送
+
+本地可以分多个小 commit，但**一个任务或一版功能没做完、没测完之前不要推**。推送只做一次：
+
+1. 功能 / 修复全部写完，工作树没有未提交的改动；同一功能的 fixup 可以在推送前 squash，但不要把中间状态推上去
+2. 跑完 HANDOFF §7 的离线检查：
+   - `for f in test/*.test.mjs; do node "$f" || exit 1; done`，全绿
+   - `selftest/index.html` 全部通过（按 HANDOFF §7 的无头 Chrome 命令）
+   - 如果发版：`python3 tools/check-release-notes.py <版本号>`
+   - 改设置页 / 字幕 / 划词：在真实页面各过一遍（设置页、YouTube 字幕、普通文章页）
+3. `git fetch origin && git rebase origin/main`，确认没有落后；远端有新提交就 rebase，不要 force push
+4. `git diff --check`、`git log origin/main..HEAD` 自审：没有密钥、没有无关文件、没有覆盖别人的改动
+5. 以上都过，**一次 `git push origin main` 推完所有本地 commit**。不要边做边推，也不要推完再补一串小修
+
+测试失败、有未解释的 diff、或手动检查没做：不推，先修。大改动开分支，验证完再合回 main 推一次。
+推 main 且改了 `manifest.json` 会触发 Release，推送前确认版本号和 CHANGELOG 是最终版，不要把未完成的版本号推上去。
+不要用 `git push --mirror`（本地有 `refs/stash`），也不要在没有明确要求时 force push。
+
 ## 发版说明（CHANGELOG → Release 页面）
 
 `CHANGELOG.md` 里 `## <版本号> — <标题>` 这一节会原样成为 GitHub Release 的说明，必须遵守：
