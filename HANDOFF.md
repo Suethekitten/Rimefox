@@ -465,16 +465,18 @@ node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、
 
 ---
 
-## 14. 本版技术记录（0.5.4）
+## 14. 本版技术记录（0.6.0）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **字幕取批按距离排序**（`content/subtitles.js` 的 `pump()`）：先收集窗口内候选，按"离当前播放位置的距离"升序取批（正在说的那句 `dist = 0`），修掉积压 / 拖进度后当前句要等前几批的问题；批大小仍是 8 条 / 1000 字，`inflight` 仍串行
-- **日文页面不跳过纯汉字短语**（`content/main.js`）：读 `document.documentElement.lang`，`ja` 页面翻成中文时不再套用 `looksLikeTarget` 的同语言跳过；其它语言组合不受影响
-- **恢复默认保留服务商**（`options/options.js`）：`DEFAULTS` 里有 `currentProvider: 'deepseek'`，reset 时显式传回当前值，只重置翻译 / 显示设置；Key / 缓存 / 自定义服务商都不动
-- **诊断信息**（`content/dom.js`）：`DT.diagnose()` 报告新增 `provider` / `engine` / `model` / `thinkingMode`（从 `config:get` 的配置取，不含 Key）
-- **快捷键自适应**（`content/selection.js` + `content/main.js`）：`DT.selectionTranslate()` 复用划词的 `currentSelection` / `eligible` / `run`；页面内快捷键与浏览器命令两条路径都先判选区，有选区就划词、没有才翻整页，仍用 `lastToggleAt` 去重
-- **设置页自检入口**（`options/index.html`）：高级区块加「打开自检页」，走扩展内部链接，避开 Edge 对地址栏输入 `chrome-extension://` 的拦截
-- **代码拆分**（0.5.4 前完成）：`options.js` 拆成 `ui.js` / `model-picker.js` / `provider-list.js`；`subtitles.js` 拆成 `subtitles-core.js`（纯函数，自检页 + YouTube 共用）与运行时（只在 YouTube 加载）
-- 自检 87 条；Node 单测 124 条
+- **术语表纯函数**（`lib/glossary.js`）：`parseGlossaryCsv`（逐字符解析，支持引号内逗号/换行、BOM、多余列忽略、表头跳过）、`normalizeGlossary`（去空/去重/截断/上限 500）、`matchGlossary`（英文按词边界、含中日韩字符按子串；每批最多注入 20 条，按出现次数排序）、`glossaryPrompt`（拼提示词片段）、`toGlossaryCsv`、`glossaryFingerprint`（FNV-1a）
+- **匹配器的边界坑**：用消费边界的 `(^|[^\w])Term([^\w]|$)` 会漏掉连续出现（`Gamma Gamma` 只数到 1 次）；改成零宽断言 `(?<![\w])Term(?![\w])`，并用 try/catch 兜底不支持 lookbehind 的环境
+- **配置**（`lib/config.js`）：`DEFAULTS.glossary = []`；`mergeConfig` 统一 `normalizeGlossary`，不管来自旧配置还是设置页；老配置没有该字段时自然得到空数组
+- **提示词**（`lib/prompt.js`）：`systemPrompt(target, style, glossaryHits)`，术语段放在最后（模型对末尾指令更敏感），并点明标题/按钮/导航等短文本同样适用
+- **后台**（`background.js`）：`handleTranslate` 每批用 `matchGlossary(glossary, texts)` 找命中，传给 `translateBatchWithRetry`；递归拆批时把 glossary 一起传下去
+- **缓存键修复**（`lib/cache.js`）：`makeKey` 之前只拼 target/style/model/host，`scope.glossary` 加了等于没加；现在把指纹拼进键，术语增删改后旧译文全部失效（这就是「改了术语标题没变」的根因）
+- **设置页**（`options/glossary.js`）：两列表格；超过 30 行折叠（`展开全部 N 条`）；导入/导出 CSV（导出加 BOM，Excel 不乱码；文件名 `YYYYMMDD-HHmmss`）；「导入示例」是开关（记导入前快照，第二次点击收起）；收起/清空后 `scrollIntoView` 回卡片，避免页面高度骤减导致跳到下面几节
+- **示例数据**（`lib/glossary-sample.js`）：由 `docs/glossary/starter.csv` 生成 109 条，改数据要两边同步
+- **弹窗命令限定主框架**（`popup/popup.js` + `background.js` 的 `sendOrInject`）：`chrome.tabs.sendMessage` 不带 `frameId` 会发给所有 iframe，谁先 `sendResponse` 就用谁；页面内嵌 Twitter 挂件时诊断会拿到 iframe 的空结果。现在默认 `{ frameId: 0 }`；右键划词仍按 `info.frameId` 发给选中框架
+- 测试：术语表单测 14 条、缓存 +1、提示词 +2，Node 合计 141 条；自检仍是 87 条（术语表是 `lib/`，用 Node 单测覆盖）
 
