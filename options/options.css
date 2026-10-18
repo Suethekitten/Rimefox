@@ -667,9 +667,50 @@ input.switch:focus-visible {
 
 .glossary-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 112px auto;
   gap: 8px;
   align-items: center;
+}
+
+.glossary-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 112px auto;
+  gap: 8px;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.glossary-group {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: var(--field);
+}
+
+.glossary-group-head {
+  width: 100%;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.glossary-group-head:hover {
+  color: var(--accent);
+}
+
+.glossary-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .glossary-input {
@@ -678,7 +719,7 @@ input.switch:focus-visible {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: var(--field);
+  background: var(--card);
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -703,12 +744,16 @@ input.switch:focus-visible {
 }
 
 @media (max-width: 560px) {
-  .glossary-row {
-    grid-template-columns: 1fr auto;
+  .glossary-head {
+    display: none;
   }
 
-  .glossary-row .glossary-input:nth-child(2) {
-    grid-column: 1 / -1;
+  .glossary-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .glossary-row .glossary-del {
+    justify-self: start;
   }
 }
 

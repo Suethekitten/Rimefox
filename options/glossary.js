@@ -34,7 +34,23 @@ export function createGlossaryEditor(opts) {
     setResult(note, text, kind);
   }
 
-  function rowOf(item, index) {
+  const DEFAULT_CAT = '未分类';
+  const openCats = new Set();
+  let renderedOnce = false;
+
+  function categoryOf(item) {
+    return String((item && item.category) || '').trim() || DEFAULT_CAT;
+  }
+
+  function resetOpen(list) {
+    openCats.clear();
+    if ((list || []).length <= 10) {
+      (list || []).forEach((one) => openCats.add(categoryOf(one)));
+    }
+    renderedOnce = true;
+  }
+
+  function rowOf(item) {
     const row = document.createElement('div');
     row.className = 'glossary-row';
 
@@ -45,6 +61,7 @@ export function createGlossaryEditor(opts) {
     src.value = item.source || '';
     src.addEventListener('input', () => {
       item.source = src.value;
+      changed();
     });
 
     const dst = document.createElement('input');
@@ -54,6 +71,24 @@ export function createGlossaryEditor(opts) {
     dst.value = item.target || '';
     dst.addEventListener('input', () => {
       item.target = dst.value;
+      changed();
+    });
+
+    const cat = document.createElement('input');
+    cat.type = 'text';
+    cat.className = 'glossary-input glossary-category';
+    cat.placeholder = DEFAULT_CAT;
+    cat.value = item.category || '';
+    cat.addEventListener('input', () => {
+      item.category = cat.value.trim();
+      changed();
+    });
+    // 失焦时再重排：输入过程中不要因为换了分类把当前行从眼前挪走
+    cat.addEventListener('change', () => {
+      item.category = cat.value.trim();
+      if (item.category) openCats.add(item.category);
+      render();
+      changed();
     });
 
     const del = document.createElement('button');
@@ -61,53 +96,99 @@ export function createGlossaryEditor(opts) {
     del.className = 'btn danger glossary-del';
     del.textContent = '删除';
     del.addEventListener('click', () => {
-      current().splice(index, 1);
+      const list = current();
+      const at = list.indexOf(item);
+      if (at >= 0) list.splice(at, 1);
       render();
       message('已删除 1 条（点「保存」后生效）', 'ok');
       changed();
     });
 
-    row.append(src, dst, del);
+    row.append(src, dst, cat, del);
     return row;
   }
 
-  // 条数多时先折叠：导入示例有 109 条，全展开会把设置页拉得很长
-  const COLLAPSED_ROWS = 30;
-  let expanded = false;
+  function headRow() {
+    const head = document.createElement('div');
+    head.className = 'glossary-head';
+    ['原文', '译法', '分类', ''].forEach((text) => {
+      const cell = document.createElement('span');
+      cell.textContent = text;
+      head.appendChild(cell);
+    });
+    return head;
+  }
 
   function render() {
     wrap.innerHTML = '';
     const list = current();
     if (!list.length) {
+      renderedOnce = false;
+      openCats.clear();
       const empty = document.createElement('div');
       empty.className = 'glossary-empty';
       empty.textContent = '还没有术语。可以「添加一行」手动加，或「导入示例」用现成的 109 条。';
       wrap.appendChild(empty);
       return;
     }
-    const shown = expanded ? list : list.slice(0, COLLAPSED_ROWS);
-    shown.forEach((item, index) => wrap.appendChild(rowOf(item, index)));
+    if (!renderedOnce) resetOpen(list);
 
-    if (list.length > COLLAPSED_ROWS) {
-      const more = document.createElement('button');
-      more.type = 'button';
-      more.className = 'btn glossary-more';
-      more.textContent = expanded ? '收起' : '展开全部 ' + list.length + ' 条';
-      more.addEventListener('click', () => {
-        expanded = !expanded;
+    const groups = new Map();
+    list.forEach((item) => {
+      const cat = categoryOf(item);
+      if (!groups.has(cat)) groups.set(cat, []);
+      groups.get(cat).push(item);
+    });
+
+    wrap.appendChild(headRow());
+    const keys = Array.from(groups.keys());
+    keys.forEach((cat) => {
+      const items = groups.get(cat);
+      const group = document.createElement('div');
+      group.className = 'glossary-group';
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'glossary-group-head';
+      const open = openCats.has(cat);
+      head.textContent = (open ? '▾ ' : '▸ ') + cat + '（' + items.length + '）';
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      head.addEventListener('click', () => {
+        if (openCats.has(cat)) openCats.delete(cat);
+        else openCats.add(cat);
         render();
-        if (!expanded) showCard();
       });
-      wrap.appendChild(more);
+      group.appendChild(head);
+      if (open) {
+        const body = document.createElement('div');
+        body.className = 'glossary-group-body';
+        items.forEach((item) => body.appendChild(rowOf(item)));
+        group.appendChild(body);
+      }
+      wrap.appendChild(group);
+    });
+
+    const allOpen = keys.every((cat) => openCats.has(cat));
+    if (keys.length > 1 || list.length > 10) {
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.className = 'btn glossary-more';
+      all.textContent = allOpen ? '收起全部' : '展开全部';
+      all.addEventListener('click', () => {
+        if (allOpen) openCats.clear();
+        else keys.forEach((cat) => openCats.add(cat));
+        render();
+        if (allOpen) showCard();
+      });
+      wrap.appendChild(all);
     }
   }
 
-  // 合并导入：同一原文以导入的为准，其余追加
+  // 合并导入：同一原文以导入的为准，其余追加；两列 CSV 不会冲掉已有分类
   function merge(entries) {
     const byKey = new Map();
     current().forEach((one) => {
       const s = String(one.source || '').trim();
-      if (s) byKey.set(s.toLowerCase(), { source: one.source, target: one.target });
+      if (s) byKey.set(s.toLowerCase(), { source: one.source, target: one.target, category: one.category });
     });
     let added = 0;
     entries.forEach((one) => {
@@ -115,21 +196,32 @@ export function createGlossaryEditor(opts) {
       if (!s) return;
       const key = s.toLowerCase();
       if (!byKey.has(key)) added += 1;
-      byKey.set(key, { source: one.source, target: one.target });
+      const old = byKey.get(key);
+      const cat = String((one && one.category) || '').trim();
+      byKey.set(key, {
+        source: one.source,
+        target: one.target,
+        category: cat || (old && old.category) || ''
+      });
     });
     const cfg = opts.getConfig();
     cfg.glossary = normalizeGlossary(Array.from(byKey.values()));
-    expanded = false;
+    resetOpen(cfg.glossary);
     render();
     message('已导入 ' + entries.length + ' 条（新增 ' + added + ' 条，点「保存」后生效）', 'ok');
     changed();
   }
 
   $('glossaryAdd').addEventListener('click', () => {
-    current().push({ source: '', target: '' });
+    current().push({ source: '', target: '', category: DEFAULT_CAT });
+    openCats.add(DEFAULT_CAT);
     render();
-    const inputs = wrap.querySelectorAll('.glossary-input');
-    if (inputs.length) inputs[inputs.length - 2].focus();
+    const rows = wrap.querySelectorAll('.glossary-row');
+    const last = rows[rows.length - 1];
+    if (last) {
+      const input = last.querySelector('.glossary-input');
+      if (input) input.focus();
+    }
     changed();
   });
 
@@ -138,7 +230,7 @@ export function createGlossaryEditor(opts) {
   let sampleAfterKey = ''; // 导入后的内容指纹，用来判断用户有没有改过
 
   function keyOf(list) {
-    return JSON.stringify(normalizeGlossary(list).map((one) => [one.source, one.target]));
+    return JSON.stringify(normalizeGlossary(list).map((one) => [one.source, one.target, one.category || '']));
   }
 
   // 列表骤然变短（收起 / 清空）时页面高度会缩掉一大截，滚动位置不变就会“跳”到下面几节；
@@ -157,7 +249,7 @@ export function createGlossaryEditor(opts) {
       if (cfg) cfg.glossary = normalizeGlossary(sampleBefore || []);
       sampleBefore = null;
       sampleAfterKey = '';
-      expanded = false;
+      resetOpen(cfg ? cfg.glossary : []);
       render();
       showCard();
       message('已收起示例（回到导入前，点「保存」后生效）', 'ok');
@@ -170,7 +262,7 @@ export function createGlossaryEditor(opts) {
     merge(STARTER);
     sampleBefore = before;
     sampleAfterKey = keyOf(current());
-    message('已导入示例 ' + current().length + ' 条（再点一次「导入示例」可收起）', 'ok');
+    message('已导入示例 ' + current().length + ' 条（分类已分好，再点一次「导入示例」可收起）', 'ok');
   });
 
   $('glossaryClear').addEventListener('click', () => {
@@ -192,7 +284,7 @@ export function createGlossaryEditor(opts) {
       const text = await file.text();
       const entries = parseGlossaryCsv(text);
       if (!entries.length) {
-        message('这个 CSV 里没有可用的两列（原文, 译法）。', 'bad');
+        message('这个 CSV 里没有可用的原文 / 译法两列（第三列分类可选）。', 'bad');
         return;
       }
       merge(entries);
@@ -217,7 +309,7 @@ export function createGlossaryEditor(opts) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    message('已导出 ' + list.length + ' 条。', 'ok');
+    message('已导出 ' + list.length + ' 条（含分类）。', 'ok');
   });
 
   return { render };

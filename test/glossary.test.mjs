@@ -12,6 +12,7 @@ import {
   glossaryPrompt,
   glossaryFingerprint
 } from '../lib/glossary.js';
+import { STARTER } from '../lib/glossary-sample.js';
 
 let pass = 0;
 let fail = 0;
@@ -56,6 +57,17 @@ t('normalizeGlossary：接受 "a,b" 字符串与 [a,b] 数组', () => {
   ]);
 });
 
+t('normalizeGlossary：保留分类；分类为空时不写这个键', () => {
+  const out = normalizeGlossary([
+    { source: 'Battle Pass', target: '战令', category: ' 战争雷霆 ' },
+    { source: 'Profile', target: '资料', category: '' }
+  ]);
+  assert.deepEqual(out, [
+    { source: 'Battle Pass', target: '战令', category: '战争雷霆' },
+    { source: 'Profile', target: '资料' }
+  ]);
+});
+
 t('parseGlossaryCsv：跳过表头、去 BOM、兼容 CRLF', () => {
   const text = '\uFEFFsource,target\r\nPublic profile,公开资料\r\n\r\nBattle Pass,战令\r\n';
   assert.deepEqual(parseGlossaryCsv(text), [
@@ -72,9 +84,9 @@ t('parseGlossaryCsv：引号里的逗号 / 换行 / 双引号', () => {
   ]);
 });
 
-t('parseGlossaryCsv：多余列忽略，缺列跳过', () => {
+t('parseGlossaryCsv：第三列是分类，第四列忽略，缺列跳过', () => {
   const text = 'source,target,category,note\nCamouflage,涂装,战争雷霆,涂装样式\nOnlySource\n';
-  assert.deepEqual(parseGlossaryCsv(text), [{ source: 'Camouflage', target: '涂装' }]);
+  assert.deepEqual(parseGlossaryCsv(text), [{ source: 'Camouflage', target: '涂装', category: '战争雷霆' }]);
 });
 
 t('toGlossaryCsv：往返一致，含逗号的单元格加引号', () => {
@@ -83,8 +95,15 @@ t('toGlossaryCsv：往返一致，含逗号的单元格加引号', () => {
     { source: 'say "hi"', target: '说“嗨”' }
   ];
   const csv = toGlossaryCsv(list);
-  assert.match(csv, /^source,target\n/);
+  assert.match(csv, /^source,target,category\n/);
   assert.match(csv, /"Hello, world",你好，世界/);
+  assert.deepEqual(parseGlossaryCsv(csv), list);
+});
+
+t('toGlossaryCsv：分类列往返一致', () => {
+  const list = [{ source: 'Battle Pass', target: '战令', category: '战争雷霆' }];
+  const csv = toGlossaryCsv(list);
+  assert.match(csv, /Battle Pass,战令,战争雷霆/);
   assert.deepEqual(parseGlossaryCsv(csv), list);
 });
 
@@ -135,6 +154,17 @@ t('glossaryFingerprint：稳定，改译法后变化，清空为 none', () => {
   assert.equal(glossaryFingerprint(a), glossaryFingerprint([{ source: 'A', target: '甲' }]));
   assert.notEqual(glossaryFingerprint(a), glossaryFingerprint(b));
   assert.equal(glossaryFingerprint([]), 'none');
+});
+
+t('glossaryFingerprint：分类只是 UI 元数据，不进指纹', () => {
+  const a = [{ source: 'A', target: '甲', category: '分类一' }];
+  const b = [{ source: 'A', target: '甲', category: '分类二' }];
+  assert.equal(glossaryFingerprint(a), glossaryFingerprint(b));
+});
+
+t('示例数据：109 条，全部带分类', () => {
+  assert.equal(STARTER.length, 109);
+  assert.ok(STARTER.every((one) => one.category), '有示例条目没带分类');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
