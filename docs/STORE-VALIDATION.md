@@ -27,3 +27,11 @@
 - 验证命令：`unzip -l dist/Rimefox-v0.7.1-store.zip`、`unzip -t dist/Rimefox-v0.7.1-store.zip`
 - 测试：`node test/package-store.test.mjs`
 - 结果：53 个文件、248,250 B；ZIP 根目录含 manifest.json、LICENSE、THIRD-PARTY-NOTICES.md，`licenses/oneaifw-MIT.txt` 位于 licenses/ 下；`unzip -t` 无错误；打包测试 PASS；全套 14 个 Node 测试文件通过；自检 96 / 96。
+
+## 0.7.2 上架前审计验证
+
+- 审计对象：`main` @ `5eaa5c1`（Rimefox 0.7.2）
+- 构建命令：`node tools/package-store.mjs`
+- 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
+- 结果：`dist/Rimefox-v0.7.2-store.zip` 53 个文件、248,692 B；manifest.json 在根目录；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；14 个 Node 测试文件全部通过；自检 98 / 98；Chrome 打包校验成功（CRX3）
+- 未上传、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)

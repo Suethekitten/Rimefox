@@ -78,7 +78,7 @@
 
 ## 声明
 
-本项目为**独立实现**，不含任何第三方产品的代码、图标或文案，与任何商业产品无关联。YouTube 字幕是**非官方**功能，与 YouTube、Google 无关联；YouTube 是 Google LLC 的商标。
+本项目为**独立实现**，与任何商业产品无关联；除 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 中注明的 MIT 许可复用内容外，不含其他第三方产品的代码、图标或文案。YouTube 字幕是**非官方**功能，与 YouTube、Google 无关联；YouTube 是 Google LLC 的商标。
 
 所有翻译请求只发往**你自己配置的接口**，不经过本项目作者的服务器；API Key 只保存在本机浏览器的 `chrome.storage.local` 中。
 

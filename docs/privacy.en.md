@@ -1,14 +1,16 @@
 # Rimefox Privacy Policy
 
-This policy describes Rimefox 0.6.2. Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
+This policy describes Rimefox 0.7.2 (last updated: 2026-10-18). Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
 
 ## Information sent for translation
 
-Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, and YouTube caption text when subtitle translation is enabled. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page.
+Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, and YouTube caption text when subtitle translation is enabled. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page. Content scripts also run in subframes, so text in embedded frames is transmitted under the same rules when translated.
 
 When the optional local masking feature is enabled, reliably detectable values (email addresses, phone numbers, ID card numbers and bank card numbers, optionally Chinese names in explicit contexts) are replaced with `__PII_<TYPE>_<n>__` placeholders before the request is sent; only the placeholder text is transmitted. See “Optional local masking” below.
 
 Requests also include the target language, translation instructions including your custom prompt, and matching glossary source terms and specified translations. Your API key is sent to the configured endpoint in authentication headers. Connection tests send fixed sample sentences; model-list requests also authenticate to that endpoint. The provider receives normal network metadata such as your IP address. Do not translate sensitive content or put secrets into prompts unless you trust the configured endpoint.
+
+The only recipient is the endpoint you configure (for example DeepSeek, an OpenAI-compatible service, Anthropic, Gemini, Ollama, or your own gateway); the author and other third parties do not receive this data. If you enter an `http://` endpoint, data is transmitted in clear text; use HTTPS unless the endpoint is on your own machine.
 
 DeepSeek, OpenAI or OpenAI-compatible services, Anthropic, Gemini and custom gateways handle requests under their own privacy policies and retention practices. A compatible gateway is not necessarily operated by the named model vendor. Review the policy of the actual endpoint operator, including training, logging, retention and deletion terms.
 
@@ -21,6 +23,10 @@ Off by default. When enabled in Settings → Privacy, the extension masks sensit
 - If the model drops, rewrites or invents a placeholder, the affected segment is treated as a failed translation: the page keeps the source text and retries with the existing backoff, rather than displaying corrupted content or using source text as a translation.
 - Scope is limited to fixed-format data. Addresses, organizations, passwords, seed phrases and private keys are not masked. Chinese names are detected only in explicit contexts such as “Name:” or “I am …”, are off by default, and may still be missed or misidentified.
 - Translation caching is unchanged: short source/translation pairs may still be stored in the local disk cache under the existing rules; the mapping itself is never cached.
+
+## Limited Use
+
+Rimefox's use of user data complies with the Chrome Web Store User Data Policy, including the Limited Use requirements. Data is used only to provide the translation features described in this policy and to maintain, secure and measure those features. It is not sold, not used for personalized advertising or creditworthiness decisions, and is not read by humans except as required for security or legal compliance.
 
 ## YouTube captions
 
@@ -50,4 +56,4 @@ Rimefox does not access browser history or browse unopened sites in the backgrou
 
 ## Contact
 
-Use the project's GitHub Issues page for privacy questions, accessible from the public repository distributing Rimefox. Never post API keys, private page text or unredacted diagnostic output. Use the repository's private vulnerability-reporting channel for security reports, as described in SECURITY.md. The configured Git remote is https://github.com/Suethekitten/Rimefox; while the repository is private, anonymous repository and Issues requests return HTTP 404, and the links become public once it is published. See STORE.md for URL placeholders, not deployed URLs.
+Use the public GitHub Issues page at https://github.com/Suethekitten/Rimefox/issues for privacy questions. Never post API keys, private page text or unredacted diagnostic output. Use the repository's private vulnerability-reporting channel for security reports, as described in SECURITY.md. The repository and its Issues page are public and require no login to read.

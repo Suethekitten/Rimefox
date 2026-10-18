@@ -1,5 +1,7 @@
 # 隐私说明
 
+最后更新：2026-10-18（对应 Rimefox 0.7.2）。
+
 > **English summary**: Rimefox has no author-operated server or telemetry. See the [full English privacy policy](docs/privacy.en.md). Page text you choose to translate is sent only to the API endpoint **you** configure (DeepSeek, OpenAI-compatible, Anthropic, Gemini…), under that provider's privacy policy. An optional, off-by-default local masking feature replaces reliably detectable sensitive values with placeholders before sending and restores them locally; the mapping never leaves the request. Your API key, settings and translation cache are stored locally; the key is also sent to your configured provider for authentication. No analytics, no telemetry, no third-party SDKs.
 
 凛狐（Rimefox）**没有作者运营的服务器，作者不收集你的数据**。没有统计、没有遥测、没有第三方 SDK，作者收不到你的任何信息。
@@ -19,8 +21,10 @@
 请求还会带上目标语言、翻译提示词（包括你填写的自定义提示词）、本批文本命中的术语表原词与指定译法，以及 API Key（认证请求头，发给配置的接口）。获取模型列表和测试连接也会向配置的接口认证。
 
 YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默认关闭，但页面挂钩仍会加载。启用翻译后才向配置 API 发送待翻字幕。适用站点包括 www.youtube.com、m.youtube.com 和 www.youtube-nocookie.com；需要原文轨道时还可能请求同源 YouTube 字幕地址。
-启用自动翻译后，符合条件的文字可能无需逐页点击就发送。服务商也会收到 IP 地址等常规网络信息。
+启用自动翻译后，符合条件的文字可能无需逐页点击就发送。页面里的子框架（iframe）也会运行内容脚本，翻译时其中的文字按同样规则发送。服务商也会收到 IP 地址等常规网络信息。
 这些数据如何保存、是否用于训练，取决于**你选择的服务商**的隐私政策，请自行查阅。
+
+接收方只有你在设置页配置的接口（例如 DeepSeek、智谱、通义、Kimi、硅基流动、OpenRouter、Ollama、Anthropic、Gemini，或你自建 / 中转的网关）；作者和其他第三方不会收到这些数据。如果你填写的是 `http://` 地址，数据会以明文传输；除本机服务外，建议使用 HTTPS。
 
 ## AI 隐私保护翻译（可选，默认关闭）
 
@@ -44,6 +48,10 @@ YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默
 - 中文姓名只识别「姓名：」「联系人：」「我叫」等明确上下文里的写法，默认关闭，仍可能漏识别或误识别；
 - 号码类识别做了校验位 / 长度约束（如身份证校验位、银行卡 Luhn），但不保证 100%；
 - 翻译缓存仍按原有规则工作：短文本（原文 + 译文 ≤ 160 字符）可能写入本机磁盘缓存，这与是否开启隐私保护无关；映射本身不会进入缓存。
+
+## 有限使用声明
+
+凛狐对用户数据的使用遵守 Chrome Web Store 用户数据政策，包括有限使用（Limited Use）要求：数据只用于提供本扩展披露的翻译功能，以及维护、保障和衡量这些功能；不出售，不用于个性化广告、信用评估或贷款，不允许人工读取（安全排查或法律要求除外）。
 
 ## 保存在本机的数据
 
@@ -75,7 +83,7 @@ YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默
 | `activeTab`、`scripting` | 在当前标签页注入翻译脚本（页面在安装扩展前就打开时补注入） |
 | `contextMenus` | 划词翻译的右键菜单 |
 | `<all_urls>`（网站访问权限） | 在任意网页上翻译；向你填写的接口地址发请求 |
-| YouTube 页面脚本（`world: MAIN`） | 只在 manifest 列出的 YouTube 与 youtube-nocookie 页面上运行，读取播放器已加载的字幕交给扩展翻译，见 README 的「YouTube 字幕（非官方功能）」 |
+| YouTube 页面脚本（`world: MAIN`） | 只在 manifest 列出的 YouTube 与 youtube-nocookie 页面上运行，读取播放器已加载的字幕交给扩展翻译，见 [docs/YOUTUBE.md](docs/YOUTUBE.md) |
 
 ## 你主动导出的内容
 
@@ -84,4 +92,4 @@ YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默
 
 ## 联系
 
-有疑问请在 GitHub 提 Issue（**不要**贴出 API Key）。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
+有疑问请在 [GitHub Issues](https://github.com/Suethekitten/Rimefox/issues) 提（**不要**贴出 API Key）。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
