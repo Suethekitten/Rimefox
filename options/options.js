@@ -7,7 +7,11 @@ import {
   IS_MAC,
   hotkeyLabel,
   browserShortcut,
-  openShortcutsPage
+  openShortcutsPage,
+  IMPORT_APP,
+  IMPORT_SCHEMA,
+  pickImportedConfig,
+  localIso
 } from '../lib/config.js';
 import { listModels } from '../lib/provider.js';
 
@@ -350,52 +354,17 @@ $('clearCache').addEventListener('click', async () => {
 // ---------------- 配置导出 / 导入 ----------------
 // 用途：换电脑、或换扩展 ID（品牌改名、目录改名）时，把配置整份搬过去，
 // 不用重新填 Key 和各项设置。
-const EXPORT_APP = 'rimefox';
-const EXPORT_SCHEMA = 1;
-
+// 解析与校验在 lib/config.js 的 pickImportedConfig 里（纯函数，可被 node 直接测试）。
 function buildExport(includeKey) {
   const cfg = { ...currentCfg };
   if (!includeKey) delete cfg.apiKey;
   return {
-    app: EXPORT_APP,
-    schema: EXPORT_SCHEMA,
-    exportedAt: new Date().toISOString(),
+    app: IMPORT_APP,
+    schema: IMPORT_SCHEMA,
+    exportedAt: localIso(new Date()),
     extensionVersion: chrome.runtime.getManifest().version,
     config: cfg
   };
-}
-
-// 只接受已知字段，并按默认值的类型转换；多余字段直接丢弃（避免把陌生键写进配置）
-function pickImportedConfig(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('文件内容不是一个 JSON 对象');
-  }
-  if (raw.app && raw.app !== EXPORT_APP) {
-    throw new Error('这不是凛狐的配置文件（app = ' + raw.app + '）');
-  }
-  if (raw.schema && Number(raw.schema) > EXPORT_SCHEMA) {
-    throw new Error('配置文件版本比当前扩展新，请先升级扩展');
-  }
-
-  const src = raw.config && typeof raw.config === 'object' ? raw.config : raw;
-  const out = {};
-
-  Object.keys(DEFAULTS).forEach((key) => {
-    const def = DEFAULTS[key];
-    const val = src[key];
-    if (val === undefined || val === null) return;
-    if (typeof def === 'boolean') {
-      out[key] = !!val;
-    } else if (typeof def === 'number') {
-      const n = Number(val);
-      if (Number.isFinite(n)) out[key] = n;
-    } else if (typeof def === 'string') {
-      if (typeof val === 'string') out[key] = val;
-    }
-  });
-
-  if (!Object.keys(out).length) throw new Error('文件里没有可识别的配置项');
-  return out;
 }
 
 $('exportCfg').addEventListener('click', () => {
@@ -404,7 +373,8 @@ $('exportCfg').addEventListener('click', () => {
     const payload = buildExport(includeKey);
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    // 文件名用本地时间：UTC 会让人误判"这是凌晨导出的"
+    const stamp = localIso(new Date()).slice(0, 19).replace(/[:T]/g, '-');
     const a = document.createElement('a');
     a.href = url;
     a.download = 'rimefox-config-' + stamp + '.json';
@@ -441,19 +411,20 @@ $('importFile').addEventListener('change', async (event) => {
       throw new Error('不是合法的 JSON 文件');
     }
 
-    const patch = pickImportedConfig(raw);
+    const parsed = pickImportedConfig(raw);
+    const patch = parsed.config;
     const next = await saveConfig(patch);
     currentCfg = next;
     applyConfig(next);
     renderBrowserShortcut();
     if (next.baseUrl && next.apiKey) fetchModels();
 
-    const count = Object.keys(patch).length;
-    setResult(
-      $('cfgResult'),
-      '已导入 ' + count + ' 项设置' + (patch.apiKey ? '（含 API Key）' : '（文件里没有 API Key，请手动填）'),
-      'ok'
-    );
+    let msg = '已导入 ' + Object.keys(patch).length + ' 项设置';
+    if (parsed.rejected.length) {
+      msg += '；' + parsed.rejected.length + ' 项取值不合法已忽略（' + parsed.rejected.join('、') + '）';
+    }
+    if (!patch.apiKey) msg += '（文件里没有 API Key，请手动填）';
+    setResult($('cfgResult'), msg, parsed.rejected.length ? 'bad' : 'ok');
   } catch (err) {
     setResult($('cfgResult'), '导入失败：' + err.message, 'bad');
   }
