@@ -486,6 +486,7 @@
     // 旧一轮却带着过期的队列继续往页面里插译文
     cancelRun();
     DT.state.enabled = false;
+    if (DT.hover) DT.hover.clear();
     DT.state.style = 'plain'; // 趣味翻译是一次性的：还原后回到普通翻译
     DT.send({ type: 'resume:set', value: false }).catch(function () {});
     DT.restore();
@@ -692,6 +693,7 @@
   // 中途重建：作废在途的一轮（它回来的结果会被丢弃），清空重来
   function startOver() {
     cancelRun();
+    if (DT.hover) DT.hover.clear();
     DT.restore();
     settled = new WeakMap();
     churn = new WeakMap();

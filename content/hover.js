@@ -322,33 +322,167 @@
   }
 
   // ---------------- 原文气泡（原地替换的单元用） ----------------
+  // 短句：轻量纯文本，pointer-events:none，不打断阅读。
+  // 长段落：有上限的富气泡（预览 + 展开 / 收起 / 关闭），允许鼠标移进去滚动查看。
+  var TIP_PREVIEW_CHARS = 180;
+  var TIP_HIDE_DELAY = 200;
+  var tipText = '';
+  var tipScope = '';
+  var tipFull = '';
+  var tipExpanded = false;
+  var tipRich = false;
+  var tipAnchor = null;
+  var tipTimer = 0;
+
   function ensureTip() {
     if (tip && tip.isConnected) return tip;
     tip = document.createElement('div');
     tip.setAttribute('data-dt-ui', '1');
     tip.className = 'dt-hover-tip';
     tip.hidden = true;
+    tip.setAttribute('role', 'dialog');
+
+    var head = document.createElement('div');
+    head.className = 'dt-hover-head';
+    var label = document.createElement('span');
+    label.className = 'dt-hover-label';
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'dt-hover-close';
+    close.textContent = '×';
+    close.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      clear();
+    });
+    head.appendChild(label);
+    head.appendChild(close);
+
+    var body = document.createElement('div');
+    body.className = 'dt-hover-body';
+    body.setAttribute('tabindex', '0');
+
+    var actions = document.createElement('div');
+    actions.className = 'dt-hover-actions';
+    var expand = document.createElement('button');
+    expand.type = 'button';
+    expand.className = 'dt-hover-expand';
+    expand.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleExpand();
+    });
+    actions.appendChild(expand);
+
+    tip.appendChild(head);
+    tip.appendChild(body);
+    tip.appendChild(actions);
+    tip._head = head;
+    tip._label = label;
+    tip._close = close;
+    tip._body = body;
+    tip._actions = actions;
+    tip._expand = expand;
+
+    // 鼠标能从原文移进气泡，不能一离开锚点就消失
+    tip.addEventListener('mouseenter', cancelHide);
+    tip.addEventListener('mouseleave', function () {
+      if (tipRich) scheduleClear();
+    });
+
     (document.body || document.documentElement).appendChild(tip);
     return tip;
   }
 
-  function showTip(anchor, text) {
-    ensureTip();
-    tip.textContent = text;
-    tip.hidden = false;
-    var r = anchor.getBoundingClientRect();
+  function scopeLabel(scope, truncated) {
+    if (scope === 'paragraph') {
+      return DT.uiText('段落级对应', 'Paragraph-level match') + (truncated ? ' · ' + DT.uiText('原文节选', 'excerpt') : '');
+    }
+    if (scope === 'line') return DT.uiText('行级对应', 'Line-level match');
+    return '';
+  }
+
+  function positionTip(anchor) {
+    if (!tip || tip.hidden || !anchor) return;
     var pad = 8;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var r = anchor.getBoundingClientRect();
     var w = tip.offsetWidth;
     var h = tip.offsetHeight;
-    var left = Math.min(Math.max(pad, r.left), Math.max(pad, window.innerWidth - w - pad));
+    var left = Math.min(Math.max(pad, r.left), Math.max(pad, vw - w - pad));
     var top = r.bottom + 6;
-    if (top + h > window.innerHeight - pad) top = Math.max(pad, r.top - h - 6);
+    if (top + h > vh - pad) top = Math.max(pad, r.top - h - 6);
+    if (top + h > vh - pad) top = Math.max(pad, vh - h - pad);
     tip.style.left = Math.round(left) + 'px';
     tip.style.top = Math.round(top) + 'px';
   }
 
-  function hideTip() {
+  function toggleExpand() {
+    if (!tip) return;
+    tipExpanded = !tipExpanded;
+    tip._body.textContent = tipExpanded ? tipFull : tipPreview(tipFull);
+    tip._expand.textContent = tipExpanded ? DT.uiText('收起', 'Collapse') : DT.uiText('展开全文', 'Show full text');
+    tip._body.scrollTop = 0;
+    positionTip(tipAnchor);
+  }
+
+  function tipPreview(text) {
+    var full = String(text || '');
+    if (full.length <= TIP_PREVIEW_CHARS) return full;
+    return full.slice(0, TIP_PREVIEW_CHARS).replace(/s+$/, '') + '…';
+  }
+
+  function showTip(anchor, text, scope) {
+    ensureTip();
+    var full = String(text || '');
+    var truncated = full.length > TIP_PREVIEW_CHARS;
+    var sc = scope || 'sentence';
+    tipText = full;
+    tipScope = sc;
+    tipFull = full;
+    tipExpanded = false;
+    tipAnchor = anchor;
+    // 段落 / 行级对应必须明确标识；长句即使 scope=sentence 也要能展开
+    tipRich = sc === 'paragraph' || sc === 'line' || truncated;
+    tip.classList.toggle('is-rich', tipRich);
+    tip.classList.toggle('is-plain', !tipRich);
+    tip._head.hidden = !tipRich;
+    tip._close.hidden = !tipRich;
+    tip._actions.hidden = !truncated;
+    tip._label.textContent = tipRich ? scopeLabel(sc, truncated) : '';
+    tip._expand.textContent = DT.uiText('展开全文', 'Show full text');
+    tip._close.setAttribute('aria-label', DT.uiText('关闭原文提示', 'Close source text'));
+    tip._body.textContent = tipPreview(full);
+    tip._body.setAttribute('aria-label', DT.uiText('原文内容，可滚动查看', 'Source text, scrollable'));
+    tip.hidden = false;
+    positionTip(anchor);
+    if (tipRich) cancelHide();
+  }
+
+  function hideTip(force) {
+    cancelHide();
     if (tip) tip.hidden = true;
+    // 保留 tipText / tipScope：滚动或点击暂时收起后，鼠标回到同一句要能重新显示
+    if (force) {
+      tipRich = false;
+      tipAnchor = null;
+    }
+  }
+
+  function scheduleClear() {
+    cancelHide();
+    tipTimer = setTimeout(function () {
+      tipTimer = 0;
+      clear();
+    }, TIP_HIDE_DELAY);
+  }
+
+  function cancelHide() {
+    if (tipTimer) {
+      clearTimeout(tipTimer);
+      tipTimer = 0;
+    }
   }
 
   // ---------------- 高亮 ----------------
@@ -358,6 +492,7 @@
   }
 
   function clear() {
+    cancelHide();
     if (HAS_HIGHLIGHT) {
       CSS.highlights.delete(SRC_HL);
       CSS.highlights.delete(TGT_HL);
@@ -368,7 +503,14 @@
     marked = [];
     current = null;
     currentKey = '';
-    hideTip();
+    cache = null;
+    hideTip(true);
+    tipText = '';
+    tipScope = '';
+    tipFull = '';
+    tipExpanded = false;
+    tipRich = false;
+    tipAnchor = null;
   }
 
   // 不支持 Highlight API 的浏览器：退回整段高亮
@@ -378,7 +520,7 @@
       if (!original || DT.normalizeText(original) === DT.normalizeText(unit.textContent)) return;
       unit.setAttribute('data-dt-hover', 'replaced');
       marked.push(unit);
-      showTip(unit, original);
+      showTip(unit, original, 'paragraph');
       return;
     }
     var target = hover.targetOf(unit);
@@ -409,11 +551,21 @@
 
   // 鼠标在 (x, y)、落在 node 上：找到那一句并高亮
   hover.updateAt = function (x, y, node) {
-    var unit = enabled() ? hover.unitOf(node) : null;
-    if (!unit) {
-      if (current) clear();
+    // 鼠标在长气泡里滚动 / 点按钮：不要把它当成"移到空白处"而收起
+    if (tip && tipRich && !tip.hidden && tip.contains(node)) {
+      cancelHide();
       return;
     }
+    var unit = enabled() ? hover.unitOf(node) : null;
+    if (!unit) {
+      if (current) {
+        // 长气泡允许鼠标从原文移进去；给它一点时间，短句仍然立即消失
+        if (tipRich && !tip.hidden) scheduleClear();
+        else clear();
+      }
+      return;
+    }
+    cancelHide();
     if (!HAS_HIGHLIGHT) {
       if (unit !== current) {
         clear();
@@ -435,13 +587,16 @@
       var hit = hover.matchReplaced(page.text, at, DT.replacedOf(unit));
       if (!hit) return;
       var key = 'r' + hit.span.join(':');
-      if (unit === current && key === currentKey) return;
+      if (unit === current && key === currentKey) {
+        if (tipRich && tip && tip.hidden) showTip(unit, tipText, tipScope);
+        return;
+      }
       clear();
       current = unit;
       currentKey = key;
       paint(TGT_HL, hover.rangeOf(page, hit.span));
       if (DT.normalizeText(hit.tip) !== DT.normalizeText(page.text.slice(hit.span[0], hit.span[1]))) {
-        showTip(unit, hit.tip);
+        showTip(unit, hit.tip, hit.scope);
       }
       return;
     }
@@ -481,8 +636,36 @@
     },
     true
   );
-  // 滚动、点击、按键时收起气泡，免得它停在别的位置上（句子高亮跟着文字走，不用收）
-  window.addEventListener('scroll', hideTip, true);
-  document.addEventListener('mousedown', hideTip, true);
-  document.addEventListener('keydown', hideTip, true);
+  // 配置变更（设置页 / 弹窗 / 悬浮入口）要主动清理，不能等鼠标再动
+  DT.onConfig(function () {
+    clear();
+  });
+
+  // 滚动时位置会失效，整组清掉；点击页面只收气泡，保留高亮
+  window.addEventListener(
+    'scroll',
+    function () {
+      clear();
+    },
+    true
+  );
+  document.addEventListener(
+    'mousedown',
+    function (event) {
+      if (tip && tipRich && !tip.hidden && tip.contains(event.target)) return;
+      clear();
+    },
+    true
+  );
+  document.addEventListener(
+    'keydown',
+    function (event) {
+      if (event.key === 'Escape') {
+        clear();
+        return;
+      }
+      if (!tipRich) hideTip(true);
+    },
+    true
+  );
 })();

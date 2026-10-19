@@ -23,6 +23,7 @@ const el = {
   modeSeg: document.getElementById('modeSeg'),
   styleSeg: document.getElementById('styleSeg'),
   target: document.getElementById('target'),
+  hoverCompare: document.getElementById('hoverCompare'),
   stat: document.getElementById('stat'),
   meta: document.getElementById('meta'),
   statusBox: document.getElementById('statusBox'),
@@ -40,6 +41,7 @@ const el = {
   quickOut: document.getElementById('quickOut'),
   themeToggle: document.getElementById('themeToggle'),
   nightRow: document.getElementById('nightRow'),
+  hoverRow: document.getElementById('hoverRow'),
   nightSite: document.getElementById('nightSite'),
   nightHost: document.getElementById('nightHost')
 };
@@ -335,6 +337,14 @@ function tabHostname() {
   }
 }
 
+function renderHover() {
+  var on = currentCfg.hoverCompare !== false;
+  el.hoverCompare.checked = on;
+  var label = t('悬停时显示对应原句；无法准确匹配时回退到行或段落。可在网页悬浮入口中快速开关。');
+  el.hoverCompare.setAttribute('aria-label', t('悬停对照'));
+  el.hoverRow.title = label;
+}
+
 function renderNight() {
   const host = tabHostname();
   el.nightRow.hidden = !host || !supported;
@@ -346,6 +356,23 @@ function renderNight() {
   el.nightSite.setAttribute('aria-label', label);
   el.nightRow.title = label;
 }
+
+el.hoverCompare.addEventListener('change', async () => {
+  var wanted = el.hoverCompare.checked;
+  el.hoverCompare.disabled = true;
+  var saved = await saveAndRemember({ hoverCompare: wanted });
+  el.hoverCompare.disabled = false;
+  if (!saved) {
+    // 保存失败：恢复界面状态，不能让用户以为已经生效
+    el.hoverCompare.checked = currentCfg.hoverCompare !== false;
+    el.stat.textContent = t('设置保存失败，请重试');
+    setTimeout(function () { render(); }, 1800);
+    return;
+  }
+  currentCfg = saved;
+  rememberSaved(saved);
+  renderHover();
+});
 
 el.nightSite.addEventListener('change', async () => {
   const host = tabHostname();
@@ -370,6 +397,7 @@ function onConfigElsewhere(next) {
   renderThemeToggle();
   renderMeta();
   renderNight();
+  renderHover();
 }
 
 async function init() {
@@ -417,6 +445,7 @@ async function init() {
   renderMeta();
   renderThemeToggle();
   renderNight();
+  renderHover();
   watchConfig(onConfigElsewhere);
 }
 

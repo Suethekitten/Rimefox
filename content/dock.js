@@ -34,6 +34,8 @@
     selection: 'M5 4h4M7 4v16M5 20h4M13 8h7M13 12h7M13 16h5',
     // 图钉：置顶小窗
     pin: 'M9 3h6l-1 6 3 3H7l3-3-1-6zM12 15v6',
+    // 左右双向箭头：悬停对照开关
+    hover: 'M4 7h16M7 4 4 7l3 3M20 17H4M17 14l3 3-3 3',
     // 服务器：当前服务商
     provider: 'M4 5h16v5H4zM4 14h16v5H4zM8 7.5h.01M8 16.5h.01'
   };
@@ -96,6 +98,11 @@
     }
     if (act === 'mode') {
       return st.mode === 'translation' ? DT.uiText('切到双语对照', 'Switch to bilingual') : DT.uiText('切到仅译文', 'Switch to translation only');
+    }
+    if (act === 'hover') {
+      return cfg().hoverCompare === false
+        ? DT.uiText('开启悬停对照', 'Enable hover compare')
+        : DT.uiText('关闭悬停对照', 'Disable hover compare');
     }
     if (act === 'selection') return DT.uiText('翻译选中的文字', 'Translate selected text');
     if (act === 'pin') return DT.uiText('置顶小窗：划词译文始终在最上层', 'Pinned window: selection translations stay on top');
@@ -164,7 +171,7 @@
     dock.setAttribute('aria-orientation', 'vertical');
     var panel = document.createElement('div');
     panel.className = 'panel';
-    ['toggle', 'mode', 'selection', 'pin', 'provider'].forEach(function (act) {
+    ['toggle', 'mode', 'hover', 'selection', 'pin', 'provider'].forEach(function (act) {
       panel.appendChild(makeButton(act));
     });
     dock.appendChild(panel);
@@ -348,6 +355,25 @@
       render();
       return;
     }
+    if (act === 'hover') {
+      var next = cfg().hoverCompare === false;
+      DT.send({ type: 'hover:set', value: next }, 5000)
+        .then(function (res) {
+          if (!res || !res.ok) {
+            DT.toast(DT.uiText('设置保存失败，请重试', 'Could not save the setting — please retry'));
+            render();
+            return;
+          }
+          if (DT.state.config) DT.state.config.hoverCompare = res.value;
+          DT.emitConfig(DT.state.config || {});
+          render();
+        })
+        .catch(function () {
+          DT.toast(DT.uiText('设置保存失败，请重试', 'Could not save the setting — please retry'));
+          render();
+        });
+      return;
+    }
     if (act === 'selection') {
       if (cfg().selectionTranslate === false) {
         DT.toast(DT.uiText('划词翻译已在设置里关闭', 'Selection translation is turned off in Settings'));
@@ -381,6 +407,7 @@
     buttons.toggle.setAttribute('aria-pressed', String(!!st.enabled));
     buttons.ball.setAttribute('aria-pressed', String(!!st.enabled));
     buttons.mode.dataset.mode = st.mode;
+    buttons.hover.setAttribute('aria-pressed', String(cfg().hoverCompare !== false));
     buttons.pin.hidden = !(DT.pip && DT.pip.supported());
     Object.keys(buttons).forEach(function (act) {
       buttons[act].setAttribute('aria-label', labelOf(act));

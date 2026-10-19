@@ -168,21 +168,112 @@ html[data-dt="on"] [data-dt-hover="replaced"] {
 html[data-dt="on"] .dt-hover-tip {
   position: fixed;
   z-index: 2147483646;
-  max-width: 360px;
-  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-width: min(420px, calc(100vw - 24px));
+  max-height: min(40vh, 340px);
   border-radius: 8px;
   background: rgba(22, 24, 30, 0.94);
   color: #fff;
   font: 12.5px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-  white-space: pre-wrap;
-  word-break: break-word;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
   border-left: 3px solid var(--dt-accent, #60a5fa);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+/* 短句：保持原来的轻量提示，不让鼠标进入 */
+html[data-dt="on"] .dt-hover-tip.is-plain {
+  padding: 6px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
 
-html[data-dt="on"] .dt-hover-tip[hidden] {
-  display: none;
+.dt-hover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 8px 5px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.dt-hover-label {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  opacity: 0.78;
+}
+
+.dt-hover-close,
+.dt-hover-expand {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: 5px;
+  color: inherit;
+}
+
+.dt-hover-close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+.dt-hover-close:hover,
+.dt-hover-close:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.dt-hover-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 7px 10px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.dt-hover-actions {
+  flex: 0 0 auto;
+  padding: 0 8px 7px 10px;
+}
+
+.dt-hover-expand {
+  padding: 2px 4px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--dt-accent, #60a5fa) 70%, white);
+}
+
+.dt-hover-expand:hover,
+.dt-hover-expand:focus-visible {
+  text-decoration: underline;
+}
+
+.dt-hover-head[hidden],
+.dt-hover-actions[hidden],
+.dt-hover-close[hidden],
+.dt-hover-expand[hidden] {
+  display: none !important;
+}
+
+html[data-dt="on"] .dt-hover-tip :focus-visible {
+  outline: 2px solid var(--dt-accent, #60a5fa);
+  outline-offset: 1px;
+}
+
+.dt-hover-tip[hidden] {
+  display: none !important;
 }
 
 /* ---- 深色网页（data-dt-scheme="dark"，content/appearance.js 按页面背景判断）----
@@ -211,6 +302,15 @@ html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-tip {
   background: rgba(241, 245, 249, 0.96);
   color: #0f172a;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-head {
+  border-bottom-color: rgba(15, 23, 42, 0.14);
+}
+
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-close:hover,
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-close:focus-visible {
+  background: rgba(15, 23, 42, 0.1);
 }
 
 /* ---- 译文排版（设置页「外观 → 译文排版」，全是默认值时不生效）----
@@ -245,4 +345,3 @@ html[data-dt-night="on"] [style*="background-image"],
 html[data-dt-night="on"] body > [data-dt-ui] {
   filter: invert(1) hue-rotate(180deg);
 }
-

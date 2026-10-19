@@ -504,6 +504,14 @@ const ROUTES = {
     await saveConfig({ mode: msg.mode });
     return { ok: true };
   },
+  // 内容脚本不能直接写配置（完整配置含 Key）：只允许改这一个布尔开关
+  'hover:set': async (msg) => {
+    if (typeof msg.value !== 'boolean') return { ok: false, error: 'bad_value' };
+    const cfg = await getConfig();
+    if ((cfg.hoverCompare !== false) === msg.value) return { ok: true, value: msg.value };
+    await saveConfig({ hoverCompare: msg.value });
+    return { ok: true, value: msg.value };
+  },
   // 开发调试用的用量统计（设置页打开「输出调试日志」后才返回）
   'usage:stats': async () => {
     const cfg = await getConfig();

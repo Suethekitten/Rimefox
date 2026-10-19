@@ -878,19 +878,23 @@
 
   // ---------------- 悬停对照（DT.hover，逐句） ----------------
   // 夹具放在视口里：caretRangeFromPoint 只能命中屏幕上的文字（#fixture 在屏幕外）
-  function withHoverFixture(html, fn) {
+  function withHoverFixture(html, fn, extraStyle) {
     var box = document.createElement('div');
-    box.style.cssText = 'position:fixed;left:0;top:0;width:640px;z-index:2147483000;background:#fff;font:16px/1.6 sans-serif;padding:8px';
+    box.style.cssText = 'position:fixed;left:0;top:0;width:640px;z-index:2147483000;background:#fff;font:16px/1.6 sans-serif;padding:8px' + (extraStyle ? ';' + extraStyle : '');
     box.innerHTML = html;
     document.body.appendChild(box);
     var wasEnabled = DT.state.enabled;
+    var prevDt = document.documentElement.getAttribute('data-dt');
     DT.state.enabled = true;
+    document.documentElement.setAttribute('data-dt', 'on');
     try {
       return fn(box);
     } finally {
       DT.hover.clear();
       DT.restore();
       DT.state.enabled = wasEnabled;
+      if (prevDt === null) document.documentElement.removeAttribute('data-dt');
+      else document.documentElement.setAttribute('data-dt', prevDt);
       box.remove();
     }
   }
@@ -961,13 +965,93 @@
       DT.hover.updateAt(p.x, p.y, btn);
       var tip = document.querySelector('.dt-hover-tip');
       if (!tip || tip.hidden) return '没有弹出原文气泡';
-      if (tip.textContent !== 'Then continue.') return '气泡里不是这一句原文：' + tip.textContent;
+      var tipBody = tip.querySelector('.dt-hover-body');
+      if (!tipBody || tipBody.textContent !== 'Then continue.') return '气泡里不是这一句原文：' + (tipBody ? tipBody.textContent : tip.textContent);
       if (highlighted('dt-hover-target') !== '然后继续。') return '页面上高亮的不是鼠标下这句：' + highlighted('dt-hover-target');
       var c = box.querySelector('#hv-c');
       p = pointOf(c.firstChild, 'Else');
       DT.hover.updateAt(p.x, p.y, c);
       return tip.hidden && !highlighted('dt-hover-target') ? true : '移开后气泡 / 高亮没收起';
     });
+  });
+
+  check('悬停对照：超长段落气泡有尺寸上限、标段落级、可展开/收起/关闭', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    var prevMode = DT.state.mode;
+    DT.state.mode = 'translation';
+    try {
+      return withHoverFixture('<p id="hv-long" style="white-space:pre-wrap"></p><p id="hv-other">Other text</p>', function (box) {
+        var p = box.querySelector('#hv-long');
+        var orig = '';
+        for (var i = 1; i <= 8; i += 1) orig += 'Original sentence number ' + i + ' is deliberately long. ';
+        p.textContent = orig;
+        if (!DT.inject(p, '第一段。\n第二段。', 'zh-CN')) return 'inject 返回 false';
+        if (!p.hasAttribute('data-dt-replaced')) return '长段落应原地替换';
+        var tip = document.querySelector('.dt-hover-tip');
+        if (!tip) return '没有气泡';
+        var txt = p.firstChild;
+        var pt = pointOf(txt, '第一段');
+        DT.hover.updateAt(pt.x, pt.y, p);
+        if (tip.hidden) return '长段落没有弹出气泡';
+        if (!tip.classList.contains('is-rich')) return '长段落应使用可交互气泡';
+        var label = tip.querySelector('.dt-hover-label').textContent;
+        if (label.indexOf('段落级对应') < 0) return '没有标段落级：' + label;
+        var body = tip.querySelector('.dt-hover-body');
+        if (body.textContent.length >= orig.length) return '长段落应先显示节选';
+        if (body.textContent.slice(-1) !== '…') return '节选没有省略号';
+        var r = tip.getBoundingClientRect();
+        if (r.width > Math.min(420, window.innerWidth - 24) + 1) return '气泡太宽：' + r.width;
+        if (r.height > window.innerHeight * 0.4 + 1) return '气泡太高：' + r.height;
+        if (r.left < 0 || r.top < 0 || r.right > window.innerWidth || r.bottom > window.innerHeight) {
+          return '气泡超出视口：' + JSON.stringify({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+        }
+        var expand = tip.querySelector('.dt-hover-expand');
+        if (!expand || expand.hidden) return '长段落没有展开按钮';
+        expand.click();
+        if (body.textContent !== orig.trim() && body.textContent !== orig) return '展开后不是完整原文';
+        if (expand.textContent !== '收起') return '展开按钮文案不对：' + expand.textContent;
+        expand.click();
+        if (body.textContent.slice(-1) !== '…') return '收起后没有回到节选';
+        tip.querySelector('.dt-hover-close').click();
+        if (!tip.hidden) return '关闭按钮没有收起气泡';
+        if (highlighted('dt-hover-target')) return '关闭后高亮没有清除';
+        // 再显示一次，测试 Escape
+        DT.hover.updateAt(pt.x, pt.y, p);
+        if (tip.hidden) return '重新悬停没有显示';
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return tip.hidden ? true : 'Escape 没有关闭气泡';
+      }, 'left:auto;right:0;bottom:0;top:auto;');
+    } finally {
+      DT.state.mode = prevMode;
+    }
+  });
+
+  check('悬停对照：配置关闭后立即清除气泡与高亮，重新开启可再次触发', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    var prev = DT.state.config;
+    try {
+      DT.state.config = { hoverCompare: true, uiLang: 'zh' };
+      return withHoverFixture('<button id="hv-toggle">Sign in now. Then continue.</button>', function (box) {
+        var btn = box.querySelector('#hv-toggle');
+        if (!DT.inject(btn, '立即登录。然后继续。', 'zh-CN')) return 'inject 返回 false';
+        var pt = pointOf(btn.firstChild, '然后');
+        DT.hover.updateAt(pt.x, pt.y, btn);
+        var tip = document.querySelector('.dt-hover-tip');
+        if (!tip || tip.hidden) return '没有弹出';
+        DT.state.config = { hoverCompare: false, uiLang: 'zh' };
+        DT.emitConfig(DT.state.config);
+        if (!tip.hidden) return '关闭后气泡没有立即消失';
+        if (highlighted('dt-hover-target') || btn.hasAttribute('data-dt-hover')) return '关闭后高亮/属性没有清除';
+        DT.hover.updateAt(pt.x, pt.y, btn);
+        if (!tip.hidden || highlighted('dt-hover-target')) return '关闭后不应再触发';
+        DT.state.config = { hoverCompare: true, uiLang: 'zh' };
+        DT.emitConfig(DT.state.config);
+        DT.hover.updateAt(pt.x, pt.y, btn);
+        return !tip.hidden && highlighted('dt-hover-target') === '然后继续。' ? true : '重新开启后没有恢复';
+      });
+    } finally {
+      DT.state.config = prev;
+    }
   });
 
   // ---------------- 0.8.4 小说正文：分行保留 / 按行写回 / 还原 ----------------
@@ -1289,7 +1373,8 @@
       DT.hover.updateAt(pt.x, pt.y, line2.parentElement);
       var tip = document.querySelector('.dt-hover-tip');
       if (!tip || tip.hidden) return '没有弹出原文气泡';
-      if (tip.textContent !== '「ポッキーの日だ。」') return '气泡不是第 2 行原文：' + tip.textContent;
+      var tipBody = tip.querySelector('.dt-hover-body');
+      if (!tipBody || tipBody.textContent !== '「ポッキーの日だ。」') return '气泡不是第 2 行原文：' + (tipBody ? tipBody.textContent : tip.textContent);
       return highlighted('dt-hover-target') === '「是百奇日。」' ? true : '高亮的不是鼠标下这一句：' + highlighted('dt-hover-target');
     });
   });
@@ -1310,7 +1395,7 @@
       DT.hover.updateAt(pt.x, pt.y, node.parentElement);
       var tip = document.querySelector('.dt-hover-tip');
       if (!tip || tip.hidden) return '没有弹出原文气泡';
-      var r = eq(tip.textContent, '「今日は何の日？」\n「ポッキーの日だ。」\n「勝負しよう。」');
+      var r = eq(tip.querySelector('.dt-hover-body').textContent, '「今日は何の日？」\n「ポッキーの日だ。」\n「勝負しよう。」');
       if (r !== true) return '应退回整段原文：' + r;
       return highlighted('dt-hover-target') === '「今天是什么日子？」「是百奇日，来比一场。」' ? true : '应高亮整段：' + highlighted('dt-hover-target');
     });
@@ -1416,7 +1501,7 @@
     var acts = [].map.call(DT.dock.root().querySelectorAll('button'), function (b) {
       return b.dataset.act;
     });
-    return eq(acts, ['toggle', 'mode', 'selection', 'pin', 'provider', 'ball']);
+    return eq(acts, ['toggle', 'mode', 'hover', 'selection', 'pin', 'provider', 'ball']);
   });
 
   check('悬浮入口：左右位置、自动隐藏、界面语言跟着配置走', function () {
@@ -1431,6 +1516,23 @@
     if (dock.hasAttribute('data-auto')) return '关掉自动隐藏后不该半藏';
     if (toggle !== 'Translate this page') return '英文界面的说明不对：' + toggle;
     return provider === 'Switch provider (current: Gemini · flash)' ? true : '服务商说明不对：' + provider;
+  });
+
+  check('悬浮入口：悬停对照按钮的选中状态与中英文文案同步', function () {
+    emitConfig({ dockEnabled: true, hoverCompare: true, uiLang: 'zh', page: {} });
+    var root = DT.dock.root();
+    var b = root.querySelector('[data-act="hover"]');
+    if (!b) return '没有悬停对照按钮';
+    if (b.getAttribute('aria-pressed') !== 'true') return '开启状态没有 aria-pressed';
+    if (b.getAttribute('aria-label') !== '关闭悬停对照') return '中文开启文案不对：' + b.getAttribute('aria-label');
+
+    emitConfig({ dockEnabled: true, hoverCompare: false, uiLang: 'en', page: {} });
+    if (b.getAttribute('aria-pressed') !== 'false') return '关闭状态没有 aria-pressed=false';
+    if (b.getAttribute('aria-label') !== 'Enable hover compare') return '英文关闭文案不对：' + b.getAttribute('aria-label');
+
+    emitConfig({ dockEnabled: false, page: {} });
+    DT.state.config = null;
+    return true;
   });
 
   check('悬浮入口：服务商菜单只列有 Key 的，再点一次收起', function () {

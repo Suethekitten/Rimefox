@@ -53,6 +53,13 @@
           <span class="label">译成</span>
           <select id="target"></select>
         </div>
+        <div class="row" id="hoverRow">
+          <span class="label" title="悬停时显示对应原句；无法准确匹配时回退到行或段落。可在网页悬浮入口中快速开关。">悬停对照</span>
+          <label class="night-line" title="悬停时显示对应原句；无法准确匹配时回退到行或段落。可在网页悬浮入口中快速开关。">
+            <input type="checkbox" id="hoverCompare" role="switch" />
+            <span class="mini-switch" aria-hidden="true"></span>
+          </label>
+        </div>
         <!-- 趣味翻译：只对当前页生效，还原后回到普通 -->
         <div class="row">
           <span class="label" title="只改写正文，只对当前页生效；还原后回到普通翻译">趣味</span>

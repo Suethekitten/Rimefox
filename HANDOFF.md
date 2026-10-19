@@ -39,7 +39,7 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **126 / 126 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **129 / 129 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 
 ---
 
@@ -134,6 +134,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | `translate` | `{texts: string[], target: string, style?: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败 |
 | `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本）。`config.page` 是后台按发送方网址算好的 `{accent, customCss, typo, site, night, provider}`（自定义 CSS 已清洗、站点规则已匹配） |
 | `mode:set` | `{mode}` | `{ok}` | 悬浮入口切显示方式后记进配置；只接受 `dual` / `translation`，内容脚本改不了别的配置项 |
+| `hover:set` | `{value: boolean}` | `{ok, value}` / `{ok:false,error}` | 悬浮入口切悬停对照；只接受严格布尔值，内容脚本不能改其他配置项 |
 | `test` | — | `{ok, ms, model, sample}` / `{ok:false,error}` | 测试连接 |
 | `cache:clear` | — | `{ok}` | 清空三层缓存（storage 里的 `dt.cache.v1` 一并删掉） |
 | `cache:stats` | — | `{ok, stats: {memory, disk, hits, misses}, bytesInUse: {session, local}}` | 设置页「翻译缓存」卡片用；`bytesInUse` 是浏览器实际记的占用 |
@@ -294,7 +295,8 @@ Pixiv 小说的正文是 `pre-wrap` 容器里一段一个 `<p>`，段内几行�
   下一轮按新内容重翻。同一元素连续 3 次都在翻译途中被改（计时器、实时数字）就不再翻它，免得每变一次重发一次请求
 - **悬停对照**按「段落 → 行 → 句子」三级对应，只认靠得住的那一层：行数相同才按行配对；句子要句数相同且句界相对位置相差
   ≤ 0.25 才一一对应，否则退回整行 / 整段（高亮和气泡一起放大）。不再按长度比例猜句子。仅译文的原文与逐行对应关系
-  记在 `DT.replacedOf(el)`（`src` / `lines` / `aligned`）
+  记在 `DT.replacedOf(el)`（`src` / `lines` / `aligned`）。行级 / 段落级气泡会标明层级；超长段落默认只给节选，
+  可展开滚动查看完整原文，鼠标能移进气泡，Escape / 关闭按钮收起。开关复用 `hoverCompare`，Dock / Popup / Options 三处同步
 
 ### 5.3 `textOf()` 必须排除自己的节点
 
@@ -365,7 +367,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-126 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
+129 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -384,6 +386,7 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 node test/subtitles-session.test.mjs # 字幕运行时 A–J：语言/视频切换、异步轨道、播放器重建、CC/开关（10 条）
 node test/usage.test.mjs       # 三协议 usage 提取 + 统计聚合（6 条）
 node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆批、部分成功、usage 汇总（8 条）
+node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络请求（6 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
@@ -497,7 +500,7 @@ node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆�
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **126 / 126**
+4. 跑自检页：必须 **129 / 129**
 4b. 跑 Node 单测：`for f in test/*.test.mjs; do node $f; done`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -576,5 +579,9 @@ node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆�
 - **超时阶梯**：翻译消息超时 90s → 190s、看门狗 100s → 200s，高于 provider 单请求 180s 总上限，减少"后台还在生成、内容脚本已超时重发"的重复计费。多轮重试仍可能超过 190s（剩余风险）。
 - **用量诊断**（`lib/usage.js` + 三个引擎 + `lib/provider.js` + `background.js`）：三协议 `parseResponse` 提取 usage；provider 的 `meta` 记 `http / usages / finishReasons`；background 聚合 `requests / responses / input / output / reasoning / cacheRead / cacheHits / cacheMisses / retries / splits / discarded / failed / finishReasons`。只在 `debug` 开启时通过 `usage:stats` / `usage:reset` 读取；只存数字，不存正文、Key、Prompt 或原始响应。
 - **中日 token 审计**：32 / 55 是"成功注入的单元数"，不是 token；代码没有按方向分支的计费逻辑。正常差异来自字符长度、输出膨胀、缓存冷热与语言跳过；最坏拆批 `8n−2` 次 HTTP。已修"拆批一半失败丢弃另一半"与"90s/180s 超时倒挂"；并发批次 in-flight 去重、`maxCharsPerBatch > 3744` 时 8000 输出上限、单条截断保护仍是后续项。详见 [docs/TOKEN-AUDIT.md](docs/TOKEN-AUDIT.md)。
-- **测试**：Node 18 个文件全部通过（新增 subtitles-session 10 条、usage 6 条、usage-pipeline 8 条）；自检 126 / 126。
-- **未验证**：真实 YouTube 视频切换 / CC / 全屏 / 剧场（本机环境未做完整人工回归）；真实模型的中日 token 对照（没有真实 API Key，不编造数值）。
+- **悬停原文气泡**（`content/hover.js` + `content/styles/inject.css`）：短句仍是 `pointer-events:none` 的轻量提示；长段落 / 行级 / 段落级改为有上限的富气泡：宽度 `min(420px, 100vw - 24px)`、高度 `min(40vh, 340px)`、正文可滚动；默认 180 字符节选，提供展开 / 收起 / 关闭，支持 Escape。鼠标可从原文移进气泡（200ms 延迟），内部滚动和按钮不会触发重新定位或隐藏循环。
+- **对应层级标注**：`matchReplaced()` 的 `scope` 原样传给气泡；段落级显示「段落级对应」（截断时加「原文节选」），行级显示「行级对应」。没有重新启用按字符比例猜句子；没有可靠局部依据时仍回退整段。双语的整段高亮保持原行为（原文在页面上，不弹大框）。
+- **悬停状态清理**：`clear()` 同时删除 CSS Custom Highlight、`data-dt-hover`、活动气泡、`cache` / `current` / `currentKey`；`DT.onConfig()` 在开关或任何配置变化时主动清理；`main.js` 的 `disable()` / `startOver()`（含切换双语 / 仅译文）也会清理，避免旧 Range 和残留高亮。
+- **三处快捷开关**：复用 `hoverCompare`，没有新配置。Dock 新增双向箭头按钮（`aria-pressed` + 中英文「开启/关闭悬停对照」）；Popup「显示」卡片加紧凑 switch，保存失败恢复显示并提示；Options 保留原开关并更新说明。内容脚本只能通过后台 `hover:set` 改这一个严格布尔值；后台保存后走现有广播 / `DT.onConfig()`，Dock 成功时先乐观更新，三处不写循环、不触发任何翻译 API。
+- **测试**：Node 19 个文件全部通过（新增 subtitles-session 10 条、usage 6 条、usage-pipeline 8 条、hover-config 6 条）；自检 **129 / 129**。另用 Chrome for Testing 155 + 本地页面做真实浏览器同步测试：Dock → Popup → Options 三处双向切换，`aria-pressed`、switch 状态和 storage 值一致，页面未发起翻译请求。
+- **未验证**：GitHub / Pixiv / Aeon / OWID 的真实站点矩阵本轮未重跑（注入 / 段落策略未改，风险集中在悬停层）；Edge 未测；真实模型的中日 token 对照没有 Key，未编造数值。
