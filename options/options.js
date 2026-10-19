@@ -724,7 +724,8 @@ function bindNav() {
   if (sections[0]) highlight(sections[0].id);
 }
 
-// 商店包不带自检页（只收运行时文件）：找不到就把「打开自检页」那一行藏起来，免得点开是 404
+// 商店包和 GitHub Release 包都不带自检页（只收运行时文件，见 tools/package-store.mjs）：
+// 找不到就把「打开自检页」那一行藏起来，免得点开是 404；直接加载仓库目录时才有
 function hideSelftestIfMissing() {
   fetch('../selftest/index.html')
     .then((res) => {

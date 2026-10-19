@@ -32,7 +32,10 @@
 
   window.addEventListener('message', function (event) {
     if (event.source !== window || !event.data || event.data.source !== 'rimefox-ext') return;
-    if (event.data.type === 'replay' && last) post(last);
+    // 重发时标上 replay：这一份可能是上一个视频的，扩展那边要核对视频才收
+    if (event.data.type === 'replay' && last) {
+      post({ source: last.source, type: last.type, url: last.url, body: last.body, replay: true });
+    }
   });
 
   // 播放器目前用 XHR 拉字幕

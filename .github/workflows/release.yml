@@ -3,7 +3,8 @@
 # 触发：推送到 main 且改动了 manifest.json（通常就是改了版本号），或在 Actions 页面手动运行。
 # 同一个版本只发一次：v<版本号> 已经有 Release 就直接跳过，所以普通推送不会重复发版。
 #
-# 流程：校验版本号 → 跑离线自检（不通过就不发）→ 打包 zip → 从 CHANGELOG 摘出这一版的说明 → 发 Release
+# 流程：校验版本号 → 发版说明格式 → 全部 Node 单测 → 离线自检 → 打包（与商店包同一份白名单）→ 检查安装包清单
+#       → 从 CHANGELOG 摘出这一版的说明 → 发 Release。任何一步失败，后面的步骤（包括发 Release）都不执行
 name: Release
 
 on:
@@ -35,8 +36,9 @@ jobs:
         run: |
           VERSION=$(jq -r .version manifest.json)
           CORE=$(grep -oP "DT\.VERSION = '\K[^']+" content/core.js)
-          if [ "$VERSION" != "$CORE" ]; then
-            echo "::error::manifest.json（$VERSION）和 content/core.js（$CORE）的版本号不一致"
+          PKG=$(jq -r .version package.json)
+          if [ "$VERSION" != "$CORE" ] || [ "$VERSION" != "$PKG" ]; then
+            echo "::error::版本号不一致：manifest.json $VERSION / content/core.js $CORE / package.json $PKG"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -59,6 +61,19 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         run: python3 tools/check-release-notes.py "${{ steps.ver.outputs.version }}"
 
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        if: steps.check.outputs.skip == 'false'
+        with:
+          node-version: 24
+
+      # 全部 Node 单测（字幕竞态、悬停配置、用量统计、打包……）。node --test 把每个 test/*.test.mjs 放进
+      # 单独的子进程，按退出码判定（失败时脚本 process.exit(1) / 抛异常），不看输出里有没有「通过」字样
+      - name: 跑 Node 单测
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          node --version
+          node --test --test-reporter=spec test/*.test.mjs
+
       # 自检页是纯前端页面，不需要加载扩展：用无头 Chrome 打开 file:// 地址，读出结果
       - name: 跑离线自检
         if: steps.check.outputs.skip == 'false'
@@ -72,21 +87,47 @@ jobs:
             exit 1
           fi
 
+      # 安装包和商店包用 tools/package-store.mjs 的同一份白名单：只收运行时文件和许可文件，
+      # 测试、自检页、开发文档、商店截图都不进用户下载的 zip（0.8.5 以前是 rsync 整仓再排除几项）。
+      # 脚本自己会校验版本号、图标、manifest 引用的文件、欢迎页和许可文件，缺一个就失败。
       # zip 里的文件夹名固定叫 Rimefox：已解压扩展的 ID 跟文件夹路径绑定，
       # 用户升级时把新版本覆盖到同一个文件夹再点"重新加载"，设置（包括 API Key）就不会丢
       - name: 打包
         if: steps.check.outputs.skip == 'false'
         id: pack
         run: |
-          ZIP="Rimefox-${{ steps.ver.outputs.tag }}.zip"
-          mkdir -p "$RUNNER_TEMP/pkg/Rimefox"
-          rsync -a --exclude '.git' --exclude '.github' --exclude '.gitignore' \
-            --exclude 'package.ps1' --exclude 'package.bat' \
-            --exclude 'icons/source.png' --exclude 'icons/preview-*.png' --exclude 'icons/icon512.png' --exclude 'tools' \
-            ./ "$RUNNER_TEMP/pkg/Rimefox/"
-          (cd "$RUNNER_TEMP/pkg" && zip -qr "$GITHUB_WORKSPACE/$ZIP" Rimefox)
-          unzip -l "$ZIP" | tail -1
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          node tools/package-store.mjs --release | tail -1
+          node tools/package-store.mjs | tail -1
+          echo "zip=dist/Rimefox-${{ steps.ver.outputs.tag }}.zip" >> "$GITHUB_OUTPUT"
+          echo "store=dist/Rimefox-${{ steps.ver.outputs.tag }}-store.zip" >> "$GITHUB_OUTPUT"
+
+      - name: 检查安装包清单
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          REL="${{ steps.pack.outputs.zip }}"
+          STORE="${{ steps.pack.outputs.store }}"
+          unzip -tq "$REL"
+          unzip -tq "$STORE"
+          unzip -Z1 "$REL" | sort > "$RUNNER_TEMP/release.lst"
+          unzip -Z1 "$STORE" | sed 's#^#Rimefox/#' | sort > "$RUNNER_TEMP/store.lst"
+          # 与商店包的文件集合必须一致（只差一层 Rimefox/ 文件夹）
+          if ! diff -u "$RUNNER_TEMP/store.lst" "$RUNNER_TEMP/release.lst"; then
+            echo "::error::Release 包与商店包的文件不一致"
+            exit 1
+          fi
+          # 不能带测试 / 自检页 / 开发文档 / 商店截图 / 工具脚本
+          if grep -E '^Rimefox/(test|selftest|docs|tools|dist|\.github)/|^Rimefox/[^/]+\.md$|^Rimefox/package\.json$' "$RUNNER_TEMP/release.lst" | grep -v '^Rimefox/THIRD-PARTY-NOTICES\.md$'; then
+            echo "::error::Release 包里混进了非运行时文件（见上面列出的路径）"
+            exit 1
+          fi
+          # 许可文件必须随包分发
+          for f in manifest.json LICENSE THIRD-PARTY-NOTICES.md licenses/oneaifw-MIT.txt; do
+            if ! grep -qx "Rimefox/$f" "$RUNNER_TEMP/release.lst"; then
+              echo "::error::Release 包缺少 $f"
+              exit 1
+            fi
+          done
+          echo "安装包 $(wc -l < "$RUNNER_TEMP/release.lst") 个文件，$(wc -c < "$REL") B"
 
       - name: 整理更新说明
         if: steps.check.outputs.skip == 'false'

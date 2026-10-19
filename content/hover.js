@@ -427,10 +427,22 @@
     positionTip(tipAnchor);
   }
 
+  // 长原文的节选：前 TIP_PREVIEW_CHARS 个字，去掉截断处的空白再加省略号。
+  // 以前写成 /s+$/（字母 s），英文节选末尾的 s 会被吃掉、空白反而留着。
+  // 截断点落在代理对中间（emoji、扩展区汉字）时往前退一位，不留半个字
   function tipPreview(text) {
     var full = String(text || '');
     if (full.length <= TIP_PREVIEW_CHARS) return full;
-    return full.slice(0, TIP_PREVIEW_CHARS).replace(/s+$/, '') + '…';
+    var cut = TIP_PREVIEW_CHARS;
+    var code = full.charCodeAt(cut - 1);
+    if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
+    return full.slice(0, cut).replace(/\s+$/, '') + '…';
+  }
+  hover.tipPreview = tipPreview; // 自检直接测
+
+  // 节点在不在原文气泡里（气泡正文滚动、点按钮都发生在这里面）
+  function insideTip(node) {
+    return !!tip && !!node && node.nodeType === 1 && tip.contains(node);
   }
 
   function showTip(anchor, text, scope) {
@@ -641,10 +653,13 @@
     clear();
   });
 
-  // 滚动时位置会失效，整组清掉；点击页面只收气泡，保留高亮
+  // 网页滚动后锚点位置失效，整组清掉；点击页面只收气泡，保留高亮。
+  // 捕获阶段也会收到元素自己的滚动：气泡正文在滚（读展开后的长原文、收起时 scrollTop 归零）
+  // 不能算网页滚动，否则读到一半气泡就没了。网页其它容器在滚照样清掉
   window.addEventListener(
     'scroll',
-    function () {
+    function (event) {
+      if (insideTip(event.target)) return;
       clear();
     },
     true
@@ -652,7 +667,7 @@
   document.addEventListener(
     'mousedown',
     function (event) {
-      if (tip && tipRich && !tip.hidden && tip.contains(event.target)) return;
+      if (tip && tipRich && !tip.hidden && insideTip(event.target)) return;
       clear();
     },
     true

@@ -28,6 +28,7 @@
     var shownOverlay = null;
     var last = null; // 上一句已显示的内容，句间空档时用来兜底
     var processSeq = 0; // 异步拿原文轨道的代际：晚开始的 process 覆盖早开始的
+    var replayAskedFor = ''; // 已经为哪个视频向来源层要过一次 replay（每个视频最多一次）
 
     function now() {
       return env.now ? env.now() : Date.now();
@@ -45,6 +46,12 @@
       last = null;
       render(null);
     }
+
+    // 两种生命周期分开管：
+    //   原始轨道（track.units，时间轴）只跟「视频 + 字幕轨道」走，视频没换、轨道没换就一直留着；
+    //   译文（trans / pending / inflight）跟「目标语言 + 风格 + 请求代际 gen」走，任何一项变了都作废。
+    // 目标语言等于字幕语言、或关掉字幕翻译时只是不接管（交还原生字幕），轨道不扔：
+    // 以前这里直接 reset()，用户再切回中文时 YouTube 不会重新请求字幕，就再也翻不了了。
 
     // 语言 / 风格变化：保留原始字幕和句子时间轴，只让旧译文与旧请求失效
     function invalidate(next) {
@@ -71,6 +78,8 @@
       var lang = p.lang;
       var seq = ++processSeq;
       var startVideo = p.v || env.videoId();
+      // 重放的是主环境钩子留着的「最后一份」，可能是上一个视频的：和当前视频对不上就不收
+      if (raw.replay && p.v && env.videoId() && p.v !== env.videoId()) return;
 
       // YouTube 机翻轨道：拿原文轨道来做双语（同源请求，带着播放器的令牌）
       if (p.tlang) {
@@ -84,12 +93,8 @@
         if (!body) return; // 拿不到原文就不接管，原生机翻字幕照常显示
       }
 
-      // 字幕本来就是目标语言：不用翻
-      if (subs.sameLanguage(lang, env.target())) {
-        reset();
-        return;
-      }
-
+      // 字幕本来就是目标语言：照样解析、留着轨道，只是不接管（tick 里交还原生字幕）；
+      // 用户之后改了目标语言就能直接接着翻，不用等 YouTube 再请求一次
       var key = [p.v, lang, p.kind, env.target()].join('|');
       if (track && track.key === key) return; // 播放器重复拉同一条轨道（拖动进度时会）
 
@@ -128,6 +133,7 @@
       if (!track) return;
       if (!env.enabled()) return;
       if (track.target !== env.target() || track.style !== env.styleId()) return; // 由 tick 先失效
+      if (subs.sameLanguage(track.lang, track.target)) return; // 字幕本来就是目标语言：不翻
       if (track.inflight > 0) return; // 只限制同一代任务；旧视频/旧语言的请求不算
 
       var units = track.units;
@@ -307,51 +313,59 @@
       overlay.style.display = 'block';
     }
 
+    // 当前视频没有可用轨道（还没收到、或手上的是上一个视频的）：请来源层把最后一份字幕回包重放一次。
+    // 每个视频最多要一次；重放回来的在 process() 里核对视频，旧视频的不收。不碰 CC 开关
+    function recover(vid, player) {
+      if (!vid || replayAskedFor === vid || !player || !captionsOn(player)) return;
+      replayAskedFor = vid;
+      try {
+        src.replay();
+      } catch (err) {
+        /* 忽略 */
+      }
+    }
+
     function tick() {
       // 没开开关 / 没配 Key 时先留着，开了再处理（播放器不会为同一条轨道再请求一次）
       if (env.enabled()) {
         var raw = src.take();
         if (raw) process(raw);
       }
-      if (!track) {
-        render(null);
-        return;
-      }
+      // 关掉字幕翻译：交还原生字幕，不再发请求（pump 只在开启时调度）；
+      // 原始轨道留着，同一个视频重新打开时直接接着翻
       if (!env.enabled()) {
-        reset();
-        return;
-      }
-      if (!track) {
         render(null);
         return;
       }
 
-      // 目标语言变化：旧语言的译文与旧请求立即失效；新目标 = 原字幕语言时交还原生字幕
+      // 换了视频：先收起，等新视频的字幕回包把 track 换掉。
+      // 不能在这里清掉 track —— 新字幕可能比地址栏先到，会把刚收到的新轨道一起清掉
+      var vid = env.videoId();
+      var view = env.player();
+      var player = view && view.player;
+      if (!track || (track.v && vid && track.v !== vid)) {
+        recover(vid, player);
+        render(null);
+        return;
+      }
+
+      // 目标语言 / 趣味风格变化：旧译文与旧请求立即失效（包括切到和字幕同语言的时候），轨道保留
       var tgt = env.target();
       if (track.target !== tgt) {
-        if (subs.sameLanguage(track.lang, tgt)) {
-          reset();
-          return;
-        }
         invalidate({
           target: tgt,
           key: [track.v, track.lang, track.kind, tgt].join('|')
         });
       }
-
-      // 趣味风格切换：旧译文的措辞不能继续用，清掉重翻（缓存键带 style，不会串）
       var style = env.styleId();
       if (track.style !== style) invalidate({ style: style });
 
-      // 换了视频：先收起，等新视频的字幕回包把 track 换掉。
-      // 不能在这里清掉 track —— 新字幕可能比地址栏先到，会把刚收到的新轨道一起清掉
-      var vid = env.videoId();
-      if (track.v && vid && track.v !== vid) {
+      // 字幕本来就是目标语言：不接管，交还原生字幕；改回别的语言时上面的 invalidate 会重新调度
+      if (subs.sameLanguage(track.lang, tgt)) {
         render(null);
         return;
       }
-      var view = env.player();
-      var player = view && view.player;
+
       var ms = view && view.ms;
       if (!player || !captionsOn(player) || typeof ms !== 'number') {
         render(null);
@@ -382,6 +396,7 @@
     }
 
     function start() {
+      replayAskedFor = env.videoId() || ''; // 启动时已经要过一次，recover() 不再重复要
       try {
         src.replay();
       } catch (err) {

@@ -21,7 +21,8 @@
     var d = event.data;
     if (!d || d.source !== 'rimefox-yt' || d.type !== 'captions') return;
     if (typeof d.url !== 'string' || typeof d.body !== 'string') return;
-    pending = { url: d.url, body: d.body };
+    // replay = 钩子应 replay() 请求重发的「最后一份」，可能属于上一个视频：运行时会核对视频再收
+    pending = { url: d.url, body: d.body, replay: d.replay === true };
   });
 
   // 播放器可能在本脚本加载前就拉完了字幕：让主环境钩子把最后一份再发一次

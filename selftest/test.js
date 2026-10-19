@@ -16,6 +16,42 @@
     }
   }
 
+  // 需要真实时间（计时器、异步滚动事件）的用例：先排队，等所有同步用例跑完再逐个执行，
+  // 避免挂在屏幕上的夹具挡住后面按坐标取字的同步用例。fn 返回 Promise，resolve 成 true 或失败说明；
+  // 3 秒没结果算失败（CI 的 --virtual-time-budget 会快进计时器）
+  var asyncChecks = [];
+  function checkAsync(name, fn) {
+    var slot = results.length;
+    results.push({ name: name, ok: false, detail: '没有执行' });
+    asyncChecks.push(function () {
+      var timer;
+      var timeout = new Promise(function (resolve) {
+        timer = setTimeout(function () {
+          resolve('超时（3 秒没有结果）');
+        }, 3000);
+      });
+      var run;
+      try {
+        run = Promise.resolve(fn());
+      } catch (err) {
+        run = Promise.resolve('抛异常：' + ((err && err.message) || String(err)));
+      }
+      return Promise.race([run, timeout])
+        .catch(function (err) {
+          return '抛异常：' + ((err && err.message) || String(err));
+        })
+        .then(function (out) {
+          clearTimeout(timer);
+          results[slot] = out === true ? { name: name, ok: true, detail: '' } : { name: name, ok: false, detail: String(out) };
+        });
+    });
+  }
+  function wait(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
   function eq(actual, expected) {
     var a = JSON.stringify(actual);
     var e = JSON.stringify(expected);
@@ -1054,6 +1090,130 @@
     }
   });
 
+  // ---------------- 0.8.6 悬停气泡：节选 / 内部滚动 / 鼠标进出 ----------------
+  check('悬停气泡节选：末尾是 s 的英文不丢字，截断处空白去掉，短文本原样，中日文和 emoji 不截坏', function () {
+    var P = DT.hover.tipPreview;
+    var LIMIT = 180; // 与 hover.js 的 TIP_PREVIEW_CHARS 一致
+    var bad = [];
+    function expect(input, want, label) {
+      var got = P(input);
+      if (got !== want) bad.push(label + '：' + JSON.stringify(got.slice(-12)) + ' ≠ ' + JSON.stringify(want.slice(-12)));
+    }
+    expect(new Array(LIMIT).join('a') + 's and more words', new Array(LIMIT).join('a') + 's…', '截断处是 s');
+    expect(new Array(LIMIT - 3).join('b') + ' \t\n ' + 'tail text here', new Array(LIMIT - 3).join('b') + '…', '截断处是空白');
+    expect('Short text ends with s', 'Short text ends with s', '短文本');
+    expect('末尾有空格的短文本 ', '末尾有空格的短文本 ', '短文本不改');
+    expect(new Array(LIMIT + 21).join('漢'), new Array(LIMIT + 1).join('漢') + '…', '中文');
+    expect(new Array(LIMIT / 2 + 11).join('あs'), new Array(LIMIT / 2 + 1).join('あs') + '…', '日文与 s 混排');
+    expect(new Array(LIMIT).join('x') + '😀tail', new Array(LIMIT).join('x') + '…', 'emoji 不截成半个字');
+    return bad.length ? bad.join('；') : true;
+  });
+
+  function withHoverFixtureAsync(html, fn, extraStyle) {
+    var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;left:0;top:0;width:640px;z-index:2147483000;background:#fff;font:16px/1.6 sans-serif;padding:8px' + (extraStyle ? ';' + extraStyle : '');
+    box.innerHTML = html;
+    document.body.appendChild(box);
+    var wasEnabled = DT.state.enabled;
+    var prevMode = DT.state.mode;
+    var prevDt = document.documentElement.getAttribute('data-dt');
+    DT.state.enabled = true;
+    document.documentElement.setAttribute('data-dt', 'on');
+    function cleanup() {
+      DT.hover.clear();
+      DT.restore();
+      DT.state.enabled = wasEnabled;
+      DT.state.mode = prevMode;
+      if (prevDt === null) document.documentElement.removeAttribute('data-dt');
+      else document.documentElement.setAttribute('data-dt', prevDt);
+      box.remove();
+    }
+    return Promise.resolve()
+      .then(function () {
+        return fn(box);
+      })
+      .then(
+        function (out) {
+          cleanup();
+          return out;
+        },
+        function (err) {
+          cleanup();
+          throw err;
+        }
+      );
+  }
+
+  checkAsync('悬停气泡：正文内部滚动、点按钮、鼠标移进移出都不误收；网页滚动 / 其它容器滚动 / Escape 照常收起', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    var orig = '';
+    for (var i = 1; i <= 24; i += 1) orig += 'Original sentence number ' + i + ' is deliberately long so the bubble scrolls. ';
+    return withHoverFixtureAsync('<p id="hv-scroll" style="white-space:pre-wrap"></p>', function (box) {
+      var p = box.querySelector('#hv-scroll');
+      p.textContent = orig;
+      DT.state.mode = 'translation';
+      if (!DT.inject(p, '第一段。\n第二段。', 'zh-CN')) return 'inject 返回 false';
+      var tip, body, expand, pt;
+      function show() {
+        pt = pointOf(p.firstChild, '第一段');
+        DT.hover.updateAt(pt.x, pt.y, p);
+        tip = document.querySelector('.dt-hover-tip');
+        body = tip.querySelector('.dt-hover-body');
+        expand = tip.querySelector('.dt-hover-expand');
+      }
+      function visible() {
+        return !!tip && !tip.hidden && !!highlighted('dt-hover-target');
+      }
+      show();
+      if (!visible() || !tip.classList.contains('is-rich')) return '长段落没有弹出可交互气泡';
+      expand.click();
+      if (body.scrollHeight <= body.clientHeight) return '夹具不够长，正文不能滚动';
+      body.scrollTop = 80; // 真实滚动：scroll 事件异步派发，捕获阶段的监听也会收到
+      return wait(120)
+        .then(function () {
+          if (!visible()) throw new Error('气泡正文内部滚动后气泡被收起了');
+          if (body.scrollTop < 1) throw new Error('正文没有滚动');
+          expand.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+          if (!visible()) throw new Error('在气泡按钮上按下鼠标就被收起了');
+          expand.click(); // 收起：scrollTop 归零，又一次内部 scroll
+          return wait(120);
+        })
+        .then(function () {
+          if (!visible()) throw new Error('点「收起」后气泡消失了');
+          if (body.textContent.slice(-1) !== '…') throw new Error('收起后没有回到节选');
+          DT.hover.updateAt(1, 1, body); // 鼠标在气泡里移动
+          tip.dispatchEvent(new MouseEvent('mouseleave'));
+          return wait(60);
+        })
+        .then(function () {
+          tip.dispatchEvent(new MouseEvent('mouseenter')); // 200ms 内又移回来
+          return wait(300);
+        })
+        .then(function () {
+          if (!visible()) throw new Error('鼠标移出又很快移回，气泡不该收起');
+          tip.dispatchEvent(new MouseEvent('mouseleave'));
+          return wait(300);
+        })
+        .then(function () {
+          if (visible() || !tip.hidden) throw new Error('鼠标离开气泡后应延迟收起');
+          show();
+          if (!visible()) throw new Error('重新悬停没有显示');
+          document.dispatchEvent(new Event('scroll')); // 网页滚动：锚点位置失效
+          if (!tip.hidden || highlighted('dt-hover-target')) throw new Error('网页滚动后气泡 / 高亮没有清掉');
+          show();
+          box.dispatchEvent(new Event('scroll')); // 网页里别的容器在滚
+          if (!tip.hidden) throw new Error('网页其它容器滚动后气泡没有收起');
+          show();
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          if (!tip.hidden || highlighted('dt-hover-target')) throw new Error('Escape 没有关闭');
+          return true;
+        })
+        .catch(function (err) {
+          return err && err.message ? err.message : String(err);
+        });
+    }, 'left:auto;right:0;bottom:0;top:auto;');
+  });
+
   // ---------------- 0.8.4 小说正文：分行保留 / 按行写回 / 还原 ----------------
   function mountNovel() {
     var box = document.createElement('div');
@@ -1579,7 +1739,14 @@
     return document.getElementById('dt-dock') ? '关掉后还在' : true;
   });
 
-  // ---------------- 渲染 ----------------
+  // ---------------- 渲染（等排队的异步用例逐个跑完） ----------------
+  asyncChecks
+    .reduce(function (chain, next) {
+      return chain.then(next);
+    }, Promise.resolve())
+    .then(render);
+
+  function render() {
   var list = document.getElementById('list');
   var passed = 0;
 
@@ -1607,4 +1774,5 @@
   var allPass = passed === results.length;
   summary.className = allPass ? 'pass' : 'fail';
   summary.textContent = passed + ' / ' + results.length + (allPass ? '  全部通过' : '  存在失败项');
+  }
 })();

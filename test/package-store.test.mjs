@@ -39,5 +39,22 @@ try {
   await cp(resolve(source,'welcome/welcome.js'), resolve(temp,'welcome/welcome.js'));
   await rm(resolve(temp,m.icons['16'])); result=run(); assert.notEqual(result.status,0); assert.match(result.stderr,/16px/);
   assert.deepEqual(await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`)),zip,'failed checks must preserve previous output');
+  // GitHub Release 包：同一份白名单，文件集合与商店包一致，只是多一层 Rimefox/ 文件夹
+  await cp(resolve(source,m.icons['16']), resolve(temp,m.icons['16'])); // 上一步故意删掉的图标放回去
+  const zipNames = (buf) => { const out=[]; let q=0; while(buf.readUInt32LE(q)===0x04034b50){ const sz=buf.readUInt32LE(q+18), n=buf.readUInt16LE(q+26), x=buf.readUInt16LE(q+28); out.push(buf.subarray(q+30,q+30+n).toString()); q+=30+n+x+sz; } return out; };
+  for (const dev of ['test/x.test.mjs', 'selftest/index.html', 'docs/screenshots/01.png', 'docs/STORE.md', 'tools/extra.mjs']) {
+    await mkdir(dirname(resolve(temp,dev)),{recursive:true}); await writeFile(resolve(temp,dev),'dev only');
+  }
+  for (const top of ['README.md', 'HANDOFF.md', 'CHANGELOG.md', 'AGENTS.md', 'PRIVACY.md', 'STORE-READINESS.md', 'package.json', '.gitattributes']) await writeFile(resolve(temp,top),'dev only');
+  result=spawnSync(process.execPath,[script,'--release'],{cwd:tmpdir(),encoding:'utf8'}); assert.equal(result.status,0,result.stderr);
+  const rel=await readFile(resolve(temp,`dist/Rimefox-v${m.version}.zip`));
+  const relNames=zipNames(rel);
+  assert(relNames.length>0 && relNames.every(n=>n.startsWith('Rimefox/')), 'Release 包的文件都要在 Rimefox/ 文件夹里');
+  assert.deepEqual(relNames.map(n=>n.slice('Rimefox/'.length)), names, 'Release 包与商店包的文件集合必须一致');
+  for (const legal of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt', 'manifest.json']) assert(relNames.includes('Rimefox/'+legal), legal + ' must be in the release zip');
+  assert(!relNames.some(n=>/^Rimefox\/(?:test|selftest|docs|tools|dist)\//.test(n) || /^Rimefox\/(?:README|HANDOFF|CHANGELOG|AGENTS|PRIVACY|STORE-READINESS)\.md$|^Rimefox\/package\.json$|^Rimefox\/\.git/.test(n)), 'Release 包不能带测试 / 开发文档 / 商店截图：' + relNames.join(','));
+  const storeAgain=await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`));
+  assert.deepEqual(zipNames(storeAgain), names, '打 Release 包不能改动商店包');
   console.log('Store packaging: contents, welcome assets, exclusions, independent cwd, reproducibility, version/icon failure guards PASS');
+  console.log('Release packaging: same allowlist as the store zip, Rimefox/ folder, licenses kept, tests / docs / screenshots excluded PASS');
 } finally {await rm(temp,{recursive:true,force:true});}

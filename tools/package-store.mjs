@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-// 商店包：运行时文件 + 许可文件（LICENSE / THIRD-PARTY-NOTICES.md / licenses/）。
-// manifest.json 仍在 ZIP 根目录，扩展文件夹结构不变。
+// 安装包：运行时文件 + 许可文件（LICENSE / THIRD-PARTY-NOTICES.md / licenses/），商店包和 GitHub Release 共用这一份白名单。
+//   node tools/package-store.mjs            → dist/Rimefox-v<版本>-store.zip，manifest.json 在 ZIP 根目录（商店要求）
+//   node tools/package-store.mjs --release  → dist/Rimefox-v<版本>.zip，同样的文件放在 Rimefox/ 文件夹里
+//                                            （用户覆盖解压同一个文件夹升级，扩展 ID 与设置不变）
+// 0.8.5 以前 Release 包是 rsync 整仓再排除几项，商店截图、测试、开发文档都进了用户下载的 zip。
 // Node 18+, no npm packages or external zip executable required.
 import { readFile, readdir, lstat, mkdir, writeFile, rename, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const release = process.argv.slice(2).includes('--release');
+const prefix = release ? 'Rimefox/' : '';
 const manifest = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
 const core = await readFile(resolve(root, 'content/core.js'), 'utf8');
 if (core.match(/DT\.VERSION\s*=\s*['"]([^'"]+)['"]/)?.[1] !== manifest.version) throw Error('manifest / DT.VERSION mismatch');
@@ -59,7 +64,7 @@ function crc32(data) {
 const local = [], central = [];
 let offset = 0;
 for (const { name, data } of entries) {
-  const filename = Buffer.from(name), compressed = deflateRawSync(data), crc = crc32(data);
+  const filename = Buffer.from(prefix + name), compressed = deflateRawSync(data), crc = crc32(data);
   if (filename.length > 65535 || compressed.length >= 0xffffffff || data.length >= 0xffffffff || offset >= 0xffffffff) throw Error('ZIP64 is not supported');
   const h = Buffer.alloc(30);
   h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(0x800, 6);
@@ -75,11 +80,12 @@ const directory = Buffer.concat(central), end = Buffer.alloc(22);
 if (entries.length >= 65535 || offset + directory.length >= 0xffffffff) throw Error('ZIP32 limit exceeded');
 end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
 end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
-const destination = resolve(root, `dist/Rimefox-v${manifest.version}-store.zip`);
+const destination = resolve(root, release ? `dist/Rimefox-v${manifest.version}.zip` : `dist/Rimefox-v${manifest.version}-store.zip`);
 await mkdir(dirname(destination), { recursive: true });
 const temporary = `${destination}.${process.pid}.tmp`;
 try { await writeFile(temporary, Buffer.concat([...local, directory, end]), { flag: 'wx' }); await rename(temporary, destination); }
 finally { await rm(temporary, { force: true }); }
 console.log(destination);
-for (const e of entries) console.log(`${e.data.length.toString().padStart(8)}  ${e.name}`);
-console.log(`${entries.length} files; runtime files + LICENSE / THIRD-PARTY-NOTICES.md / licenses/; manifest.json is at the ZIP root.`);
+for (const e of entries) console.log(`${e.data.length.toString().padStart(8)}  ${prefix}${e.name}`);
+console.log(`${entries.length} files; runtime files + LICENSE / THIRD-PARTY-NOTICES.md / licenses/; ` +
+  (release ? 'inside the Rimefox/ folder (GitHub Release).' : 'manifest.json is at the ZIP root.'));

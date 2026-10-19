@@ -145,7 +145,8 @@ function setup() {
       source.fetches.push({ url: url, d: d });
       return d.promise;
     },
-    replay: function () {}
+    replays: 0,
+    replay: function () { source.replays += 1; }
   };
 
   const state = {
@@ -238,16 +239,21 @@ await t('A. 目标语言 zh → ja 后，旧中文结果不能覆盖日文', asy
   assert.equal(c.runtime.inspect().overlay._trans.textContent, '日本語');
 });
 
-await t('B. 新目标语言等于原字幕语言时恢复原生字幕', async function () {
+await t('B. 新目标语言等于原字幕语言时恢复原生字幕，原始轨道保留、旧译文清掉', async function () {
   const c = setup();
-  await displayed(c);
+  const before = (await displayed(c)).track;
   assert.equal(c.player.classList.contains('rimefox-subs-on'), true);
 
   c.state.target = 'en';
   c.runtime.tick();
-  assert.equal(c.runtime.inspect().track, null, '同语言应停止接管');
+  const track = c.runtime.inspect().track;
+  assert.equal(track, before, '同语言只停止接管，不能把原始轨道扔掉');
+  assert.equal(track.units.length, 2);
+  assert.equal(track.trans.filter(Boolean).length, 0, '旧语言译文不能留着');
   assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
   assert.equal(c.runtime.inspect().overlay.style.display, 'none');
+  c.runtime.tick();
+  assert.equal(c.state.requests.length, 1, '同语言不发翻译请求');
 });
 
 await t('C. 视频 A 请求未完成时，视频 B 能立即开始自己的调度', async function () {
@@ -375,9 +381,20 @@ await t('I. 关闭 CC / 关闭字幕翻译时交还原生字幕', async function
 
   c.state.enabled = false;
   c.runtime.tick();
-  assert.equal(c.runtime.inspect().track, null);
+  assert.notEqual(c.runtime.inspect().track, null, '关闭字幕翻译只交还显示，不扔原始轨道');
   assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
   assert.equal(c.runtime.inspect().overlay.style.display, 'none');
+  const sent = c.state.requests.length;
+  c.state.ms = 2500;
+  c.runtime.tick();
+  assert.equal(c.state.requests.length, sent, '关闭期间不发请求');
+  assert.equal(c.btn.getAttribute('aria-pressed'), 'true', '不碰 CC 按钮');
+
+  c.state.enabled = true;
+  c.state.ms = 0;
+  c.runtime.tick();
+  assert.equal(c.player.classList.contains('rimefox-subs-on'), true, '重新打开同一视频直接接着显示');
+  assert.equal(c.runtime.inspect().overlay._trans.textContent, '你好。');
 });
 
 await t('J. 快速切换语言 / 风格 / 视频，最终只接受最新有效结果', async function () {
@@ -416,6 +433,137 @@ await t('J. 快速切换语言 / 风格 / 视频，最终只接受最新有效�
   assert.equal(end.style, 'classical');
   assert.equal(end.trans[0], '最新译文');
   assert.equal(c.runtime.inspect().overlay._trans.textContent, '最新译文');
+});
+
+await t('K. 英文 CC：中文 → 英文（原生）→ 中文 → 英文 → 中文，复用原轨道、晚到的旧请求不残留', async function () {
+  const c = setup();
+  await startTrack(c, 'A', ['One.', 'Two.', 'Three.']);
+  const units = c.runtime.inspect().track.units;
+  c.state.ms = 0;
+  c.runtime.tick();
+  const zh1 = c.state.requests[0];
+  assert.equal(zh1.msg.target, 'zh-CN');
+
+  // 中文请求还没回来就切到英文：交还原生字幕
+  c.state.target = 'en';
+  c.runtime.tick();
+  assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
+  await resolveReq(zh1, ['旧一。', '旧二。', '旧三。']);
+  c.runtime.tick();
+  assert.equal(c.runtime.inspect().track.trans.filter(Boolean).length, 0, '切走之后才回来的中文不能写进去');
+  assert.equal(c.player.classList.contains('rimefox-subs-on'), false, '英文目标下不接管');
+
+  for (let round = 0; round < 2; round += 1) {
+    // 切回中文：YouTube 不会再请求字幕（来源队列是空的），必须复用原轨道重新调度
+    c.state.target = 'zh-CN';
+    c.runtime.tick();
+    const req = c.state.requests[c.state.requests.length - 1];
+    assert.equal(req.msg.target, 'zh-CN', '第 ' + (round + 1) + ' 轮切回中文应重新调度');
+    assert.equal(req.msg.texts.join('|'), 'One.|Two.|Three.');
+    assert.equal(c.runtime.inspect().track.units, units, '应复用同一份原始时间轴');
+    assert.equal(c.source.fetches.length, 0, '不重新下载字幕');
+    await resolveReq(req, ['一。', '二。', '三。']);
+    c.runtime.tick();
+    assert.equal(c.player.classList.contains('rimefox-subs-on'), true);
+    assert.equal(c.runtime.inspect().overlay.style.display, 'block');
+    assert.equal(c.runtime.inspect().overlay._orig.textContent, 'One.');
+    assert.equal(c.runtime.inspect().overlay._trans.textContent, '一。');
+
+    c.state.target = 'en';
+    c.runtime.tick();
+    assert.equal(c.player.classList.contains('rimefox-subs-on'), false, '第 ' + (round + 1) + ' 轮切回英文应交还原生字幕');
+    assert.equal(c.runtime.inspect().overlay.style.display, 'none');
+    assert.equal(c.runtime.inspect().track.trans.filter(Boolean).length, 0, '切回英文后不留中文译文');
+  }
+});
+
+await t('L. 字幕先以原语言到达（目标英文）：轨道留着，改成中文后直接开始翻', async function () {
+  const c = setup();
+  c.state.target = 'en';
+  await startTrack(c, 'A', ['Hi there.']);
+  c.state.ms = 0;
+  c.runtime.tick();
+  assert.notEqual(c.runtime.inspect().track, null, '同语言字幕也要留着轨道');
+  assert.equal(c.state.requests.length, 0, '同语言不翻');
+  assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
+  c.state.target = 'zh-CN';
+  c.runtime.tick();
+  assert.equal(c.state.requests.length, 1, '改成中文后应立即调度');
+  await resolveReq(c.state.requests[0], ['你好。']);
+  c.runtime.tick();
+  assert.equal(c.runtime.inspect().overlay._trans.textContent, '你好。');
+});
+
+await t('M. 语言切换途中换视频：上一视频的轨道与晚到的请求都不复用', async function () {
+  const c = setup();
+  await startTrack(c, 'A', ['A one.']);
+  c.state.ms = 0;
+  c.runtime.tick();
+  const reqA = c.state.requests[0];
+  c.state.target = 'en';
+  c.runtime.tick();
+
+  c.state.video = 'B';
+  c.runtime.tick();
+  assert.equal(c.player.classList.contains('rimefox-subs-on'), false, '新视频的字幕还没到，不能显示 A');
+  await startTrack(c, 'B', ['B one.']);
+  await resolveReq(reqA, ['A 旧译文']);
+  c.state.target = 'zh-CN';
+  c.runtime.tick();
+  const reqB = c.state.requests[c.state.requests.length - 1];
+  assert.equal(reqB.msg.texts.join('|'), 'B one.', '只翻当前视频的字幕');
+  await resolveReq(reqB, ['B 译文']);
+  c.runtime.tick();
+  assert.equal(c.runtime.inspect().track.v, 'B');
+  assert.equal(c.runtime.inspect().overlay._trans.textContent, 'B 译文');
+});
+
+await t('N. 重放的字幕回包必须属于当前视频；没有轨道时每个视频最多要一次重放，CC 关着不要', async function () {
+  const c = setup();
+  c.state.video = 'B';
+  await c.runtime.process(Object.assign(rawFor('A', 'en', ['Old video.']), { replay: true }));
+  assert.equal(c.runtime.inspect().track, null, '上一视频的重放不能被当成当前字幕');
+  await c.runtime.process(Object.assign(rawFor('B', 'en', ['Current video.']), { replay: true }));
+  assert.equal(c.runtime.inspect().track.v, 'B', '当前视频的重放可以用');
+  // 新字幕比地址栏先到（不是重放）：照常接收
+  await c.runtime.process(rawFor('C', 'en', ['Next video.']));
+  assert.equal(c.runtime.inspect().track.v, 'C');
+
+  const d = setup();
+  d.btn._attrs['aria-pressed'] = 'false';
+  d.runtime.tick();
+  assert.equal(d.source.replays, 0, 'CC 关着不要重放');
+  assert.equal(d.btn.getAttribute('aria-pressed'), 'false', '不能替用户打开 CC');
+  d.btn._attrs['aria-pressed'] = 'true';
+  d.runtime.tick();
+  d.runtime.tick();
+  assert.equal(d.source.replays, 1, '同一视频只要一次');
+  d.state.video = 'B';
+  d.runtime.tick();
+  assert.equal(d.source.replays, 2, '换视频后可以再要一次');
+});
+
+await t('O. 切语言期间播放器 DOM 重建：切回中文后新播放器上照常显示', async function () {
+  const c = setup();
+  await displayed(c);
+  c.state.target = 'en';
+  c.runtime.tick();
+  const player2 = el('div', c.doc);
+  c.doc.body.appendChild(player2);
+  const btn2 = el('button', c.doc);
+  btn2._attrs['aria-pressed'] = 'true';
+  player2._captionBtn = btn2;
+  c.state.player = player2;
+  c.state.target = 'zh-CN';
+  c.runtime.tick();
+  await resolveReq(c.state.requests[c.state.requests.length - 1], ['你好。', '世界。']);
+  c.runtime.tick();
+  const overlay = c.runtime.inspect().overlay;
+  assert.equal(overlay.parentNode, player2);
+  assert.equal(overlay.style.display, 'block');
+  assert.equal(overlay._trans.textContent, '你好。');
+  assert.equal(player2.classList.contains('rimefox-subs-on'), true);
+  assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
