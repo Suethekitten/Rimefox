@@ -359,7 +359,8 @@
         });
         var res = null;
         try {
-          res = await DT.send({ type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain' });
+          // 与后台 provider 的 180s 总上限对齐：内容脚本先超时会让同一批重复计费
+          res = await DT.send({ type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain' }, 190000);
         } catch (err) {
           if (cancelled()) return;
           lastBeat = Date.now();
@@ -877,7 +878,8 @@
   function startWatchdog() {
     setInterval(function () {
       if (!running || !lastBeat) return;
-      if (Date.now() - lastBeat < 100000) return;
+      // 高于内容脚本 190s / 后台单请求 180s 的上限，避免后台还在生成就被看门狗复位重发
+      if (Date.now() - lastBeat < 200000) return;
       DT.log('watchdog: 翻译卡住，强制复位');
       cancelRun();
       DT.toast('翻译长时间没有响应，已复位并重新开始。');

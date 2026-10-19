@@ -10,6 +10,10 @@ import { resolveSiteRule, hostListed } from './lib/site-rules.js';
 import { providerById } from './lib/providers.js';
 import { maskTexts, restoreText, optionsFromConfig } from './lib/privacy.js';
 import { openWelcomePage, shouldOpenWelcome } from './lib/welcome.js';
+import { createUsageStats } from './lib/usage.js';
+
+// 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
+const usageStats = createUsageStats();
 
 // ---------------- 并发闸门 ----------------
 let running = 0;
@@ -47,6 +51,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
   const hits = matchGlossary(glossary, texts);
   while (attempt < 3 && !mismatch) {
     attempt += 1;
+    if (attempt > 1) usageStats.retry();
     const meta = {};
     try {
       const active = activeConfig(cfg);
@@ -68,6 +73,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
       });
       const parsed = parseArray(raw, texts.length);
       if (parsed) return parsed;
+      usageStats.discard();
       // 错误信息带上 finish_reason 和长度：一眼看出是被截断（length）还是格式不对，不只截一段原始返回
       lastErr = new ApiError(
         '模型没有按 JSON 数组返回（finish_reason=' + (meta.finishReason || '未知') + '，content ' + String(raw).length + ' 字）',
@@ -86,20 +92,50 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
       lastErr = err;
       const status = err && err.status ? err.status : 0;
       const retriable = status === 0 || status === 429 || status >= 500;
-      if (!retriable) throw err;
+      if (!retriable) {
+        usageStats.failure();
+        throw err;
+      }
+    } finally {
+      // HTTP 次数包含 thinking 二次请求；usage 包含“成功但内容为空 / 解析失败”的响应
+      if (meta.http) usageStats.request(meta.http);
+      (meta.usages || []).forEach(function (usage) {
+        usageStats.response(usage);
+      });
+      (meta.finishReasons || []).forEach(function (reason) {
+        usageStats.finish(reason);
+      });
     }
     if (attempt < 3 && !mismatch) await sleep(700 * attempt);
   }
   if (mismatch) {
-    // 两半并行各自翻（各自带重试），拆到单条为止。放在重试循环外面：
-    // 某一半失败时直接失败，不能再把整批重来一遍
+    usageStats.split();
+    // 两半依次翻（各自带重试），拆到单条为止。放在重试循环外面：
+    // 一半失败时保留另一半已经拿到的结果，不能把整批全丢掉重来；
+    // 也避免一次拆批瞬间绕过并发闸门。
     const mid = Math.ceil(texts.length / 2);
-    const halves = await Promise.all([
-      translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked),
-      translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked)
-    ]);
-    return halves[0].concat(halves[1]);
+    let left = null;
+    let right = null;
+    let leftErr = null;
+    let rightErr = null;
+    try {
+      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked);
+    } catch (err) {
+      leftErr = err;
+    }
+    try {
+      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked);
+    } catch (err) {
+      rightErr = err;
+    }
+    if (left && right) return left.concat(right);
+    if (!left && !right) throw leftErr || rightErr || new ApiError('翻译失败', 0, '');
+    const out = new Array(texts.length).fill(null);
+    if (left) left.forEach((value, i) => { out[i] = value; });
+    if (right) right.forEach((value, i) => { out[mid + i] = value; });
+    return out;
   }
+  usageStats.failure();
   throw lastErr || new ApiError('翻译失败', 0, '');
 }
 
@@ -168,10 +204,12 @@ async function handleTranslate(msg, sender) {
     if (hit !== undefined) {
       results[index] = hit;
       cached += 1;
+      usageStats.cacheHit();
     } else {
       groups.set(text, [index]);
     }
   });
+  usageStats.cacheMiss(groups.size);
   let todo = Array.from(groups.keys());
   let firstError = null;
 
@@ -236,6 +274,14 @@ async function handleTranslate(msg, sender) {
           if (!out) throw new ApiError('模型返回无法解析', 0, '');
           payload.forEach((text, k) => {
             let value = out[k];
+            if (value === null) {
+              // 拆批时一半失败：这一条按失败处理，另一半已经成功的照常写缓存
+              groups.get(text).forEach((index) => {
+                results[index] = null;
+              });
+              if (!firstError) firstError = new ApiError('其中一部分译文失败，稍后重试', 0, '');
+              return;
+            }
             if (privacyRows) {
               const back = restoreText(String(value == null ? '' : value), privacyRows.get(text).tokens, privacyValues);
               if (!back.ok) {
@@ -456,6 +502,18 @@ const ROUTES = {
   'mode:set': async (msg) => {
     if (msg.mode !== 'dual' && msg.mode !== 'translation') return { ok: false };
     await saveConfig({ mode: msg.mode });
+    return { ok: true };
+  },
+  // 开发调试用的用量统计（设置页打开「输出调试日志」后才返回）
+  'usage:stats': async () => {
+    const cfg = await getConfig();
+    if (!cfg.debug) return { ok: false, error: '需要先在设置页打开「输出调试日志」' };
+    return { ok: true, stats: usageStats.snapshot() };
+  },
+  'usage:reset': async () => {
+    const cfg = await getConfig();
+    if (!cfg.debug) return { ok: false, error: '需要先在设置页打开「输出调试日志」' };
+    usageStats.reset();
     return { ok: true };
   },
   // 设置页的缓存统计：估算值（LRU 预算用）+ 浏览器实际记的占用

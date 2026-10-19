@@ -289,7 +289,7 @@
         type: 'translate',
         texts: [info.text],
         target: DT.state.target || cfg().targetLang || 'zh-CN'
-      });
+      }, 190000);
       if (mySeq !== seq) return; // 期间又划了别的词，或气泡已关
 
       var value = res && res.results && res.results[0];

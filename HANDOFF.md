@@ -58,6 +58,7 @@ edge-bilingual/
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格），纯函数
 │   ├── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
 │   ├── privacy.js         可选的本地脱敏 / 恢复（纯 JS，无依赖）：识别、占位符、fail-closed 恢复
+│   ├── usage.js           仅调试用的用量计数：HTTP、usage token、缓存、重试、拆批、失败、finish_reason
 │   ├── appearance.js      强调色预设、译文排版变量、译文自定义 CSS 清洗（纯函数，后台按网址算 page 对象用）
 │   ├── site-rules.js      站点规则：内置规则、校验、按网址匹配；夜间模式网站名单
 │   ├── ui-appearance.js   设置页/弹窗共用：强调色等写到 <html>、深浅色圆形过渡、跨页面配置同步、空闲执行
@@ -79,7 +80,7 @@ edge-bilingual/
 ├── welcome/               首次安装欢迎页 / 新手引导（index.html + welcome.css + welcome.js，无构建）
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
-├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页）
+├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
 └── selftest/              离线自检（126 条用例）
 ```
 
@@ -136,6 +137,8 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | `test` | — | `{ok, ms, model, sample}` / `{ok:false,error}` | 测试连接 |
 | `cache:clear` | — | `{ok}` | 清空三层缓存（storage 里的 `dt.cache.v1` 一并删掉） |
 | `cache:stats` | — | `{ok, stats: {memory, disk, hits, misses}, bytesInUse: {session, local}}` | 设置页「翻译缓存」卡片用；`bytesInUse` 是浏览器实际记的占用 |
+| `usage:stats` | — | `{ok, stats}` / `{ok:false,error}` | 仅 `debug` 开启时；HTTP 请求、usage token、缓存、重试、拆批、失败、finish_reason 计数，不含正文 / Key |
+| `usage:reset` | — | `{ok}` | 仅 `debug` 开启时；清空累计用量统计 |
 | `ensure` | `{tabId}` | `{ok}` | 补注入内容脚本（页面在安装前打开时） |
 | `resume:set` | `{value: boolean}` | `{ok}` | 记录本标签页"在翻译"，用于返回/刷新后自动续翻 |
 | `resume:get` | — | `{ok, value}` | 查询（会校验域名一致） |
@@ -308,13 +311,16 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
    ├─ 地址带 tlang（YouTube 机翻）→ 去掉 tlang 同源再请求一次，拿原文轨道
    ├─ 字幕语言 = 目标语言 → 不接管
    ├─ 人工字幕：按句末标点合并相邻事件；自动生成：逐词按停顿拼句（短句要长停顿才断）
-   ├─ 每 200ms：按 video.currentTime 找当前句；只翻 [当前 − 3s, 当前 + 90s] 里没翻过的，20 句 / 2000 字一批
+   ├─ 每 200ms：按 video.currentTime 找当前句；只翻 [当前 − 3s, 当前 + 90s] 里没翻过的，8 句 / 1000 字一批
    └─ 叠层插在 .html5-video-player 里（全屏跟着走），z-index 30；播放器加 rimefox-subs-on 类隐藏原生字幕
 ```
 
 - **为什么挂钩而不是自己请求**：字幕地址要带播放器生成的 `pot` 令牌，直接请求 `captionTracks[].baseUrl` 只会拿到 200 + 空内容（2026-10 实测）
 - **CC 开关**看 `.ytp-subtitles-button[aria-pressed]`；换视频看地址里的 `v`，不清轨道（新字幕可能比地址栏先到）
-- 纯函数在 `DT.subs.*`，自检页直接测；运行时只在 `youtube.com` / `youtube-nocookie.com` 启动
+- **会话状态**（0.8.5）：track 带 `v / lang / kind / target / style` 与 `gen / inflight / pending`。目标语言或风格一变，`invalidate()` 清空译文并把 `gen` +1，旧请求回来时按 `track === mine && gen === mine.gen` 丢弃；新目标 = 原字幕语言时 `reset()` 交还原生字幕
+- **视频切换**：`inflight` 挂在 track 上，不再全局阻塞；旧视频请求的回调不碰当前 track、不改 `shown`。异步 `fetchText()` 用 `processSeq` 代际，晚完成的旧轨道不能覆盖新轨道
+- **播放器重建**：显示缓存同时绑定"哪个叠层"（`shownOverlay`）；播放器 DOM 被替换后即使字幕文本相同也会重新写入新叠层。CC 关闭 / 字幕翻译关闭时移除 `rimefox-subs-on`，原生字幕恢复
+- 纯函数在 `DT.subs.*`，运行时工厂 `DT.subtitleRuntime.create(env)` 可注入假 DOM / 假 send；`test/subtitles-session.test.mjs` 覆盖 A–J 十个竞态场景。真实运行时只在 `youtube.com` / `youtube-nocookie.com` 启动
 - 这一块依赖 YouTube 的私有接口与 DOM 类名，YouTube 改版就可能失效 —— 出问题先看 `/api/timedtext` 回包还在不在、类名变没变
 
 ---
@@ -375,6 +381,9 @@ node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 /
 node test/appearance.test.mjs  # 强调色、译文排版变量、自定义 CSS 清洗（8 条）
 node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间名单、配置导入（8 条）
 node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎页资源、英文覆盖、权限与后台接线（13 条）
+node test/subtitles-session.test.mjs # 字幕运行时 A–J：语言/视频切换、异步轨道、播放器重建、CC/开关（10 条）
+node test/usage.test.mjs       # 三协议 usage 提取 + 统计聚合（6 条）
+node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆批、部分成功、usage 汇总（8 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
@@ -554,39 +563,18 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 
 ---
 
-## 14. 本版技术记录（0.8.4）
+## 14. 本版技术记录（0.8.5）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
+> 0.8.4 的小说分行 / 悬停修复细节看 `6d220b9` 与 CHANGELOG。
 
-- **问题现场**：Pixiv 小说（阅读器是 `white-space: pre-wrap` 容器，一段一个 `<p>`，段内几行用 `span.text-count` + `<br>` 分隔）切到仅译文后，
-  几行对白并成一大段、段尾留 n−1 行空白；双语译文同样不分行；悬停气泡有时显示相邻句子的原文。用户给的测试页 29390937 是 R-18、需要登录，
-  验证改用同一阅读器的全年龄作品 29392114（日文）/ 29416270（中文）
-- **根因（已在真实页面复现）**：`textOf()` 把 `<br>` 当空格、`normalizeText` 折叠 `\n`，模型看不到分行；`injectOnly()` 把整段译文写进第一个文本节点、
-  其余清空，`<br>` 还在；`.dt-target` 的 `white-space: normal !important` 让双语译文也不分行；`hover.alignSentence()` 句数不同时按长度比例猜句子；
-  只有 `<br>` 子元素的段落走 `ownText()`，同样被压平；`tryInject` 注入前不复核原文，SPA 复用元素时旧译文可能写进新内容
-- **送翻文本**（`content/dom.js`）：`tokensOf()` 统一遍历（文本节点 + `<br>` + 所在元素是否保留换行）；`DT.unitText()` / `ownText()` 把 `<br>` 和
-  `pre / pre-wrap / pre-line / break-spaces` 里的 `\n` 记成换行，经 `DT.normalizeLines()`（`core.js`）每行折叠、连续空行留一个；
-  普通元素里源码折行仍算空格。没有分行的单元文本与 0.8.3 逐字相同（缓存键、GitHub / OWID / Aeon 不受影响）。`textOf()` 仍是全折叠版
-- **仅译文写回**：`lineGroups()` 与 `unitText` 同一套切法；有 2 行以上时走 `injectLines()`：第 i 行译文写进第 i 行第一个有字的片段（保留行首缩进），
-  同行其余片段清空，`<br>` / 空行 / 行所在元素不动；首字下沉在第一行里照旧拆分。模型行数不同：按顺序填、多出的并进最后一行，
-  不够时后面的 `<br>` 加 `data-dt-collapsed`（`inject.css` 里 `display:none`），`DT.restore()` / `releaseReplaced()` 去掉。单行单元仍走原逻辑
-- **记录**：`DT.replaced` 每条多了 `src`（原文，含分行）、`lines`、`aligned`、`collapsed`；`DT.replacedOf(el)` 给悬停用
-- **双语**：译文含换行时节点加 `dt-lines`（`white-space: pre-line`，窄容器 `pre`），只作用在这种节点上
-- **长段落**：`DT.splitLong()` 有换行时先按整行装段（超长行才行内按句切，原算法原样保留为 `splitSentences`），返回数组带 `seps`；
-  `DT.joinSlots(slots, seps)` 按原分隔拼回，丢空段时保留换行最多的分隔；不带 `seps` 时与旧行为相同
-- **过期译文**（`main.js`）：`tryInject` 先 `DT.sourceChanged(unit)`（按收集时同样的取法重算原文），变了就放弃注入、置 `dirty` 重收；
-  同一元素连续 3 次（`CHURN_MAX`）在翻译途中被改就不再翻，`disable` / `startOver` 清零
-- **悬停**（`hover.js`）：`sentencesOf` 改为逐字扫描（换行必断；「」『』“”（）《》〈〉【】里不断句，「……。」后接空白 / 行尾 / 下一段引号才断）；
-  新增 `linesOf`、`sentencesAgree`（句数相同且句界相对位置差 ≤ `SENT_DRIFT` 0.25）、纯函数 `matchDual` / `matchReplaced`；
-  `alignSentence` 对不上返回 −1（不再按位置猜）。`textMap` 把 `<br>` 记成换行、跳过隐藏子树和收起的 `<br>`，`mapsFor` 发现文字变了就重建
-- **接口层**：`lib/prompt.js` 加一条「段落里的 `\n` 是原文分行，行数与原文一致」；`lib/parse.js` 新增 `escapeRawControls()`，
-  回包字符串里直接写了换行时修复后再解析，不再整批失败、对半拆开重发
-- **回归测试**：`selftest` 106 → 126（`tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、源码折行；按行写回、缩进、
-  合并 / 拆分行、两种模式还原、切换模式与重翻、途中改原文、长篇 `splitLong`/`joinSlots`、句子切分与对齐、`matchDual`/`matchReplaced`、
-  仅译文 / 双语悬停 DOM 用例）；旧用例「句数不同按相对位置」改为不猜，`fx-br` 期望改为换行。`test/parse` 15 → 18，`test/prompt` 13 → 14
-- **真实页面验证**（CDP 把内容脚本 + 假 `chrome.runtime` / 假翻译器注入真实页面，不调 API）：Pixiv 29392114 双语 / 仅译文 / 悬停 / 还原，
-  模型保持 / 合并 / 合并句子三种行为，翻译途中改原文、重翻 3 次、SPA 跳到上一话；GitHub / OWID / Aeon 与 0.8.3 差分：单元与布局一致
-  （唯一差异是 OWID logo `Our World<br>in Data` 按两行送翻），还原逐字一致
-- **未验证 / 剩余**：真实模型是否遵守行数（对不上时按顺序填、悬停只给整段）；R-18 测试页（需登录）、Edge、Pixiv 竖排模式；
-  扩展实装后的弹窗 / 快捷键入口（本机 Chrome 155 无头不加载 `--load-extension`）；`welcome` / `package-store` 两个 Node 测试需要真 Node；
-  `<rt>` 振假名会混进原文（原有问题，未改）；`dist/` 商店包未重打（需要 Node 跑 `tools/package-store.mjs`）
+- **字幕会话代际**（`content/subtitles.js`）：track 增加 `v / lang / kind / target / style` 与 `gen / inflight / pending`。目标语言或风格一变，`invalidate()` 清空译文、`gen` +1、`inflight` 归零；旧请求回调同时校验 `track === mine && gen === mine.gen`，不能写当前 `trans` 或 `shown`。新目标 = 原字幕语言时 `reset()`，交还原生字幕。
+- **视频 / 轨道竞态**：`inflight` 从全局移到 track；`process()` 用 `processSeq` 代际与 `track.key` 去重，异步 `fetchText()` 晚完成不能覆盖新轨道；旧视频请求的 `finally` 不改新 track 的 `pending / inflight / shown`。
+- **播放器重建**：显示缓存改为 `shownOverlay + sig`；`ensureOverlay()` 创建新叠层时清空缓存，`render()` 只在"同一叠层 + 同一 sig"时跳过。播放器 DOM 被替换后即使字幕文本相同也会重新写入；CC 关闭 / 字幕翻译关闭时移除 `rimefox-subs-on`，原生字幕恢复。
+- **字幕回归测试**：新增 `test/subtitles-session.test.mjs` 10 个场景（A–J），假 DOM + 可控 Promise 覆盖语言切换、视频切换、异步轨道乱序、播放器重建、全屏高度、CC/开关关闭、快速连续切换；验证叠层 `display:block` 与文本，不只检查元素存在。
+- **拆批失败保留**：`translateBatchWithRetry()` 拆批改为**顺序**执行；一半失败保留另一半已成功结果（失败项用 `null` 标记），`handleTranslate()` 对 `null` 不缓存并记为失败；避免 `Promise.all` 把成功一半整体丢弃。也避免一次拆批瞬间绕过并发闸门。
+- **超时阶梯**：翻译消息超时 90s → 190s、看门狗 100s → 200s，高于 provider 单请求 180s 总上限，减少"后台还在生成、内容脚本已超时重发"的重复计费。多轮重试仍可能超过 190s（剩余风险）。
+- **用量诊断**（`lib/usage.js` + 三个引擎 + `lib/provider.js` + `background.js`）：三协议 `parseResponse` 提取 usage；provider 的 `meta` 记 `http / usages / finishReasons`；background 聚合 `requests / responses / input / output / reasoning / cacheRead / cacheHits / cacheMisses / retries / splits / discarded / failed / finishReasons`。只在 `debug` 开启时通过 `usage:stats` / `usage:reset` 读取；只存数字，不存正文、Key、Prompt 或原始响应。
+- **中日 token 审计**：32 / 55 是"成功注入的单元数"，不是 token；代码没有按方向分支的计费逻辑。正常差异来自字符长度、输出膨胀、缓存冷热与语言跳过；最坏拆批 `8n−2` 次 HTTP。已修"拆批一半失败丢弃另一半"与"90s/180s 超时倒挂"；并发批次 in-flight 去重、`maxCharsPerBatch > 3744` 时 8000 输出上限、单条截断保护仍是后续项。详见 [docs/TOKEN-AUDIT.md](docs/TOKEN-AUDIT.md)。
+- **测试**：Node 18 个文件全部通过（新增 subtitles-session 10 条、usage 6 条、usage-pipeline 8 条）；自检 126 / 126。
+- **未验证**：真实 YouTube 视频切换 / CC / 全屏 / 剧场（本机环境未做完整人工回归）；真实模型的中日 token 对照（没有真实 API Key，不编造数值）。
