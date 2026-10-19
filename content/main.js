@@ -311,7 +311,7 @@
         for (var k = 0; k < unit.slots.length; k += 1) {
           if (unit.slots[k] === undefined) return; // 还有段没回来（或失败了，等下次补扫重试）
         }
-        var text = DT.joinSlots(unit.slots, unit.seps);
+        var text = DT.joinSlots(unit.slots, DT.translationSeps(unit.seps, target));
         unit.done = true;
         // 等译文期间站点改了这段原文（SPA 重渲染、翻页复用同一个元素）：
         // 旧译文不能写进新内容，也不记成「已处理」；本轮结束后按新内容重新收集

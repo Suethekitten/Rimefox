@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.8.6';
+  DT.VERSION = '0.8.7';
 
   DT.state = {
     enabled: false,
@@ -327,21 +327,21 @@
 
   // 长段落按句切开，避免单条请求过大。
   // 有分行（\n）的文本先按整行装段，一行本身超长才在行内按句切。
-  // 返回的数组带 seps：seps[i] 是第 i 段和第 i+1 段之间原来的分隔（换行 '\n' / '\n\n'，行内 ' '），
-  // 拼回时交给 DT.joinSlots(slots, seps)，段落换行不会被拼成空格
+  // 返回的数组带 seps：seps[i] 是第 i 段和第 i+1 段之间原来的分隔（换行 '\n' / '\n\n'；行内切点处有空白为 ' '，没有为 ''）。
+  // 每一段都是原文的原样子串。拼回译文时先用 DT.translationSeps 按目标语言换掉行内分隔，再交给 DT.joinSlots，
+  // 段落换行不会被拼成空格
   DT.splitLong = function (text, max) {
     var limit = Math.max(200, Number(max) || 1200);
     var out;
     if (text.length <= limit) {
       out = [text];
-    } else if (text.indexOf('\n') < 0) {
-      out = splitSentences(text, limit);
-    } else {
-      return splitByLines(text, limit);
+      out.seps = [];
+      return out;
     }
-    out.seps = out.slice(1).map(function () {
-      return ' ';
-    });
+    if (text.indexOf('\n') >= 0) return splitByLines(text, limit);
+    var cut = splitSentences(text, limit);
+    out = cut.parts;
+    out.seps = cut.seps;
     return out;
   };
 
@@ -360,8 +360,9 @@
         atoms.push({ text: line, sep: sep });
         return;
       }
-      splitSentences(line, limit).forEach(function (piece, k) {
-        atoms.push({ text: piece, sep: k ? ' ' : sep });
+      var cut = splitSentences(line, limit);
+      cut.parts.forEach(function (piece, k) {
+        atoms.push({ text: piece, sep: k ? cut.seps[k - 1] : sep });
       });
     });
     // 再把相邻的块装进不超过 limit 的段
@@ -383,36 +384,66 @@
     return out;
   }
 
-  // 一行之内按句切（0.8.3 及以前的 splitLong，原样保留）
+  // 一行之内的句末切点：中日文的句末标点直接切；西文的 . ! ? ; : 后面要跟空白才算句末
+  // （3.5、example.com、10:30 不切）。紧跟的引号 / 括号算在前一句里（「……。」）
+  var SENT_END = /[.!?…;:]+["'”’)\]]*(?=\s|$)|[。！？；：]+["'”’」』）)\]]*/g;
+
+  // 一行之内按句切（参考 Wenyi 的 split_long_segments：在句末之后切，不增删任何字）。
+  // 返回 { parts, seps }：parts 是原文的原样子串（只去掉切点两边的空白），seps[i] 是切点处原来有没有空白（' ' / ''）。
+  // 以前先吃掉标点后的空白、再用空格拼回去：发给模型的原文里 3.5 变成 "3. 5"、example.com 变成 "example. com"，
+  // 中文「你好。」里也被塞进空格（只影响超过 maxUnitChars 的长段落）
   function splitSentences(text, limit) {
-    var marked = text.replace(/([.!?。！？；;:：])\s*/g, '$1\u0001');
-    var parts = marked.split('\u0001');
+    var pieces = [];
+    var last = 0;
+    var m;
+    SENT_END.lastIndex = 0;
+    while ((m = SENT_END.exec(text))) {
+      var end = m.index + m[0].length;
+      if (end > last) pieces.push(text.slice(last, end));
+      last = end;
+    }
+    if (last < text.length) pieces.push(text.slice(last));
 
-    var out = [];
+    // 单句本身超长：按 limit 的 1.6 倍硬切，尽量切在空白处
+    var max = Math.floor(limit * 1.6);
+    var units = [];
+    pieces.forEach(function (piece) {
+      var rest = piece;
+      while (rest.length > max) {
+        var at = rest.lastIndexOf(' ', max);
+        if (at < max / 2) at = max;
+        units.push(rest.slice(0, at));
+        rest = rest.slice(at);
+      }
+      if (rest) units.push(rest);
+    });
+
+    var parts = [];
+    var seps = [];
     var buf = '';
-    parts.forEach(function (part) {
-      if (!part) return;
-      if (buf && buf.length + part.length > limit) {
-        out.push(buf);
-        buf = part;
+    units.forEach(function (unit) {
+      if (buf && buf.length + unit.length > limit) {
+        var gap = /\s$/.test(buf) || /^\s/.test(unit);
+        parts.push(buf.replace(/\s+$/, ''));
+        seps.push(gap ? ' ' : '');
+        buf = unit.replace(/^\s+/, '');
       } else {
-        buf = buf ? buf + ' ' + part : part;
+        buf += unit;
       }
     });
-    if (buf) out.push(buf);
-
-    var safe = [];
-    out.forEach(function (chunk) {
-      var s = chunk;
-      while (s.length > limit * 1.6) {
-        safe.push(s.slice(0, Math.floor(limit * 1.6)));
-        s = s.slice(Math.floor(limit * 1.6));
-      }
-      if (s) safe.push(s);
-    });
-
-    return safe.length ? safe : [text.slice(0, limit)];
+    if (buf.replace(/\s+$/, '')) parts.push(buf.replace(/\s+$/, ''));
+    if (!parts.length) parts.push(text.slice(0, limit));
+    return { parts: parts, seps: seps };
   }
+
+  // 拼回译文用的分隔：换行照原样；行内切点按目标语言定——中文 / 日文句子之间不加空格，其它语言加一个空格。
+  // 原文切点有没有空白不能照搬：中文原文译成英文，句子之间要有空格；英文原文译成中文则不要
+  DT.translationSeps = function (seps, target) {
+    var cjk = /^(zh|ja)/i.test(String(target || ''));
+    return (seps || []).map(function (sep) {
+      return String(sep).indexOf('\n') >= 0 ? sep : cjk ? '' : ' ';
+    });
+  };
 
   // ---------------- 调度用的纯函数 ----------------
   // 这些函数不读 window、不调 getBoundingClientRect：矩形由调用方传进来。

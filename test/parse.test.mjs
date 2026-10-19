@@ -2,7 +2,15 @@
 // 运行：node test/parse.test.mjs
 import assert from 'node:assert/strict';
 
-import { parseArray, parseArrayFromReasoning, isRunaway, escapeRawControls } from '../lib/parse.js';
+import {
+  parseArray,
+  parseArrayFromReasoning,
+  isRunaway,
+  escapeRawControls,
+  stripTrailingCommas,
+  normalizeTranslationBreaks,
+  leaksWrapper
+} from '../lib/parse.js';
 
 let pass = 0;
 let fail = 0;
@@ -55,6 +63,117 @@ t('escapeRawControls 只转义字符串里面的换行，已转义的 \\" 不打
 });
 
 // ---------------- isRunaway ----------------
+// 0.8.7：可确定的格式修补只去掉 / 选择分隔符，不补造内容；认不出来的结构照样失败
+t('结尾多一个逗号：去掉这个分隔符即可解析，不再整批失败 / 拆批重发', () => {
+  assert.deepEqual(parseArray('["一","二",]', 2), ['一', '二']);
+  assert.deepEqual(parseArray('["一",\n "二",\n]', 2), ['一', '二']);
+  assert.equal(stripTrailingCommas('["a,]", "b"]'), '["a,]", "b"]', '字符串里的 ,] 不能动');
+});
+
+t('说明文字里也有方括号：换下一个 [ 起点找到真正的数组', () => {
+  assert.deepEqual(parseArray('Here are the [2] results: ["甲","乙"]', 2), ['甲', '乙']);
+});
+
+t('元素被包成 {"translation": …}：取出译文；结构认不出来就整批失败，不插 [object Object]', () => {
+  assert.deepEqual(parseArray('[{"translation":"甲"},{"translation":"乙"}]', 2), ['甲', '乙']);
+  assert.deepEqual(parseArray('[{"text":"甲"}]', 1), ['甲']);
+  assert.equal(parseArray('[{"id":1,"value":"甲"},{"id":2,"value":"乙"}]', 2), null);
+  assert.equal(parseArray('[{"text":"甲","translation":"乙"}]', 2), null, '两个候选字段：有歧义');
+  assert.equal(parseArray('[["甲"],["乙"]]', 2), null);
+});
+
+t('单条回了纯文本：英文对白的引号不再被剥掉；整段只被一对引号包着时才剥', () => {
+  assert.deepEqual(parseArray('"What are you doing?" she asked.', 1), ['"What are you doing?" she asked.']);
+  assert.deepEqual(parseArray('你好世界', 1), ['你好世界']);
+  assert.deepEqual(parseArray('"你好世界', 1), ['"你好世界'], '只有一边引号：不剥');
+});
+
+t('没解析成功的 JSON 数组不按行拆（碎片 `"a",` 不能当译文）', () => {
+  assert.equal(parseArray('[\n"甲",\n"乙" oops\n', 3), null);
+  assert.equal(parseArray('"甲",\n"乙"', 2), null);
+  assert.deepEqual(parseArray('1. 甲\n2. 乙', 2), ['甲', '乙'], '编号列表照常兜底');
+});
+
+console.log('\n[换行规范化 normalizeTranslationBreaks]');
+const BS = '\\';
+const zhDialog = '「你在做什么？」她问。\n「我在等人。」';
+const enDialogLit = '"What are you doing?" she asked.' + BS + 'n"I\'m waiting for someone."';
+const enDialogOk = '"What are you doing?" she asked.\n"I\'m waiting for someone."';
+
+t('标准 JSON 转义：解析后是真换行，原样不动', () => {
+  const v = parseArray(JSON.stringify([enDialogOk]), 1)[0];
+  assert.equal(v, enDialogOk);
+  assert.equal(normalizeTranslationBreaks(zhDialog, v), enDialogOk);
+});
+
+t('多转义一层（\\\\n）：解析后的字面 \\n 按原文分行恢复成真换行', () => {
+  const raw = '[' + JSON.stringify(enDialogLit) + ']';
+  const v = parseArray(raw, 1)[0];
+  assert.ok(v.includes(BS + 'n'), '前提：解析后确实是字面 \\n');
+  assert.equal(normalizeTranslationBreaks(zhDialog, v), enDialogOk);
+  assert.equal(normalizeTranslationBreaks('a\nb', 'A.' + BS + BS + 'nB.'), 'A.\nB.', '多个反斜杠同样处理');
+});
+
+t('字符串里直接写了换行（不合法 JSON）：修复后就是真换行', () => {
+  const v = parseArray('["' + enDialogOk.replace(/"/g, '\\"') + '"]', 1)[0];
+  assert.equal(normalizeTranslationBreaks(zhDialog, v), enDialogOk);
+});
+
+t('中文 / 英文 / 日文小说：多行对白按原文行数恢复，空行保留', () => {
+  assert.equal(normalizeTranslationBreaks('"Hi," he said.\n"Bye."', '「你好，」他说。' + BS + 'n「再见。」'), '「你好，」他说。\n「再见。」');
+  assert.equal(normalizeTranslationBreaks('「行くよ。」\n「うん。」\n\n夜だった。', '"Let\'s go."' + BS + 'n"Yeah."' + BS + 'n' + BS + 'nIt was night.'), '"Let\'s go."\n"Yeah."\n\nIt was night.');
+  assert.equal(normalizeTranslationBreaks('第一行\n第二行\n第三行', '一行目。' + BS + 'n二行目。' + BS + 'n三行目。'), '一行目。\n二行目。\n三行目。');
+});
+
+t('原文没有分行：句末残留的字面 \\n 清掉（中文之间不加字，英文换成空格），不新增行', () => {
+  assert.equal(normalizeTranslationBreaks('你好。', 'Hello.' + BS + 'n'), 'Hello.');
+  assert.equal(normalizeTranslationBreaks('He said. She laughed.', '他说。' + BS + 'n她笑了。'), '他说。她笑了。');
+  assert.equal(normalizeTranslationBreaks('他说。她笑了。', 'He said.' + BS + 'n' + BS + 'nShe laughed.'), 'He said. She laughed.');
+});
+
+t('合法的字面 \\n 一律原样：JS 代码、正则、Windows 路径、Markdown 代码、转义说明', () => {
+  const keep = [
+    ['console.log("a' + BS + 'nb")', 'console.log("a' + BS + 'nb")'],
+    ['用正则 /' + BS + 'n+/ 匹配换行', 'Match newlines with /' + BS + 'n+/'],
+    ['打开 C:' + BS + 'new' + BS + 'test', 'Open C:' + BS + 'new' + BS + 'test'],
+    ['```\nprint("' + BS + 'n")\n```', '```\nprint("' + BS + 'n")\n```'],
+    ['换行符怎么写', 'Write the newline as "' + BS + 'n" in strings.'],
+    ['换行怎么写', 'Use `' + BS + 'n` for a newline.'],
+    ['路径', 'Saved to C:' + BS + 'new folder.'],
+    ['数字', 'Item' + BS + 'n2 is next.'],
+    ['普通文本', 'Plain text without backslashes.']
+  ];
+  keep.forEach(([src, out]) => assert.equal(normalizeTranslationBreaks(src, out), out, '不该改：' + out));
+});
+
+t('幂等：处理过的结果再处理一次不变；非字符串原样返回', () => {
+  const samples = [[zhDialog, enDialogLit], ['他说。她笑了。', 'He said.' + BS + 'n' + BS + 'nShe laughed.'], ['a\nb', 'A.' + BS + 'nB.' + BS + 'nC'], ['x', 'Use `' + BS + 'n`.']];
+  samples.forEach(([src, out]) => {
+    const once = normalizeTranslationBreaks(src, out);
+    assert.equal(normalizeTranslationBreaks(src, once), once);
+  });
+  assert.equal(normalizeTranslationBreaks('a', null), null);
+  assert.equal(normalizeTranslationBreaks('a', ''), '');
+});
+
+t('不丢字、不增加条目：规范化前后除换行处以外的字符一致，数组条数不变', () => {
+  const raw = '[' + JSON.stringify(enDialogLit) + ',"Second."]';
+  const arr = parseArray(raw, 2);
+  assert.equal(arr.length, 2);
+  const fixed = normalizeTranslationBreaks(zhDialog, arr[0]);
+  assert.equal(fixed.replace(/\n/g, ''), arr[0].replace(BS + 'n', ''));
+});
+
+console.log('\n[写入前校验 leaksWrapper]');
+t('译文残留 JSON 包装 / 字段名 / 提示词原句 → 拦；原文本来就有的不拦', () => {
+  assert.equal(leaksWrapper('你好', '{"translation": "Hello"}'), true);
+  assert.equal(leaksWrapper('你好', '{"translations": ["Hello"]}'), true);
+  assert.equal(leaksWrapper('你好', '[object Object]'), true);
+  assert.equal(leaksWrapper('Translate', '你是一个网页翻译引擎，只做翻译'), true);
+  assert.equal(leaksWrapper('API 返回 {"translation": "x"}', 'The API returns {"translation": "x"}'), false);
+  assert.equal(leaksWrapper('「你好。」', '"Hello."'), false);
+});
+
 console.log('\n[isRunaway]');
 
 t('正常英译中不拦', () => {

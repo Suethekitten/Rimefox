@@ -117,6 +117,24 @@ await t('存储里的坏数据被忽略，不影响使用', async () => {
   assert.equal(c.size(), 1);
 });
 
+await t('删除一条：内存层和磁盘层都删，落盘后重启也不会再命中，其它条目不受影响', async () => {
+  const session = fakeArea();
+  const local = fakeArea();
+  const a = createCache({ session, local });
+  await a.ready;
+  a.set(makeKey(scope, 'Bad'), '{"translation": "x"}');
+  a.set(makeKey(scope, 'Code'), '代码');
+  await a.flush();
+  a.remove(makeKey(scope, 'Bad'));
+  a.remove(makeKey(scope, 'Missing')); // 不存在的键：什么也不做
+  assert.equal(a.get(makeKey(scope, 'Bad')), undefined);
+  await a.flush();
+  const b = createCache({ session, local });
+  await b.ready;
+  assert.equal(b.get(makeKey(scope, 'Bad')), undefined, '重启后也不能再命中');
+  assert.equal(b.get(makeKey(scope, 'Code')), '代码');
+});
+
 // ---------------- 上限 ----------------
 console.log('\n[上限]');
 

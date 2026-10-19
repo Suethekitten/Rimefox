@@ -2,6 +2,8 @@
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
 > 版本：0.6.2 ｜ 目录：`edge-bilingual/`
+> 翻译引擎（收集 → 分段 → 批量 → 解析 → 缓存 → 注入 → 还原）的实现细节、0.8.7 的优化、外部项目参考（Wenyi / Agent Book Translate）与后续路线，
+> 单独写在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)；改翻译链路前先读它。
 
 ---
 
@@ -39,7 +41,7 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **131 / 131 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **135 / 135 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 自检页只在直接加载仓库目录时才有：商店包和 0.8.6 起的 GitHub Release 包只收运行时文件（`tools/package-store.mjs` 的白名单），设置页里的「打开自检页」会自动隐藏。
 
 ---
@@ -55,7 +57,7 @@ edge-bilingual/
 │   ├── provider.js        接口门面：chat() / listModels()，按 engine 分发
 │   ├── engines/           各协议实现（openai / anthropic / gemini）
 │   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
-│   ├── parse.js           模型返回值解析（JSON 数组容错）+ 输出长度护栏
+│   ├── parse.js           模型返回值解析（JSON 数组容错）+ 换行规范化 + 写入前校验 + 输出长度护栏
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格），纯函数
 │   ├── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
 │   ├── privacy.js         可选的本地脱敏 / 恢复（纯 JS，无依赖）：识别、占位符、fail-closed 恢复
@@ -82,7 +84,7 @@ edge-bilingual/
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
-└── selftest/              离线自检（131 条用例）
+└── selftest/              离线自检（135 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -168,7 +170,7 @@ lib/
 │   ├── anthropic.js  原生 Messages 协议
 │   └── gemini.js     原生 generateContent 协议
 ├── providers.js      内置 10 家模板（地址 + 协议 + 关闭思考的参数）
-├── parse.js          模型返回值解析（JSON 数组容错）
+├── parse.js          模型返回值解析（JSON 数组容错、换行规范化、写入前校验）
 └── prompt.js         翻译提示词：普通翻译 / 趣味风格（风格表在 config.js 的 STYLES）
 ```
 
@@ -368,15 +370,16 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-131 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
+135 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
 node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射（45 条）
 node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（30 条）
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
-node test/parse.test.mjs       # 回包解析 parseArray / 思考过程兜底 parseArrayFromReasoning / 输出长度护栏 isRunaway / 字符串里裸换行的修复（18 条）
-node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、清空（13 条）
+node test/parse.test.mjs       # 回包解析 parseArray（围栏 / 说明文字 / 裸换行 / 结尾逗号 / 对象元素）/ 换行规范化 normalizeTranslationBreaks / 写入前校验 leaksWrapper / 思考过程兜底 / 输出长度护栏（32 条）
+node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空（14 条）
+node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批（7 条）
 node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度、保留分行规则（14 条）
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息（5 条，假 fetch）
 node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹（18 条）
@@ -476,6 +479,7 @@ node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络
 8. **不支持 OpenAI Responses 协议**（`/v1/responses`）——目前只有 OpenAI 兼容（chat completions）/ Anthropic / Gemini 三种。遇到只开 responses 的第三方接口会 404，见第 10 节 P3
 9. **网页夜间模式是反色实现**：`filter: invert(1) hue-rotate(180deg)` + 媒体元素反向回正；画布绘制的界面、CSS 背景图、自带深色主题的网站可能显示异常，所以默认关闭、只对名单里的网站生效。
 10. **置顶小窗依赖浏览器能力**：Document Picture-in-Picture 需要 Chrome 116+；退回的 `window.open` 小窗不会置顶，网页设置了 COOP 等隔离或拦截弹窗时打不开（会提示）。
+11. **振假名会混进原文**：`<ruby>漢字<rt>かんじ</rt></ruby>` 的读音 `<rt>` 也被当成正文送翻（`content/dom.js` 的 `tokensOf` 没有跳过 RT / RP）。按代码推断，Pixiv 的 `[[rb:]]` 注音会受影响，尚未在真实页面验证。
 
 ---
 
@@ -501,7 +505,7 @@ node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **131 / 131**
+4. 跑自检页：必须 **135 / 135**
 4b. 跑 Node 单测：`node --test test/*.test.mjs`（19 个文件、按退出码判定，应全部通过；CI 发版前跑同一条命令）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -568,36 +572,24 @@ node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络
 
 ---
 
-## 14. 本版技术记录（0.8.6）
+## 14. 本版技术记录（0.8.7）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.8.5 的字幕会话代际 / 用量诊断 / 悬停气泡细节看 `cae1133`、`938f1bf`。
+> 翻译引擎的完整说明、外部项目参考（Wenyi / Agent Book Translate）、未完成方向与接手指南在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)，这里只记本版改了什么。
 
-- **气泡内部滚动被收起**（`content/hover.js`）：页面滚动清理挂在 `window` 的捕获阶段，元素自己的 `scroll`（气泡正文 `.dt-hover-body`，
-  以及「收起」时 `scrollTop = 0`）也会进来，于是一滚就 `clear()`。改为 `insideTip(event.target)` 时跳过；网页滚动、网页里其它容器滚动仍然清理
-  （锚点位置失效，不复用旧 Range）。`mousedown` 的判断改用同一个 `insideTip()`。真实页面（Aeon，CDP 真实滚轮）复现：0.8.5 滚一格气泡消失，修复后正文滚到底、页面不动
-- **节选正则**：`tipPreview()` 的 `/s+$/`（字母 s）改为 `/\s+$/`；截断点落在代理对高位时退一位，emoji / 扩展区汉字不截成半个字。`hover.tipPreview` 挂出来给自检测
-- **YouTube 原始轨道生命周期**（`content/subtitles.js`）：目标语言等于字幕语言、或关掉字幕翻译时不再 `reset()`（会把已解析的时间轴扔掉，
-  YouTube 不会重新请求字幕，切回中文就再也翻不了）。现在只 `render(null)` 交还原生字幕；目标 / 风格变化一律 `invalidate()`（`gen` +1、清译文与在途计数），
-  `pump()` 对同语言轨道不调度。`process()` 收到同语言字幕也照样建轨道。切回别的语言时按同一份 `units` 重新调度（后台翻译缓存命中，不额外花 API）
-- **重放校验**：`youtube-hook.js` 应 replay 重发时带 `replay: true`；`subtitles-source.js` 透传；`process()` 对重放回包核对 `v` 与当前视频，
-  不一致直接丢（钩子留着的是「最后一份」，可能是上一个视频的）。非重放回包照常接收（新字幕可能比地址栏先到）。当前视频没有可用轨道且 CC 开着时，
-  `recover()` 每个视频最多要一次重放（`start()` 那次算在内），不碰 CC 按钮
-- **安装包**（`tools/package-store.mjs`）：加 `--release`，同一份白名单 / 版本 / 图标 / manifest 引用 / 欢迎页 / 许可校验，输出 `dist/Rimefox-v<版本>.zip`、
-  条目加 `Rimefox/` 前缀；默认模式（商店包）输出与改动前逐字节相同。CI 不再 rsync 整仓。v0.8.5 Release zip 1,219,457 B / 105 个文件
-  （按旧流程在 v0.8.5 标签上重建，大小与线上资源一致）→ 同一棵树新规则 291,485 B / 58 个文件；少掉的 47 个是 `test/` 19、`docs/` 16（含商店截图 6 张）、
-  `selftest/` 2 与 `README / HANDOFF / CHANGELOG / AGENTS / CLAUDE / PRIVACY / SECURITY / STORE-READINESS` 等开发文档、`package.json`、`.gitattributes`；
-  许可文件与全部运行时文件都在。解压后用 CDP `Extensions.loadUnpacked` 在 Chrome 155 加载成功，Service Worker 起来，弹窗 / 设置 / 欢迎页无缺失资源。
-  设置页「打开自检页」在 Release 安装里会自动隐藏（和商店包一样）。`package.ps1` 是给协作者的源码交接包，不在本次范围
-- **CI 门禁**（`.github/workflows/release.yml`）：版本校验加上 `package.json`；新增 `actions/setup-node`（钉 SHA，v6.5.0，Node 24）与
-  `node --test --test-reporter=spec test/*.test.mjs`（每个文件独立子进程、按退出码判定）；打包改用脚本；新增「检查安装包清单」：`unzip -t`、
-  与商店包文件集合 `diff`、禁止 `test/ selftest/ docs/ tools/ dist/ .github/`、顶层 `.md`（THIRD-PARTY-NOTICES 除外）与 `package.json`、许可文件必须在。
-  本地按 workflow 原文逐步跑过（Node 24.19），并验证：一个测试文件失败 → `node --test` 退出 1；Release 包混进一张截图 → 清单检查退出 1
-- **回归测试**：`test/subtitles-session.test.mjs` 10 → 15（K 英文 CC 中→英→中→英→中两轮、晚到旧请求；L 同语言字幕先到；M 切语言途中换视频；
-  N 重放校验与每视频一次；O 切语言期间播放器重建），B / I 改成新语义（轨道保留）；新用例在 0.8.5 代码上 7 条失败。`test/package-store.test.mjs`
-  加 Release 模式（与商店包集合一致、`Rimefox/` 前缀、许可文件、排除开发文件、不改商店包）。自检 129 → 131：节选纯函数、气泡真实滚动 / 按钮 /
-  鼠标移出移入 / 网页滚动 / 其它容器滚动 / Escape（`checkAsync`，排在同步用例之后逐个跑，CI 的虚拟时间会快进计时器）；两条在 0.8.5 代码上失败
-- **真实浏览器**：假 YouTube 页面（`www.youtube.com` 映射到本地 HTTPS，真实 `youtube-hook.js` → postMessage → 来源层 → 运行时，真实计时器）12 项：
-  0.8.5 失败 6 项（切回中文后字幕不再出现），修复后全部通过。Node 19 个文件 / 280 条全部通过，自检 131 / 131（CI 参数连跑 3 次）
-- **未验证**：真实 youtube.com 播放器（需要登录态 / 广告 / 真实 Key，未做）；Edge；在扩展管理页手动「加载已解压」（本轮用 CDP 加载）；
-  Windows 资源管理器解压不带目录条目的 zip（标准 ZIP，理论上没问题，未实测）
+- **Pixiv 中译英字面 `\n` 的根因**：模型偶尔把换行多转义一层（JSON 里写成 `\\n`），解析后译文里是「反斜杠 + n」；单条纯文本回包、多转义的 JSON 字符串同理。
+  `parseArray` 原样放过、缓存把坏译文固化；DOM 只按真换行分行，所以字面 `\n` 原样显示，仅译文模式行数对不上时整段落进第一行。
+  用真实 background.js + 构造回包复现（`test/translate-pipeline.test.mjs`），又用真实扩展 + 本地假模型接口在 Pixiv 29416270 复现
+- **修复（解析 / 缓存层，DOM 没改）**：`lib/parse.js` 新增 `normalizeTranslationBreaks(source, translated)`——原文有反斜杠就不动；原文有分行时换成真换行后行数一致才换；
+  否则只清理紧贴句末标点 / 引号后、紧跟新一句的字面 `\n`，有一处像说明文字或路径就整段不动；幂等。`background.js`：脱敏还原 → 规范化 → `leaksWrapper` → `isRunaway` → 写缓存；
+  缓存命中同样规范化并写回（旧坏数据当场修好，不清缓存），残留 JSON 包装的旧值用新增的 `cache.remove` 删掉后重翻。`lib/prompt.js` 分行规则改为明确的 JSON 约束（不要写成 `\\n`），缓存键不变
+- **解析容错与写入前校验**：`stripTrailingCommas`、解析失败换下一个 `[` 起点、对象元素只认 `translation` / `translated_text` / `translatedText` / `text` 之一（以前插 `[object Object]`）、
+  单条纯文本只在整段被一对引号包着时才剥（以前剥掉英文对白的引号）、没解析成功的 JSON 数组不再按行拆；`leaksWrapper`：残留 JSON 包装 / 字段名 / 提示词原句且原文没有 → 该条 `null`、不进缓存
+- **长段落无损切分**（`content/core.js`）：0.8.6 及以前超过 1200 字的单行段落发出去的原文被改坏（`3.5` → `3. 5`、`example.com` → `example. com`、中文句号后插空格）。
+  改为在句末之后切（西文标点后要有空白才算句末），每段是原文原样子串，`seps` 记切点原有空白；拼回译文用新增的 `DT.translationSeps(seps, target)`（中 / 日不加空格，其它加空格，换行原样）。
+  只有 >1200 字的段落会因此缓存未命中一次
+- **测试**：Node 20 个文件 / 302 条（新增 `translate-pipeline` 7 条，parse 18 → 32，cache 13 → 14，prompt 断言改新措辞）；`translate-pipeline` 在 0.8.6 代码上 6 / 7 失败。
+  自检 131 → 135（`tpl-pixiv-zh` 夹具：中译英双语 / 仅译文 / 还原、合法字面 `\n` 不拆行、长段落无损切分、按目标语言拼接）
+- **真实浏览器**：Chrome 155 CDP `Extensions.loadUnpacked` 加载 0.8.6 与 0.8.7，接本地假 OpenAI 接口（故意多转义）翻译 Pixiv 29416270：0.8.6 五行诗成一行带 4 个字面 `\n`，0.8.7 分五行、还原逐字一致。
+  请求数两版各自波动（51–62），送出条数与字符量相同。GitHub / OWID / Aeon 差分一致
+- **未验证**：真实模型回包（没用 API Key）、R-18 测试页 29390937（需登录）、Edge、YouTube 真实播放器

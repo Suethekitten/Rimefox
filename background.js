@@ -2,7 +2,7 @@
 import { getConfig, saveConfig, activeConfig, styleById, providerChoices } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
-import { parseArray, parseArrayFromReasoning, isRunaway } from './lib/parse.js';
+import { parseArray, parseArrayFromReasoning, isRunaway, normalizeTranslationBreaks, leaksWrapper } from './lib/parse.js';
 import { matchGlossary, normalizeGlossary, glossaryFingerprint } from './lib/glossary.js';
 import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
@@ -200,7 +200,19 @@ async function handleTranslate(msg, sender) {
       groups.get(text).push(index);
       return;
     }
-    const hit = cache.get(keyOf(text));
+    let hit = cache.get(keyOf(text));
+    // 旧版本存进去的译文可能带着多转义的字面 \n（Pixiv 中译英）：读出来同样规范化，改了就顺手写回；
+    // 残留 JSON 包装的旧译文当作没命中，重新翻（不整体清缓存）
+    if (typeof hit === 'string') {
+      const fixed = normalizeTranslationBreaks(text, hit);
+      if (leaksWrapper(text, fixed)) {
+        cache.remove(keyOf(text));
+        hit = undefined;
+      } else if (fixed !== hit) {
+        cache.set(keyOf(text), fixed);
+        hit = fixed;
+      }
+    }
     if (hit !== undefined) {
       results[index] = hit;
       cached += 1;
@@ -293,6 +305,16 @@ async function handleTranslate(msg, sender) {
                 return;
               }
               value = back.text;
+            }
+            // 多转义的字面 \n 在写缓存之前就规范化（对照原文的分行，代码 / 路径原样保留）
+            value = normalizeTranslationBreaks(text, value);
+            // 写入前兜底：残留 JSON 包装 / 字段名 / 提示词原句 → 这一条按失败处理，不插进网页、不进缓存
+            if (typeof value === 'string' && leaksWrapper(text, value)) {
+              groups.get(text).forEach((index) => {
+                results[index] = null;
+              });
+              if (!firstError) firstError = new ApiError('模型返回的译文里混进了 JSON 格式，已丢弃', 0, '');
+              return;
             }
             let result = '';
             if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {

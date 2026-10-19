@@ -228,6 +228,10 @@ Line two of the poem.
 A new stanza begins here.</div><p class="nv-source-newline">Hello
       world, this newline is only source formatting.</p></template>
 
+    <!-- 0.8.7 Pixiv 中译英夹具：中文对白两行（span + <br>，和真实 Pixiv 阅读器一样标签间不留空白）；
+         另有一段讲转义字符的正文（译文里的字面 \n 是正文，不能被当成换行） -->
+    <template id="tpl-pixiv-zh"><div class="nv-reader" style="white-space: pre-wrap; width: 600px; font: 16px/2 serif"><p class="px-zh"><span class="text-count">「你在做什么？」她问。</span><br><span class="text-count">「我在等人。」</span></p><p class="px-code">换行符在字符串里写作 <code>\n</code>。</p></div></template>
+
     <script src="../content/core.js"></script>
     <script src="../content/dom.js"></script>
     <script src="../content/appearance.js"></script>

@@ -1447,6 +1447,87 @@
     return eq(DT.joinSlots(['一', '', '二', '三'], ['\n', ' ', '\n\n']), '一\n二\n\n三');
   });
 
+  // ---------------- 0.8.7 Pixiv 中译英换行 / 长段落切分 ----------------
+  function withPixivZh(mode, fn) {
+    var box = document.createElement('div');
+    box.appendChild(document.getElementById('tpl-pixiv-zh').content.cloneNode(true));
+    document.getElementById('fixture').appendChild(box);
+    var prev = DT.state.mode;
+    DT.state.mode = mode;
+    try {
+      return fn(box, function (cls) { return box.querySelector('.' + cls); });
+    } finally {
+      DT.state.mode = prev;
+      DT.restore();
+      box.remove();
+    }
+  }
+  var PX_EN = '"What are you doing?" she asked.\n"I\'m waiting for someone."';
+  var BSL = String.fromCharCode(92);
+
+  check('Pixiv 中译英：后台修好的真换行，仅译文逐行写回、双语分行显示，还原逐字一致', function () {
+    var bad = [];
+    ['translation', 'dual'].forEach(function (mode) {
+      withPixivZh(mode, function (box, q) {
+        var p = q('px-zh');
+        var html = p.innerHTML;
+        var u = unitOfEl(p);
+        if (u.text !== '「你在做什么？」她问。\n「我在等人。」') bad.push(mode + ' 送翻文本不对：' + JSON.stringify(u.text));
+        if (!DT.inject(u.el, PX_EN, 'en')) bad.push(mode + ' inject 失败');
+        var shown = mode === 'translation' ? shownLines(p) : shownLines(p.querySelector('[data-dt-target]'));
+        if (JSON.stringify(shown) !== JSON.stringify(['"What are you doing?" she asked.', '"I\'m waiting for someone."'])) {
+          bad.push(mode + ' 显示：' + JSON.stringify(shown));
+        }
+        if (p.textContent.indexOf(BSL + 'n') >= 0) bad.push(mode + ' 页面上出现了字面 \\n');
+        DT.restore();
+        if (p.innerHTML !== html) bad.push(mode + ' 还原后不一致');
+      });
+    });
+    return bad.length ? bad.join('；') : true;
+  });
+
+  check('正文里合法的字面 \\n（讲转义字符）：原样写进页面，不被拆成两行', function () {
+    var bad = [];
+    var en = 'A newline is written as ' + BSL + 'n inside strings.';
+    ['translation', 'dual'].forEach(function (mode) {
+      withPixivZh(mode, function (box, q) {
+        var p = q('px-code');
+        var u = unitOfEl(p);
+        if (u.text.indexOf(BSL + 'n') < 0) bad.push('原文里的 \\n 丢了：' + u.text);
+        DT.inject(u.el, en, 'en');
+        var host = mode === 'translation' ? p : p.querySelector('[data-dt-target]');
+        if (shownLines(host).length !== 1) bad.push(mode + ' 被拆成了多行：' + JSON.stringify(shownLines(host)));
+        if (host.textContent.indexOf(BSL + 'n') < 0) bad.push(mode + ' 字面 \\n 被改掉了');
+      });
+    });
+    return bad.length ? bad.join('；') : true;
+  });
+
+  check('长段落切分：每一段都是原文原样子串，拼回与原文逐字相同（3.5 / example.com / 10:30 / 中文引号不被插空格）', function () {
+    var en = new Array(31).join('Version 3.5 is out at example.com today. Meet me at 10:30, e.g. after lunch. ').trim();
+    var zh = new Array(121).join('「你好。今天是什么日子？」她问。');
+    var bad = [];
+    [['en', en], ['zh', zh]].forEach(function (c) {
+      var parts = DT.splitLong(c[1], 1200);
+      if (parts.length < 2) bad.push(c[0] + ' 应拆成多段');
+      if (parts.some(function (part) { return part.length > 1200 * 1.6; })) bad.push(c[0] + ' 有超长段');
+      if (parts.some(function (part) { return c[1].indexOf(part) < 0; })) bad.push(c[0] + ' 某段不是原文子串（被插了字）');
+      if (DT.joinSlots(parts, parts.seps) !== c[1]) bad.push(c[0] + ' 拼回与原文不一致');
+    });
+    if (DT.splitLong(zh, 1200).seps.some(function (sep) { return sep !== ''; })) bad.push('中文切点处原本没有空白');
+    return bad.length ? bad.join('；') : true;
+  });
+
+  check('译文拼接分隔按目标语言：中 / 日句子之间不加空格，其它语言加空格，换行照旧', function () {
+    var r = eq(DT.translationSeps([' ', '', '\n', '\n\n'], 'zh-CN'), ['', '', '\n', '\n\n']);
+    if (r !== true) return 'zh：' + r;
+    r = eq(DT.translationSeps([' ', '', '\n'], 'ja'), ['', '', '\n']);
+    if (r !== true) return 'ja：' + r;
+    r = eq(DT.translationSeps(['', ' ', '\n'], 'en'), [' ', ' ', '\n']);
+    if (r !== true) return 'en：' + r;
+    return eq(DT.joinSlots(['第一句。', '第二句。'], DT.translationSeps([' '], 'zh-CN')), '第一句。第二句。');
+  });
+
   // ---------------- 0.8.4 悬停对照：句子 / 行 / 段落三级对应（纯函数） ----------------
   function sents(text) {
     return DT.hover.sentencesOf(text).map(function (r) { return text.slice(r[0], r[1]); });

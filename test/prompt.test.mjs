@@ -62,11 +62,13 @@ t('规则编号连续，没有跳号', () => {
   });
 });
 
-t('要求保留段落里的分行（内容脚本按行写回页面）', () => {
+t('要求保留段落里的分行，并且换行只写成 JSON 标准的 \\n（不多转义一层）', () => {
   ['plain', 'classical', 'catgirl'].forEach((style) => {
-    const p = systemPrompt('zh-CN', style);
-    assert.ok(p.includes('换行符 \\n 是原文的分行'), style + ' 缺少分行规则');
+    const p = systemPrompt('en', style);
+    assert.ok(p.includes('JSON 字符串里的 \\n'), style + ' 缺少分行规则');
     assert.ok(p.includes('行数与原文一致'));
+    assert.ok(p.includes('不要写成 \\\\n'), style + ' 没有禁止多转义的换行');
+    assert.ok(!p.includes('换行符 \\n 是原文的分行'), '旧写法容易让模型把反斜杠 + n 当正文输出');
   });
 });
 
