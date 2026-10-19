@@ -572,24 +572,13 @@ node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络
 
 ---
 
-## 14. 本版技术记录（0.8.7）
+## 14. 本版技术记录（0.8.8）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 > 翻译引擎的完整说明、外部项目参考（Wenyi / Agent Book Translate）、未完成方向与接手指南在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)，这里只记本版改了什么。
 
-- **Pixiv 中译英字面 `\n` 的根因**：模型偶尔把换行多转义一层（JSON 里写成 `\\n`），解析后译文里是「反斜杠 + n」；单条纯文本回包、多转义的 JSON 字符串同理。
-  `parseArray` 原样放过、缓存把坏译文固化；DOM 只按真换行分行，所以字面 `\n` 原样显示，仅译文模式行数对不上时整段落进第一行。
-  用真实 background.js + 构造回包复现（`test/translate-pipeline.test.mjs`），又用真实扩展 + 本地假模型接口在 Pixiv 29416270 复现
-- **修复（解析 / 缓存层，DOM 没改）**：`lib/parse.js` 新增 `normalizeTranslationBreaks(source, translated)`——原文有反斜杠就不动；原文有分行时换成真换行后行数一致才换；
-  否则只清理紧贴句末标点 / 引号后、紧跟新一句的字面 `\n`，有一处像说明文字或路径就整段不动；幂等。`background.js`：脱敏还原 → 规范化 → `leaksWrapper` → `isRunaway` → 写缓存；
-  缓存命中同样规范化并写回（旧坏数据当场修好，不清缓存），残留 JSON 包装的旧值用新增的 `cache.remove` 删掉后重翻。`lib/prompt.js` 分行规则改为明确的 JSON 约束（不要写成 `\\n`），缓存键不变
-- **解析容错与写入前校验**：`stripTrailingCommas`、解析失败换下一个 `[` 起点、对象元素只认 `translation` / `translated_text` / `translatedText` / `text` 之一（以前插 `[object Object]`）、
-  单条纯文本只在整段被一对引号包着时才剥（以前剥掉英文对白的引号）、没解析成功的 JSON 数组不再按行拆；`leaksWrapper`：残留 JSON 包装 / 字段名 / 提示词原句且原文没有 → 该条 `null`、不进缓存
-- **长段落无损切分**（`content/core.js`）：0.8.6 及以前超过 1200 字的单行段落发出去的原文被改坏（`3.5` → `3. 5`、`example.com` → `example. com`、中文句号后插空格）。
-  改为在句末之后切（西文标点后要有空白才算句末），每段是原文原样子串，`seps` 记切点原有空白；拼回译文用新增的 `DT.translationSeps(seps, target)`（中 / 日不加空格，其它加空格，换行原样）。
-  只有 >1200 字的段落会因此缓存未命中一次
-- **测试**：Node 20 个文件 / 302 条（新增 `translate-pipeline` 7 条，parse 18 → 32，cache 13 → 14，prompt 断言改新措辞）；`translate-pipeline` 在 0.8.6 代码上 6 / 7 失败。
-  自检 131 → 135（`tpl-pixiv-zh` 夹具：中译英双语 / 仅译文 / 还原、合法字面 `\n` 不拆行、长段落无损切分、按目标语言拼接）
-- **真实浏览器**：Chrome 155 CDP `Extensions.loadUnpacked` 加载 0.8.6 与 0.8.7，接本地假 OpenAI 接口（故意多转义）翻译 Pixiv 29416270：0.8.6 五行诗成一行带 4 个字面 `\n`，0.8.7 分五行、还原逐字一致。
-  请求数两版各自波动（51–62），送出条数与字符量相同。GitHub / OWID / Aeon 差分一致
-- **未验证**：真实模型回包（没用 API Key）、R-18 测试页 29390937（需登录）、Edge、YouTube 真实播放器
+- **根因**（popup/popup.css）：.label 固定列宽（中文 30px / 英文 64px）+ white-space: nowrap；「悬停对照」四个字（英文 Hover compare）宽 50/85px，溢出标签盒 20/21px。该行复用 .night-line 但没有 .night-host 占位，开关贴在标签盒右缘，溢出的文字正好压在开关上（无头 Edge 实测：中文压 10px、英文压 11px）。「夜间」行因有 host 文本把开关顶到行尾，所以没暴露
+- **修复**：#hoverRow .label { width: auto } 让标签按内容取宽；#hoverRow .night-line { justify-content: flex-end } 把开关右对齐到与「夜间」行同一列（实测 [279,311]）。其余行的列宽与控件左缘逐像素不变；设置页用另一套 ow-text 布局，不受影响
+- **验证**：修复前后无头几何对照（溢出 20/21px → 0、重叠 10/11px → 无）；弹窗 / 设置页 / 欢迎页做中+英通用扫描（文本溢出、裁切、同层重叠），0 真实命中，其余命中判定为 svg 图标内部、sticky 保存条、line-height: 1.08 行盒等假阳性；注入式悬停提示确认有视口钳制（max-width: min(420px, 100vw - 24px)、上方翻转 + 二次钳制）；真机 escapefromtartarkov.com 仅译文 63 段验证通过
+- **审计工具**：工作区测量页引用真实 popup.css 读几何；页面副本扫描器内联 lib/i18n.js 的 408 条 EN 映射模拟英文态（ile:// 下 module 脚本不执行，扫描器按 pplyI18n 同款规则替换文本节点与 placeholder/title/aria-label）
+- **回归**：Node 20 个文件 / 302 条、自检 135 / 135 全绿；git diff --check 干净；0.8.7 的记录见 769b018 与 docs/TRANSLATION-ENGINE-HANDOFF.md
