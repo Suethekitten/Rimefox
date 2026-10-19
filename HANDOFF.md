@@ -625,17 +625,13 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.9.2）
+## 14. 本版技术记录（0.9.3）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 翻译引擎的完整说明、真实页面验收、外部项目参考与接手指南在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)。
+> 0.9.2 的段落 / 注音 / 卡顿修复记录见 `docs/STABILITY-AUDIT-0.9.2.md` 与 0.9.2 的提交。
 
-- **来源**：0.9.1 已在真实青空文库《罗生门》复现两处严重回归（双语全部译文堆页尾；仅译文巨大空白 + 3 个图片基字 Ruby 的假名残留）。按「真实 DOM 诊断 → 修结构 → 补真实夹具 → 真实 Chrome 验收」顺序修复，版本按补丁位升到 0.9.2。
-- **段落识别**：`content/units.js` 的 `textMap` 在规范化（trim）**之前**记录每行的「源码换行」和「行首全角缩进 U+3000」；`paragraphsOf` 之外的换行只在满足「源码换行 + 全角缩进」或空行时升级为段落。真实 Aozora 的 `<br>\n　段落` 因此形成 29 个单元；Pixiv 的 `span` 连续行（有 `　`、无源码换行）仍保持同一段。保留 `<br><br>` 旧规则；新增「单单元 8+ `<br>` 行 / >800 字」按行兜底（`fallback='line'`），防止静默巨型单元。
-- **锚点**：最后一段插在尾部空行的第一个 `<br>` 之前（`map.trailingBreak`），不再 append 到容器最末尾；其它段落仍插在本段分隔 `<br>` 前。真实页面双语 29 个译文节点，首段译文 y≈60，29/29 紧跟所属原文。
-- **Ruby**：`rubyAnnotationsFor(el, chars, bounds, own)` 除字符映射外，再按本段 DOM Range（上一段分隔 `<br>` 之后 → 本段分隔 `<br>` 之前）扫所有 `<ruby>`。青空文库的外字图片基字（`<img class="gaiji">`）没有文本字符，旧逻辑漏掉 3 个 `rt`；现在仅译文可见 `rt` = 0。
-- **仅译文空白**：根因不是 CSS，而是「整篇一个单元 + `injectRuby` 清空全部正文后 40 个 `<br>` 留在原位、唯一译文节点 append 到末尾」。段落单元正确后，每段译文回到本段位置；真实页面首段译文 y≈30、最大段间空白 30px、高度与原文同量级。
-- **多段落状态**：`main.js` 的 settled / failures / churn 从「元素」改为「元素 → Map(源文本签名 + 段序号)」；同一容器里一段失败不会被另一段的成功清掉，一段连续被站点改写不会让兄弟段落一起停止。懒翻译 / 批次优先级用 `DT.rectOfUnit(unit)`（段首文本节点的矩形），不再用整个正文容器的高度。
-- **稳定性审计（0.9.2 同版）**：修复 3000 段注入 116 秒的主线程卡顿（实时 CSSStyleDeclaration → 样式快照）、观察器克隆清理 O(n²)、tx / detached rendered 过期引用、findRenderedFor / Ruby / fillSnapshot 的重复扫描；`MAX_UNITS` 在段循环和 collectAll 全局生效；全渲染容器用源文本签名早退。报告见 `docs/STABILITY-AUDIT-0.9.2.md`，基准 `tools/stability-audit.mjs`。
-- **测试**：新增 `test/fixtures/aozora-roshomon.html`（从真实页面抽取的 4 段 + 对白续行 + 无缩进续行 + rb/rp/rt）；自检 151 → **159**（真实夹具的分段 / 双语句 / 仅译文字面空白 / Ruby 显隐与恢复 / 模式切换 / 动态新增 / 对齐）；E2E 新增 `--aozora-live`，在真实页面跑段落、双语句、仅译文位置 / 空白 / 注音、悬停、动态补翻、关闭恢复，并保存截图与 `*-diagnostics.json`。旧 0.9.1 用同一工具跑真实页面：1 个单元、1 个译文节点、仅译文 y=210、3 个可见 `rt`——证明测试能抓到回归。
-- **未验证**：Pixiv / GitHub / Aeon / OWID / YouTube 真实页面仍未跑；竖排；Edge；真实模型下 `align` 遵守率与译文质量。
+- **拖拽模型**（`content/dock.js`）：host 从 CSS `top:58%;right:0` 改为 JS 定位 `left/top`；`DT.dockDefault(side, view)` 算默认贴边位置，`DT.dockPlace(pos, view)` 负责吸附（离边 ≤72px 吸附，否则自由悬浮）与夹取；位置存 `config.dockPos = {x,y}`，设置页「恢复默认」写回 `null`。
+- **滚动条避让**：`viewOf()` 原用 `window.innerWidth`（含经典滚动条），贴右时 `x = innerWidth - w` 正好钻到滚动条下面。改为 `document.documentElement.clientWidth / clientHeight`（布局视口）；另加 `ResizeObserver(document.documentElement)`，页面变长/变短导致滚动条出现或消失时（只有 clientWidth 变、没有 resize 事件）重新 `place()`。
+- **按钮点击回归**：拖拽在 `pointerdown` 就 `setPointerCapture`，捕获后 `pointerup` 被重定向到 dock，浏览器据此把 `click` 也算到 dock 上，所有按钮自己的 click 永远不触发（真实鼠标表现为「服务商点了不弹菜单、翻译按钮没反应」）。修复：位移 >5px、真正开始拖时才捕获指针。
+- **测试**：`selftest` 159 → **163**（4 条拖拽 / 吸附 / 滚动条避让 / 点击）；新增 `test/dock.test.mjs`（纯函数 `dockDefault` / `dockPlace` 的吸附、夹取、窄视口）；Node 22 个文件 / 368 条；真实鼠标事件（CDP `Input.dispatchMouseEvent`）验证按钮点击与拖拽。
+- **未验证**：触摸屏拖拽、RTL 页面、多显示器 DPI 变化、极窄窗口（吸附区收窄）。
