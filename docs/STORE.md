@@ -1,13 +1,14 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-10-18，对应 `main`（Rimefox 0.8.3）。
+最后更新：2026-10-19，对应 `main`（Rimefox 0.8.5）。
 
 ## 当前状态
 
 - 仓库已公开：<https://github.com/Suethekitten/Rimefox>
-- 商店包：`dist/Rimefox-v0.8.3-store.zip`（57 个文件，275,405 B），manifest.json 在 ZIP 根目录
+- 商店包：`dist/Rimefox-v0.8.5-store.zip`（58 个文件，290,557 B），manifest.json 在 ZIP 根目录
+- GitHub Release：`v0.8.5`（整仓发布包，见下），商店包是单独的精简运行时包
 - 本文件只用于准备提交；**没有上传、没有提交审核、没有注册开发者账号、没有付款**
-- GitHub Release 的 `Rimefox-v0.8.3.zip` 是整仓发布包，**不能**当作商店包上传
+- GitHub Release 的 `Rimefox-v0.8.5.zip` 是整仓发布包，**不能**当作商店包上传
 
 ## 商店包
 
@@ -27,12 +28,12 @@ node tools/package-store.mjs
 验证命令：
 
 ```bash
-unzip -l dist/Rimefox-v0.8.3-store.zip
-unzip -t dist/Rimefox-v0.8.3-store.zip
+unzip -l dist/Rimefox-v0.8.5-store.zip
+unzip -t dist/Rimefox-v0.8.5-store.zip
 node test/package-store.test.mjs
 ```
 
-2026-10-18 实测：`unzip -t` 无错误；`node test/package-store.test.mjs` 通过；ZIP 根目录直接包含 `manifest.json`，`welcome/index.html` / `welcome.css` / `welcome.js` 与 `lib/welcome.js` 均在包内。详见 [STORE-VALIDATION.md](STORE-VALIDATION.md) 与 [../STORE-READINESS.md](../STORE-READINESS.md)。
+2026-10-19 实测：`unzip -t` 无错误；`node test/package-store.test.mjs` PASS；58 个文件、290,557 B；ZIP 根目录直接包含 `manifest.json`，`welcome/index.html` / `welcome.css` / `welcome.js` 与 `lib/welcome.js` 均在包内；19 个 Node 测试文件、离线自检 129 / 129 通过。详见 [STORE-VALIDATION.md](STORE-VALIDATION.md) 与 [../STORE-READINESS.md](../STORE-READINESS.md)。
 
 ## 商店 listing 草稿
 
@@ -51,7 +52,7 @@ node test/package-store.test.mjs
 
 中文详细说明：
 
-凛狐 Rimefox 让你在网页上对照阅读原文和译文，也支持仅译文显示、动态内容补翻、划词翻译、弹窗文字翻译与可选的 YouTube 双语字幕。通过术语表指定常用词的译法，用自定义提示词调整表达，按需要切换中文或英文界面、浅色或深色主题。可选的「AI 隐私保护翻译」会在发请求前于本地把邮箱、电话、身份证号、银行卡号等可识别信息换成占位符，译文回来后再还原；该功能默认关闭，不保证识别全部敏感信息。
+凛狐 Rimefox 让你在网页上对照阅读原文和译文，悬停译文可查看对应原句（长段落以可展开的节选显示），也支持仅译文显示、动态内容补翻、划词翻译、弹窗文字翻译与可选的 YouTube 双语字幕。通过术语表指定常用词的译法，用自定义提示词调整表达，按需要切换中文或英文界面、浅色或深色主题。可选的「AI 隐私保护翻译」会在发请求前于本地把邮箱、电话、身份证号、银行卡号等可识别信息换成占位符，译文回来后再还原；该功能默认关闭，不保证识别全部敏感信息。
 
 本扩展采用 BYOK：你需要自行配置 API 地址、API Key 和模型，服务商可能收取费用。支持 DeepSeek 等 OpenAI 兼容接口以及 Anthropic、Gemini 协议，没有内置免费翻译额度。作者不运营翻译服务器，不使用分析或遥测。待翻文本、自定义提示词及命中术语直接发给你配置的接口；Key 用于该接口认证。本机保存设置与缓存，第三方处理以其隐私政策为准。
 
@@ -61,7 +62,7 @@ YouTube 字幕翻译默认关闭，仅支持可用的 CC 字幕，不支持画�
 
 English detailed description:
 
-Read webpages with original text and translation together, or switch to translation-only view. Rimefox also offers selected-text translation, a popup text translator, dynamic-page translation, and optional bilingual YouTube captions. Use a glossary for preferred terminology and custom prompts for wording. The interface supports Chinese and English, with light and dark themes. The optional “AI privacy masking” feature replaces reliably detectable email addresses, phone numbers, ID card numbers and bank card numbers with placeholders before a request and restores them afterwards; it is off by default and does not guarantee that all sensitive data is detected.
+Read webpages with original text and translation together, hover a translated sentence to see the matching source with an expandable excerpt for long paragraphs, or switch to translation-only view. Rimefox also offers selected-text translation, a popup text translator, dynamic-page translation, and optional bilingual YouTube captions. Use a glossary for preferred terminology and custom prompts for wording. The interface supports Chinese and English, with light and dark themes. The optional “AI privacy masking” feature replaces reliably detectable email addresses, phone numbers, ID card numbers and bank card numbers with placeholders before a request and restores them afterwards; it is off by default and does not guarantee that all sensitive data is detected.
 
 Bring your own API key: configure an endpoint, key and model from your chosen provider. Provider charges may apply; no free translation quota is bundled. Rimefox supports OpenAI-compatible endpoints such as DeepSeek, plus Anthropic and Gemini protocols. The author operates no translation server and uses no analytics or telemetry. Text to translate, custom prompts and matching glossary terms go directly to your configured endpoint, with your key used for authentication. Settings and caches are stored locally; providers process requests under their own policies.
 
@@ -125,7 +126,7 @@ Install the submitted extension in Chrome. A four-step welcome page opens on fir
 
 Select a provider/protocol, enter an endpoint, an authorized API key and a supported model, save, then run Test connection. This is BYOK software: a valid key and provider access are required, and charges may apply. Reviewer credential/access details: `REVIEWER_ACCESS_PENDING` — provide a limited, revocable key only through the Developer Dashboard private review notes; never commit it or put it in the package. Without credentials, settings can be inspected, but live translation cannot be verified; there is currently no Demo mode.
 
-Open a normal English article in a fresh tab. Click Translate in the popup or use Alt+A (Option+A on macOS; assign a free shortcut in chrome://extensions/shortcuts if needed). Check original/translated text, scrolling to load more, and toggling back to the original. Repeat on a tab opened before installation to exercise fallback injection.
+Open a normal English article in a fresh tab. Click Translate in the popup or use Alt+A (Option+A on macOS; assign a free shortcut in chrome://extensions/shortcuts if needed). Check original/translated text, scrolling to load more, and toggling back to the original. Repeat on a tab opened before installation to exercise fallback injection. Hover a translated sentence to verify the matching source highlight and, in translation-only mode, the source tip; for a long paragraph verify the excerpt, expand/collapse and close. Toggle Hover compare from the on-page quick-action dock, the popup switch, or Settings → Display, and confirm all three stay in sync without a new translation request.
 
 Select a short phrase and use the translation button or context menu. Repeat in an iframe. Enter a sentence in the popup translator and submit. In Settings add a matching glossary entry and a short custom prompt, save and retranslate; change interface language and theme, reopen Settings, and confirm persistence. Changing settings should update already-open pages. Clear the cache in Settings.
 
@@ -151,7 +152,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 事项 | 说明 |
 |---|---|
 | 开发者账号 | 注册 Chrome Web Store 开发者并支付一次性费用（以官方结算页为准）；完成身份验证与 2FA |
-| 商店包上传 | 使用 `dist/Rimefox-v0.8.3-store.zip`，不要上传 GitHub Release 的整仓包 |
+| 商店包上传 | 使用 `dist/Rimefox-v0.8.5-store.zip`，不要上传 GitHub Release 的整仓包 |
 | 截图 / 宣传图 | 5 张 1280×800 截图已生成，需人工确认采用或重拍；按控制台要求补 440×280 |
 | 审核专用 API Key | 在控制台私密审核说明里提供限额、可撤销的 Key；不放入仓库、包或公开 Issue |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
@@ -166,8 +167,8 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 广泛网站权限 `<all_urls>` | 提交上述最小权限理由；不为降权限破坏任意网页 / 任意 API 支持。后续可单独设计 `optional_host_permissions` |
 | BYOK 无法直接测试 | 最高优先级：准备审核专用、限额、可撤销 Key，通过控制台私密说明交付 |
 | YouTube 非官方接口 | 明示非官方、默认关闭、仅 CC；验证当前可用性，避免品牌背书与「保证全部字幕可用」的承诺 |
-| 隐私政策与实际行为不一致 | 本次已按 0.8.3 代码核对；欢迎页只读取本地配置、不新增网络请求，译文排版与悬浮入口切换服务商不改变数据流，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
-| 版本与仓库差异 | 以 `main` 实际版本为准；0.8.3 新增悬浮入口切换服务商，未改权限、API Key 存储或服务商协议 |
+| 隐私政策与实际行为不一致 | 本次已按 0.8.5 代码核对；悬停对照开关、字幕稳定性、仅调试可见的用量统计都没有新增请求接收方或权限，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
+| 版本与仓库差异 | 以 `main` 实际版本为准；0.8.5 加入悬停气泡 / 三处快捷开关与 YouTube 字幕稳定性修复，未改权限、API Key 存储、请求接收方或服务商协议 |
 
 ## 官方依据（2026-10-18 查询）
 

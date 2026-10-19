@@ -74,3 +74,13 @@
 - 结果：`dist/Rimefox-v0.8.3-store.zip` 57 个文件、275,405 B；manifest.json 在根目录；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 106 / 106；Chrome 打包校验成功（CRX3）
 - 商店截图：新增 5 张 1280×800（整页双语浅/深、划词、隐私设置、术语表），见 [screenshots/](screenshots/)；使用真实扩展界面 + 本地演示页与本地测试接口的示例译文，未使用真实 API Key
 - 未验证 / 限制：没有用真实 API Key 跑端到端；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+
+## 0.8.5 悬停对照与字幕稳定性验证
+
+- 审计对象：`main`（Rimefox 0.8.5，发布提交 `938f1bf`）
+- 构建命令：`node tools/package-store.mjs`
+- 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
+- 结果：`dist/Rimefox-v0.8.5-store.zip` 58 个文件、290,557 B；manifest.json 在根目录；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；19 个 Node 测试文件全部通过；自检 129 / 129；Chrome 打包校验成功（CRX3）；相对链接 56 个、0 失效；商店包密钥扫描未发现明显密钥
+- 0.8.5 变更检查：长段落悬停气泡改为 420px / 40vh 上限、180 字符节选、展开 / 收起 / 关闭 / Escape，段落级与行级有明确标签；Dock / Popup / Options 复用 `hoverCompare` 双向同步；内容脚本只能通过 `hover:set` 修改严格布尔值；关闭不删除译文、不清缓存、不触发 API
+- 真实浏览器检查：Chrome for Testing 155 + 本地页面驱动 Dock → Popup → Options 双向切换，`aria-pressed`、switch 与 storage 一致，页面未发起翻译请求；悬停气泡的尺寸、层级、展开 / 关闭由 `selftest` 在无头 Chrome 中覆盖
+- 未验证 / 限制：没有用真实 API Key 跑端到端；没有在真实 GitHub / Pixiv / Aeon / OWID 重跑悬停回归；未测试 Edge；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
