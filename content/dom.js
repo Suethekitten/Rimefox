@@ -341,16 +341,19 @@
     return /^rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*0\s*\)$/.test(value);
   }
 
-  // 译文插在源元素【内部】，本来就会继承字号/颜色；
-  // 这里再显式复制一次，防止站点用通配选择器覆盖。
+  // 译文插在源元素【内部】，本来就会继承字号/颜色。
+  // 这里用 inherit / 相对值，而不是把 computed px 写死：
+  // Aeon 这类站点的标题字号随断点变化（72px → 42px），写死 px 会在窗口缩放后
+  // 让译文停在翻译那一刻的尺寸，和原文严重不匹配。
   function copyTypography(node, cs) {
     if (!cs) return;
-    if (!isTransparentColor(cs.color)) node.style.color = cs.color;
-    if (cs.fontSize) node.style.fontSize = cs.fontSize;
-    if (cs.fontWeight) node.style.fontWeight = cs.fontWeight;
-    if (cs.lineHeight) node.style.lineHeight = cs.lineHeight;
-    if (cs.letterSpacing && cs.letterSpacing !== 'normal') node.style.letterSpacing = cs.letterSpacing;
-    if (cs.textTransform && cs.textTransform !== 'none') node.style.textTransform = cs.textTransform;
+    if (!isTransparentColor(cs.color)) node.style.color = 'inherit';
+    node.style.fontSize = 'inherit';
+    node.style.fontWeight = 'inherit';
+    node.style.fontStyle = 'inherit';
+    node.style.lineHeight = 'inherit';
+    node.style.letterSpacing = 'inherit';
+    node.style.textTransform = 'inherit';
   }
 
   function isInlineLike(el) {
@@ -388,7 +391,24 @@
       'z-index: auto'
     ].join('; ') + ';';
     copyTypography(node, styleOf(sourceEl));
+    // CJK 大标题与紧行高的局部归一化：只加类名，字号仍用 em 跟原站响应式变化
+    var layout = DT.translationLayout(
+      text,
+      cs ? parseFloat(cs.fontSize) || 0 : 0,
+      cs ? parseFloat(cs.lineHeight) || 0 : 0,
+      /^H[1-6]$/.test(tagOf(sourceEl)),
+      inline
+    );
+    if (layout.heading) {
+      node.classList.add('dt-cjk-heading');
+      node.style.fontSize = '0.8em'; // CSS 没加载时也有兜底
+    }
+    if (layout.tight) {
+      node.classList.add('dt-cjk-tight');
+      node.style.lineHeight = '1.25';
+    }
     if (narrow) {
+      node.classList.add('dt-narrow');
       node.style.whiteSpace = 'nowrap';
       node.style.overflow = 'visible';
     }

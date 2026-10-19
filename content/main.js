@@ -9,6 +9,7 @@
   DT.__booted = true;
 
   var observer = null;
+  var chromeObserver = null;
   var debounceTimer = 0;
   var lastUrl = location.href;
   var urlTimer = 0;
@@ -64,6 +65,21 @@
     html.setAttribute('data-dt', DT.state.enabled ? 'on' : 'off');
     html.setAttribute('data-dt-mode', DT.state.mode || 'dual');
     html.setAttribute('data-dt-theme', DT.state.theme || 'underline');
+  }
+
+  // Aeon（Next.js）hydration 会清掉扩展写在 <html> 上的 data-dt，
+  // 导致 inject.css 里的主题 / 悬停 / 归一化规则整体失效。属性被删后补回；
+  // 只在值不对时写，避免 MutationObserver 自己触发自己。
+  function keepChromeState() {
+    var html = document.documentElement;
+    if (!html) return;
+    if (
+      html.getAttribute('data-dt') !== (DT.state.enabled ? 'on' : 'off') ||
+      html.getAttribute('data-dt-mode') !== (DT.state.mode || 'dual') ||
+      html.getAttribute('data-dt-theme') !== (DT.state.theme || 'underline')
+    ) {
+      applyChrome();
+    }
   }
 
   async function loadConfig() {
@@ -873,6 +889,21 @@
     window.addEventListener('resize', onViewChange, { passive: true });
     watchUrl();
     startWatchdog();
+
+    // 有些站点（Aeon 的 Next.js hydration）会把 data-dt 从 <html> 上删掉；
+    // 监听属性变化并补回，另外在 load 后和两个延迟点再对一次，覆盖慢 hydration。
+    try {
+      chromeObserver = new MutationObserver(keepChromeState);
+      chromeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-dt', 'data-dt-mode', 'data-dt-theme']
+      });
+    } catch (err) {
+      /* 老浏览器不支持或没有 documentElement */
+    }
+    window.addEventListener('load', keepChromeState);
+    setTimeout(keepChromeState, 1200);
+    setTimeout(keepChromeState, 4000);
 
     // 同一个标签页里"刚才正在翻译"：刷新 / 返回后自动接着翻
     var resume = null;

@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.8.0';
+  DT.VERSION = '0.8.1';
 
   DT.state = {
     enabled: false,
@@ -165,6 +165,26 @@
       .replace(/\u00a0/g, ' ')
       .replace(/[ \t\r\n\f\v]+/g, ' ')
       .trim();
+  };
+
+  // 译文排版归一化：只对 CJK 做，不按网站写死字号。
+  // 中文 / 日文 / 韩文的字面比拉丁字母更"满"（汉字占满 em 方框），
+  // 原站给英文大标题的 72px/1.0 行高直接套到中文上会显得过大且换行重叠。
+  // 这里只做大标题的相对缩放（0.8em）和行高下限（1.25），字号仍随原站响应式变化。
+  var CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
+  var CJK_HEADING_MIN_PX = 36;
+  DT.hasCjk = function (text) {
+    return CJK_RE.test(String(text == null ? '' : text));
+  };
+  DT.translationLayout = function (text, fontPx, linePx, isHeading, inline) {
+    var font = Number(fontPx) || 0;
+    var line = Number(linePx) || 0;
+    var cjk = DT.hasCjk(text);
+    if (!cjk || inline) return { tight: false, heading: false };
+    // 只处理明确写死的紧行高；line-height: normal（计算值为 "normal"）保持浏览器默认
+    var tight = font > 0 && line > 0 && line / font < 1.25;
+    var heading = !!isHeading && font >= CJK_HEADING_MIN_PX;
+    return { tight: tight, heading: heading };
   };
 
   // 纯符号 / 纯数字 / 太短 —— 不值得翻译

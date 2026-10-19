@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>凛狐 自检</title>
+    <link rel="stylesheet" href="../content/styles/inject.css" />
     <style>
       body {
         margin: 0;
@@ -70,6 +71,13 @@
         left: -20000px;
         top: 0;
         width: 800px;
+      }
+      /* 模拟 Aeon 的首字下沉：4em、float、紧行高 */
+      #fixture .aeon-dropcap::first-letter {
+        font-size: 4em;
+        float: left;
+        line-height: 0.8;
+        margin: 0 6px -6px 0;
       }
     </style>
   </head>
@@ -194,6 +202,17 @@
           <a href="#" class="span-link"><span>solve complex math problems,</span><svg width="10" height="10"></svg></a>
           <span> write software, create extremely realistic images and videos, and discuss academic topics.</span>
         </p>
+      </div>
+
+      <!-- Aeon 风格回归：超大标题 leading-none + 首字下沉 + 紧行高 + 引用 / 富文本 -->
+      <div id="fx-aeon" style="width: 800px">
+        <h1 id="fx-aeon-title" style="font-size: 72px; line-height: 72px">Natural philosophy redux</h1>
+        <p id="fx-aeon-dropcap" class="aeon-dropcap">There are decisive grounds for holding that we need to bring about a revolution in philosophy.</p>
+        <p id="fx-aeon-tight" style="font-size: 20px; line-height: 18px">Tight line height paragraph for testing.</p>
+        <blockquote id="fx-aeon-quote">
+          <p>Quote with <b>bold</b>, <i>italic</i> and <a href="#">a link</a>.</p>
+        </blockquote>
+        <div id="fx-narrow" style="width: 40px">Narrow sidebar label</div>
       </div>
     </div>
 

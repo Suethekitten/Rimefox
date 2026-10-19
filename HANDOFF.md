@@ -80,7 +80,7 @@ edge-bilingual/
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页）
-└── selftest/              离线自检（98 条用例）
+└── selftest/              离线自检（104 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -326,6 +326,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 | 22 | service worker 里用 `tabs.query({currentWindow})` 找当前标签页 | 快捷键偶尔找不到标签页 | 用 `onCommand` 传进来的 `tab`，退回 `lastFocusedWindow` |
 | 24 | 直接请求 YouTube 字幕地址 | 200 + 空内容：地址要带播放器生成的 `pot` 令牌 | 页面主环境挂钩播放器自己的请求（`youtube-hook.js`）；要别的轨道时拿它的地址改参数同源再请求 |
 | 23 | 用 `getComputedStyle().height` / `lineHeight` 判"单行"，控件判定只看元素自身 | GitHub 顶栏 `Code / 代码` 两行堆叠、整页错位：链接里的行内 `<span>` 高度是 `"auto"` → NaN → 不替换 → 追加把导航挤成两排；`line-height: normal` 同样 NaN | 统一走 `DT.areaOf()`：沿行内包裹链找所属控件；单行看 `getClientRects()` / `getBoundingClientRect()`，行高 `normal` 按字号 × 1.2 |
+| 25 | 把 computed 字号 / 行高按 px 复制给译文，并依赖 `<html data-dt>` 控制样式 | Aeon 的 H1 是 `72px/72px`（窄屏 `42px/42px`），中文标题异常放大、行高重叠；Next.js hydration 删掉 `data-dt` 后 `.dt-target` 归一化整组失效 | 译文用 `inherit` / `em` 跟随原站响应式；CJK 大标题 0.8em、紧行高 1.25；`::first-letter` 归一化；`data-dt` 被删时 MutationObserver 补回 |
 
 ---
 
@@ -335,7 +336,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-98 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口。**改 `dom.js` 前后必跑。**
+104 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器回归。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -530,15 +531,13 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 
 ---
 
-## 14. 本版技术记录（0.8.0）
+## 14. 本版技术记录（0.8.1）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **新增欢迎页** `welcome/`：四步引导（欢迎 / 功能 / 配置 / 开始），单页 + 左侧步骤导航；零构建、无第三方依赖、无远程字体 / 脚本 / 图片；功能插图用 HTML/CSS 画「原文 + 译文」「划词气泡」「字幕」「模型芯片」「术语行」，页面上明确标注「示意图 · 实际界面以扩展为准」，不伪装真实截图。
-- **首次安装判断** `lib/welcome.js`：`shouldOpenWelcome(details)` 只在 `reason === 'install'` 返回 true；`background.js` 的 `onInstalled` 用它决定是否 `chrome.tabs.create({url: chrome.runtime.getURL('welcome/index.html')})`，更新 / 浏览器重启都不打开；`welcomeOpened` 防止同一 worker 生命周期重复打开。移除了原先「安装且没有 Key 就打开设置页」的行为，改由欢迎页的「打开设置」按钮进入设置。
-- **手动重开**：设置页侧栏新增「使用指南」，弹窗底部新增「指南」，都通过 `lib/welcome.js` 的 `openWelcomePage()` 打开；只创建标签页，不写配置、不触发安装逻辑、不清空任何设置。
-- **语言与主题**：复用 `lib/i18n.js`，新增欢迎页中→英映射，`test/welcome.test.mjs` 会扫描欢迎页 HTML，检查每条中文文案和 `aria-label / title / placeholder` 都有英文（示意图里的示例译文用 `data-i18n-skip` 跳过）。语言优先级为已保存 `uiLang` > 浏览器语言；新安装若浏览器非中文，会把初始 `uiLang` 写进配置，避免「欢迎页英文、设置页中文」。主题复用 `lib/ui-theme-boot.js` + `applyUiAppearance`，语言 / 主题按钮的改动保存到配置。
-- **无障碍与响应式**：步骤按钮支持 Tab、方向键、Home / End；切换步骤后焦点落到标题；步骤按钮有 `aria-current` / `aria-controls`；外链带 `noopener noreferrer`；`prefers-reduced-motion` 关闭动画；980px 以下步骤条横向滚动、卡片单列，390px 下完成按钮与分页不重叠；首帧等语言应用后再显示，避免英文用户先看到中文。
-- **商店包**：`tools/package-store.mjs` 白名单加入 `welcome/`，并显式校验 `welcome/index.html`、`welcome/welcome.css`、`welcome/welcome.js` 三个入口文件；`test/package-store.test.mjs` 覆盖欢迎页资源入包、缺失资源拒绝出包、manifest 仍在 ZIP 根目录。
-- **测试**：新增 `test/welcome.test.mjs`（13 条：安装判断、语言默认值、getURL、手动打开、远程资源 / 内联事件、四步结构、英文覆盖、权限不新增、后台接线、入口存在、配置写入边界）；Node 测试 15 个文件全部通过；无头 Chrome 检查了中英文、深浅色、1440px 桌面与 390px 窄屏。
-- **未实机验证**：本机 Chrome 155 headless 不加载 `--load-extension`（用最小扩展复现同样不加载），所以「Chrome / Edge 首次安装自动打开」「商店包安装后资源加载」没有在真实扩展进程里跑；改用 CDP 注入 chrome API 模拟验证了语言 / 主题持久化、设置按钮和版本号显示。首次安装 / 更新 / 重启的判定由纯函数单测覆盖。
+- **问题现场**（Aeon essay）：整页双语后中文标题异常放大、行高过紧、文字上下重叠，英雄区布局被撑开。Aeon 的 H1 是 `text-7xl leading-none`：桌面 `72px/72px`，`max-[960px]` 下 `42px/42px`。
+- **根因一：computed px 冻结**。`copyTypography()` 把源元素的 `fontSize` / `lineHeight` 原样写成 px；汉字占满 em 方框，同字号视觉上比拉丁字母大，`line-height: 1.0` 又让中文多行挤在一起。窗口缩放后源标题变 42px，译文仍停在 72px。
+- **根因二：`data-dt` 被 hydration 删除**。Aeon 的 Next.js 在 hydration 时清掉扩展写在 `<html>` 上的 `data-dt`；`.dt-target` 归一化 / 主题 / 悬停规则都挂在 `html[data-dt="on"]` 下，实测 `data-dt` 变成 `null`，整套样式失效。
+- **修复**：`content/core.js` 新增 `DT.hasCjk()` / `DT.translationLayout()`；`content/dom.js` 改用 `inherit` / `em`，CJK 大标题（H1–H6、≥36px）加 `dt-cjk-heading`（0.8em），紧行高加 `dt-cjk-tight`（1.25），窄容器保留 `dt-narrow` 的 `nowrap`；`content/styles/inject.css` 把 `.dt-target` 基础归一化移出 `data-dt` 作用域并加关键属性 `!important`，增加 `::first-letter` 归一化；`content/main.js` 用 `keepChromeState()` + MutationObserver 在 hydration 后补回 `data-dt` / mode / theme。
+- **回归测试**：`selftest` 98 → 104，新增 CJK 大标题缩放与响应式、首字下沉、紧行高、引用 / 富文本、窄容器 6 条；测试夹具直接模拟 Aeon 的 `72px/72px` H1 与 `4em` dropcap。真实 Chrome 用 CDP `Extensions.loadUnpacked` 加载当前仓库，配合本地 OpenAI 兼容假接口在 Aeon 实测：H1 从 `72/72` 变为 `57.6/72`，390px 下 `42/42` 变为 `33.6/42`；正文 22/30.8，窄屏 18/25.2；原站 dropcap 71.5px 保留，译文首字 22px。普通文章 1440/390 回归无重叠。
+- **未验证 / 剩余**：翻译文本来自本地假接口，非真实服务商；未验证 Edge 和真实 API Key。行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制，原文结构本身保留）；仅译文模式没有 `.dt-target`，大标题仍沿用站点字号。极长标题翻译仍可能撑高英雄区，0.8em + 1.25 行高只能缓解。

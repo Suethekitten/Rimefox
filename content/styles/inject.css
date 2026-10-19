@@ -1,19 +1,33 @@
-/* 注入到页面的译文样式。仅在扩展开启时生效（html[data-dt="on"]）。
+/* 注入到页面的译文样式。基础归一化作用在 .dt-target 上（节点只在开启翻译时存在）；
+   主题 / 悬停 / 排版等可选效果仍挂在 html[data-dt="on"] 上。
    颜色跟随强调色 --dt-accent（设置页「外观」，content/appearance.js 写到 <html> 上）；
    没设时用后面的默认蓝，和以前一样。 */
 
-html[data-dt="on"] .dt-target {
-  display: block;
+/* 译文节点自己的样式隔离。
+   不再依赖 html[data-dt="on"]：Aeon 这类 Next.js 站点会在 hydration 时
+   把扩展写在 <html> 上的属性移除，导致整套 .dt-target 归一化规则失效。
+   .dt-target 只由扩展创建，页面恢复原文时节点会被移除，所以单独作用域是安全的。
+   关键排版属性用 !important，避免站点 p span / :first-child 之类规则穿透。 */
+.dt-target {
+  display: block !important;
   margin: 0.38em 0 0.2em;
   padding: 0;
-  font: inherit;
-  color: inherit;
-  line-height: inherit;
-  letter-spacing: inherit;
-  text-align: inherit;
-  white-space: normal;
-  word-break: inherit;
-  overflow-wrap: anywhere;
+  font: inherit !important;
+  color: inherit !important;
+  line-height: inherit !important;
+  letter-spacing: inherit !important;
+  text-align: inherit !important;
+  text-indent: 0 !important;
+  text-transform: inherit !important;
+  white-space: normal !important;
+  word-break: inherit !important;
+  overflow-wrap: anywhere !important;
+  position: static !important;
+  float: none !important;
+  transform: none !important;
+  filter: none !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
   opacity: 1;
   border: 0;
   background: none;
@@ -21,9 +35,46 @@ html[data-dt="on"] .dt-target {
   animation: dt-fade-in 0.18s ease-out;
 }
 
-html[data-dt="on"] .dt-target.dt-inline {
-  display: inline;
+.dt-target.dt-inline {
+  display: inline !important;
   margin: 0 0 0 0.28em;
+}
+
+/* 窄容器（图标菜单、竖排侧栏）里长译文不能一个字一行：类名优先级高于基础规则 */
+.dt-target.dt-narrow {
+  white-space: nowrap !important;
+  overflow: visible !important;
+}
+
+/* 首字下沉：原站常给 p::first-letter / .dropcap 配 4em 字号和 float。
+   译文自己也是块级元素，必须把 ::first-letter 归一化，否则目标首字会被放大。 */
+.dt-target::first-letter {
+  font-size: inherit !important;
+  line-height: inherit !important;
+  float: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  text-indent: 0 !important;
+}
+
+/* CJK 大标题（H1–H6、≥32px）：汉字视觉上比同字号拉丁字母更"满"，
+   缩到 0.8em；行高紧时至少给 1.25，避免换行上下重叠。
+   用 em / 无单位值，不写死 px，窗口缩放和站点响应式字号仍会生效。 */
+.dt-target.dt-cjk-heading {
+  font-size: 0.8em !important;
+}
+
+.dt-target.dt-cjk-tight {
+  line-height: 1.25 !important;
+}
+
+/* 用户开了「译文排版」时，字号/行高以设置页为准；CJK 规则仍保留相对比例。 */
+html[data-dt="on"][data-dt-typo="on"] .dt-target.dt-cjk-heading {
+  font-size: calc(var(--dt-font-scale, 1) * 0.8em) !important;
+}
+
+html[data-dt="on"][data-dt-typo="on"] .dt-target.dt-cjk-tight {
+  line-height: var(--dt-line-height, 1.25) !important;
 }
 
 @keyframes dt-fade-in {

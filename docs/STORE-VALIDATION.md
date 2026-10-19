@@ -45,3 +45,13 @@
 - 欢迎页检查：无头 Chrome 在 1440px 桌面与 390px 窄屏、中文 / English、浅色 / 深色下截图检查；CDP 注入 chrome API 模拟验证语言 / 主题持久化、设置按钮和版本号显示；页面无远程 JS/CSS/字体，无内联事件，未新增权限
 - 未实机验证：本机 Chrome 155 headless 不加载 `--load-extension`（最小扩展同样不加载），因此 Chrome / Edge 首次安装自动打开、更新 / 重启不打开、商店包安装后的真实扩展进程未实机验证；安装判定由 `test/welcome.test.mjs` 的纯函数测试覆盖
 - 未上传、未提交审核、未注册账号、未付款、未推送；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+
+## 0.8.1 Aeon 中文排版修复验证
+
+- 审计对象：`main`（Rimefox 0.8.1）
+- 构建命令：`node tools/package-store.mjs`
+- 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
+- 结果：`dist/Rimefox-v0.8.1-store.zip` 57 个文件、272,900 B；manifest.json 在根目录；`welcome/`、`lib/welcome.js`、`content/core.js`、`content/dom.js`、`content/main.js`、`content/styles/inject.css` 均在包内；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 104 / 104（新增 Aeon 大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 6 条）；Chrome 打包校验成功（CRX3）
+- 真实浏览器检查：本机 Chrome 通过 CDP `Extensions.loadUnpacked` 加载当前仓库，配合本地 OpenAI 兼容假接口打开 Aeon 文章。修复前 `data-dt=null`、H1 `72/72`；修复后 `data-dt=on`、H1 `57.6/72`、正文 `22/30.8`，不刷新缩到 390px 时 H1 `33.6/42`、正文 `18/25.2`，回到 1440px 恢复；原站 dropcap 71.5px 保留，译文首字 22px。普通文章 1440/390 回归无重叠。
+- 未验证 / 限制：翻译内容来自本地假接口，不是真实服务商；未验证 Edge 和真实 API Key；行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制）；仅译文模式的大标题仍沿用站点字号。极长标题翻译仍可能撑高 Aeon 英雄区。
+- 本验证在推送前完成；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)

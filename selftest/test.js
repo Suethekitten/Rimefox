@@ -237,9 +237,100 @@
     if (!DT.inject(u.el, '带自有样式的标题', 'zh-CN')) return 'inject 返回 false';
     var node = h.querySelector('[data-dt-target]');
     if (!node) return '译文没有插进标题';
-    if (node.style.fontSize !== '28px') return '字号没继承：' + node.style.fontSize;
-    if (String(node.style.fontWeight) !== '700') return '字重没继承：' + node.style.fontWeight;
-    if (node.style.color.indexOf('200') === -1) return '颜色没继承：' + node.style.color;
+    var cs = getComputedStyle(node);
+    if (cs.fontSize !== '28px') return '字号没继承：' + cs.fontSize;
+    if (String(cs.fontWeight) !== '700') return '字重没继承：' + cs.fontWeight;
+    if (cs.color.indexOf('200') === -1) return '颜色没继承：' + cs.color;
+    return true;
+  });
+
+  // ---------------- 特殊站点排版（Aeon 回归） ----------------
+  check('CJK 排版归一化：大标题缩放 / 紧行高 / 拉丁文不处理', function () {
+    if (!DT.hasCjk('中文') || !DT.hasCjk('日本語') || !DT.hasCjk('한국어')) return 'CJK 识别失败';
+    if (DT.hasCjk('Natural philosophy')) return '英文不应被判成 CJK';
+    var a = DT.translationLayout('自然哲学的回归', 72, 72, true, false);
+    if (!a.heading || !a.tight) return '大标题应 heading + tight：' + JSON.stringify(a);
+    var b = DT.translationLayout('Natural philosophy redux', 72, 72, true, false);
+    if (b.heading || b.tight) return '英文不应被 CJK 规则处理';
+    var c = DT.translationLayout('中文正文', 20, 28, false, false);
+    if (c.heading || c.tight) return '正常行高正文不应 tight';
+    var d = DT.translationLayout('中文正文', 20, 18, false, false);
+    if (!d.tight) return '紧行高正文应 tight';
+    var e = DT.translationLayout('中文', 72, 72, true, true);
+    if (e.heading || e.tight) return '行内译文不做块级归一化';
+    return true;
+  });
+
+  check('Aeon 大标题：CJK 译文 0.8em / 行高 1.25，并跟随原站响应式字号', function () {
+    var h = document.getElementById('fx-aeon-title');
+    var u = DT.collect(h)[0];
+    if (!u) return '没有收集到 Aeon 标题';
+    if (!DT.inject(u.el, '自然哲学的回归', 'zh-CN')) return 'inject 返回 false';
+    var node = h.querySelector('[data-dt-target]');
+    if (!node || !node.classList.contains('dt-cjk-heading')) return '缺少 dt-cjk-heading';
+    var fs = parseFloat(getComputedStyle(node).fontSize);
+    var lh = parseFloat(getComputedStyle(node).lineHeight);
+    if (Math.abs(fs - 57.6) > 0.5) return '字号应为 0.8×72=57.6，实际 ' + fs;
+    if (Math.abs(lh - 72) > 0.5) return '行高应为 57.6×1.25=72，实际 ' + lh;
+    h.style.fontSize = '42px';
+    h.style.lineHeight = '42px';
+    var fs2 = parseFloat(getComputedStyle(node).fontSize);
+    var lh2 = parseFloat(getComputedStyle(node).lineHeight);
+    if (Math.abs(fs2 - 33.6) > 0.5) return '缩放后字号应为 0.8×42=33.6，实际 ' + fs2;
+    if (Math.abs(lh2 - 42) > 0.5) return '缩放后行高应为 42，实际 ' + lh2;
+    h.style.fontSize = '72px';
+    h.style.lineHeight = '72px';
+    return true;
+  });
+
+  check('首字下沉：原站 ::first-letter 不会放大译文首字', function () {
+    var p = document.getElementById('fx-aeon-dropcap');
+    var u = DT.collect(p)[0];
+    if (!u) return '没有收集到首字下沉段落';
+    if (!DT.inject(u.el, '这是一个用于测试首字下沉的中文译文。', 'zh-CN')) return 'inject 返回 false';
+    var node = p.querySelector('[data-dt-target]');
+    if (!node) return '译文没有插入';
+    var tfs = parseFloat(getComputedStyle(node).fontSize);
+    var tfl = parseFloat(getComputedStyle(node, '::first-letter').fontSize);
+    if (Math.abs(tfl - tfs) > 0.5) return '译文首字被放大：' + tfl + ' vs ' + tfs;
+    var pfs = parseFloat(getComputedStyle(p).fontSize);
+    var pfl = parseFloat(getComputedStyle(p, '::first-letter').fontSize);
+    if (pfl <= pfs * 2) return '原站首字下沉不应被破坏：' + pfl + ' vs ' + pfs;
+    return true;
+  });
+
+  check('紧行高正文：CJK 译文行高至少 1.25', function () {
+    var p = document.getElementById('fx-aeon-tight');
+    var u = DT.collect(p)[0];
+    if (!u) return '没有收集到紧行高段落';
+    if (!DT.inject(u.el, '这是一个紧行高测试段落。', 'zh-CN')) return 'inject 返回 false';
+    var node = p.querySelector('[data-dt-target]');
+    if (!node || !node.classList.contains('dt-cjk-tight')) return '缺少 dt-cjk-tight';
+    var lh = parseFloat(getComputedStyle(node).lineHeight);
+    if (Math.abs(lh - 25) > 0.5) return '行高应为 20×1.25=25，实际 ' + lh;
+    return true;
+  });
+
+  check('引用 / 粗体 / 斜体 / 链接：原文结构保留，译文追加在内部', function () {
+    var q = document.getElementById('fx-aeon-quote');
+    var u = DT.collect(q)[0];
+    if (!u) return '没有收集到引用段落';
+    if (!DT.inject(u.el, '引用里的中文译文。', 'zh-CN')) return 'inject 返回 false';
+    var p = q.querySelector('p');
+    if (!p) return '引用里没有 p';
+    if (!p.querySelector('b') || !p.querySelector('i') || !p.querySelector('a')) return '原文行内结构被破坏';
+    if (!p.querySelector('[data-dt-target]')) return '译文没有追加';
+    return true;
+  });
+
+  check('窄容器：长译文保持 nowrap，不出现一字一行', function () {
+    var el = document.getElementById('fx-narrow');
+    var u = DT.collect(el)[0];
+    if (!u) return '没有收集到窄容器单元';
+    if (!DT.inject(u.el, '窄侧栏里的长译文不应该一个字一行。', 'zh-CN')) return 'inject 返回 false';
+    var node = el.querySelector('[data-dt-target]');
+    if (!node || !node.classList.contains('dt-narrow')) return '缺少 dt-narrow';
+    if (getComputedStyle(node).whiteSpace !== 'nowrap') return 'white-space 被基础规则覆盖了';
     return true;
   });
 
