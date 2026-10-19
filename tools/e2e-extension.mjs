@@ -978,6 +978,33 @@ async function dockChecks() {
   await dragTo(Math.round(r2.vw / 2), 240);
   const r3 = await rectOf();
   check('页面中间松手：自由悬浮、不贴任何边', r3.left > 80 && r3.left < r3.vw - 80, JSON.stringify(r3));
+
+  // 小球在 pointerdown 就捕获指针（拖拽起手不能等第一次 pointermove：指针一先滑进
+  // iframe，顶层文档收不到那次移动，拖拽永远起不来）。捕获会把随后的 click 改投到
+  // 捕获元素，这里守住 0.9.3 踩过的坑：点按小球（不移动）仍然切换翻译。
+  const ballAt = JSON.parse(
+    await contentEval(
+      d,
+      '(function () { var r = window.__DT.dock.root().querySelector(".ball").getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()'
+    )
+  );
+  const clickBall = async () => {
+    const at = { x: ballAt.x, y: ballAt.y, button: 'left', clickCount: 1, pointerType: 'mouse' };
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at }, d.s);
+    await sleep(40);
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at }, d.s);
+    await sleep(300);
+  };
+  const enabledBefore = await contentEval(d, 'window.__DT.control.status().enabled');
+  await clickBall();
+  const enabledOn = await contentEval(d, 'window.__DT.control.status().enabled');
+  await clickBall();
+  const enabledOff = await contentEval(d, 'window.__DT.control.status().enabled');
+  check(
+    '点按小球仍然切换翻译（拖拽捕获不抢 click）',
+    enabledBefore === false && enabledOn === true && enabledOff === false,
+    JSON.stringify({ enabledBefore, enabledOn, enabledOff })
+  );
   await patchConfig({ dockEnabled: false, dockPos: null });
   await sleep(300);
 }

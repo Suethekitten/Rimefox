@@ -243,9 +243,20 @@
         sy: event.clientY,
         moved: false
       };
-      // 注意：这里不能立刻 setPointerCapture。捕获后 pointerup 会重定向到 dock，
-      // 浏览器据此把 click 也算到 dock 上，按钮自己的 click 永远收不到（0.9.3 实测
-      // 服务商按钮点不开菜单、翻译按钮点了没反应）。等真正开始拖再捕获。
+      // 小球是拖拽手柄：按下就捕获指针。如果等到第一次 pointermove 再捕获，那次移动
+      // 必须由顶层文档收到才行；指针一先滑进页面里的 iframe（广告位、嵌入编辑器），
+      // 事件就交给子框架，顶层窗口的 pointermove 永远不触发 —— 拖拽起不来，dock 原地
+      // 不动（0.9.5 e2e 实测：从贴左边的小球往页面中间拖，第一步正好落进测试页的 iframe）。
+      // 只在小球上捕获，不是整个 dock：捕获会把随后的 click 改投到捕获元素，捕在 .dock
+      // 上时面板按钮的 click 就收不到了（0.9.3 实测服务商菜单点不开、翻译按钮没反应）；
+      // 小球自己就是那个按钮，click 仍然落在它身上，点按照常生效。
+      if (event.target === buttons.ball) {
+        try {
+          buttons.ball.setPointerCapture(event.pointerId);
+        } catch (err) {
+          /* 合成事件拿不到捕获：靠 window 监听也能拖 */
+        }
+      }
       window.addEventListener('pointermove', onDragMove, true);
       window.addEventListener('pointerup', onDragEnd, true);
       window.addEventListener('pointercancel', onDragEnd, true);
