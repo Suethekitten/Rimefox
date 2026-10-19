@@ -38,6 +38,15 @@
       if (env.log) env.log.apply(null, arguments);
     }
 
+    // 正在播广告：广告也是同一个播放器里的一段视频（播放器带 ad-showing），字幕请求带的是广告自己的视频 ID
+    function adOn(player) {
+      return !!(player && player.classList && player.classList.contains('ad-showing'));
+    }
+    function adShowing() {
+      var view = env.player();
+      return adOn(view && view.player);
+    }
+
     function reset() {
       processSeq += 1; // 让还在 fetchText 的旧 process 作废
       track = null;
@@ -80,6 +89,10 @@
       var startVideo = p.v || env.videoId();
       // 重放的是主环境钩子留着的「最后一份」，可能是上一个视频的：和当前视频对不上就不收
       if (raw.replay && p.v && env.videoId() && p.v !== env.videoId()) return;
+      // 播广告时收到别的视频的字幕（广告自己的）：不收。插播广告会把正片的轨道换掉，
+      // 广告播完播放器不会再请求一次正片字幕，后面的双语字幕就没了。
+      // 不播广告时照常收：换视频时新字幕可能比地址栏先到
+      if (p.v && env.videoId() && p.v !== env.videoId() && adShowing()) return;
 
       // YouTube 机翻轨道：拿原文轨道来做双语（同源请求，带着播放器的令牌）
       if (p.tlang) {
@@ -343,6 +356,11 @@
       var vid = env.videoId();
       var view = env.player();
       var player = view && view.player;
+      // 播广告时交还原生显示、不调度翻译：时间轴是广告的，正片的句子对不上
+      if (adOn(player)) {
+        render(null);
+        return;
+      }
       if (!track || (track.v && vid && track.v !== vid)) {
         recover(vid, player);
         render(null);

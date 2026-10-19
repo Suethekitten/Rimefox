@@ -32,7 +32,7 @@ main.js  accept()：skipText / looksLikeTarget（简繁按 DT.chineseScript 区�
          takeBatch()：按离屏幕距离排序，屏幕内 ≤3 条 / ≤500 字
          DT.send({ type:'translate', texts, target, style }) ───────►  handleTranslate(msg, sender)
                                                                        ├ 缓存查找：makeKey(scope, text)
-                                                                       │   scope = 目标语言 / 风格 / 服务商:模型 / 域名 / 术语指纹 / 自定义提示词指纹
+                                                                       │   scope = 目标语言 / 风格 / 服务商:模型 / 域名 / 这段命中的术语指纹 / 自定义提示词指纹
                                                                        │   命中 → normalizeTranslationBreaks + leaksWrapper（旧坏数据修好 / 当作未命中）
                                                                        ├ 同批重复文本合并（groups）
                                                                        ├ 在途去重：同一缓存键已有请求在翻 → 等它的 { value, error }（0.8.9）
@@ -170,7 +170,7 @@ hover.js 悬停对照：段落 → 行 → 句子三级，只认靠得住的一�
 
 ### 3.4 术语一致性
 
-- 状态：已有用户术语表（`lib/glossary.js`，命中才注入、进缓存指纹）。
+- 状态：已有用户术语表（`lib/glossary.js`，命中才注入；缓存键只带这段原文命中的术语指纹，`createHitFingerprint`）。
 - 参考：Wenyi `glossary/extractor.py`（从已完成的原文 / 译文里抽人物、地名并更新术语库）。
 - 收益：同一篇小说里人名译法统一。
 - 成本：Wenyi 的做法要额外模型调用 —— **不符合 Rimefox 的低成本定位**。可行的轻量版：不调模型，只在同一页面内记录「原文专有名词 → 第一次出现时的译法」（需要可靠的对齐，目前没有）。

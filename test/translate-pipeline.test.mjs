@@ -271,5 +271,34 @@ await t('在途的那次失败：等着它的请求拿到同一个失败原因�
   assert.equal(again.results[0], 'T:失败的段落〔8〕', '失败后不能一直挂在「在途」上');
 });
 
+// 缓存键里的术语只算这段原文命中的：加 / 改一条术语只让用到它的段落重翻，不是全站缓存失效
+async function setGlossary(glossary) {
+  const { config } = await localArea.get('config');
+  await localArea.set({ config: { ...config, glossary } });
+}
+
+await t('加一条不相干的术语：没用到它的段落照常命中缓存；改了命中术语的译法，只有那一段重翻', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  await setGlossary([{ source: 'Rimefox', target: '凛狐' }]);
+  const withTerm = 'Rimefox is a translator 〔9〕';
+  const plain = 'A plain sentence 〔9〕';
+  calls = [];
+  await translate([withTerm, plain]);
+  assert.equal(calls.length, 1);
+
+  calls = [];
+  await setGlossary([{ source: 'Rimefox', target: '凛狐' }, { source: 'Gemini', target: '双子座' }]);
+  const again = await translate([withTerm, plain]);
+  assert.equal(calls.length, 0, '加的术语这两段都没用到：不该重翻');
+  assert.equal(again.cached, 2);
+
+  calls = [];
+  await setGlossary([{ source: 'Rimefox', target: '凛狐 Rimefox' }, { source: 'Gemini', target: '双子座' }]);
+  const changed = await translate([withTerm, plain]);
+  assert.deepEqual(calls, [[withTerm]], '只有用到改动那条术语的段落重翻');
+  assert.equal(changed.cached, 1);
+  await setGlossary([]);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

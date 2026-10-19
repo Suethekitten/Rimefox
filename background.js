@@ -3,7 +3,7 @@ import { getConfig, saveConfig, activeConfig, styleById, providerChoices } from 
 import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseArrayFromReasoning, isRunaway, normalizeTranslationBreaks, leaksWrapper } from './lib/parse.js';
-import { matchGlossary, normalizeGlossary, glossaryFingerprint } from './lib/glossary.js';
+import { matchGlossary, normalizeGlossary, createHitFingerprint } from './lib/glossary.js';
 import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
 import { resolveSiteRule, hostListed } from './lib/site-rules.js';
@@ -179,16 +179,21 @@ async function handleTranslate(msg, sender) {
     return { ok: false, error: '还没有配置 API Key，请先打开「设置」填写。', results };
   }
 
-  // 缓存键带上术语表 / 自定义提示词指纹：改了之后旧译文不能再命中
+  // 缓存键带上术语 / 自定义提示词指纹：改了之后旧译文不能再命中。
+  // 术语只算这段原文命中的那些（没命中是 'none'）：加一条术语只让含这个词的段落重翻，不是全站缓存失效
   const scope = {
     target,
     style,
     model: active.provider + ':' + active.model,
     host: hostOf(sender),
-    glossary: glossaryFingerprint(glossary),
     prompt: promptFingerprint(cfg.customPrompt)
   };
-  const keyOf = (text) => cache.makeKey(scope, text);
+  const hitPrint = createHitFingerprint(glossary);
+  const keys = new Map();
+  const keyOf = (text) => {
+    if (!keys.has(text)) keys.set(text, cache.makeKey({ ...scope, glossary: hitPrint(text) }, text));
+    return keys.get(text);
+  };
 
   // 同一批里重复的文本（页面上一排相同的按钮、"Reply"、"Share"）只翻一次、只付一次钱：
   // groups 记 原文 → 它出现的所有位置，只把 groups 的键送去翻，回来按位置回填

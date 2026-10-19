@@ -10,7 +10,8 @@ import {
   toGlossaryCsv,
   matchGlossary,
   glossaryPrompt,
-  glossaryFingerprint
+  glossaryFingerprint,
+  createHitFingerprint
 } from '../lib/glossary.js';
 import { STARTER } from '../lib/glossary-sample.js';
 
@@ -165,6 +166,28 @@ t('glossaryFingerprint：分类只是 UI 元数据，不进指纹', () => {
 t('示例数据：109 条，全部带分类', () => {
   assert.equal(STARTER.length, 109);
   assert.ok(STARTER.every((one) => one.category), '有示例条目没带分类');
+});
+
+t('createHitFingerprint：只算这段原文命中的术语，加一条不相干的术语不影响别的段落', () => {
+  const base = [{ source: 'Rimefox', target: '凛狐' }, { source: 'cache', target: '缓存' }];
+  const a = createHitFingerprint(base);
+  const b = createHitFingerprint(base.concat({ source: 'glossary', target: '术语表' }));
+  const hit = 'Rimefox keeps a cache of translations.';
+  const plain = 'Nothing special here.';
+  assert.equal(a(plain), 'none', '没命中任何术语');
+  assert.equal(b(plain), 'none', '加了不相干的术语，没命中的段落指纹不变');
+  assert.equal(a(hit), b(hit), '加的术语这段没用到：指纹不变');
+  assert.notEqual(b('The glossary is new.'), 'none');
+  const c = createHitFingerprint([{ source: 'Rimefox', target: '凛狐 Rimefox' }, base[1]]);
+  assert.notEqual(c(hit), a(hit), '命中的术语改了译法：指纹要变');
+  assert.equal(c('Only cache here.'), a('Only cache here.'), '没命中改动那条的段落不受影响');
+  assert.equal(createHitFingerprint([])('anything'), 'none');
+});
+
+t('createHitFingerprint：和整张表的指纹同一种算法（命中的就是整张表时两者相同）', () => {
+  const list = [{ source: 'Rimefox', target: '凛狐' }];
+  assert.equal(createHitFingerprint(list)('Rimefox'), glossaryFingerprint(list));
+  assert.equal(createHitFingerprint(list)('rimefox is lower case'), glossaryFingerprint(list), '匹配不分大小写，和提示词注入一致');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

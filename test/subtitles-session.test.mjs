@@ -566,5 +566,39 @@ await t('O. 切语言期间播放器 DOM 重建：切回中文后新播放器上
   assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
 });
 
+await t('P. 播广告时交还原生字幕、不发翻译；广告播完接着显示正片的双语字幕', async function () {
+  const c = setup();
+  await displayed(c);
+  assert.equal(c.runtime.inspect().overlay.style.display, 'block');
+  const before = c.state.requests.length;
+  c.player.classList.add('ad-showing');
+  c.state.ms = 2500; // 广告自己的时间轴：正好落在正片第二句上
+  c.runtime.tick();
+  assert.equal(c.runtime.inspect().overlay.style.display, 'none', '播广告时不能把正片字幕叠在广告上');
+  assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
+  assert.equal(c.state.requests.length, before, '播广告时不调度翻译');
+  c.player.classList.remove('ad-showing');
+  c.state.ms = 0;
+  c.runtime.tick();
+  assert.equal(c.runtime.inspect().overlay._trans.textContent, '你好。');
+});
+
+await t('Q. 插播广告的字幕不替换正片轨道（广告播完播放器不会再请求正片字幕）', async function () {
+  const c = setup();
+  const track = (await displayed(c)).track;
+  c.player.classList.add('ad-showing');
+  await c.runtime.process(rawFor('AD', 'en', ['Buy now.', 'Limited offer.'], '&kind=asr'));
+  c.runtime.tick();
+  assert.equal(c.runtime.inspect().track, track, '正片的轨道被广告字幕换掉了');
+  c.player.classList.remove('ad-showing');
+  c.state.ms = 0;
+  c.runtime.tick();
+  assert.equal(c.runtime.inspect().overlay.style.display, 'block');
+  assert.equal(c.runtime.inspect().overlay._trans.textContent, '你好。');
+  // 不在播广告时，别的视频的字幕照常接收（换视频时新字幕可能比地址栏先到）
+  await c.runtime.process(rawFor('B', 'en', ['B one.']));
+  assert.equal(c.runtime.inspect().track.v, 'B');
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

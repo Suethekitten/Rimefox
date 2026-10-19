@@ -84,7 +84,8 @@ edge-bilingual/
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
-└── selftest/              离线自检（135 条用例）
+├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs，见 7.1c）
+└── selftest/              离线自检（139 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -325,7 +326,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 - **会话状态**（0.8.5）：track 带 `v / lang / kind / target / style` 与 `gen / inflight / pending`。目标语言或风格一变，`invalidate()` 清空译文并把 `gen` +1，旧请求回来时按 `track === mine && gen === mine.gen` 丢弃；新目标 = 原字幕语言时 `reset()` 交还原生字幕
 - **视频切换**：`inflight` 挂在 track 上，不再全局阻塞；旧视频请求的回调不碰当前 track、不改 `shown`。异步 `fetchText()` 用 `processSeq` 代际，晚完成的旧轨道不能覆盖新轨道
 - **播放器重建**：显示缓存同时绑定"哪个叠层"（`shownOverlay`）；播放器 DOM 被替换后即使字幕文本相同也会重新写入新叠层。CC 关闭 / 字幕翻译关闭时移除 `rimefox-subs-on`，原生字幕恢复
-- 纯函数在 `DT.subs.*`，运行时工厂 `DT.subtitleRuntime.create(env)` 可注入假 DOM / 假 send；`test/subtitles-session.test.mjs` 覆盖 A–J 十个竞态场景。真实运行时只在 `youtube.com` / `youtube-nocookie.com` 启动
+- 纯函数在 `DT.subs.*`，运行时工厂 `DT.subtitleRuntime.create(env)` 可注入假 DOM / 假 send；`test/subtitles-session.test.mjs` 覆盖 A–Q 的竞态场景（含播广告时不接管、插播广告的字幕不替换正片轨道）。真实运行时只在 `youtube.com` / `youtube-nocookie.com` 启动
 - 这一块依赖 YouTube 的私有接口与 DOM 类名，YouTube 改版就可能失效 —— 出问题先看 `/api/timedtext` 回包还在不在、类名变没变
 
 ---
@@ -379,21 +380,30 @@ node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校�
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
 node test/parse.test.mjs       # 回包解析 parseArray（围栏 / 说明文字 / 裸换行 / 结尾逗号 / 对象元素）/ 换行规范化 normalizeTranslationBreaks / 写入前校验 leaksWrapper / 思考过程兜底 / 输出长度护栏 / 单条拆句拼回（36 条）
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空、分段落盘与旧格式迁移（17 条）
-node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重（9 条）
+node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动只让用到它的段落重翻（10 条）
 node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度、保留分行规则、简繁转写（15 条）
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息、记住服务端不认的思考参数（6 条，假 fetch）
-node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹（18 条）
+node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹 / 按命中算的缓存指纹（20 条）
 node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖（13 条）
 node test/appearance.test.mjs  # 强调色、译文排版变量、自定义 CSS 清洗（8 条）
 node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间名单、配置导入（8 条）
 node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎页资源、英文覆盖、权限与后台接线（13 条）
-node test/subtitles-session.test.mjs # 字幕运行时 A–J：语言/视频切换、异步轨道、播放器重建、CC/开关（10 条）
+node test/subtitles-session.test.mjs # 字幕运行时 A–Q：语言/视频切换、异步轨道、播放器重建、CC/开关、广告（17 条）
 node test/usage.test.mjs       # 三协议 usage 提取 + 统计聚合（6 条）
 node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆批、部分成功、usage 汇总（8 条）
 node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络请求、并发保存不丢项（7 条）
 node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层页面、配置广播改模式 / 语言时整页重建（7 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
+
+### 7.1c 真实浏览器端到端检查（发版前）
+```
+node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 仅译文 / 还原 / 配置广播 / 简繁 / 缓存落盘 / 设置页
+node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
+```
+真实 Chrome（`--browser` 或环境变量 `RIMEFOX_BROWSER` 可换成 Edge）+ CDP `Extensions.loadUnpacked` 加载工作树 + 本地假 OpenAI 兼容接口，不需要 API Key，不进 CI（要真实浏览器，YouTube 还要能上网）。
+`--verbose` 打印扩展调试日志、YouTube 字幕请求 / 响应、钩子消息和广告开始 / 结束；`--youtube-only` 跳过文章页和设置页；`--headed` 显示窗口。
+YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按地区自动选中文字幕，和目标语言相同时扩展按设计不接管），遇到广告能跳就跳、跳不过就等它播完；YouTube 每次的加载情况不同，失败时先加 `--verbose` 重跑看是哪一步
 
 ### 7.2 诊断按钮
 弹窗底部「诊断」→ 生成 JSON 并复制到剪贴板，包含：
@@ -462,7 +472,7 @@ node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层�
 | `dockSide` | `right` | 悬浮入口位置：`right` / `left` |
 | `dockAutoHide` | true | 悬浮入口收起时半藏 |
 | `customPrompt` | `''` | 追加到系统提示词末尾，进缓存指纹（改了旧译文失效） |
-| `glossary` | `[]` | 术语表 `[{src, dst, cat?}]`，全局一份，命中才注入提示词（进缓存指纹） |
+| `glossary` | `[]` | 术语表 `[{src, dst, cat?}]`，全局一份，命中才注入提示词；缓存键只带这段原文命中的术语的指纹（没命中是 `none`），加 / 改一条只让用到它的段落重翻 |
 | `debug` | false | 输出调试日志 |
 | `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |
 
