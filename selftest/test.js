@@ -299,6 +299,26 @@
     return true;
   });
 
+  check('仅译文 + 首字下沉：整段译文不会被塞进下沉字母', function () {
+    var p = document.getElementById('fx-aeon-dropcap-span');
+    var prev = DT.state.mode;
+    DT.state.mode = 'translation';
+    try {
+      var u = DT.collect(p)[0];
+      if (!u) return '没有收集到首字下沉段落';
+      if (!DT.inject(u.el, '牛顿的归纳主义方法论今天仍然伴随着我们。', 'zh-CN')) return 'inject 返回 false';
+      var drop = p.querySelector('.ld-dropcap');
+      if (!drop) return '下沉节点不见了';
+      if (drop.textContent.length !== 1) return '整段译文被塞进下沉节点（' + drop.textContent.length + ' 字）';
+      if (drop.textContent !== '牛') return '下沉节点应是译文首字，实际：' + drop.textContent;
+      var bodyText = p.textContent.slice(drop.textContent.length);
+      if (bodyText.indexOf('归纳主义') === -1) return '正文没有拿到剩余译文：' + bodyText.slice(0, 30);
+      return true;
+    } finally {
+      DT.state.mode = prev;
+    }
+  });
+
   check('紧行高正文：CJK 译文行高至少 1.25', function () {
     var p = document.getElementById('fx-aeon-tight');
     var u = DT.collect(p)[0];

@@ -54,4 +54,14 @@
 - 结果：`dist/Rimefox-v0.8.1-store.zip` 57 个文件、272,900 B；manifest.json 在根目录；`welcome/`、`lib/welcome.js`、`content/core.js`、`content/dom.js`、`content/main.js`、`content/styles/inject.css` 均在包内；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 104 / 104（新增 Aeon 大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 6 条）；Chrome 打包校验成功（CRX3）
 - 真实浏览器检查：本机 Chrome 通过 CDP `Extensions.loadUnpacked` 加载当前仓库，配合本地 OpenAI 兼容假接口打开 Aeon 文章。修复前 `data-dt=null`、H1 `72/72`；修复后 `data-dt=on`、H1 `57.6/72`、正文 `22/30.8`，不刷新缩到 390px 时 H1 `33.6/42`、正文 `18/25.2`，回到 1440px 恢复；原站 dropcap 71.5px 保留，译文首字 22px。普通文章 1440/390 回归无重叠。
 - 未验证 / 限制：翻译内容来自本地假接口，不是真实服务商；未验证 Edge 和真实 API Key；行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制）；仅译文模式的大标题仍沿用站点字号。极长标题翻译仍可能撑高 Aeon 英雄区。
+- 0.8.1 已推送并发布为 GitHub Release `v0.8.1`；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+
+## 0.8.2 仅译文首字下沉修复验证
+
+- 审计对象：`main`（Rimefox 0.8.2）
+- 构建命令：`node tools/package-store.mjs`
+- 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
+- 结果：`dist/Rimefox-v0.8.2-store.zip` 57 个文件、273,626 B；manifest.json 在根目录；`welcome/`、`lib/welcome.js`、`content/core.js`、`content/dom.js`、`content/main.js`、`content/styles/inject.css` 均在包内；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 105 / 105（新增“仅译文 + 首字下沉”回归）；Chrome 打包校验成功（CRX3）
+- 仅译文模式真实浏览器检查：Aeon 的 `.ld-dropcap` 段落修复前整个段落译文（385 字）被写进下沉字母 `<span>`；修复后下沉节点只保留译文首字（1 字），其余进入正文文本节点，正文恢复正常段落。0.8.1 的大标题缩放、`data-dt` hydration 补回、首字下沉归一化均保持。
+- 未验证 / 限制：翻译内容来自本地假接口，不是真实服务商；未验证 Edge 和真实 API Key；行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制）；仅译文模式的大标题仍沿用站点字号。
 - 本验证在推送前完成；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)

@@ -455,6 +455,28 @@
     return nodes;
   }
 
+  // 首字下沉节点：Aeon 用 <span class="ld-dropcap">N</span>ewton’s…，
+  // 第一个文本节点只有 "N"，但字体被放大成 71.5px 并 float。仅译文模式
+  // 不能把整段中文都写进这个节点，否则整段会变成巨型首字。
+  function isDropcapNode(node) {
+    var el = node && node.parentElement;
+    if (!el) return false;
+    var value = String(node.nodeValue || '').trim();
+    if (!value || value.length > 3) return false;
+    var text = String(el.textContent || '').trim();
+    if (!text || text.length > 4) return false;
+    var cs = styleOf(el);
+    if (!cs) return false;
+    var named = /drop.?cap|first.?letter/i.test(String(el.className || '') + ' ' + String(el.id || ''));
+    // 有 dropcap / first-letter 类名的容器即使没写 float 也认；
+    // 没类名的必须是 float 的小节点，避免把普通的行内强调当成首字下沉
+    if (cs.float !== 'left' && cs.float !== 'right' && !named) return false;
+    var pcs = el.parentElement ? styleOf(el.parentElement) : null;
+    var fs = parseFloat(cs.fontSize) || 0;
+    var pfs = pcs ? parseFloat(pcs.fontSize) || 0 : 0;
+    return named || (fs > 0 && pfs > 0 && fs >= pfs * 1.5);
+  }
+
   // 源文本签名：用于判断 SPA 路由切换后，某些元素的内容是否被站点换掉了
   function sigOf(text) {
     var t = String(text || '');
@@ -483,9 +505,36 @@
   function injectOnly(sourceEl, text, area) {
     var nodes = collectTextNodes(sourceEl);
     if (!nodes.length) return false;
+
+    // 首字下沉：首字放进下沉节点，其余放进后面的正文节点。
+    // 否则整段中文都会挤进 71.5px 的 "N" 里（Aeon 仅译文模式实例）。
+    var drop = nodes.length > 1 && isDropcapNode(nodes[0]) ? nodes[0] : null;
+    var head = '';
+    var tail = text;
+    var restIndex = 0;
+    if (drop) {
+      var chars = Array.from(String(text || '').replace(/^\s+/, ''));
+      head = chars.shift() || '';
+      tail = chars.join('');
+      restIndex = 1;
+      var dropParent = drop.parentElement;
+      while (restIndex < nodes.length && dropParent && dropParent.contains(nodes[restIndex])) {
+        restIndex += 1;
+      }
+      // 没有可放正文的节点时退回普通替换，不能吞掉剩余译文
+      if (!head || restIndex >= nodes.length) {
+        drop = null;
+        head = '';
+        tail = text;
+        restIndex = 0;
+      }
+    }
+
     var saved = [];
     for (var i = 0; i < nodes.length; i += 1) {
-      var wrote = i === 0 ? text : '';
+      var wrote;
+      if (drop) wrote = i === 0 ? head : i === restIndex ? tail : '';
+      else wrote = i === 0 ? text : '';
       saved.push({ node: nodes[i], value: nodes[i].nodeValue, wrote: wrote });
       ownWrites.set(nodes[i], wrote);
       nodes[i].nodeValue = wrote;

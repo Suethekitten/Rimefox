@@ -80,7 +80,7 @@ edge-bilingual/
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页）
-└── selftest/              离线自检（104 条用例）
+└── selftest/              离线自检（105 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -336,7 +336,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-104 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器回归。**改 `dom.js` 前后必跑。**
+105 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -531,13 +531,12 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 
 ---
 
-## 14. 本版技术记录（0.8.1）
+## 14. 本版技术记录（0.8.2）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **问题现场**（Aeon essay）：整页双语后中文标题异常放大、行高过紧、文字上下重叠，英雄区布局被撑开。Aeon 的 H1 是 `text-7xl leading-none`：桌面 `72px/72px`，`max-[960px]` 下 `42px/42px`。
-- **根因一：computed px 冻结**。`copyTypography()` 把源元素的 `fontSize` / `lineHeight` 原样写成 px；汉字占满 em 方框，同字号视觉上比拉丁字母大，`line-height: 1.0` 又让中文多行挤在一起。窗口缩放后源标题变 42px，译文仍停在 72px。
-- **根因二：`data-dt` 被 hydration 删除**。Aeon 的 Next.js 在 hydration 时清掉扩展写在 `<html>` 上的 `data-dt`；`.dt-target` 归一化 / 主题 / 悬停规则都挂在 `html[data-dt="on"]` 下，实测 `data-dt` 变成 `null`，整套样式失效。
-- **修复**：`content/core.js` 新增 `DT.hasCjk()` / `DT.translationLayout()`；`content/dom.js` 改用 `inherit` / `em`，CJK 大标题（H1–H6、≥36px）加 `dt-cjk-heading`（0.8em），紧行高加 `dt-cjk-tight`（1.25），窄容器保留 `dt-narrow` 的 `nowrap`；`content/styles/inject.css` 把 `.dt-target` 基础归一化移出 `data-dt` 作用域并加关键属性 `!important`，增加 `::first-letter` 归一化；`content/main.js` 用 `keepChromeState()` + MutationObserver 在 hydration 后补回 `data-dt` / mode / theme。
-- **回归测试**：`selftest` 98 → 104，新增 CJK 大标题缩放与响应式、首字下沉、紧行高、引用 / 富文本、窄容器 6 条；测试夹具直接模拟 Aeon 的 `72px/72px` H1 与 `4em` dropcap。真实 Chrome 用 CDP `Extensions.loadUnpacked` 加载当前仓库，配合本地 OpenAI 兼容假接口在 Aeon 实测：H1 从 `72/72` 变为 `57.6/72`，390px 下 `42/42` 变为 `33.6/42`；正文 22/30.8，窄屏 18/25.2；原站 dropcap 71.5px 保留，译文首字 22px。普通文章 1440/390 回归无重叠。
-- **未验证 / 剩余**：翻译文本来自本地假接口，非真实服务商；未验证 Edge 和真实 API Key。行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制，原文结构本身保留）；仅译文模式没有 `.dt-target`，大标题仍沿用站点字号。极长标题翻译仍可能撑高英雄区，0.8em + 1.25 行高只能缓解。
+- **问题现场**（Aeon 仅译文模式）：第一段正常，但 `Newton’s inductivist methodology…` 这段的整段中文被塞进首字下沉的 `<span class="ld-dropcap">N</span>`，正文错位/像未翻译。该段原始 H1 区域的第一段带 `::first-letter`，而这段带的是独立 `.ld-dropcap` 文本节点。
+- **根因**：`injectOnly()` 把整段译文写进 `collectTextNodes()` 返回的**第一个文本节点**。Aeon 这段的第一个文本节点是下沉字母 `N`；其父节点是 `float:left`、`71.5px` 的 `.ld-dropcap`，于是 385 字译文全进了这个容器，其余文本节点被清空。
+- **修复**：`content/dom.js` 新增 `isDropcapNode()`：识别 `float:left/right`、字号 ≥ 父级 1.5 倍或类名含 `dropcap` 的小文本节点；`injectOnly()` 把译文首字写进下沉节点，其余写进第一个非下沉文本节点，其他节点保持清空。没有正文节点时回退到原行为，避免吞字。还原仍走原有的 saved nodes，不影响 `DT.restore()` / `releaseReplaced()`。
+- **回归测试**：`selftest` 104 → 105，新增“仅译文 + 首字下沉：整段译文不会被塞进下沉字母”。真实 Chrome 用 CDP `Extensions.loadUnpacked` 加载当前仓库、本地假接口在 Aeon 仅译文模式实测：修复前 `.ld-dropcap` 文本节点 385 字；修复后 `这`（1 字）在下沉节点，其余译文在正文节点。0.8.1 的 CJK 大标题 / 行高 / `data-dt` 修复保持不变。
+- **未验证 / 剩余**：翻译文本来自本地假接口，非真实服务商；未验证 Edge 和真实 API Key。行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制，原文结构本身保留）；仅译文模式的大标题仍沿用站点字号。极长标题翻译仍可能撑高 Aeon 英雄区。

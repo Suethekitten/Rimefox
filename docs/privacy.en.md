@@ -1,6 +1,6 @@
 # Rimefox Privacy Policy
 
-This policy describes Rimefox 0.8.1 (last updated: 2026-10-18). Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
+This policy describes Rimefox 0.8.2 (last updated: 2026-10-18). Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
 
 ## Information sent for translation
 
