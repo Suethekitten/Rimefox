@@ -106,6 +106,14 @@ t('数字 1：拒绝（严格布尔）', () => {
   assert.equal(data.get('config').hoverCompare, true);
 });
 
+// 悬浮入口里连着点两个开关（mode:set / hover:set 都走 saveConfig）：两次「读 → 合并 → 写」不能互相覆盖
+const { saveConfig } = await import('../lib/config.js');
+await Promise.all([saveConfig({ mode: 'translation' }), saveConfig({ hoverCompare: false })]);
+t('同时保存两项：两项都落盘，后写的不盖掉先写的', () => {
+  assert.equal(data.get('config').mode, 'translation', '显示方式被另一次保存盖掉了');
+  assert.equal(data.get('config').hoverCompare, false, '悬停对照被另一次保存盖掉了');
+});
+
 t('整个过程没有发起翻译 / 网络请求', () => {
   assert.equal(fetches, 0);
 });

@@ -86,24 +86,45 @@
     }
   }
 
+  // 上一次按配置（含站点规则）算出的显示方式 / 目标语言。
+  // 配置广播、换网址时只有这两个值真的变了才跟着改：没变就保留本页自己的选择（弹窗 / 悬浮入口切的）。
+  // 以前每次都直接覆盖 DT.state，翻译中的页面不重建，同一页就混着双语和仅译文、或混着两种语言
+  var cfgMode = null;
+  var cfgTarget = null;
+
   async function loadConfig() {
+    var rebuild = false;
     try {
       var res = await DT.send({ type: 'config:get' });
       if (res && res.ok && res.config) {
         DT.state.config = res.config;
-        DT.state.target = res.config.targetLang || 'zh-CN';
-        DT.state.mode = res.config.mode || 'dual';
-        DT.state.theme = res.config.theme || 'underline';
         // 站点规则可以固定这个网站的显示方式 / 译文样式
         var site = res.config.page && res.config.page.site;
-        if (site && site.mode) DT.state.mode = site.mode;
-        if (site && site.theme) DT.state.theme = site.theme;
+        var mode = (site && site.mode) || res.config.mode || 'dual';
+        var target = res.config.targetLang || 'zh-CN';
+        if (mode !== cfgMode) {
+          cfgMode = mode;
+          if (DT.state.mode !== mode) {
+            DT.state.mode = mode;
+            rebuild = true;
+          }
+        }
+        if (target !== cfgTarget) {
+          cfgTarget = target;
+          if (DT.state.target !== target) {
+            DT.state.target = target;
+            rebuild = true;
+          }
+        }
+        DT.state.theme = (site && site.theme) || res.config.theme || 'underline';
       }
     } catch (err) {
       DT.log('loadConfig failed', err);
     }
     applyChrome();
     if (DT.state.config) DT.emitConfig(DT.state.config);
+    // 翻译中换了显示方式 / 目标语言：已注入的译文是按旧设置写的，整页重建（注入策略跟模式走）
+    if (rebuild && DT.state.enabled) startOver();
     return DT.state.config;
   }
 
@@ -359,7 +380,8 @@
         });
         var res = null;
         try {
-          // 与后台 provider 的 180s 总上限对齐：内容脚本先超时会让同一批重复计费
+          // 比后台单次请求的 180s 上限略长。后台整条消息没有总时限（排队、重试、拆批），这里超时后
+          // 按退避重发；同一段还在后台翻的话，重发的那次会等它的结果，不会再请求一次（见 background.js 的 inflight）
           res = await DT.send({ type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain' }, 190000);
         } catch (err) {
           if (cancelled()) return;
@@ -829,8 +851,13 @@
     }
 
     if (msg.type === 'dt:setTarget') {
-      DT.state.target = msg.target || DT.state.target;
-      startOver();
+      var nextTarget = msg.target || DT.state.target;
+      // 弹窗先存配置再发这条：配置广播可能已经按新语言重建过了，同一种语言不再重建一次
+      // （重建会作废上一轮，它在途的请求白白计费）
+      if (nextTarget !== DT.state.target) {
+        DT.state.target = nextTarget;
+        startOver();
+      }
       sendResponse(summarize());
       return false;
     }

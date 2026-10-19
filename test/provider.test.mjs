@@ -95,5 +95,27 @@ await t('正常返回：不受影响，只请求一次', async () => {
   assert.equal(bodies.length, 1);
 });
 
+console.log('\n[服务端不认思考参数]');
+
+await t('400 拒绝 reasoning_effort：去掉重试；之后同一地址 + 模型直接不发，不再每批多吃一个 400', async () => {
+  const bodies = [];
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    if (body.reasoning_effort) {
+      return new Response('{"error":{"message":"Unrecognized request argument supplied: reasoning_effort"}}', { status: 400 });
+    }
+    return new Response(JSON.stringify(reply('["你好"]', 'stop')), { status: 200 });
+  };
+  const opts = { ...base, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', thinkingMode: 'off' };
+  assert.equal(await chat(opts), '["你好"]');
+  assert.equal(bodies.length, 2, '第一次：被拒绝后去掉参数重发');
+  assert.equal(await chat(opts), '["你好"]');
+  assert.equal(bodies.length, 3, '第二次应该只请求一次');
+  assert.equal(bodies[2].reasoning_effort, undefined);
+  await chat({ ...opts, model: 'o4-mini' });
+  assert.equal(bodies[3].reasoning_effort, 'none', '换了模型要重新试');
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

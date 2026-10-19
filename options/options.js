@@ -976,7 +976,9 @@ $('importFile').addEventListener('change', async (event) => {
     applyConfig(next);
     markSaved(next);
     renderBrowserShortcut();
-    if (next.baseUrl && next.apiKey) fetchModels();
+    // applyConfig 已把导入后的当前服务商填进表单：有地址和 Key 就刷新模型列表
+    // （以前读的是 v5 之前的扁平字段 next.baseUrl / next.apiKey，迁移后永远是空的，这一步从来没跑过）
+    if (fields.baseUrl.value && fields.apiKey.value) fetchModels();
 
     let msg = '已导入 ' + Object.keys(patch).length + ' 项设置';
     if (parsed.rejected.length) {

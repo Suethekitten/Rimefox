@@ -45,6 +45,13 @@ t('单条被拆成几句 → 拼回一段', () => {
   assert.deepEqual(parseArray('["第一句。","第二句。"]', 1), ['第一句。第二句。']);
 });
 
+t('单条被拆成几句：西文 / 韩文句子之间补一个空格，中日文不加', () => {
+  assert.deepEqual(parseArray('["Hello.","How are you?"]', 1), ['Hello. How are you?']);
+  assert.deepEqual(parseArray('["안녕하세요.","잘 지내요?"]', 1), ['안녕하세요. 잘 지내요?']);
+  assert.deepEqual(parseArray('["こんにちは。","元気？"]', 1), ['こんにちは。元気？']);
+  assert.deepEqual(parseArray('["用 Rimefox","翻译。"]', 1), ['用 Rimefox翻译。'], '一边是中文就不加');
+});
+
 t('单条直接回纯文本', () => {
   assert.deepEqual(parseArray('这是译文', 1), ['这是译文']);
 });

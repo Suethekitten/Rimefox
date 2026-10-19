@@ -356,6 +356,22 @@ t('providerChoices：自定义服务商用保存的名字', () => {
   assert.equal(list[0].current, true);
 });
 
+t('导入术语表：导出文件里的 glossary 清洗后导入，坏格式计入 rejected', () => {
+  const { config } = pickImportedConfig(
+    envelope({
+      targetLang: 'zh-CN',
+      theme: 'underline',
+      glossary: [{ source: 'Rimefox', target: '凛狐', category: '品牌' }, { source: '', target: '空' }, { source: 'rimefox', target: '重复' }]
+    })
+  );
+  assert.deepEqual(config.glossary, [{ source: 'Rimefox', target: '凛狐', category: '品牌' }]);
+  const bad = pickImportedConfig(envelope({ targetLang: 'zh-CN', theme: 'underline', mode: 'dual', glossary: 'Rimefox,凛狐' }));
+  assert.ok(bad.rejected.indexOf('glossary') >= 0);
+  assert.equal(bad.config.glossary, undefined);
+  const empty = pickImportedConfig(envelope({ targetLang: 'zh-CN', theme: 'underline', mode: 'dual', glossary: [] }));
+  assert.equal(empty.config.glossary, undefined, '空术语表不覆盖本机已有的');
+});
+
 // ---------------- 删除自定义服务商 ----------------
 console.log('\n[删除自定义服务商]');
 

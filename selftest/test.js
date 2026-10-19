@@ -123,6 +123,23 @@
     return DT.looksLikeTarget('進捗状況を確認します。', 'ja') === true ? true : '应判为已是日语';
   });
 
+  check('looksLikeTarget: 简体 / 繁体不算同一种目标语言', function () {
+    var hans = '这是一个完整的中文句子，用于测试识别效果。';
+    var hant = '這是一個完整的中文句子，用於測試識別效果。';
+    return eq(
+      [
+        DT.looksLikeTarget(hans, 'zh-TW'),
+        DT.looksLikeTarget(hant, 'zh-TW'),
+        DT.looksLikeTarget(hant, 'zh-CN'),
+        DT.looksLikeTarget(hans, 'zh-CN'),
+        DT.looksLikeTarget('人工智能研究所', 'zh-TW'), // 两边写法相同的字：看不出来，按已是目标语言
+        DT.chineseScript(hans),
+        DT.chineseScript(hant)
+      ],
+      [false, true, false, true, true, 'hans', 'hant']
+    );
+  });
+
   check('normalizeText: 折叠空白', function () {
     return eq(DT.normalizeText('  a \n\t b  '), 'a b');
   });
@@ -894,6 +911,13 @@
     ];
     var bad = cases.filter(function (c) { return DT.isNearDuplicate(c[0], c[1], 'zh-CN'); });
     return bad.length ? '被误判为重复：' + JSON.stringify(bad) : true;
+  });
+
+  check('近似重复：简体转繁体的译文不当成重复丢掉', function () {
+    var src = '这是一个测试段落，内容很普通，说明这个问题。';
+    var out = '這是一個測試段落，內容很普通，說明這個問題。';
+    if (DT.isNearDuplicate(src, out, 'zh-TW')) return '简繁转换被当成近似重复丢掉了';
+    return DT.isNearDuplicate(out, out, 'zh-TW') ? true : '完全相同仍应判为重复';
   });
 
   // ---------------- 趣味翻译（DT.unitStyle） ----------------

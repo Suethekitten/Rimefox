@@ -15,6 +15,9 @@ import { createUsageStats } from './lib/usage.js';
 // 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
 const usageStats = createUsageStats();
 
+// 在途的翻译：缓存键 → Promise<{ value: 译文 | ''（无需翻译）| null（失败）, error }>，见 handleTranslate
+const inflight = new Map();
+
 // ---------------- 并发闸门 ----------------
 let running = 0;
 let maxParallel = 3;
@@ -225,6 +228,29 @@ async function handleTranslate(msg, sender) {
   let todo = Array.from(groups.keys());
   let firstError = null;
 
+  // 这一条的结果定下来了：回填到它出现的所有位置；失败（null）时记下第一个原因
+  function fill(text, value, err) {
+    groups.get(text).forEach((index) => {
+      results[index] = value;
+    });
+    if (value === null && !firstError) firstError = err || new ApiError('翻译失败', 0, '');
+  }
+
+  // 同一原文已经有请求在翻（内容脚本等了 190s 超时后重发、几个框架同时翻同一段）：
+  // 不再发一次请求，等那边的结果。单条消息在后台没有总时限（排队 + 最多 3 次重试 + 拆批），
+  // 以前重发的那次缓存没命中，同一段文字要付两次钱
+  const waits = [];
+  todo = todo.filter((text) => {
+    const running = inflight.get(keyOf(text));
+    if (!running) return true;
+    waits.push(
+      running.then((done) => {
+        fill(text, done.value, done.error);
+      })
+    );
+    return false;
+  });
+
   // 可选：本地脱敏。映射只活在这个请求里，不落盘、不进缓存、不写日志。
   // 关闭时下面的分支整段跳过，行为与改动前完全一致。
   let privacyRows = null;
@@ -238,10 +264,7 @@ async function handleTranslate(msg, sender) {
       const original = todo[i];
       if (!row.ok) {
         // 脱敏失败（例如原文本身就带占位符）：这一段判失败，绝不把原文发出去
-        groups.get(original).forEach((index) => {
-          results[index] = null;
-        });
-        if (!firstError) firstError = new ApiError('本地隐私保护无法为这段文字生成占位符，已跳过', 0, row.reason || '');
+        fill(original, null, new ApiError('本地隐私保护无法为这段文字生成占位符，已跳过', 0, row.reason || ''));
         return;
       }
       privacyRows.set(original, { masked: row.masked, tokens: row.tokens });
@@ -250,11 +273,27 @@ async function handleTranslate(msg, sender) {
     todo = usable;
   }
 
-  if (todo.length === 0) {
-    if (results.some((r) => r === null)) {
-      return { ok: false, error: describeError(firstError), results };
+  // 要真正发出去的这些登记成「在途」，结果定下来（成功、空、失败）就交给等着它的请求
+  const settles = new Map();
+  todo.forEach((text) => {
+    const key = keyOf(text);
+    let resolve;
+    const running = new Promise((r) => {
+      resolve = r;
+    });
+    inflight.set(key, running);
+    settles.set(text, (value, error) => {
+      if (inflight.get(key) === running) inflight.delete(key);
+      resolve({ value, error });
+    });
+  });
+  function settle(text, value, err) {
+    fill(text, value, err);
+    const done = settles.get(text);
+    if (done) {
+      settles.delete(text);
+      done(value, value === null ? err || firstError : null);
     }
-    return { ok: true, results, failed: 0, cached };
   }
 
   // 按条数 + 字符数切批，避免单次请求过大
@@ -275,69 +314,62 @@ async function handleTranslate(msg, sender) {
   });
   if (current.length > 0) batches.push(current);
 
-  await Promise.all(
-    batches.map((payload) =>
-      (async () => {
-        await acquire();
-        try {
-          // 发出去的是脱敏后的文本；映射只在本地
-          const wire = privacyRows ? payload.map((text) => privacyRows.get(text).masked) : payload;
-          const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows);
-          if (!out) throw new ApiError('模型返回无法解析', 0, '');
-          payload.forEach((text, k) => {
-            let value = out[k];
-            if (value === null) {
-              // 拆批时一半失败：这一条按失败处理，另一半已经成功的照常写缓存
-              groups.get(text).forEach((index) => {
-                results[index] = null;
-              });
-              if (!firstError) firstError = new ApiError('其中一部分译文失败，稍后重试', 0, '');
+  const runs = batches.map((payload) =>
+    (async () => {
+      await acquire();
+      try {
+        // 发出去的是脱敏后的文本；映射只在本地
+        const wire = privacyRows ? payload.map((text) => privacyRows.get(text).masked) : payload;
+        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows);
+        if (!out) throw new ApiError('模型返回无法解析', 0, '');
+        payload.forEach((text, k) => {
+          let value = out[k];
+          if (value === null) {
+            // 拆批时一半失败：这一条按失败处理，另一半已经成功的照常写缓存
+            settle(text, null, new ApiError('其中一部分译文失败，稍后重试', 0, ''));
+            return;
+          }
+          if (privacyRows) {
+            const back = restoreText(String(value == null ? '' : value), privacyRows.get(text).tokens, privacyValues);
+            if (!back.ok) {
+              // 占位符丢失 / 被改写 / 对不上：这一段判失败，不输出半截译文，也不缓存
+              settle(text, null, new ApiError('本地隐私保护无法还原这段译文，已跳过', 0, back.reason || ''));
               return;
             }
-            if (privacyRows) {
-              const back = restoreText(String(value == null ? '' : value), privacyRows.get(text).tokens, privacyValues);
-              if (!back.ok) {
-                // 占位符丢失 / 被改写 / 对不上：这一段判失败，不输出半截译文，也不缓存
-                groups.get(text).forEach((index) => {
-                  results[index] = null;
-                });
-                if (!firstError) firstError = new ApiError('本地隐私保护无法还原这段译文，已跳过', 0, back.reason || '');
-                return;
-              }
-              value = back.text;
-            }
-            // 多转义的字面 \n 在写缓存之前就规范化（对照原文的分行，代码 / 路径原样保留）
-            value = normalizeTranslationBreaks(text, value);
-            // 写入前兜底：残留 JSON 包装 / 字段名 / 提示词原句 → 这一条按失败处理，不插进网页、不进缓存
-            if (typeof value === 'string' && leaksWrapper(text, value)) {
-              groups.get(text).forEach((index) => {
-                results[index] = null;
-              });
-              if (!firstError) firstError = new ApiError('模型返回的译文里混进了 JSON 格式，已丢弃', 0, '');
-              return;
-            }
-            let result = '';
-            if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {
-              result = value;
-              cache.set(keyOf(text), value);
-            }
-            // 否则：模型返回空（"EN"/"×" 这类不需要翻的），或译文长得离谱（见 isRunaway）：给 ''，
-            // 和失败的 null 区分开，内容脚本据此记为"与原文相同"而不是失败。不进缓存，免得一次抽风永久生效。
-            groups.get(text).forEach((index) => {
-              results[index] = result;
-            });
-          });
-        } catch (err) {
-          if (!firstError) firstError = err;
-        } finally {
-          release();
-        }
-      })()
-    )
+            value = back.text;
+          }
+          // 多转义的字面 \n 在写缓存之前就规范化（对照原文的分行，代码 / 路径原样保留）
+          value = normalizeTranslationBreaks(text, value);
+          // 写入前兜底：残留 JSON 包装 / 字段名 / 提示词原句 → 这一条按失败处理，不插进网页、不进缓存
+          if (typeof value === 'string' && leaksWrapper(text, value)) {
+            settle(text, null, new ApiError('模型返回的译文里混进了 JSON 格式，已丢弃', 0, ''));
+            return;
+          }
+          let result = '';
+          if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {
+            result = value;
+            cache.set(keyOf(text), value);
+          }
+          // 否则：模型返回空（"EN"/"×" 这类不需要翻的），或译文长得离谱（见 isRunaway）：给 ''，
+          // 和失败的 null 区分开，内容脚本据此记为"与原文相同"而不是失败。不进缓存，免得一次抽风永久生效。
+          settle(text, result);
+        });
+      } catch (err) {
+        if (!firstError) firstError = err;
+      } finally {
+        release();
+        // 这一批没定下来的（整批失败）也要通知等着的请求，不能让它们一直挂着
+        payload.forEach((text) => {
+          if (settles.has(text)) settle(text, null);
+        });
+      }
+    })()
   );
 
+  await Promise.all(runs.concat(waits));
+
   const failed = results.filter((r) => r === null).length;
-  if (failed === results.length) {
+  if (results.length && failed === results.length) {
     return { ok: false, error: describeError(firstError), results };
   }
 

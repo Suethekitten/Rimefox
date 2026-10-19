@@ -344,5 +344,62 @@ t('Gemini 3：off 用 thinkingLevel=minimal', () => {
   assert.equal(cfg.thinkingBudget, undefined);
 });
 
+// ---------------- 模型列表（三个引擎共用 lib/engines/model-list.js） ----------------
+console.log('\n[模型列表请求]');
+
+async function at(name, fn) {
+  try {
+    await fn();
+    pass += 1;
+    console.log('  \u2713 ' + name);
+  } catch (err) {
+    fail += 1;
+    console.log('  \u2717 ' + name + '\n      ' + (err && err.message));
+  }
+}
+
+function fakeFetch(status, body) {
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url, headers: init.headers });
+    return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
+  };
+  return seen;
+}
+
+await at('各引擎：地址、鉴权头照旧，回包按各自格式解析', async () => {
+  let seen = fakeFetch(200, { data: [{ id: 'a' }, { id: 'b' }] });
+  assert.deepEqual(await openai.listModels({ baseUrl: 'https://x.test/v1/chat/completions', apiKey: 'k' }), ['a', 'b']);
+  assert.equal(seen[0].url, 'https://x.test/v1/models');
+  assert.equal(seen[0].headers.Authorization, 'Bearer k');
+  seen = fakeFetch(200, { data: [{ id: 'claude-x' }] });
+  assert.deepEqual(await anthropic.listModels({ baseUrl: 'https://api.anthropic.com/v1/messages', apiKey: 'k' }), ['claude-x']);
+  assert.equal(seen[0].url, 'https://api.anthropic.com/v1/models');
+  assert.equal(seen[0].headers['x-api-key'], 'k');
+  seen = fakeFetch(200, { models: [{ name: 'models/gemini-x', supportedGenerationMethods: ['generateContent'] }] });
+  assert.deepEqual(await gemini.listModels({ baseUrl: 'https://g.test/v1beta', apiKey: 'k' }), ['gemini-x']);
+  assert.equal(seen[0].headers['x-goog-api-key'], 'k');
+});
+
+await at('非 2xx：各引擎的说法不变（OpenAI 404/405、Anthropic 404 是「不提供模型列表」，Gemini 走自己的错误映射）', async () => {
+  fakeFetch(405, 'nope');
+  await assert.rejects(openai.listModels({ baseUrl: 'https://x.test/v1', apiKey: 'k' }), /不提供模型列表/);
+  fakeFetch(401, '{"error":{"message":"bad"}}');
+  await assert.rejects(openai.listModels({ baseUrl: 'https://x.test/v1', apiKey: 'k' }), /API Key 无效/);
+  fakeFetch(404, '');
+  await assert.rejects(anthropic.listModels({ baseUrl: 'https://a.test/v1', apiKey: 'k' }), /不提供模型列表/);
+  fakeFetch(400, '{"error":{"message":"User location is not supported for the API use."}}');
+  await assert.rejects(gemini.listModels({ baseUrl: 'https://g.test/v1beta', apiKey: 'k' }), (err) => err.message === gemini.LOCATION_MESSAGE);
+});
+
+await at('坏 JSON / 网络错误：统一成可读的错误', async () => {
+  fakeFetch(200, '<html>');
+  await assert.rejects(anthropic.listModels({ baseUrl: 'https://a.test/v1', apiKey: 'k' }), /模型列表不是合法 JSON/);
+  globalThis.fetch = async () => {
+    throw new TypeError('Failed to fetch');
+  };
+  await assert.rejects(gemini.listModels({ baseUrl: 'https://g.test/v1beta', apiKey: 'k' }), /网络请求失败：Failed to fetch/);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

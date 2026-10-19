@@ -236,6 +236,45 @@
     return false;
   };
 
+  // ---------------- 简体 / 繁体 ----------------
+  // 只收两边写法不同的常用字（这 / 這、们 / 們……），一一对应排列；两边写法相同的字（中、文、人）不算
+  var HANS_CHARS =
+    '这们个为说时对来会过还没发现样从点问间经两进动开关门见车东题实学书话语读写觉买卖钱电乐听业认识让万与专种义习乡乱争产亲众优传伤体儿党兴军农决况净减几击刘则刚创删别剧办务劳势医华协单卫厂历压县参双变号吗员响团园围国图圆场块坏处备复够头夺奖妇妈孙宁宝审宫宽寻导寿将尔尽层岁岛币师带帮广庆应库废张弹强归当录忆忧怀态总恶惊惯愿战户扩扫扬护报担择挂挥损换据摄敌数断无旧显术机杀杂权条极枪标树桥梦检楼欢残毕气汉沟泪洁测济浓涛温湾满灭灯灵灾炼烟热爱独猎环画盐监盖盘矿码确礼离积称税稳穷笔简类粮紧红纪约级纯纸线练组细织终结绝统继续维绿编网罗职联胜脑脚脸艺节药获营虑虽补装观规视览计讨训议讯记讲许论设访证评词译试诗询该详误请课谁调谈谢负财责败货质购贵费资赛赞赢转轮软轻载较辆输边达运远违连迟适选遗邮释错键镇长闪闭闻阅队阳阴阵阶际陆陈险随隐难雾静页顶项顺须顾预领频颜额风飞饭饮馆马验骑鱼鸟鸡麦黄齐龙';
+  var HANT_CHARS =
+    '這們個為說時對來會過還沒發現樣從點問間經兩進動開關門見車東題實學書話語讀寫覺買賣錢電樂聽業認識讓萬與專種義習鄉亂爭產親眾優傳傷體兒黨興軍農決況淨減幾擊劉則剛創刪別劇辦務勞勢醫華協單衛廠歷壓縣參雙變號嗎員響團園圍國圖圓場塊壞處備復夠頭奪獎婦媽孫寧寶審宮寬尋導壽將爾盡層歲島幣師帶幫廣慶應庫廢張彈強歸當錄憶憂懷態總惡驚慣願戰戶擴掃揚護報擔擇掛揮損換據攝敵數斷無舊顯術機殺雜權條極槍標樹橋夢檢樓歡殘畢氣漢溝淚潔測濟濃濤溫灣滿滅燈靈災煉煙熱愛獨獵環畫鹽監蓋盤礦碼確禮離積稱稅穩窮筆簡類糧緊紅紀約級純紙線練組細織終結絕統繼續維綠編網羅職聯勝腦腳臉藝節藥獲營慮雖補裝觀規視覽計討訓議訊記講許論設訪證評詞譯試詩詢該詳誤請課誰調談謝負財責敗貨質購貴費資賽贊贏轉輪軟輕載較輛輸邊達運遠違連遲適選遺郵釋錯鍵鎮長閃閉聞閱隊陽陰陣階際陸陳險隨隱難霧靜頁頂項順須顧預領頻顏額風飛飯飲館馬驗騎魚鳥雞麥黃齊龍';
+  var SCRIPT_OF = {};
+  (function () {
+    var i;
+    for (i = 0; i < HANS_CHARS.length; i += 1) SCRIPT_OF[HANS_CHARS.charAt(i)] = 'hans';
+    for (i = 0; i < HANT_CHARS.length; i += 1) SCRIPT_OF[HANT_CHARS.charAt(i)] = 'hant';
+  })();
+
+  // 'hans' 简体 / 'hant' 繁体 / '' 看不出来（只有两边写法相同的字，比如「中文」，这时两边都算对）
+  DT.chineseScript = function (text) {
+    var s = String(text || '');
+    var hans = 0;
+    var hant = 0;
+    for (var i = 0; i < s.length; i += 1) {
+      var w = SCRIPT_OF[s.charAt(i)];
+      if (w === 'hans') hans += 1;
+      else if (w === 'hant') hant += 1;
+    }
+    if (hans > hant) return 'hans';
+    if (hant > hans) return 'hant';
+    return '';
+  };
+
+  // 目标语言要哪种写法：zh-TW / zh-HK / zh-Hant 是繁体，其余中文按简体
+  function targetScript(lang) {
+    return /^zh-(tw|hk|mo|hant)/i.test(String(lang || '')) ? 'hant' : 'hans';
+  }
+
+  // 写法和目标对不上（简体页面翻成繁體中文、或反过来）：不算「已是目标语言」，要送去转换
+  function wrongScript(text, lang) {
+    var script = DT.chineseScript(text);
+    return !!script && script !== targetScript(lang);
+  }
+
   // 这段文本是否已经基本是目标语言（避免中→中、英→英）
   // 注意：不能只看 CJK 占比。中英混排的段落（作者原文就混写）如果被判成
   // "已是中文"，整段就不会翻，表现为"有些段落没翻译"。
@@ -257,7 +296,7 @@
       if (kana > 0 || hangul > 0) return false; // 有假名/谚文就不是中文
       if (cjk / letters <= 0.75) return false;
       if (latin / letters > 0.15) return false;
-      return true;
+      return !wrongScript(text, code); // 简体 ≠ 繁体：简体页面选了繁體中文也要翻
     }
     if (code.indexOf('ja') === 0) {
       if (kana === 0) return false; // 没有假名的不当日语（否则中文会被判成"已是日语"）
@@ -289,7 +328,7 @@
     var kana = (s.match(/[\u3040-\u30ff]/g) || []).length;
     var hangul = (s.match(/[\uac00-\ud7af\u1100-\u11ff]/g) || []).length;
     var code = String(lang || '');
-    if (code.indexOf('zh') === 0) return kana === 0 && hangul === 0 && han / letters >= 0.4;
+    if (code.indexOf('zh') === 0) return kana === 0 && hangul === 0 && han / letters >= 0.4 && !wrongScript(s, code);
     if (code.indexOf('ja') === 0) return kana > 0 && (kana + han) / letters >= 0.4;
     if (code.indexOf('ko') === 0) return hangul / letters >= 0.4;
     return false;

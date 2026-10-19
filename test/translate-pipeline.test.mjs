@@ -90,7 +90,7 @@ const scope = {
   prompt: promptFingerprint('')
 };
 
-// 旧版本留下的坏缓存：译文里是多转义的字面 \n（升级前就存在 session 区里）
+// 旧版本留下的坏缓存：译文里是多转义的字面 \n（升级前就存在 session 区里，还是旧的整层一个键的格式）
 const LEGACY_SRC = '「你在做什么？」她问。\n「我在等人。」〔旧缓存〕';
 const LEGACY_BAD = '"What are you doing?" she asked.' + BS + 'n"I\'m waiting for someone."';
 const LEAKY_SRC = '「走吧。」〔旧缓存 2〕';
@@ -148,7 +148,11 @@ await t('旧缓存里的字面 \\n：命中时就修好，不发请求，并把�
   assert.equal(res.cached, 1);
   assert.equal(res.results[0], '"What are you doing?" she asked.\n"I\'m waiting for someone."');
   await new Promise((r) => setTimeout(r, 2700)); // 等缓存延迟落盘（LIMITS.flushMs = 2500）
-  const stored = (await sessionArea.get('dt.cache.v1'))['dt.cache.v1'].entries;
+  // 缓存现在分段存：dt.cache.v1.s.index 是段号清单，dt.cache.v1.s.<段号> 是 [键, 译文] 列表
+  const index = (await sessionArea.get('dt.cache.v1.s.index'))['dt.cache.v1.s.index'] || [];
+  const parts = await sessionArea.get(index.map((id) => 'dt.cache.v1.s.' + id));
+  const stored = Object.values(parts).flat();
+  assert.equal((await sessionArea.get('dt.cache.v1'))['dt.cache.v1'], undefined, '旧格式的整层键应已迁移删掉');
   const row = stored.find((pair) => pair[0] === makeKey(scope, LEGACY_SRC));
   assert.ok(row && !hasLiteral(row[1]), '存储里的旧值应已修好：' + (row && row[1]));
 });
@@ -203,6 +207,68 @@ await t('认不出的结构照样失败：不把对象 / 字段名插进网页',
   const res = await translate(['己〔6〕']);
   assert.notEqual(res.results[0], '[object Object]');
   assert.ok(res.results[0] === null || !/object Object|"value"/.test(res.results[0]), '不能插入结构碎片：' + res.results[0]);
+});
+
+// 内容脚本 190s 超时后会重发同一批，几个框架也可能同时翻同一段：后台这段还在翻时，不能再付一次钱
+function gatedFetch(respond) {
+  let open;
+  const gate = new Promise((r) => {
+    open = r;
+  });
+  const real = globalThis.fetch;
+  globalThis.fetch = async function (url, init) {
+    await gate;
+    return respond(url, init, real);
+  };
+  return {
+    open,
+    restore() {
+      globalThis.fetch = real;
+    }
+  };
+}
+const tick = () => new Promise((r) => setTimeout(r, 20));
+
+await t('同一段文字已经在翻：重发 / 别的框架同时请求时不再发一次，等那边的结果', async () => {
+  calls = [];
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const gate = gatedFetch((url, init, real) => real(url, init));
+  try {
+    const first = translate(['等待中的段落〔7〕']);
+    await tick();
+    const second = translate(['等待中的段落〔7〕', '另一段〔7〕']);
+    await tick();
+    gate.open();
+    const [a, b] = await Promise.all([first, second]);
+    assert.equal(a.results[0], 'T:等待中的段落〔7〕');
+    assert.deepEqual(b.results, ['T:等待中的段落〔7〕', 'T:另一段〔7〕']);
+    const sentTwice = calls.filter((texts) => texts.includes('等待中的段落〔7〕')).length;
+    assert.equal(sentTwice, 1, '同一段只能请求一次，实际 ' + sentTwice + ' 次');
+  } finally {
+    gate.restore();
+  }
+});
+
+await t('在途的那次失败：等着它的请求拿到同一个失败原因，之后还能重新请求', async () => {
+  calls = [];
+  const gate = gatedFetch(() => new Response('{"error":{"message":"bad key"}}', { status: 401 }));
+  try {
+    const first = translate(['失败的段落〔8〕']);
+    await tick();
+    const second = translate(['失败的段落〔8〕']);
+    await tick();
+    gate.open();
+    const [a, b] = await Promise.all([first, second]);
+    assert.equal(a.ok, false);
+    assert.equal(b.ok, false);
+    assert.deepEqual(b.results, [null]);
+    assert.match(b.error, /API Key/, '应带上真正的失败原因：' + b.error);
+  } finally {
+    gate.restore();
+  }
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const again = await translate(['失败的段落〔8〕']);
+  assert.equal(again.results[0], 'T:失败的段落〔8〕', '失败后不能一直挂在「在途」上');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

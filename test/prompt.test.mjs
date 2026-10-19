@@ -29,6 +29,12 @@ t('普通翻译：有「已是目标语言原样返回」，没有风格要求',
   assert.ok(!p.includes('【风格要求】'));
 });
 
+t('简体 / 繁体：目标是中文时提示另一种写法也要转写；其它目标语言不加这句', () => {
+  assert.ok(systemPrompt('zh-TW').includes('简体中文的段落不算已是繁體中文'));
+  assert.ok(systemPrompt('zh-CN').includes('繁體中文的段落不算已是简体中文'));
+  assert.ok(!systemPrompt('en').includes('转写成'));
+});
+
 t('文言文：去掉「原样返回」，换成风格要求，并要求中文原文也改写', () => {
   const p = systemPrompt('zh-CN', 'classical');
   assert.ok(!p.includes(SAME_LANG_RULE), '风格模式下还留着规则 4，中文页面会一个字都不改');
