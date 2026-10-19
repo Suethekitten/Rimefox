@@ -65,3 +65,12 @@
 - 仅译文模式真实浏览器检查：Aeon 的 `.ld-dropcap` 段落修复前整个段落译文（385 字）被写进下沉字母 `<span>`；修复后下沉节点只保留译文首字（1 字），其余进入正文文本节点，正文恢复正常段落。0.8.1 的大标题缩放、`data-dt` hydration 补回、首字下沉归一化均保持。
 - 未验证 / 限制：翻译内容来自本地假接口，不是真实服务商；未验证 Edge 和真实 API Key；行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制）；仅译文模式的大标题仍沿用站点字号。
 - 本验证在推送前完成；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+
+## 0.8.3 悬浮入口切换服务商验证
+
+- 审计对象：`main`（Rimefox 0.8.3）
+- 构建命令：`node tools/package-store.mjs`
+- 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
+- 结果：`dist/Rimefox-v0.8.3-store.zip` 57 个文件、275,405 B；manifest.json 在根目录；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 106 / 106；Chrome 打包校验成功（CRX3）
+- 商店截图：新增 5 张 1280×800（整页双语浅/深、划词、隐私设置、术语表），见 [screenshots/](screenshots/)；使用真实扩展界面 + 本地演示页与本地测试接口的示例译文，未使用真实 API Key
+- 未验证 / 限制：没有用真实 API Key 跑端到端；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)

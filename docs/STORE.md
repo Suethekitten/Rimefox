@@ -1,13 +1,13 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-10-18，对应 `main`（Rimefox 0.8.2）。
+最后更新：2026-10-18，对应 `main`（Rimefox 0.8.3）。
 
 ## 当前状态
 
 - 仓库已公开：<https://github.com/Suethekitten/Rimefox>
-- 商店包：`dist/Rimefox-v0.8.2-store.zip`（57 个文件，273,626 B），manifest.json 在 ZIP 根目录
+- 商店包：`dist/Rimefox-v0.8.3-store.zip`（57 个文件，275,405 B），manifest.json 在 ZIP 根目录
 - 本文件只用于准备提交；**没有上传、没有提交审核、没有注册开发者账号、没有付款**
-- GitHub Release 的 `Rimefox-v0.8.2.zip` 是整仓发布包，**不能**当作商店包上传
+- GitHub Release 的 `Rimefox-v0.8.3.zip` 是整仓发布包，**不能**当作商店包上传
 
 ## 商店包
 
@@ -27,8 +27,8 @@ node tools/package-store.mjs
 验证命令：
 
 ```bash
-unzip -l dist/Rimefox-v0.8.2-store.zip
-unzip -t dist/Rimefox-v0.8.2-store.zip
+unzip -l dist/Rimefox-v0.8.3-store.zip
+unzip -t dist/Rimefox-v0.8.3-store.zip
 node test/package-store.test.mjs
 ```
 
@@ -151,7 +151,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 事项 | 说明 |
 |---|---|
 | 开发者账号 | 注册 Chrome Web Store 开发者并支付一次性费用（以官方结算页为准）；完成身份验证与 2FA |
-| 商店包上传 | 使用 `dist/Rimefox-v0.8.2-store.zip`，不要上传 GitHub Release 的整仓包 |
+| 商店包上传 | 使用 `dist/Rimefox-v0.8.3-store.zip`，不要上传 GitHub Release 的整仓包 |
 | 截图 / 宣传图 | 5 张 1280×800 截图已生成，需人工确认采用或重拍；按控制台要求补 440×280 |
 | 审核专用 API Key | 在控制台私密审核说明里提供限额、可撤销的 Key；不放入仓库、包或公开 Issue |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
@@ -166,8 +166,8 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 广泛网站权限 `<all_urls>` | 提交上述最小权限理由；不为降权限破坏任意网页 / 任意 API 支持。后续可单独设计 `optional_host_permissions` |
 | BYOK 无法直接测试 | 最高优先级：准备审核专用、限额、可撤销 Key，通过控制台私密说明交付 |
 | YouTube 非官方接口 | 明示非官方、默认关闭、仅 CC；验证当前可用性，避免品牌背书与「保证全部字幕可用」的承诺 |
-| 隐私政策与实际行为不一致 | 本次已按 0.8.2 代码核对；欢迎页只读取本地配置、不新增网络请求，译文排版修复不改变数据流，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
-| 版本与仓库差异 | 以 `main` 实际版本为准；0.8.2 修复仅译文首字下沉，未改权限、API Key 存储或服务商协议 |
+| 隐私政策与实际行为不一致 | 本次已按 0.8.3 代码核对；欢迎页只读取本地配置、不新增网络请求，译文排版与悬浮入口切换服务商不改变数据流，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
+| 版本与仓库差异 | 以 `main` 实际版本为准；0.8.3 新增悬浮入口切换服务商，未改权限、API Key 存储或服务商协议 |
 
 ## 官方依据（2026-10-18 查询）
 
