@@ -1066,7 +1066,32 @@
     if (host.getAttribute('data-side') !== 'left') return '没切到左侧';
     if (dock.hasAttribute('data-auto')) return '关掉自动隐藏后不该半藏';
     if (toggle !== 'Translate this page') return '英文界面的说明不对：' + toggle;
-    return provider === 'Current provider: Gemini · flash' ? true : '服务商说明不对：' + provider;
+    return provider === 'Switch provider (current: Gemini · flash)' ? true : '服务商说明不对：' + provider;
+  });
+
+  check('悬浮入口：服务商菜单只列有 Key 的，再点一次收起', function () {
+    emitConfig({
+      dockEnabled: true,
+      providers: [
+        { id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat', hasKey: true, current: true },
+        { id: 'custom:2', name: '硅基流动', model: 'qwen', hasKey: true, current: false },
+        { id: 'sftest', name: '没有 Key 的', model: 'x', hasKey: false, current: false }
+      ],
+      page: {}
+    });
+    var menu = DT.dock.menu();
+    if (!menu) return '没有创建菜单节点';
+    if (!menu.hidden) return '默认应该是收起的';
+    DT.dock.run('provider');
+    if (menu.hidden) return '点服务商按钮后菜单没打开';
+    var items = menu.querySelectorAll('.menu-item');
+    if (items.length !== 2) return '应只列出有 Key 的 2 家，实际 ' + items.length;
+    if (items[0].getAttribute('aria-current') !== 'true') return '当前服务商没标记';
+    if (items[1].textContent.indexOf('硅基流动') < 0) return '自定义服务商名字不对：' + items[1].textContent;
+    DT.dock.run('provider');
+    if (!menu.hidden) return '再点一次应收起';
+    DT.state.config = null;
+    return true;
   });
 
   check('悬浮入口：收起时只有小球接收鼠标，看不见的面板不挡网页', function () {
