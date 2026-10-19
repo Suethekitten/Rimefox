@@ -140,11 +140,11 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 素材 | 规格与当前状态 |
 |---|---|
 | 图标 | `icons/icon128.png`，128×128 PNG 已存在；包内校验通过 |
-| 真实截图 | **必须**，1–5 张，1280×800 推荐或 640×400；待人工拍摄。建议整页双语、划词、设置 / 术语表、深色英文界面、YouTube CC |
+| 真实截图 | **已生成 5 张** 1280×800：整页双语（浅色 / 深色）、划词气泡、隐私保护设置、术语表。位于 [docs/screenshots/](screenshots/)，说明见 [screenshots/README.md](screenshots/README.md) |
 | 小宣传图 | 440×280；按控制台当前要求确认是否必填，待制作 |
 | 大宣传图 | 1400×560，可选，待决定 |
 
-截图隐藏 Key、个人网页、账号、账单与私人内容；不能用 Demo 冒充真实 API 输出。
+截图隐藏 Key、个人网页、账号、账单与私人内容。现有 5 张截图使用真实扩展界面 + 本地测试接口返回的人工示例译文（未使用真实 API Key）；如果希望展示真实服务商输出，请用自己的 Key 按 [screenshots/README.md](screenshots/README.md) 重拍。
 
 ## 仍需人工完成
 
@@ -152,7 +152,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 |---|---|
 | 开发者账号 | 注册 Chrome Web Store 开发者并支付一次性费用（以官方结算页为准）；完成身份验证与 2FA |
 | 商店包上传 | 使用 `dist/Rimefox-v0.8.2-store.zip`，不要上传 GitHub Release 的整仓包 |
-| 截图 / 宣传图 | 至少 1 张真实截图；按控制台要求补 440×280 |
+| 截图 / 宣传图 | 5 张 1280×800 截图已生成，需人工确认采用或重拍；按控制台要求补 440×280 |
 | 审核专用 API Key | 在控制台私密审核说明里提供限额、可撤销的 Key；不放入仓库、包或公开 Issue |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
 | 支持入口 | 已可用：GitHub Issues 公开 |

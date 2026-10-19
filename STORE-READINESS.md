@@ -6,7 +6,7 @@
 
 ## 结论摘要
 
-代码与商店包已经达到「可以上传」的合规状态；**当前还不能直接提交审核**，差的是非代码事项：真实截图、开发者账号、审核专用 API Key、控制台 listing / 隐私问卷，以及把本地审计修复推送上线。
+代码与商店包已经达到「可以上传」的合规状态；**当前还不能直接提交审核**，差的是非代码事项：确认截图样张、开发者账号、审核专用 API Key、控制台 listing / 隐私问卷，以及上传商店包。0.8.2 与隐私政策已推送到公开仓库。
 
 本轮在 0.8.1 的中文排版修复基础上，继续修复仅译文模式下首字下沉段落把整段译文塞进下沉字母的问题；没有修改权限、API Key 存储或服务商协议，没有上传、没有提交审核、没有注册账号或付款。版本号与 CHANGELOG 已按仓库规范更新到 0.8.2。
 
@@ -16,7 +16,7 @@
 
 | 项目 | 结果与证据 |
 |---|---|
-| Git 状态 | 审计开始时工作区干净；0.8.2 改动在本地，未 reset / rebase / 覆盖提交 |
+| Git 状态 | 0.8.2 已推送（origin/main = `5442adb`）；本轮只新增截图与文档，未 reset / rebase / 覆盖提交 |
 | 版本一致 | `manifest.json`、`content/core.js` 的 `DT.VERSION`、`package.json` 均为 0.8.2 |
 | Manifest V3 | `manifest_version: 3`；service worker 为 ESM；无 `update_url`、无自定义 CSP、无 `externally_connectable`、无 `optional_permissions` |
 | 权限清单 | `storage`、`activeTab`、`scripting`、`contextMenus`、`host_permissions: <all_urls>`；未申请 `tabs` / `webRequest` / `cookies` / `history` / `downloads` 等 |
@@ -50,12 +50,12 @@
 | ZIP 完整性 | `unzip -t dist/Rimefox-v0.8.2-store.zip` | 无错误；manifest.json 在根目录 |
 | Chrome 校验 | `chrome --pack-extension=<解包目录>` | 成功生成 CRX3 |
 | 打包测试 | `node test/package-store.test.mjs` | PASS |
-| Markdown 链接 | 仓库内相对链接检查 | 44 个链接，0 失效（见下） |
+| Markdown 链接 | 仓库内相对链接检查 | 52 个链接，0 失效（见下） |
 | 密钥扫描 | 对解包后的商店包做正则扫描 | 未发现明显密钥 |
 
 ### 链接检查
 
-检查范围：README、PRIVACY、HANDOFF、THIRD-PARTY-NOTICES、本报告、docs/ 下 8 个 Markdown 与 SECURITY.md，共 44 个相对链接；0 个失效。外部链接（GitHub、Chrome 官方文档、服务商站点）单独用 HTTP 状态核对，见「公开链接」与 docs/STORE.md 的参考列表。
+检查范围：README、PRIVACY、HANDOFF、THIRD-PARTY-NOTICES、本报告、docs/ 下 9 个 Markdown（含 screenshots/README.md）与 SECURITY.md，共 52 个相对链接；0 个失效。外部链接（GitHub、Chrome 官方文档、服务商站点）单独用 HTTP 状态核对，见「公开链接」与 docs/STORE.md 的参考列表。
 
 ---
 
@@ -63,12 +63,11 @@
 
 这些不是代码缺陷，但不完成就不能提交：
 
-1. **真实截图**：Chrome Web Store 至少需要 1 张截图（1280×800 或 640×400），建议 3–5 张。仓库目前只有图标，没有产品截图。
+1. **截图确认**：5 张 1280×800 样张已生成在 [docs/screenshots/](docs/screenshots/)（真实扩展界面 + 本地测试接口的示例译文）；需维护者确认采用，或用真实 API Key 按 [说明](docs/screenshots/README.md) 重拍。
 2. **开发者账号**：注册 Chrome Web Store 开发者、完成身份验证与 2FA、支付一次性费用；没有账号无法上传。
 3. **审核专用 API Key**：扩展是 BYOK，没有 Key 审核员无法验证真实翻译。需准备限额、可撤销的测试 Key，只通过控制台私密审核说明提供，不能写进仓库、包或公开 Issue。
 4. **控制台字段**：单一用途、权限理由、listing 文案、Privacy practices 数据类别与认证、隐私政策 URL、支持 URL 必须按 [docs/STORE.md](docs/STORE.md) 的建议填写。
-5. **把本地改动推送上线**：0.8.2 仅译文修复与文档改动在审计时只在本地提交；推送后商店填写的隐私政策 URL 必须指向最新内容。
-6. **上传商店包**：使用 `dist/Rimefox-v0.8.2-store.zip`，不要上传 GitHub Release 的 `Rimefox-v0.8.2.zip`。
+5. **上传商店包**：使用 `dist/Rimefox-v0.8.2-store.zip`，不要上传 GitHub Release 的 `Rimefox-v0.8.2.zip`。
 
 ---
 
@@ -89,10 +88,10 @@
 | 事项 | 负责人 | 说明 |
 |---|---|---|
 | 开发者账号注册 / 付费 / 2FA | 维护者 | 本任务未注册、未付款 |
-| 拍真实截图 / 做 440×280 宣传图 | 维护者 | 截图需隐藏 Key、个人页面与账号信息 |
+| 确认截图样张 / 做 440×280 宣传图 | 维护者 | 样张已生成；采用前确认是否用真实 API 重拍，并隐藏 Key、个人页面与账号信息 |
 | 准备审核专用 API Key | 维护者 | 限额、可撤销；只放控制台私密说明 |
 | 填写 listing 与 Privacy practices | 维护者 | 可按 docs/STORE.md 直接粘贴 |
-| 推送审计修复 | 维护者确认后 | 本轮只本地提交，不 push |
+| 推送截图与文档 | 维护者确认后 | 本轮截图与文档只本地提交，不 push |
 | 上传商店包并提交审核 | 维护者 | 不得由本任务执行 |
 
 ---
@@ -100,7 +99,7 @@
 ## 五、未验证项
 
 - 没有用真实 API Key 跑端到端翻译；没有在真实网页、YouTube 字幕、iframe 上做人工回归。
-- 没有实际拍摄商店截图或制作宣传图。
+- 截图使用本地演示页与本地测试接口的示例译文，未使用真实 API Key 或真实服务商输出；未制作 440×280 宣传图。
 - 没有上传 Chrome Web Store，因此没有真实审核结果。
 - 没有验证 Chrome Web Store 后台对简介字符数、分类和数据类别的最终呈现；以提交时表单为准。
 
@@ -110,11 +109,10 @@
 
 **还不能。** 代码、权限、隐私政策文案和商店包已经准备好，测试与打包验证通过；但仍缺：
 
-1. 至少一张真实截图；
+1. 确认 5 张截图样张（已生成）或按说明用真实 API 重拍；
 2. 开发者账号（注册、付费、2FA）；
 3. 审核专用 API Key；
 4. 控制台 listing / 隐私问卷填写；
-5. 把本地隐私政策与文档修复推送上线；
-6. 上传 `Rimefox-v0.8.2-store.zip` 并提交审核。
+5. 上传 `Rimefox-v0.8.2-store.zip` 并提交审核。
 
-完成这 6 项后，当前版本即可提交审核；不需要再改代码。
+完成这 5 项后，当前版本即可提交审核；不需要再改代码。
