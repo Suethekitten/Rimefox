@@ -13,6 +13,9 @@ on:
     paths:
       - manifest.json
       - .github/workflows/release.yml
+      # 测试 / 自检改动也要重新校验：0.9.4 的教训是自检用例只在 CI 上失败
+      - selftest/**
+      - test/**
   workflow_dispatch:
 
 permissions:

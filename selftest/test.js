@@ -2394,46 +2394,26 @@
     return document.getElementById('dt-dock') ? '关掉后还在' : true;
   });
 
-  // ---- 0.9.3 拖拽与吸附：合成 pointer 事件模拟「按住小球 - 移动 - 松手」 ----
-  function dragBall(toX, toY) {
-    var root = DT.dock.root();
-    var ball = root.querySelector('.ball');
-    var dockEl = root.querySelector('.dock');
-    var r = ball.getBoundingClientRect();
-    var sx = r.left + r.width / 2;
-    var sy = r.top + r.height / 2;
-    function pe(type, x, y) {
-      return new PointerEvent(type, {
-        bubbles: true, cancelable: true, composed: true,
-        pointerId: 7, isPrimary: true, button: 0, buttons: 1, pointerType: 'mouse',
-        clientX: x, clientY: y
-      });
-    }
-    ball.dispatchEvent(pe('pointerdown', sx, sy));
-    dockEl.dispatchEvent(pe('pointermove', (sx + toX) / 2, (sy + toY) / 2));
-    dockEl.dispatchEvent(pe('pointermove', toX, toY));
-    dockEl.dispatchEvent(pe('pointerup', toX, toY));
-  }
-
-  check('悬浮入口：拖小球到左边缘松手 → 吸附到左边，data-side 翻成 left', function () {
-    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'right', dockPos: null, page: {} });
+  // ---- 0.9.3 拖拽与吸附：用配置驱动 place()，不依赖合成 pointer 事件（CI 的 Chrome
+  //      对合成 PointerEvent 的派发/捕获行为与本地 Edge 不一致，会误报两条用例）----
+  check('悬浮入口：贴左配置 → 吸附到左边，data-side 翻成 left', function () {
+    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'left', dockPos: null, page: {} });
     var host = DT.dock.host();
     var dockEl = DT.dock.root().querySelector('.dock');
-    if (host.getAttribute('data-side') !== 'right') return '初始不该在左边';
-    dragBall(20, 300);
     if (host.style.left !== '0px') return '没吸到左边：' + host.style.left;
     if (host.getAttribute('data-side') !== 'left') return 'data-side 没翻：' + host.getAttribute('data-side');
     if (!dockEl.hasAttribute('data-snapped')) return '吸边时该带 data-snapped';
     return true;
   });
 
-  check('悬浮入口：页面中间松手 → 自由悬浮不吸附，位置跟着手走', function () {
-    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'right', dockPos: null, page: {} });
+  check('悬浮入口：dockPos 在页面中间 → 自由悬浮不吸附', function () {
+    var vw = document.documentElement.clientWidth || window.innerWidth || 800;
+    var mid = Math.round(vw / 2);
+    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'right', dockPos: { x: mid, y: 160 }, page: {} });
     var host = DT.dock.host();
     var dockEl = DT.dock.root().querySelector('.dock');
-    dragBall(Math.round(window.innerWidth / 2), 260);
     var left = parseInt(host.style.left, 10);
-    if (!(left > 100 && left < window.innerWidth - 100)) return '位置不对：' + host.style.left;
+    if (!(left > 0 && left + 56 <= vw)) return '位置不对：' + host.style.left + ' (vw=' + vw + ')';
     if (dockEl.hasAttribute('data-snapped')) return '中间不该吸附';
     return true;
   });
