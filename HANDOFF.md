@@ -66,6 +66,7 @@ edge-bilingual/
 │   ├── site-rules.js      站点规则：内置规则、校验、按网址匹配；夜间模式网站名单
 │   ├── ui-appearance.js   设置页/弹窗共用：强调色等写到 <html>、深浅色圆形过渡、跨页面配置同步、空闲执行
 │   ├── ui-theme-boot.js   设置页/弹窗的首帧主题与外观预判（<head> 同步执行，避免闪一帧白底）
+│   ├── ui-tokens.css      弹窗 / 设置页 / 欢迎页共用的设计变量：材质、三级文字、强调色派生、圆角、阴影、字体；深浅色与「减少透明 / 关闭阴影」都在这里切换（各页面 CSS 首行 @import）
 │   └── welcome.js         首次安装判断 / 欢迎页语言默认值 / getURL 打开（纯函数，可单测）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
@@ -584,6 +585,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 - 新增"跳过规则"前先想清楚：会不会把**可见内容**也跳过（坑 6、7）
 - 新增"替换规则"前先想清楚：会不会把**正文**也替换（坑：Tarkov 全页 flex）
 - 任何改动都先跑自检页，再上真实站点
+- **扩展页面的样式只用 `lib/ui-tokens.css` 的变量**（`--bg-canvas / --bg-card / --bg-subtle / --bg-elevated`、`--text-1/2/3`、`--accent` 及其派生 `--accent-hover / -soft / -ring / -border / -grad / -fill`、`--r-lg / -md / -sm`、`--shadow-card / -raise / -pop`、`--font-mono`）。不要在页面里另写一套深色变量：深色、自定义强调色、减少透明、关闭阴影都只改 ui-tokens.css。页面里的 `--bg / --card / --line / --muted …` 只是旧名别名。多层阴影里的「空阴影」写 `0 0 #0000`，不能写 `none`（整条声明会失效）；最低 Chrome 114，不能用 `light-dark()`
 - **我们加到网页上的界面**（悬浮入口、置顶小窗、气泡、提示条）都带 `data-dt-ui`，切分 / 观察器 / 点击补扫都会跳过；大块界面放进 closed Shadow DOM，不受网页样式影响。文案用 `DT.uiText(zh, en)` 跟随界面语言
 - **配置变了要跟着变的模块**用 `DT.onConfig(fn)` 订阅（外观、站点规则、悬浮入口），`main.js` 的 `loadConfig` 读完后统一 `DT.emitConfig`
 - **调度用的纯函数放 `core.js`，挂成 `DT.*`**（自检页能直接测）。约定：不读 `window`、不调 `getBoundingClientRect`、不碰 DOM 状态，矩形/时间等全部由调用方传参。现有：`distanceOf` / `nearView` / `batchLimits` / `nextRetry` / `joinSlots` / `matchesHotkey` / `keyFromCode` / `isEditableTarget`
