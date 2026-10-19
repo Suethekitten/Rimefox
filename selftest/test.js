@@ -452,6 +452,36 @@
   });
 
   // ---------------- 还原 ----------------
+  check('整块早退不会漏掉后来显示的隐藏段落', function () {
+    var box = document.createElement('div');
+    box.innerHTML = '<p>Visible paragraph before hidden dialog.</p><div id="dt-hidden-probe" style="display:none"><p>Hidden paragraph that appears later.</p></div>';
+    document.body.appendChild(box);
+    var visible = DT.collect(box);
+    if (!visible.length) { box.remove(); return '可见段没有收集到'; }
+    DT.state.mode = 'dual';
+    if (!DT.inject(visible[0], '可见段译文', 'zh-CN')) { box.remove(); return '可见段注入失败'; }
+    box.querySelector('#dt-hidden-probe').style.display = 'block';
+    var after = DT.collect(box);
+    var ok = after.some(function (u) { return u.text.indexOf('Hidden paragraph') >= 0; });
+    DT.restore();
+    box.remove();
+    return ok ? true : '隐藏段显示后没有被重新收集';
+  });
+
+  check('pruneDetached: 页面删除的节点会被释放，不拖到 restore', function () {
+    var host = document.createElement('div');
+    host.innerHTML = '<p>Detached paragraph stays out of the live tree.</p>';
+    document.body.appendChild(host);
+    var u = DT.collect(host)[0];
+    if (!u) { host.remove(); return '没有收集到单元'; }
+    DT.state.mode = 'dual';
+    if (!DT.inject(u, '已脱离页面的译文', 'zh-CN')) { host.remove(); return 'inject 返回 false'; }
+    host.remove();
+    var removed = DT.pruneDetached();
+    if (removed < 1) return '没有释放已脱离页面的记录';
+    return true;
+  });
+
   check('restore: 还原被就地替换的文本', function () {
     DT.restore();
     var td = fixture.querySelector('td');
@@ -1006,6 +1036,7 @@
       var target = a.querySelector('[data-dt-target]');
       var p = pointOf(srcText, 'Second');
       a.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: p.x, clientY: p.y }));
+      DT.hover.flushMove();
       if (highlighted('dt-hover-src') !== 'Second sentence follows.') return '原文高亮的不是这一句：' + highlighted('dt-hover-src');
       if (highlighted('dt-hover-target') !== '第二句跟着来。') return '译文高亮的不是对应句：' + highlighted('dt-hover-target');
       if (a.hasAttribute('data-dt-hover')) return '不该再整段高亮';

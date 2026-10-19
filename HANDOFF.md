@@ -87,7 +87,7 @@ edge-bilingual/
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
 ├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs，见 7.1c）
-└── selftest/              离线自检（157 条用例；e2e 脚本会顺带跑一遍，见 7.1c）
+└── selftest/              离线自检（159 条用例；e2e 脚本会顺带跑一遍，见 7.1c）
 ```
 
 **为什么内容脚本是 classic script 而不是 ESM？**
@@ -405,7 +405,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-157 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、悬停句级 / 行级 / 段落级、代际隔离与段落级 SPA 更新、真实《罗生门》夹具（单 `<br>`+全角缩进 / rb/rp/rt / 图片基字 Ruby / 只有 fixture 时也要跑）。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
+159 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、悬停句级 / 行级 / 段落级、代际隔离与段落级 SPA 更新、真实《罗生门》夹具（单 `<br>`+全角缩进 / rb/rp/rt / 图片基字 Ruby / 只有 fixture 时也要跑）。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -435,6 +435,7 @@ node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层�
 node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
 node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
+node tools/stability-audit.mjs                # 真实 Chrome 长文 / 大量段落 / 动态 / 内存基准（直接页面）
 ```
 真实 Chrome（`--browser` 或环境变量 `RIMEFOX_BROWSER` 可换成 Edge）+ CDP `Extensions.loadUnpacked` 加载工作树 + 本地假 OpenAI 兼容接口，不需要 API Key，不进 CI（要真实浏览器，YouTube 还要能上网）。
 `--verbose` 打印扩展调试日志、YouTube 字幕请求 / 响应、钩子消息和广告开始 / 结束；`--youtube-only` 跳过文章页和设置页；`--headed` 显示窗口。
@@ -557,7 +558,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **157 / 157**
+4. 跑自检页：必须 **159 / 159**
 4b. 跑 Node 单测：`node --test test/*.test.mjs`（21 个文件、按退出码判定，应全部通过；CI 发版前跑同一条命令）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -635,5 +636,6 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 - **Ruby**：`rubyAnnotationsFor(el, chars, bounds, own)` 除字符映射外，再按本段 DOM Range（上一段分隔 `<br>` 之后 → 本段分隔 `<br>` 之前）扫所有 `<ruby>`。青空文库的外字图片基字（`<img class="gaiji">`）没有文本字符，旧逻辑漏掉 3 个 `rt`；现在仅译文可见 `rt` = 0。
 - **仅译文空白**：根因不是 CSS，而是「整篇一个单元 + `injectRuby` 清空全部正文后 40 个 `<br>` 留在原位、唯一译文节点 append 到末尾」。段落单元正确后，每段译文回到本段位置；真实页面首段译文 y≈30、最大段间空白 30px、高度与原文同量级。
 - **多段落状态**：`main.js` 的 settled / failures / churn 从「元素」改为「元素 → Map(源文本签名 + 段序号)」；同一容器里一段失败不会被另一段的成功清掉，一段连续被站点改写不会让兄弟段落一起停止。懒翻译 / 批次优先级用 `DT.rectOfUnit(unit)`（段首文本节点的矩形），不再用整个正文容器的高度。
-- **测试**：新增 `test/fixtures/aozora-roshomon.html`（从真实页面抽取的 4 段 + 对白续行 + 无缩进续行 + rb/rp/rt）；自检 151 → **157**（真实夹具的分段 / 双语句 / 仅译文字面空白 / Ruby 显隐与恢复 / 模式切换 / 动态新增 / 对齐）；E2E 新增 `--aozora-live`，在真实页面跑段落、双语句、仅译文位置 / 空白 / 注音、悬停、动态补翻、关闭恢复，并保存截图与 `*-diagnostics.json`。旧 0.9.1 用同一工具跑真实页面：1 个单元、1 个译文节点、仅译文 y=210、3 个可见 `rt`——证明测试能抓到回归。
+- **稳定性审计（0.9.2 同版）**：修复 3000 段注入 116 秒的主线程卡顿（实时 CSSStyleDeclaration → 样式快照）、观察器克隆清理 O(n²)、tx / detached rendered 过期引用、findRenderedFor / Ruby / fillSnapshot 的重复扫描；`MAX_UNITS` 在段循环和 collectAll 全局生效；全渲染容器用源文本签名早退。报告见 `docs/STABILITY-AUDIT-0.9.2.md`，基准 `tools/stability-audit.mjs`。
+- **测试**：新增 `test/fixtures/aozora-roshomon.html`（从真实页面抽取的 4 段 + 对白续行 + 无缩进续行 + rb/rp/rt）；自检 151 → **159**（真实夹具的分段 / 双语句 / 仅译文字面空白 / Ruby 显隐与恢复 / 模式切换 / 动态新增 / 对齐）；E2E 新增 `--aozora-live`，在真实页面跑段落、双语句、仅译文位置 / 空白 / 注音、悬停、动态补翻、关闭恢复，并保存截图与 `*-diagnostics.json`。旧 0.9.1 用同一工具跑真实页面：1 个单元、1 个译文节点、仅译文 y=210、3 个可见 `rt`——证明测试能抓到回归。
 - **未验证**：Pixiv / GitHub / Aeon / OWID / YouTube 真实页面仍未跑；竖排；Edge；真实模型下 `align` 遵守率与译文质量。

@@ -161,7 +161,7 @@
 
 ## 6. 改代码前的最低要求
 
-1. 动 `content/dom.js` → 跑 `selftest/index.html`（当前 157 条，必须全过；也可以用 `tools/e2e-extension.mjs` 自动跑）
+1. 动 `content/dom.js` → 跑 `selftest/index.html`（当前 159 条，必须全过；也可以用 `tools/e2e-extension.mjs` 自动跑）
 2. 动 `lib/` / `background.js` / `options/` → 跑 `test/*.test.mjs`（当前 21 个文件、368 条；CI 发版前用 `node --test test/*.test.mjs` 全跑）
 3. 新增跳过规则 → 想清楚会不会把可见内容跳过
 4. 新增替换规则 → 想清楚会不会破坏布局或替换正文

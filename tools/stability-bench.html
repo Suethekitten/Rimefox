@@ -1,0 +1,151 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>#fixture{width:760px;font:16px/1.8 serif;margin:20px}.box{margin:8px 0}</style>
+</head><body><div id="fixture"></div><pre id="result"></pre>
+<script src="../content/core.js"></script>
+<script src="../content/units.js"></script>
+<script src="../content/dom.js"></script>
+<script src="../content/hover.js"></script>
+<script>
+(function () {
+  var DT = window.__DT;
+  var fixture = document.getElementById('fixture');
+  var result = document.getElementById('result');
+  var longTasks = [];
+  try {
+    if (window.PerformanceObserver) {
+      new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) { longTasks.push(Math.round(e.duration * 10) / 10); });
+      }).observe({ entryTypes: ['longtask'] });
+    }
+  } catch (err) {}
+
+  function now() { return Math.round(performance.now() * 10) / 10; }
+  function heapMB() {
+    return performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576 * 10) / 10 : -1;
+  }
+  function gc() { if (window.gc) { try { window.gc(); window.gc(); } catch (e) {} } }
+  function hash(text) {
+    var h = 2166136261;
+    for (var i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = (h * 16777619) >>> 0; }
+    return h >>> 0;
+  }
+  function para(i, ruby) {
+    var s = 'ある日の暮方の事である。一人の下人が、羅生門の下で雨やみを待っていた。段落' + i + '。';
+    if (ruby) s += '<ruby><rb>下人</rb><rp>（</rp><rt>げにん</rt><rp>）</rp></ruby>と<ruby><rb>羅生門</rb><rp>（</rp><rt>らしょうもん</rt><rp>）</rp></ruby>';
+    return s;
+  }
+  function run(name, build) {
+    var box = document.createElement('div');
+    box.className = 'box';
+    fixture.appendChild(box);
+    build(box);
+    gc();
+    var before = box.textContent;
+    var h0 = heapMB();
+    var t0 = now();
+    var units = DT.collect(box);
+    var t1 = now();
+    var targets = 0;
+    var injectOk = true;
+    if (units.length) {
+      DT.state.mode = 'dual';
+      if (DT.beginRenderCache) DT.beginRenderCache();
+      try {
+        units.forEach(function (u, i) { if (!DT.inject(u, '中文译文' + i + '。', 'zh-CN')) injectOk = false; });
+      } finally {
+        if (DT.endRenderCache) DT.endRenderCache();
+      }
+      targets = box.querySelectorAll('[data-dt-target]').length;
+    }
+    var t2 = now();
+    var again = units.length ? DT.collect(box) : [];
+    var t3 = now();
+    DT.restore();
+    var restoreOk = box.textContent === before;
+    box.remove();
+    gc();
+    return {
+      name: name, chars: before.length, units: units.length, targets: targets, injectOk: injectOk,
+      collectMs: Math.round((t1 - t0) * 10) / 10,
+      injectMs: Math.round((t2 - t1) * 10) / 10,
+      recollectMs: Math.round((t3 - t2) * 10) / 10,
+      recollectUnits: again.length, restoreOk: restoreOk,
+      heapBeforeMB: h0, heapAfterMB: heapMB(), hash: hash(before)
+    };
+  }
+
+  var out = { scenarios: [], longTasks: longTasks, ua: navigator.userAgent };
+  ['10000', '100000', '500000'].forEach(function (n) {
+    out.scenarios.push(run('single-' + n + '-chars', function (box) { box.textContent = 'あ'.repeat(Number(n)); }));
+  });
+  [1000, 3000].forEach(function (n) {
+    out.scenarios.push(run('paragraphs-' + n + '-with-ruby', function (box) {
+      var rows = [];
+      for (var i = 0; i < n; i += 1) rows.push('<br>\n　' + para(i, true));
+      box.innerHTML = rows.join('');
+    }));
+  });
+  out.scenarios.push(run('dom-10000-nodes', function (box) {
+    var html = '';
+    for (var i = 0; i < 1000; i += 1) {
+      html += '<div class="row"><span>row ' + i + ' </span><b>bold</b><i>italic</i><a href="#">link</a><br><ul><li>one</li><li>two</li></ul><table><tr><td>cell ' + i + '</td></tr></table></div>';
+    }
+    box.innerHTML = html;
+  }));
+
+  (function dynamic() {
+    var box = document.createElement('div');
+    box.className = 'box';
+    fixture.appendChild(box);
+    var rows = [];
+    for (var i = 0; i < 500; i += 1) rows.push('<br>\n　' + para(i, true));
+    box.innerHTML = rows.join('');
+    var before = box.textContent;
+    var t0 = now();
+    for (var round = 0; round < 20; round += 1) {
+      var add = document.createElement('div');
+      for (var j = 0; j < 20; j += 1) {
+        var p = document.createElement('p');
+        p.textContent = para(10000 + round * 20 + j, false);
+        add.appendChild(p);
+      }
+      box.appendChild(add);
+      DT.collect(box);
+      add.remove();
+      if (DT.pruneDetached) DT.pruneDetached();
+    }
+    var t1 = now();
+    DT.restore();
+    var ok = box.textContent === before;
+    box.remove();
+    gc();
+    out.dynamic = { rounds: 20, addedPerRound: 20, elapsedMs: Math.round((t1 - t0) * 10) / 10, restoreOk: ok, heapAfterMB: heapMB() };
+  })();
+
+  (function cycles() {
+    var box = document.createElement('div');
+    box.className = 'box';
+    fixture.appendChild(box);
+    var rows = [];
+    for (var i = 0; i < 500; i += 1) rows.push('<br>\n　' + para(i, false));
+    box.innerHTML = rows.join('');
+    var t0 = now();
+    for (var round = 0; round < 10; round += 1) {
+      var units = DT.collect(box);
+      DT.state.mode = 'dual';
+      if (DT.beginRenderCache) DT.beginRenderCache();
+      units.forEach(function (u) { DT.inject(u, '循环译文', 'zh-CN'); });
+      if (DT.endRenderCache) DT.endRenderCache();
+      DT.restore();
+    }
+    var t1 = now();
+    box.remove();
+    gc();
+    out.cycles = { rounds: 10, paragraphs: 500, elapsedMs: Math.round((t1 - t0) * 10) / 10, heapAfterMB: heapMB() };
+  })();
+
+  out.longTasks = longTasks;
+  result.textContent = JSON.stringify(out);
+})();
+</script></body></html>

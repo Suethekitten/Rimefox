@@ -669,10 +669,30 @@
 
   hover.clear = clear;
 
+  // 鼠标移动每帧最多处理一次：长段落 / 大量 Ruby 页面上，mousemove 可能远高于 60Hz，
+  // 每个事件都做 caret + 文本偏移查找会让主线程持续忙。
+  var moveRaf = 0;
+  var moveArgs = null;
+  function flushMove() {
+    moveRaf = 0;
+    if (!moveArgs) return;
+    var args = moveArgs;
+    moveArgs = null;
+    hover.updateAt(args.x, args.y, args.node);
+  }
+  // 测试 / 需要立即生效的调用方：把未处理的那一帧鼠标移动立刻执行
+  hover.flushMove = function () {
+    if (moveRaf) {
+      cancelAnimationFrame(moveRaf);
+      moveRaf = 0;
+    }
+    flushMove();
+  };
   document.addEventListener(
     'mousemove',
     function (event) {
-      hover.updateAt(event.clientX, event.clientY, event.target);
+      moveArgs = { x: event.clientX, y: event.clientY, node: event.target };
+      if (!moveRaf) moveRaf = requestAnimationFrame(flushMove);
     },
     { capture: true, passive: true }
   );

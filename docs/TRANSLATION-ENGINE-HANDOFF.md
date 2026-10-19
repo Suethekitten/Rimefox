@@ -269,7 +269,7 @@ node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》
 # 自检页（本机 headless Chrome 需要 --no-sandbox）
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \
   --user-data-dir=/tmp/chrome-selftest --allow-file-access-from-files \
-  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 157 / 157
+  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 159 / 159
 node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 ```
 
@@ -287,7 +287,7 @@ node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 
 **先读**：`AGENTS.md` → `HANDOFF.md` §5–§6 → 本文 §1–§5。
 
-**先跑**：`git status -sb && node --test test/*.test.mjs`，再跑自检页（157 / 157），再跑 E2E；能上网时加 `--aozora-live` 跑真实《罗生门》。
+**先跑**：`git status -sb && node --test test/*.test.mjs`，再跑自检页（159 / 159），再跑 E2E；能上网时加 `--aozora-live` 跑真实《罗生门》。
 
 **不要重复实现**（已经有了）：
 
