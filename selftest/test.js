@@ -2449,7 +2449,6 @@
     };
     ball.dispatchEvent(pe('pointerdown'));
     ball.dispatchEvent(pe('pointerup'));
-    ball.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
     if (host.style.left !== before) return '点按后位置变了：' + before + ' → ' + host.style.left;
     return true;
   });
@@ -2574,7 +2573,12 @@
 
   var summary = document.getElementById('summary');
   var allPass = passed === results.length;
+  var failed = results.filter(function (r) {
+    return !r.ok;
+  }).map(function (r) {
+    return r.name;
+  });
   summary.className = allPass ? 'pass' : 'fail';
-  summary.textContent = passed + ' / ' + results.length + (allPass ? '  全部通过' : '  存在失败项');
+  summary.textContent = passed + ' / ' + results.length + (allPass ? '  全部通过' : '  存在失败项：' + failed.slice(0, 3).join('；'));
   }
 })();

@@ -625,10 +625,12 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.9.3）
+## 14. 本版技术记录（0.9.4）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 > 0.9.2 的段落 / 注音 / 卡顿修复记录见 `docs/STABILITY-AUDIT-0.9.2.md` 与 0.9.2 的提交。
+
+- **0.9.3 → 0.9.4**：0.9.3 的 CI 在「跑离线自检」挂掉（161 / 163），本地 Edge 全过。排查发现新增的「原地点按不移动」用例会在自检页里真的派发一次 `click`，触发翻译开关的异步 `enable()`，与后续 dock 用例产生竞态；已去掉这次 click 派发，并让汇总在失败时带上失败用例名（CI 注释能直接看到），重发为 0.9.4。
 
 - **拖拽模型**（`content/dock.js`）：host 从 CSS `top:58%;right:0` 改为 JS 定位 `left/top`；`DT.dockDefault(side, view)` 算默认贴边位置，`DT.dockPlace(pos, view)` 负责吸附（离边 ≤72px 吸附，否则自由悬浮）与夹取；位置存 `config.dockPos = {x,y}`，设置页「恢复默认」写回 `null`。
 - **滚动条避让**：`viewOf()` 原用 `window.innerWidth`（含经典滚动条），贴右时 `x = innerWidth - w` 正好钻到滚动条下面。改为 `document.documentElement.clientWidth / clientHeight`（布局视口）；另加 `ResizeObserver(document.documentElement)`，页面变长/变短导致滚动条出现或消失时（只有 clientWidth 变、没有 resize 事件）重新 `place()`。
