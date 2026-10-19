@@ -642,6 +642,16 @@ select:focus,
   opacity: 0.5;
 }
 
+/* 悬停对照行：标签是四个字（英文 "Hover compare" 更长），.label 的固定列宽装不下，
+   溢出的文字会压到开关上。标签按内容取宽、开关靠右，与「夜间」行的开关同列。 */
+#hoverRow .label {
+  width: auto;
+}
+
+#hoverRow .night-line {
+  justify-content: flex-end;
+}
+
 /* ---- 强调色：和设置页同一套派生方式（设置页「外观」里选） ---- */
 :root[data-accent] {
   --accent: var(--accent-user);
