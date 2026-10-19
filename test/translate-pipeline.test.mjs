@@ -396,5 +396,59 @@ await t('noCache：输入框翻译不读也不写缓存', async () => {
   assert.equal(stored.find((pair) => pair[0] === key), undefined, '输入框的草稿不该进缓存');
 });
 
+
+// ---------------- 0.9.1 结构化对齐（align） ----------------
+await t('align：结构化 parts → 结果仍是整段译文，alignments 走旁路缓存', async () => {
+  await setGlossary([]);
+  reply = (texts) => JSON.stringify(texts.map((one) => ({ parts: [{ n: 1, t: 'One:' + one }, { n: 1, t: 'Two:' + one }] })));
+  calls = [];
+  const src = 'Aligned source twelve';
+  const first = await send({ type: 'translate', texts: [src], target: 'en', align: true });
+  assert.equal(first.ok, true);
+  assert.equal(first.results[0], 'One:' + src + ' Two:' + src);
+  assert.deepEqual(first.alignments[0], [{ n: 1, t: 'One:' + src }, { n: 1, t: 'Two:' + src }]);
+  assert.equal(calls.length, 1);
+  assert.ok(lastSystem.includes('"parts"'), 'align 请求应使用结构化输出提示词');
+
+  calls = [];
+  const again = await send({ type: 'translate', texts: [src], target: 'en', align: true });
+  assert.equal(calls.length, 0, '同一原文不该再发一次请求');
+  assert.equal(again.cached, 1);
+  assert.deepEqual(again.alignments[0], first.alignments[0], '缓存命中时对齐也要一起回来');
+});
+
+await t('align：模型不遵守格式 → 照常显示字符串译文，alignments 为 null', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  calls = [];
+  const src = 'Plain fallback sentence';
+  const res = await send({ type: 'translate', texts: [src], target: 'en', align: true });
+  assert.equal(res.ok, true);
+  assert.equal(res.results[0], 'T:' + src);
+  assert.equal(res.alignments[0], null);
+});
+
+await t('align：旧缓存（没有对齐）照常命中，不因为要悬停而重翻', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const src = 'Legacy cached sentence thirteen';
+  calls = [];
+  await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 1);
+  calls = [];
+  const res = await send({ type: 'translate', texts: [src], target: 'en', align: true });
+  assert.equal(calls.length, 0);
+  assert.equal(res.cached, 1);
+  assert.equal(res.results[0], 'T:' + src);
+  assert.equal(res.alignments[0], null, '旧缓存没有对齐信息 → 悬停降级');
+});
+
+await t('align：parts 不合法但带 translation 字段 → 退回普通解析并保留译文', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => ({ translation: 'Wrap:' + one, parts: [{ n: 0, t: 'bad' }] })));
+  const src = 'Malformed parts sentence';
+  const res = await send({ type: 'translate', texts: [src], target: 'en', align: true });
+  assert.equal(res.ok, true);
+  assert.equal(res.results[0], 'Wrap:' + src);
+  assert.equal(res.alignments[0], null);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

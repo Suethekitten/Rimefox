@@ -89,6 +89,7 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
   sandbox.top = iframe ? {} : sandbox;
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(new URL('content/core.js', root), 'utf8'), sandbox, { filename: 'core.js' });
+  vm.runInContext(fs.readFileSync(new URL('content/units.js', root), 'utf8'), sandbox, { filename: 'units.js' });
   // dom.js 的 DOM 引擎换成桩：这里只关心调度
   const DT = sandbox.__DT;
   DT.restore = () => {
@@ -192,6 +193,51 @@ await t('没开翻译时改配置：只更新状态，不重建', async () => {
   await c.message({ type: 'dt:configChanged' });
   assert.equal(c.DT.state.mode, 'translation');
   assert.equal(c.page.rebuilds, 0);
+});
+
+
+await t('整页翻译：后台的 alignments 经 alignmentOf 校验后交给 DT.inject', async () => {
+  const env = await boot({ config: { hoverCompare: true, lazy: false, skipSameLang: false } });
+  const DT = env.DT;
+  const unit = {
+    el: {
+      ...fakeElement(),
+      isConnected: true,
+      getBoundingClientRect: () => ({ width: 100, height: 20, top: 0, bottom: 20 })
+    },
+    text: 'One. Two.',
+    sentences: [
+      { index: 0, start: 0, end: 4, text: 'One.' },
+      { index: 1, start: 5, end: 9, text: 'Two.' }
+    ],
+    style: 'plain',
+    own: false
+  };
+  const seen = [];
+  DT.collectAll = () => [unit];
+  DT.inject = (u, text, lang, align) => {
+    seen.push({ text, align });
+    return true;
+  };
+  DT.sourceChanged = () => false;
+  DT.send = async (msg) => {
+    if (msg.type === 'config:get') {
+      return { ok: true, config: { hasKey: true, targetLang: 'zh-CN', mode: 'dual', hoverCompare: true, lazy: false, skipSameLang: false } };
+    }
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') {
+      assert.equal(msg.align, true, '多句段落应请求结构化对齐');
+      return { ok: true, results: ['译:One.译:Two.'], alignments: [[{ n: 1, t: '译:One.' }, { n: 1, t: '译:Two.' }]] };
+    }
+    return { ok: true };
+  };
+
+  await env.message({ type: 'dt:toggle' });
+  await flush();
+  await flush();
+  assert.equal(seen.length, 1, '应该注入一次');
+  assert.ok(seen[0].align && seen[0].align.reliable, '对齐应通过校验：' + JSON.stringify({ ali: unit.ali, want: unit.wantAlign, text: seen[0].text, sents: unit.sentences.length }));
+  assert.equal(JSON.stringify(seen[0].align.parts.map((p) => [p.srcFrom, p.srcTo])), JSON.stringify([[0, 1], [1, 2]]));
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

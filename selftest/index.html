@@ -235,7 +235,14 @@ A new stanza begins here.</div><p class="nv-source-newline">Hello
     <!-- 0.9.0 振假名夹具：<rt> 读音 / <rp> 括号不是正文，不能送翻、不能单独成段 -->
     <template id="tpl-ruby"><p id="fx-ruby" style="width: 600px">漢字<ruby>振り仮名<rp>(</rp><rt>ふりがな</rt><rp>)</rp></ruby>のテスト。</p></template>
 
+    <!-- 0.9.1 青空文库式小说：一个容器里用连续 <br> 分段，必须形成 3 个独立段落单元与 3 个插入锚点 -->
+    <template id="tpl-aozora"><div class="main_text" style="width:600px;font:16px/2 serif">ある日の暮方の事である。一人の下人が、羅生門の下で雨やみを待っていた。<br><br>広い門の下には、この男のほかに誰もいない。ただ、所々丹塗りの剥げた、大きな円柱に、蟋蟀が一匹とまっている。<br><br>羅生門が、朱雀大路にある以上は、この男のほかにも、雨やみをする市女笠や揉烏帽子が、もう二三人はありそうなものである。</div></template>
+
+    <!-- 0.9.1 Ruby：普通 rt / rp 组合 / rb / 嵌套行内标签 / 多个 Ruby 混合普通文字 / 无注音汉字 -->
+    <template id="tpl-ruby-mix"><p id="fx-ruby-mix" style="width:600px">彼は<ruby>羅生門<rt>らしょうもん</rt></ruby>の下で、<ruby>雨<rp>(</rp><rt>あめ</rt><rp>)</rp></ruby>やみを<strong>待って</strong>いた。</p><p id="fx-ruby-rb" style="width:600px">漢<ruby><rb>字</rb><rt>じ</rt></ruby>のテスト。</p><p id="fx-ruby-other" style="width:600px"><ruby>東京<rt>とうきょう</rt></ruby>は晴れ。</p><p id="fx-ruby-plain" style="width:600px">ここには注音のない漢字だけがある。</p></template>
+
     <script src="../content/core.js"></script>
+    <script src="../content/units.js"></script>
     <script src="../content/dom.js"></script>
     <script src="../content/appearance.js"></script>
     <script src="../content/subtitles-core.js"></script>

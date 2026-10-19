@@ -9,7 +9,8 @@ import {
   escapeRawControls,
   stripTrailingCommas,
   normalizeTranslationBreaks,
-  leaksWrapper
+  leaksWrapper,
+  parseAlignedArray
 } from '../lib/parse.js';
 
 let pass = 0;
@@ -244,6 +245,51 @@ t('思考过程里的方括号不干扰', () => {
 
 t('没有思考过程 → null', () => {
   assert.equal(parseArrayFromReasoning('', ['Hello']), null);
+});
+
+
+// ---------------- parseAlignedArray（0.9.1 结构化句子对齐） ----------------
+console.log('\n[parseAlignedArray]');
+
+t('一对一：parts 拼成整段译文，align 保留 n / t', () => {
+  const raw = '[{"parts":[{"n":1,"t":"第一句。"},{"n":1,"t":"第二句。"}]}]';
+  assert.deepEqual(parseAlignedArray(raw, 1), {
+    texts: ['第一句。第二句。'],
+    aligns: [[{ n: 1, t: '第一句。' }, { n: 1, t: '第二句。' }]]
+  });
+});
+
+t('多源一译：n=2 原样保留，交给内容侧校验总和', () => {
+  const raw = '[{"parts":[{"n":2,"t":"前两句合起来。"},{"n":1,"t":"第三句。"}]}]';
+  const out = parseAlignedArray(raw, 1);
+  assert.equal(out.texts[0], '前两句合起来。第三句。');
+  assert.deepEqual(out.aligns[0].map((p) => p.n), [2, 1]);
+});
+
+t('多条：条数一一对应；西文片段之间补空格，中日文不加', () => {
+  const raw = '[{"parts":[{"n":1,"t":"Hello."},{"n":1,"t":"World."}]},{"parts":[{"n":1,"t":"你好。"},{"n":1,"t":"世界。"}]}]';
+  const out = parseAlignedArray(raw, 2);
+  assert.deepEqual(out.texts, ['Hello. World.', '你好。世界。']);
+  assert.equal(out.aligns.length, 2);
+});
+
+t('模型没遵守格式（仍是字符串数组）→ 退回普通解析，align 为 null', () => {
+  const out = parseAlignedArray('["一","二"]', 2);
+  assert.deepEqual(out, { texts: ['一', '二'], aligns: [null, null] });
+});
+
+t('零件不合法 → 整条退回普通解析；普通解析也不认就 null', () => {
+  const bad = '[{"parts":[{"n":0,"t":"x"}]}]';
+  assert.equal(parseAlignedArray(bad, 1), null);
+  const wrapped = '[{"translation":"正常译文","parts":[{"n":0,"t":"x"}]}]';
+  assert.deepEqual(parseAlignedArray(wrapped, 1), { texts: ['正常译文'], aligns: [null] });
+});
+
+t('条数对不上 / 空 parts / 非整数 n → null，不能把不可靠结构当对齐', () => {
+  assert.equal(parseAlignedArray('[{"parts":[{"n":1,"t":"一"}]}]', 2), null);
+  assert.equal(parseAlignedArray('[{"parts":[]}]', 1), null);
+  assert.equal(parseAlignedArray('[{"parts":[{"n":1.5,"t":"一"}]}]', 1), null);
+  assert.equal(parseAlignedArray('[{"parts":[{"n":1,"t":"  "}]}]', 1), null);
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

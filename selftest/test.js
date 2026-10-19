@@ -975,16 +975,20 @@
     return out.join('|');
   }
 
-  check('悬停对照：句子切分与对齐（句数不同不按位置猜）', function () {
+  check('悬停对照：句子切分 + 结构化对齐校验（不按长度 / 句界比例猜）', function () {
     var text = 'First one. Version 3.5 is out! 第三句。第四句？';
     var parts = DT.hover.sentencesOf(text).map(function (s) { return text.slice(s[0], s[1]); });
     var r = eq(parts, ['First one.', 'Version 3.5 is out!', '第三句。', '第四句？']);
     if (r !== true) return r;
-    var a = [[0, 10], [11, 20], [21, 30]];
-    var b = [[0, 15], [16, 30]];
-    var got = [0, 1, 2].map(function (i) { return DT.hover.alignSentence(a, 30, b, 30, i); });
-    if (JSON.stringify(got) !== '[-1,-1,-1]') return '句数不同时不该给出对应句：' + JSON.stringify(got);
-    return DT.hover.alignSentence(a, 30, a, 30, 2) === 2 ? true : '句数相同应按序号';
+    var target = '第一句。3.5 版出了！第三句。第四句？';
+    var ok = DT.units.alignmentOf([{ n: 1, t: '第一句。' }, { n: 1, t: '3.5 版出了！' }, { n: 1, t: '第三句。' }, { n: 1, t: '第四句？' }], target, 4);
+    if (!ok || !ok.reliable) return '合法的一一对应没有被接受';
+    if (DT.units.partAt(ok, 2).srcFrom !== 2) return '第 3 句的源范围不对';
+    if (DT.units.alignmentOf([{ n: 1, t: '第一句。' }, { n: 1, t: '第二句。' }], target, 4)) return 'n 总和不够也算对齐';
+    if (DT.units.alignmentOf([{ n: 1, t: '译文里没有这句' }], target, 1)) return '片段不在译文里也算对齐';
+    var merged = DT.units.alignmentOf([{ n: 2, t: '第一句。3.5 版出了！' }, { n: 1, t: '第三句。' }, { n: 1, t: '第四句？' }], target, 4);
+    if (!merged || merged.parts[0].srcTo !== 2) return '多源一译（n=2）没有正确覆盖';
+    return true;
   });
 
   check('悬停对照：鼠标在第二句上，只高亮这一句原文和对应译文', function () {
@@ -992,18 +996,30 @@
     return withHoverFixture('<p id="hv-a">First sentence here. Second sentence follows. Third one ends.</p><p id="hv-b">Not translated</p>', function (box) {
       var a = box.querySelector('#hv-a');
       var srcText = a.firstChild;
-      if (!DT.inject(a, '第一句在这里。第二句跟着来。第三句结束。', 'zh-CN')) return 'inject 返回 false';
+      var targetText = '第一句在这里。第二句跟着来。第三句结束。';
+      var align = DT.units.alignmentOf(
+        [{ n: 1, t: '第一句在这里。' }, { n: 1, t: '第二句跟着来。' }, { n: 1, t: '第三句结束。' }],
+        targetText,
+        3
+      );
+      if (!DT.inject(a, targetText, 'zh-CN', align)) return 'inject 返回 false';
       var target = a.querySelector('[data-dt-target]');
       var p = pointOf(srcText, 'Second');
       a.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: p.x, clientY: p.y }));
       if (highlighted('dt-hover-src') !== 'Second sentence follows.') return '原文高亮的不是这一句：' + highlighted('dt-hover-src');
       if (highlighted('dt-hover-target') !== '第二句跟着来。') return '译文高亮的不是对应句：' + highlighted('dt-hover-target');
       if (a.hasAttribute('data-dt-hover')) return '不该再整段高亮';
+      var tip = document.querySelector('.dt-hover-tip');
+      if (!tip || tip.hidden || tip.querySelector('.dt-hover-body').textContent !== '第二句跟着来。') {
+        return '原文上悬停没有显示这句译文：' + (tip && tip.querySelector('.dt-hover-body') ? tip.querySelector('.dt-hover-body').textContent : '无气泡');
+      }
       p = pointOf(target.firstChild, '第三句');
       DT.hover.updateAt(p.x, p.y, target); // 鼠标移到译文的第三句
       if (highlighted('dt-hover-src') !== 'Third one ends.' || highlighted('dt-hover-target') !== '第三句结束。') {
         return '移到译文上没对上：' + highlighted('dt-hover-src') + ' / ' + highlighted('dt-hover-target');
       }
+      tip = document.querySelector('.dt-hover-tip');
+      if (!tip || tip.hidden || tip.querySelector('.dt-hover-body').textContent !== 'Third one ends.') return '译文上悬停没有显示原文';
       var b = box.querySelector('#hv-b');
       p = pointOf(b.firstChild, 'Not');
       DT.hover.updateAt(p.x, p.y, b); // 移到没翻译的段落
@@ -1019,7 +1035,9 @@
     if (!window.Highlight || !CSS.highlights) return true;
     return withHoverFixture('<button id="hv-btn">Sign in now. Then continue.</button><p id="hv-c">Elsewhere</p>', function (box) {
       var btn = box.querySelector('#hv-btn');
-      if (!DT.inject(btn, '立即登录。然后继续。', 'zh-CN')) return 'inject 返回 false';
+      var targetText = '立即登录。然后继续。';
+      var align = DT.units.alignmentOf([{ n: 1, t: '立即登录。' }, { n: 1, t: '然后继续。' }], targetText, 2);
+      if (!DT.inject(btn, targetText, 'zh-CN', align)) return 'inject 返回 false';
       if (!btn.hasAttribute('data-dt-replaced')) return '按钮应原地替换';
       var p = pointOf(btn.firstChild, '然后');
       DT.hover.updateAt(p.x, p.y, btn);
@@ -1093,7 +1111,9 @@
       DT.state.config = { hoverCompare: true, uiLang: 'zh' };
       return withHoverFixture('<button id="hv-toggle">Sign in now. Then continue.</button>', function (box) {
         var btn = box.querySelector('#hv-toggle');
-        if (!DT.inject(btn, '立即登录。然后继续。', 'zh-CN')) return 'inject 返回 false';
+        var toggled = '立即登录。然后继续。';
+        var align = DT.units.alignmentOf([{ n: 1, t: '立即登录。' }, { n: 1, t: '然后继续。' }], toggled, 2);
+        if (!DT.inject(btn, toggled, 'zh-CN', align)) return 'inject 返回 false';
         var pt = pointOf(btn.firstChild, '然后');
         DT.hover.updateAt(pt.x, pt.y, btn);
         var tip = document.querySelector('.dt-hover-tip');
@@ -1107,7 +1127,7 @@
         DT.state.config = { hoverCompare: true, uiLang: 'zh' };
         DT.emitConfig(DT.state.config);
         DT.hover.updateAt(pt.x, pt.y, btn);
-        return !tip.hidden && highlighted('dt-hover-target') === '然后继续。' ? true : '重新开启后没有恢复';
+        return !tip.hidden && highlighted('dt-hover-target') === '然后继续。' ? true : '重新开启后没有恢复：' + highlighted('dt-hover-target');
       });
     } finally {
       DT.state.config = prev;
@@ -1309,6 +1329,221 @@
     });
   });
 
+
+  // ---------------- 0.9.1 段落单元 / Ruby / 锚点 ----------------
+  function withTemplate(id, mode, fn) {
+    var box = document.createElement('div');
+    box.appendChild(document.getElementById(id).content.cloneNode(true));
+    document.getElementById('fixture').appendChild(box);
+    var prev = DT.state.mode;
+    DT.state.mode = mode;
+    try {
+      return fn(box);
+    } finally {
+      DT.state.mode = prev;
+      DT.restore();
+      box.remove();
+    }
+  }
+
+  check('青空文库式：同一容器内连续 <br> 拆成 3 个段落单元，各有独立锚点', function () {
+    return withTemplate('tpl-aozora', 'dual', function (box) {
+      var div = box.querySelector('.main_text');
+      var units = DT.collect(box);
+      if (units.length !== 3) return '应为 3 个段落单元，实际 ' + units.length + '：' + JSON.stringify(units.map(function (u) { return u.text.slice(0, 10); }));
+      var r = eq(units.map(function (u) { return u.text.slice(0, 6); }), ['ある日の暮方', '広い門の下に', '羅生門が、朱']);
+      if (r !== true) return '段落文本：' + r;
+      for (var i = 0; i < 2; i += 1) {
+        if (!units[i].anchor || units[i].anchor.before.tagName !== 'BR') return '第 ' + (i + 1) + ' 段缺少分隔 <br> 锚点';
+      }
+      if (units[2].anchor) return '最后一段应追加到容器内部末尾';
+      units.forEach(function (u, k) {
+        if (!DT.inject(u, '译文' + (k + 1), 'zh-CN')) throw new Error('第 ' + (k + 1) + ' 段注入失败');
+      });
+      var seq = [];
+      Array.prototype.forEach.call(div.childNodes, function (n) {
+        if (n.nodeType === 3) {
+          if (n.nodeValue.trim()) seq.push('T:' + n.nodeValue.trim().slice(0, 4));
+        } else if (n.tagName === 'BR') seq.push('BR');
+        else if (n.getAttribute('data-dt-target')) seq.push('TGT:' + n.textContent);
+      });
+      var want = ['T:ある日の', 'TGT:译文1', 'BR', 'BR', 'T:広い門の', 'TGT:译文2', 'BR', 'BR', 'T:羅生門が', 'TGT:译文3'];
+      var rr = eq(seq, want);
+      if (rr !== true) return '译文没有跟在各自段落后面：' + rr;
+      if (DT.collect(box).length) return '已翻译的段落又被收集（重复翻译风险）';
+      return true;
+    });
+  });
+
+  check('青空文库式·仅译文：每段原地写回，空行与 <br> 不动，还原逐字一致', function () {
+    return withTemplate('tpl-aozora', 'translation', function (box) {
+      var div = box.querySelector('.main_text');
+      var html = div.innerHTML;
+      var brs = div.querySelectorAll('br').length;
+      var units = DT.collect(box);
+      units.forEach(function (u, k) {
+        if (!DT.inject(u, '译文' + (k + 1), 'zh-CN')) throw new Error('第 ' + (k + 1) + ' 段注入失败');
+      });
+      var texts = [];
+      Array.prototype.forEach.call(div.childNodes, function (n) {
+        if (n.nodeType === 3 && n.nodeValue.trim()) texts.push(n.nodeValue.trim());
+      });
+      var r = eq(texts, ['译文1', '译文2', '译文3']);
+      if (r !== true) return '仅译文没有逐段写回：' + r;
+      if (div.querySelectorAll('br').length !== brs) return '<br> 数量变了';
+      if (DT.collect(box).length) return '已翻译的段落又被收集';
+      DT.restore();
+      if (div.innerHTML !== html) return '还原后结构不一致：' + div.innerHTML;
+      return true;
+    });
+  });
+
+  check('Ruby：普通 rt / rp / 多个 Ruby 混合普通文字，rt/rp 不进送翻文本', function () {
+    return withTemplate('tpl-ruby-mix', 'dual', function (box) {
+      var p = box.querySelector('#fx-ruby-mix');
+      var units = DT.collect(box);
+      var u = units.filter(function (one) { return one.el === p; })[0];
+      if (!u) return '没收集到 Ruby 段落';
+      var r = eq(u.text, '彼は羅生門の下で、雨やみを待っていた。');
+      if (r !== true) return '送翻文本：' + r;
+      if (!u.ruby || u.ruby.length !== 4) return '应关联 4 个 rt/rp 节点（1 + 3），实际 ' + (u.ruby ? u.ruby.length : 0);
+      return true;
+    });
+  });
+
+  check('Ruby·仅译文：译文不写进 ruby/rb/rt/rp；只隐藏本段注音；其他 Ruby 不受影响；可完整还原', function () {
+    return withTemplate('tpl-ruby-mix', 'translation', function (box) {
+      var p = box.querySelector('#fx-ruby-mix');
+      var other = box.querySelector('#fx-ruby-other');
+      var html = box.innerHTML;
+      var units = DT.collect(box);
+      var u = units.filter(function (one) { return one.el === p; })[0];
+      if (!u) return '没收集到 Ruby 段落';
+      if (!DT.inject(u, '他在罗生门下等待雨停。', 'zh-CN')) return '注入失败';
+      var rts = p.querySelectorAll('rt');
+      if (rts.length !== 2) return 'rt 数量变了';
+      for (var i = 0; i < rts.length; i += 1) {
+        if (rts[i].getAttribute('data-dt-rt-hidden') !== '1') return '关联的 rt 没有标记隐藏';
+        if (getComputedStyle(rts[i]).display !== 'none') return '关联的 rt 没有真正隐藏：' + getComputedStyle(rts[i]).display;
+      }
+      if (!p.querySelector('ruby')) return 'Ruby 节点被删掉了';
+      if (!p.querySelector('strong')) return '行内标签被删掉了';
+      if (p.innerText.indexOf('罗生门') < 0) return '译文没显示';
+      if (p.innerText.indexOf('らしょうもん') >= 0 || p.innerText.indexOf('あめ') >= 0) return '仅译文模式残留假名：' + p.innerText;
+      var rubies = p.querySelectorAll('ruby');
+      for (var k = 0; k < rubies.length; k += 1) {
+        if (rubies[k].textContent.indexOf('罗生门') >= 0 || rubies[k].textContent.indexOf('等待') >= 0) return '整句译文被写进了 ruby：' + rubies[k].textContent;
+      }
+      var otherRt = other.querySelector('rt');
+      if (!otherRt) return '未翻译段落的 rt 被删了';
+      if (otherRt.getAttribute('data-dt-rt-hidden') || getComputedStyle(otherRt).display === 'none') return '未翻译段落的注音被全局隐藏了';
+      DT.restore();
+      if (box.innerHTML !== html) return '还原后结构不一致';
+      if (getComputedStyle(p.querySelector('rt')).display === 'none') return '还原后注音仍然是隐藏的';
+      return true;
+    });
+  });
+
+  check('Ruby·仅译文：<rb> 基字不被写入整句译文，Ruby 结构保留', function () {
+    return withTemplate('tpl-ruby-mix', 'translation', function (box) {
+      var p = box.querySelector('#fx-ruby-rb');
+      var units = DT.collect(box);
+      var u = units.filter(function (one) { return one.el === p; })[0];
+      if (!u) return '没收集到带 rb 的段落';
+      if (!DT.inject(u, '汉字的测试。', 'zh-CN')) return '注入失败';
+      var rb = p.querySelector('rb');
+      if (!rb) return '<rb> 被删掉了';
+      if (rb.textContent.indexOf('汉字的测试') >= 0) return '整句译文被写进了 <rb>：' + rb.textContent;
+      if (p.querySelector('ruby').textContent.indexOf('汉字的测试') >= 0) return '译文写进了 ruby';
+      if (p.innerText.indexOf('汉字的测试') < 0) return '译文没显示：' + p.innerText;
+      DT.restore();
+      if (p.querySelector('rb').textContent !== '字') return '还原后 <rb> 没有恢复：' + p.querySelector('rb').textContent;
+      return true;
+    });
+  });
+
+  check('Ruby·双语：注音原样可见，译文追加在段落末尾，不写进 ruby', function () {
+    return withTemplate('tpl-ruby-mix', 'dual', function (box) {
+      var p = box.querySelector('#fx-ruby-mix');
+      var units = DT.collect(box);
+      var u = units.filter(function (one) { return one.el === p; })[0];
+      if (!DT.inject(u, '他在罗生门下等待雨停。', 'zh-CN')) return '注入失败';
+      var rt = p.querySelector('rt');
+      if (rt.getAttribute('data-dt-rt-hidden') || getComputedStyle(rt).display === 'none') return '双语模式不该隐藏注音';
+      var target = p.querySelector('[data-dt-target]');
+      if (!target || target.textContent !== '他在罗生门下等待雨停。') return '没有追加译文';
+      if (p.querySelector('ruby').textContent.indexOf('他在') >= 0) return '译文写进了 ruby';
+      return true;
+    });
+  });
+
+  check('生命周期：旧代际的译文不能写进页面（晚到的 API 结果）', function () {
+    return withTemplate('tpl-aozora', 'dual', function (box) {
+      var units = DT.collect(box);
+      if (!units.length) return '没收集到单元';
+      DT.bumpGeneration();
+      if (DT.inject(units[0], '过期的译文', 'zh-CN')) return '旧代际的单元仍被注入';
+      return box.querySelector('[data-dt-target]') ? '页面上出现了过期译文' : true;
+    });
+  });
+
+
+  check('生命周期：站点改了某一个段落 → 只撤掉这一段，兄弟段落保持不动', function () {
+    return withTemplate('tpl-aozora', 'dual', function (box) {
+      var div = box.querySelector('.main_text');
+      var units = DT.collect(box);
+      units.forEach(function (u, k) {
+        if (!DT.inject(u, '译文' + (k + 1), 'zh-CN')) throw new Error('注入失败');
+      });
+      // 只改第二段的文字（模拟 SPA 重渲染复用同一个容器）
+      var textNodes = [];
+      Array.prototype.forEach.call(div.childNodes, function (n) {
+        if (n.nodeType === 3 && n.nodeValue.trim()) textNodes.push(n);
+      });
+      textNodes[1].nodeValue = 'サイトが書き換えた新しい段落。';
+      if (DT.refreshStale() !== 1) return 'refreshStale 应只撤掉被改的那一段';
+      var left = div.querySelectorAll('[data-dt-target]').length;
+      if (left !== 2) return '兄弟段落的译文不该被撤掉，剩余 ' + left;
+      var again = DT.collect(box);
+      if (again.length !== 1) return '应只重新收集被改的那一段，实际 ' + again.length;
+      return again[0].text === 'サイトが書き換えた新しい段落。' ? true : '收集到的不是新内容：' + again[0].text;
+    });
+  });
+
+  check('生命周期：Ruby 段落的基字被站点改写 → releaseReplaced 恢复注音与其余文本', function () {
+    return withTemplate('tpl-ruby-mix', 'translation', function (box) {
+      var p = box.querySelector('#fx-ruby-mix');
+      var units = DT.collect(box);
+      var u = units.filter(function (one) { return one.el === p; })[0];
+      if (!u) return '没收集到 Ruby 段落';
+      if (!DT.inject(u, '他在罗生门下等待雨停。', 'zh-CN')) return '注入失败';
+      var rt = p.querySelector('rt');
+      if (getComputedStyle(rt).display !== 'none') return '注音没有先隐藏';
+      // 站点改写了一个被清空的基字节点：说明这一段的 DOM 已经不是我们写的样子
+      p.querySelector('strong').textContent = '変わった';
+      if (DT.releaseReplaced() !== 1) return '没有把被改写的 Ruby 段落放回待翻译';
+      if (p.querySelector('[data-dt-target]')) return '译文节点没有移除';
+      if (getComputedStyle(rt).display === 'none') return '注音仍然隐藏';
+      return p.textContent.indexOf('彼は') === 0 ? true : '其余原文没有恢复：' + p.textContent.slice(0, 30);
+    });
+  });
+
+  check('生命周期：SPA 把容器内容整体换掉 → refreshStale 清掉失效译文，重新收集新内容', function () {
+    return withTemplate('tpl-aozora', 'dual', function (box) {
+      var div = box.querySelector('.main_text');
+      var units = DT.collect(box);
+      units.forEach(function (u) {
+        DT.inject(u, '旧译文', 'zh-CN');
+      });
+      div.innerHTML = '新しい第一段。<br><br>新しい第二段。';
+      var changed = DT.refreshStale();
+      if (changed < 1) return 'refreshStale 没有发现节点被整体替换';
+      var again = DT.collect(box);
+      if (again.length !== 2) return '应重新收集两段新内容，实际 ' + again.length;
+      return again[0].text.indexOf('新しい第一段') === 0 ? true : '新内容不对：' + again[0].text;
+    });
+  });
+
   check('normalizeLines / splitLines：保留分行，行内照常折叠；没有换行时与 normalizeText 相同', function () {
     var r = eq(DT.normalizeLines('  a \t b \n\n\n  c  \n'), 'a b\n\nc');
     if (r !== true) return r;
@@ -1322,13 +1557,18 @@
   check('小说：每个自然段一个单元，<br> / pre-line 的换行进入送翻文本，源码折行不算', function () {
     return withNovel('dual', function (box, q) {
       var units = DT.collect(box);
-      if (units.length !== 7) return '应为 7 个单元，实际 ' + units.length + '：' + JSON.stringify(units.map(function (u) { return u.text.slice(0, 12); }));
+      // nv-blank 的「段1<br><br>段2」是两段（0.9.1 起），其余各一段
+      if (units.length !== 8) return '应为 8 个单元，实际 ' + units.length + '：' + JSON.stringify(units.map(function (u) { return u.text.slice(0, 12); }));
       var r = eq(unitOfEl(q('nv-lines')).text, 'The classroom was empty after school.\nOnly the four of us were left.');
       if (r !== true) return 'span + <br>：' + r;
       r = eq(unitOfEl(q('nv-dialogue')).text, '「今日は何の日でしょう？」\n「ポッキーの日だ。」\n「じゃあ、勝負しよう。」');
       if (r !== true) return '对白（末尾空 span 不算一行）：' + r;
-      r = eq(unitOfEl(q('nv-blank')).text, 'First paragraph of the letter.\n\nSecond paragraph after a blank line.');
-      if (r !== true) return '连续 <br> 留一个空行：' + r;
+      var blank = units.filter(function (u) { return u.el === q('nv-blank'); });
+      if (blank.length !== 2) return '连续 <br> 应拆成两个段落单元，实际 ' + blank.length;
+      r = eq(blank.map(function (u) { return u.text; }), ['First paragraph of the letter.', 'Second paragraph after a blank line.']);
+      if (r !== true) return '连续 <br> 两段文本：' + r;
+      if (!blank[0].anchor || blank[0].anchor.before.tagName !== 'BR') return '第一段缺少分隔 <br> 锚点';
+      if (blank[1].anchor) return '最后一段不该有外部锚点（应追加到元素内部末尾）';
       r = eq(unitOfEl(q('nv-multi')).text, 'She said very quietly that it was over.\nNobody answered.');
       if (r !== true) return '行内强调：' + r;
       r = eq(unitOfEl(q('nv-preline')).text, 'Line one of the poem.\nLine two of the poem.\n\nA new stanza begins here.');
@@ -1362,8 +1602,12 @@
       var first = lines.querySelector('span').textContent;
       if (first !== '　译：The classroom was empty after school.') return '行首缩进丢了：' + JSON.stringify(first);
       var blank = q('nv-blank');
-      u = unitOfEl(blank);
-      DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+      // 0.9.1 起连续 <br> 是两个段落单元：分别写回，空行结构由 <br><br> 保留
+      var blankUnits = DT.collect(blank);
+      if (blankUnits.length !== 2) return '连续 <br> 应为两段，实际 ' + blankUnits.length;
+      blankUnits.forEach(function (unit) {
+        DT.inject(unit, fakeLines(unit.text), 'zh-CN');
+      });
       var r = eq(shownLines(blank), ['译：First paragraph of the letter.', '', '译：Second paragraph after a blank line.']);
       if (r !== true) return '连续空行：' + r;
       var pre = q('nv-preline');
@@ -1438,7 +1682,7 @@
       withNovel(mode, function (box) {
         var html = box.innerHTML;
         DT.collect(box).forEach(function (u) {
-          DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+          DT.inject(u, fakeLines(u.text), 'zh-CN');
         });
         if (box.innerHTML === html) bad.push(mode + '：没有注入');
         DT.restore();
@@ -1459,12 +1703,12 @@
       for (var i = 0; i < rounds.length; i += 1) {
         DT.state.mode = rounds[i];
         DT.collect(box).forEach(function (u) {
-          DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+          DT.inject(u, fakeLines(u.text), 'zh-CN');
         });
         // 同一轮再收集一次：已翻过的不再出现，也不会二次注入
         if (DT.collect(box).length) return rounds[i] + '：已翻译的段落又被收集';
         var targets = box.querySelectorAll('[data-dt-target]').length;
-        if (rounds[i] === 'dual' && targets !== 7) return '双语应有 7 个译文节点，实际 ' + targets;
+        if (rounds[i] === 'dual' && targets !== 8) return '双语应有 8 个译文节点，实际 ' + targets;
         if (rounds[i] === 'translation' && targets) return '仅译文残留了双语节点 ' + targets;
         if (count() !== start) return rounds[i] + '：数量变了 ' + count() + ' vs ' + start;
         DT.restore(); // 切换模式 = 还原后重建（main.js 的 startOver）
@@ -1611,55 +1855,69 @@
     return bad.length ? bad.map(function (c) { return JSON.stringify(sents(c[0])); }).join(' | ') : true;
   });
 
-  check('句子对齐：句数相同且句界一致才认；合并、拆分、一并一拆都不给精确对应', function () {
+  check('句子对齐：一对多 / 多对一 / 不可确认', function () {
     var src = 'It rained. We waited for hours at the station. Then the train came.';
     var same = '下雨了。我们在车站等了好几个小时。然后火车来了。';
-    var merged = '下雨了，我们在车站等了好几个小时。然后火车来了。';
-    var split = '下雨了。我们在车站等。等了好几个小时。然后火车来了。';
-    var shuffled = '下雨了，我们在车站等了好几个小时，然后火车。终于来了。了。'; // 句数相同但句界错开
-    var S = DT.hover.sentencesOf(src);
-    function at(t, i) { return DT.hover.alignSentence(S, src.length, DT.hover.sentencesOf(t), t.length, i); }
-    if (at(same, 1) !== 1) return '一一对应时应给出对应句';
-    if (at(merged, 1) !== -1 || at(split, 1) !== -1) return '句数不同时不该给对应句';
-    if (DT.hover.sentencesOf(shuffled).length !== 3) return '夹具应是 3 句：' + JSON.stringify(sents(shuffled));
-    return at(shuffled, 0) === -1 ? true : '句界明显错开时不该给对应句';
+    var n = DT.units.sentencesIn(src, 0, src.length).length;
+    var one = DT.units.alignmentOf([{ n: 1, t: '下雨了。' }, { n: 1, t: '我们在车站等了好几个小时。' }, { n: 1, t: '然后火车来了。' }], same, n);
+    if (!one || one.parts.length !== 3) return '一对一没有建立';
+    // 多源一译：前两句合成一个片段
+    var many = DT.units.alignmentOf([{ n: 2, t: '下雨了，我们在车站等了好几个小时。' }, { n: 1, t: '然后火车来了。' }], '下雨了，我们在车站等了好几个小时。然后火车来了。', n);
+    if (!many || many.parts[0].srcTo !== 2) return '多源一译没有记录源范围';
+    // 一源多译：一句拆成两个片段（n=1 + n=1 覆盖同一句不可能；这里用 n=1 的片段各自对应一句）
+    var split = DT.units.alignmentOf([{ n: 1, t: '下雨了。' }, { n: 1, t: '我们在车站等。' }, { n: 1, t: '等了好几个小时。' }, { n: 1, t: '然后火车来了。' }], '下雨了。我们在车站等。等了好几个小时。然后火车来了。', n);
+    if (split) return 'n 总和超过源句数时不能算对齐';
+    // 模型没遵守 / 片段不在最终译文里：一律 null（调用方降级为段落级）
+    if (DT.units.alignmentOf([{ n: 1, t: '不存在的句子' }], same, 1)) return '片段不在译文里也算对齐';
+    return DT.units.alignmentOf([], same, n) === null ? true : '空 parts 应返回 null';
   });
 
-  check('悬停匹配（纯函数）：按行配对 → 行内按句；行数不同退回整段', function () {
+  function fakeUnit(text, align) {
+    return {
+      map: { text: text, chars: [] },
+      sentences: DT.units.sentencesIn(text, 0, text.length),
+      align: align || null
+    };
+  }
+
+  check('悬停匹配（纯函数）：有结构化对齐按句；没有对齐按真实行；行数不同退回整段', function () {
     var H = DT.hover;
     var from = 'One. Two.\nThree.';
     var to = '一。二。\n三。';
-    var m = H.matchDual(from, to, from.indexOf('Two'));
-    var r = eq([m.scope, to.slice(m.to[0], m.to[1])], ['sentence', '二。']);
-    if (r !== true) return '行内按句：' + r;
-    m = H.matchDual(from, '一。二。三。', from.indexOf('Three'));
-    r = eq([m.scope, from.slice(m.from[0], m.from[1])], ['sentence', 'Three.']);
-    if (r !== true) return '行数不同但整段句子一致：' + r;
-    m = H.matchDual(from, '一二。\n三。四。', from.indexOf('Two'));
-    r = eq([m.scope, to.length >= 0 && '一二。\n三。四。'.slice(m.to[0], m.to[1])], ['line', '一二。']);
-    if (r !== true) return '行内句子对不上应退回整行：' + r;
-    m = H.matchDual(from, '一，二，三。', from.indexOf('Two'));
-    return eq([m.scope, from.slice(m.from[0], m.from[1])], ['paragraph', from]);
+    var unit = fakeUnit(from, null);
+    var m = H.pairDual(unit, to, false, from.indexOf('Two'));
+    var r = eq([m.scope, m.sourceText, m.targetText], ['line', 'One. Two.', '一。二。']);
+    if (r !== true) return '无对齐时按行：' + r;
+    var align = DT.units.alignmentOf([{ n: 1, t: '一。' }, { n: 1, t: '二。' }, { n: 1, t: '三。' }], '一。二。\n三。', 3);
+    if (!align) return '对齐夹具无效';
+    unit = fakeUnit(from, align);
+    m = H.pairDual(unit, to, false, from.indexOf('Two'));
+    r = eq([m.scope, m.sourceText, m.targetText], ['sentence', 'Two.', '二。']);
+    if (r !== true) return '有对齐时按句：' + r;
+    m = H.pairDual(fakeUnit(from, null), '一，二，三。', false, from.indexOf('Two'));
+    return eq([m.scope, m.sourceText], ['paragraph', from]);
   });
 
-  check('悬停匹配（纯函数）：仅译文按行对齐给对应句；未对齐只给整段原文', function () {
+  check('悬停匹配（纯函数）：仅译文有对齐给源句；没有对齐按行；对不上只给整段原文', function () {
     var H = DT.hover;
+    var from = 'One. Two.\nThree.';
     var page = '一。二。\n三。';
-    var item = { src: 'One. Two.\nThree.', lines: ['One. Two.', 'Three.'], aligned: true };
-    var m = H.matchReplaced(page, page.indexOf('二'), item);
-    var r = eq([m.scope, m.tip, page.slice(m.span[0], m.span[1])], ['sentence', 'Two.', '二。']);
-    if (r !== true) return '逐行对齐：' + r;
-    m = H.matchReplaced('一二。\n三。', 1, item);
-    r = eq([m.scope, m.tip], ['line', 'One. Two.']);
-    if (r !== true) return '行内句数不同应给整行：' + r;
-    // 行没对齐（模型合并了行）：整段句子仍一一对应时可以给句子，对不上就只给整段
-    item.aligned = false;
-    m = H.matchReplaced('一。二。三。', 3, item);
-    r = eq([m.scope, m.tip], ['sentence', 'Two.']);
-    if (r !== true) return '整段句子一一对应：' + r;
+    var unit = fakeUnit(from, null);
+    var m = H.pairReplaced(unit, page, page.indexOf('二'));
+    var r = eq([m.scope, m.sourceText, page.slice(m.span[0], m.span[1])], ['line', 'One. Two.', '一。二。']);
+    if (r !== true) return '无对齐时按行：' + r;
+    var align = DT.units.alignmentOf([{ n: 1, t: '一。' }, { n: 1, t: '二。' }, { n: 1, t: '三。' }], '一。二。\n三。', 3);
+    m = H.pairReplaced(fakeUnit(from, align), page, page.indexOf('二'));
+    r = eq([m.scope, m.sourceText, page.slice(m.span[0], m.span[1])], ['sentence', 'Two.', '二。']);
+    if (r !== true) return '有对齐时按句：' + r;
     var merged = '一，二。三。';
-    m = H.matchReplaced(merged, merged.indexOf('二'), item);
-    return eq([m.scope, m.tip, merged.slice(m.span[0], m.span[1])], ['paragraph', 'One. Two.\nThree.', merged]);
+    m = H.pairReplaced(fakeUnit(from, null), merged, merged.indexOf('二'));
+    var r = eq([m.scope, m.sourceText], ['paragraph', from]);
+    if (r !== true) return r;
+    // 对齐偏移是按另一段文本算的（页面实际文本前面多了字）→ 不能假装句级
+    var wrong = DT.units.alignmentOf([{ n: 1, t: '一。' }, { n: 1, t: '二。' }], '一。二。', 2);
+    m = H.pairReplaced(fakeUnit('One. Two.', wrong), '前言一。二。', 3);
+    return m.scope === 'sentence' ? '目标文本与对齐偏移不一致时不能给句级' : true;
   });
 
   check('悬停对照·仅译文小说段落：鼠标在第 2 行 → 只高亮这一行的句子，气泡是第 2 行原文', function () {
@@ -1669,7 +1927,9 @@
       var prev = DT.state.mode;
       DT.state.mode = 'translation';
       try {
-        if (!DT.inject(p, '「今天是什么日子？」\n「是百奇日。」', 'zh-CN')) return 'inject 返回 false';
+        var target = '「今天是什么日子？」\n「是百奇日。」';
+        var align = DT.units.alignmentOf([{ n: 1, t: '「今天是什么日子？」' }, { n: 1, t: '「是百奇日。」' }], target, 2);
+        if (!DT.inject(p, target, 'zh-CN', align)) return 'inject 返回 false';
       } finally {
         DT.state.mode = prev;
       }
@@ -1710,7 +1970,9 @@
     if (!window.Highlight || !CSS.highlights) return true;
     return withHoverFixture('<p id="hv-dl" style="white-space:pre-wrap"><span>“Is it today?”</span><br><span>“Yes. It is Pocky Day.”</span></p>', function (box) {
       var p = box.querySelector('#hv-dl');
-      if (!DT.inject(p, '“是今天吗？”\n“对。是百奇日。”', 'zh-CN')) return 'inject 返回 false';
+      var target = '“是今天吗？”\n“对。是百奇日。”';
+      var align = DT.units.alignmentOf([{ n: 1, t: '“是今天吗？”' }, { n: 1, t: '“对。是百奇日。”' }], target, 2);
+      if (!DT.inject(p, target, 'zh-CN', align)) return 'inject 返回 false';
       var node = p.querySelectorAll('span')[1].firstChild;
       var pt = pointOf(node, 'Pocky');
       DT.hover.updateAt(pt.x, pt.y, node.parentElement);

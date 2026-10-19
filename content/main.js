@@ -184,6 +184,8 @@
   // 作废当前这一轮（它的在途请求回来后会被丢弃）
   function cancelRun() {
     runId += 1;
+    // 代际隔离：本轮收集的 unit 带旧代际，晚到的结果即使绕过 runId 也写不进页面
+    if (DT.bumpGeneration) DT.bumpGeneration();
     running = false;
     lastBeat = 0;
   }
@@ -265,13 +267,17 @@
 
       // 长段落切成多段，逐段翻完后拼回同一位置
       var pending = [];
+      // 只对多句段落请求结构化对齐；单句段落的段落级对应就是句子级，不需要额外字段
+      var hoverOn = !DT.state.config || DT.state.config.hoverCompare !== false;
       queue.forEach(function (unit, ui) {
         var parts = DT.splitLong(unit.text, maxUnit);
         unit.slots = new Array(parts.length);
+        unit.ali = new Array(parts.length); // 每片的对齐（模型没给就是 undefined）
         unit.seps = parts.seps; // 段与段之间原来的分隔：在换行处切开的，拼回去仍是换行
         unit.done = false;
+        unit.wantAlign = !!hoverOn && unit.sentences && unit.sentences.length > 1;
         parts.forEach(function (part, k) {
-          pending.push({ ui: ui, k: k, text: part, style: unit.style || 'plain' });
+          pending.push({ ui: ui, k: k, text: part, style: unit.style || 'plain', align: unit.wantAlign });
         });
       });
 
@@ -334,6 +340,23 @@
         }
         var text = DT.joinSlots(unit.slots, DT.translationSeps(unit.seps, target));
         unit.done = true;
+        // 结构化对齐：n 的总和必须等于源句数，片段要按顺序出现在最终译文里；
+        // 有一条不满足就返回 null（悬停降级为行 / 段落级，绝不按长度比例猜）
+        var align = null;
+        if (unit.wantAlign && unit.sentences && unit.sentences.length > 1) {
+          var parts = [];
+          var ok = true;
+          for (var pi = 0; pi < unit.slots.length; pi += 1) {
+            var one = unit.ali && unit.ali[pi];
+            // 后台的 alignments[i] 是 [{n,t}, …] 数组（不是 {parts} 包装）
+            if (!one || !one.length) {
+              ok = false;
+              break;
+            }
+            parts = parts.concat(one);
+          }
+          if (ok) align = DT.units.alignmentOf(parts, text, unit.sentences.length);
+        }
         // 等译文期间站点改了这段原文（SPA 重渲染、翻页复用同一个元素）：
         // 旧译文不能写进新内容，也不记成「已处理」；本轮结束后按新内容重新收集
         if (DT.sourceChanged(unit)) {
@@ -362,7 +385,7 @@
           return;
         }
 
-        if (DT.inject(unit.el, text, target, unit.own)) {
+        if (DT.inject(unit, text, target, align)) {
           DT.state.translated += 1;
         }
       }
@@ -382,7 +405,12 @@
         try {
           // 比后台单次请求的 180s 上限略长。后台整条消息没有总时限（排队、重试、拆批），这里超时后
           // 按退避重发；同一段还在后台翻的话，重发的那次会等它的结果，不会再请求一次（见 background.js 的 inflight）
-          res = await DT.send({ type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain' }, 190000);
+          var wantAlign = false;
+          for (var ai = 0; ai < batch.length; ai += 1) if (batch[ai].align) wantAlign = true;
+          res = await DT.send(
+            { type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain', align: wantAlign },
+            190000
+          );
         } catch (err) {
           if (cancelled()) return;
           lastBeat = Date.now();
@@ -407,6 +435,8 @@
           if (typeof value === 'string') {
             // '' = 模型返回空（原文本身是 "EN"/"×" 这种）：tryInject 里记为"同原文跳过"，不算失败
             queue[seg.ui].slots[seg.k] = value.trim();
+            var ali = res.alignments && res.alignments[k];
+            queue[seg.ui].ali[seg.k] = ali && ali.length ? ali : null;
           } else {
             // null = 这一段请求失败（Key 无效、限流、余额不足…）。
             // 以前这里也记成"跳过"，结果全部失败时弹的是"已翻译 N 段"。
@@ -659,15 +689,28 @@
         var target = targets[k];
         var parent = target.parentElement;
         if (!parent) continue;
+        // 0.9.1：同一个容器里可以有多个段落译文节点，这是正常的。
+        // 只清理「克隆出来的同一条译文」：副本带着相同的 data-dt-unit。
+        var id = target.getAttribute('data-dt-unit');
         var siblings = parent.querySelectorAll(':scope > [data-dt-target]');
         if (siblings.length <= 1) continue;
-        for (var s = 1; s < siblings.length; s += 1) siblings[s].remove();
+        if (!id) {
+          // 旧版本 / 外部写入的节点没有单元 id：维持原来的保守清理
+          for (var s = 1; s < siblings.length; s += 1) siblings[s].remove();
+          continue;
+        }
+        var same = [];
+        for (var q = 0; q < siblings.length; q += 1) {
+          if (siblings[q].getAttribute('data-dt-unit') === id) same.push(siblings[q]);
+        }
+        for (var r = 1; r < same.length; r += 1) same[r].remove();
       }
     }
   }
 
   // 我们自己插的译文节点 / 提示条
   function isOwnNode(node) {
+    if (DT.isOwnNode) return DT.isOwnNode(node);
     return (
       node.nodeType === 1 &&
       (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui'))

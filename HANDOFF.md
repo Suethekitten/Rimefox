@@ -69,6 +69,7 @@ edge-bilingual/
 │   └── welcome.js         首次安装判断 / 欢迎页语言默认值 / getURL 打开（纯函数，可单测）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
+│   ├── units.js           翻译单元结构层（纯函数）：文本映射 / 段落 / 句子 / 对齐校验 / 签名
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）；站点规则的只翻 / 跳过区域
 │   ├── appearance.js      网页里的外观：强调色、译文排版、自定义 CSS、页面明暗、夜间模式写到 <html> 上
 │   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗；DT.control 给悬浮入口用
@@ -86,10 +87,10 @@ edge-bilingual/
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
 ├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs，见 7.1c）
-└── selftest/              离线自检（141 条用例；e2e 脚本会顺带跑一遍，见 7.1c）
+└── selftest/              离线自检（151 条用例；e2e 脚本会顺带跑一遍，见 7.1c）
 ```
 
-**为什么内容脚本是 3 个 classic script 而不是 ESM？**
+**为什么内容脚本是 classic script 而不是 ESM？**
 manifest 的 `content_scripts.js` 不支持 ESM import。所以用三个文件按顺序加载，通过 `window.__DT` 共享命名空间。`background.js` 是 `type: "module"`，可以正常 import。
 
 ---
@@ -242,27 +243,43 @@ lib/
 
 ## 5. ★ 核心算法：切分与注入（最容易改坏的部分）
 
-### 5.1 切分（`dom.js` 的 `walk`）
+### 5.1 切分（`dom.js` 的 `walk` + `addParagraphs`）
+
+0.9.1 起，**一个翻译单元 = 一个 ParagraphUnit（语义段落）**，不再等于一个元素。
+`walk` 仍决定"下钻还是整体"，但整体元素里的文本会再按空行切段：
 
 ```
 对每个元素：
-  1) 没有子元素          → 它本身是一个翻译单元
-  2) 子元素全被跳过      → 直接返回（★ 不能整体再翻，见坑 3）
-  3) 有直接文本（段落）  → 整体是一个单元
+  1) 没有子元素          → addParagraphs()（一个或多个段落单元）
+  2) 子元素全被跳过      → 只翻自己的直接文本（ownText），仍按段落切
+  3) 有直接文本 / 不该下钻 → addParagraphs()（一个或多个段落单元）
   4) 容器（无直接文本）  → 逐个下钻到子元素
 ```
 
-`shouldDescend(el)` 决定"容器"还是"段落"：
+`addParagraphs` 的步骤：
+
+1. `tokensOf(el)`（或 own 单元的 `ownTokens`）按阅读顺序给出文本节点 / `<br>`；
+2. `DT.units.textMap(tokens)` 生成规范化文本 + 每个字符的 DOM 映射；
+3. `DT.units.paragraphsOf()` 按空行（`\n\n`）切段；**单个 `<br>` / `\n` 只是同一段里的行**；
+4. 只有分隔空行来自 `<br>` 时才拆成多个单元；`pre-*` 单文本节点里的空行仍是一个单元（行级结构保留）；
+5. 每个单元记录 `anchor`（分隔空行的第一个 `<br>`；最后一段 / 独占元素为 null → append 到元素末尾）。
+
+`shouldDescend(el)` 决定"容器"还是"段落"（与 0.9.0 相同）：
 - flex/grid 容器 → 下钻（一排并列的条目）
 - 有真正的块级子元素 → 下钻
 - ≥3 个并列子元素 → 下钻（列表、菜单）
 - 其余（如 `<h1><span>Hello</span> <span>World</span></h1>`）→ 作为一个整体
 
+> ⚠️ 标准段落 `<p>Hello <strong>beautiful</strong> world.</p>` 是一个单元，跨 3 个文本节点；
+> 不要因为行内 `<strong>` 把它拆成多段。
+
 ### 5.2 注入策略（`DT.inject`）
 
-**默认追加**（双语）：把译文节点 append 到源元素**内部末尾**，这样它跟随源元素的盒子、字号、对齐。
+**双语**：独占元素的段落把译文节点 append 到元素**内部末尾**（跟随源元素的盒子、字号、对齐）；
+共用容器的段落把译文插在**分隔空行的第一个 `<br>` 之前**（P1 → 译文1 → 空行 → P2 → 译文2 …）。
+0.9.0 的「所有译文都 append 到容器末尾」只适用于独占元素，多段落容器不再这样处理。
 
-**三种情况改为原地替换**（`injectOnly`：替换元素的文本节点，保留子元素如图标；单元有分行时按行写回，见 5.2.1）：
+**三种情况改为原地替换**（`injectReplace`：替换本段落的文本节点，保留子元素如图标；有分行时按行写回，见 5.2.1。含 Ruby 的段落走 `injectRuby`）：
 
 | 条件 | 原因 |
 |---|---|
@@ -283,27 +300,33 @@ lib/
 > 0.3.1 试过"短文本 + 父级是 flex-row 就替换"，结果在 Tarkov 这种整页 flex 布局的站点上，
 > 标题和正文全被替换，用户看到的是"原文被译文顶掉了"。现在的判据必须同时满足上面表格。
 
-### 5.2.1 分行：`<br>` / `white-space: pre-*` 的换行（0.8.4）
+### 5.2.1 分行、段落与 Ruby（0.9.1）
 
-Pixiv 小说的正文是 `pre-wrap` 容器里一段一个 `<p>`，段内几行对白用 `<span>` + `<br>` 分隔。以前 `<br>` 被折成空格，
-仅译文模式又把整段译文写进第一个文本节点、其余清空，几行对白并成一大段，段尾还留一串空行。现在：
-
-- **送翻文本**用 `DT.unitText(el)`：`<br>` 和保留换行的元素（`white-space: pre / pre-wrap / pre-line`）里的 `\n` 记成换行，
-  每行内部照常折叠空白（`DT.normalizeLines`）；HTML 源码里的折行在普通元素里仍算空格。**没有分行的单元文本与以前逐字相同**（缓存键不变）。
-  `textOf()` 仍是全折叠的版本，区域判定 / 签名 / 长度判断继续用它
-- **提示词**多一条规则：段落里的 `\n` 是原文分行，译文保留同样的行数；`lib/parse.js` 能修复字符串里直接写换行的回包
-- **长段落**：`DT.splitLong` 先按整行装段，返回的数组带 `seps`；`DT.joinSlots(slots, seps)` 在换行处拼回仍是换行
-- **仅译文写回**（`injectLines`）：按行分组（`lineGroups`，与 `unitText` 同一套切法），第 i 行译文写进第 i 行第一个有字的文本节点
-  （保留行首全角缩进），同一行其余节点清空；`<br>`、空行、各行所在的元素都不动。模型改了行数时按顺序填，多出的并进最后一行，
-  不够的把后面空出来的 `<br>` 加 `data-dt-collapsed` 收起（CSS `display:none`，还原时去掉）。只有一行的单元（按钮、导航、普通段落）
-  仍走原来的「整段写进第一个文本节点」
-- **双语**：译文里有换行时给节点加 `dt-lines`（`white-space: pre-line`），只作用在这种节点上，不全局改样式
-- **过期译文**：注入前 `DT.sourceChanged(unit)` 复核原文；等译文期间站点改了这段（SPA 重渲染、翻页复用元素）就放弃这次注入，
-  下一轮按新内容重翻。同一元素连续 3 次都在翻译途中被改（计时器、实时数字）就不再翻它，免得每变一次重发一次请求
-- **悬停对照**按「段落 → 行 → 句子」三级对应，只认靠得住的那一层：行数相同才按行配对；句子要句数相同且句界相对位置相差
-  ≤ 0.25 才一一对应，否则退回整行 / 整段（高亮和气泡一起放大）。不再按长度比例猜句子。仅译文的原文与逐行对应关系
-  记在 `DT.replacedOf(el)`（`src` / `lines` / `aligned`）。行级 / 段落级气泡会标明层级；超长段落默认只给节选，
-  可展开滚动查看完整原文，鼠标能移进气泡，Escape / 关闭按钮收起。开关复用 `hoverCompare`，Dock / Popup / Options 三处同步
+- **送翻文本**：`DT.units.textMap` 与 `DT.normalizeLines` 同一套规则——`<br>` 和
+  `white-space: pre / pre-wrap / pre-line` 里的 `\n` 是硬换行；普通元素里源码的折行算空格；
+  行首尾空白（含全角缩进）去掉，行内全角空格保留；连续硬换行最多留一个空行。
+- **段落**：空行（`\n\n`）分段；单个换行是同一段里的行。连续 `<br><br>` 的容器会形成多个
+  ParagraphUnit，各有独立锚点；这是青空文库 / 小说页逐段对照的基础。`DT.splitLong` 只负责请求长度，
+  不再决定页面段落。
+- **仅译文写回**（`injectReplace` / `injectLines`）：按行分组（`lineGroups`，与 `textMap` 同一套切法），
+  第 i 行译文写进本段第 i 行第一个有字的文本节点（保留行首全角缩进），同一行其余节点清空；
+  `<br>`、空行、各行所在的元素都不动。模型改了行数时按顺序填，多出的并进最后一行，
+  不够的把**本段自己的**空行 / 换行收起（`data-dt-collapsed`），**不折叠段落之间的空行**。
+  单行段落仍走「整段写进第一个文本节点」。
+- **Ruby（仅译文）**：`tokensOf` / `ownTokens` 排除 `rt` / `rp`；`rubyAnnotationsFor` 找出基字在本段内的
+  `<ruby>`；`injectRuby` 清空本段正文文本、只隐藏这些 `rt/rp`（`style.display=none` + `data-dt-rt-hidden`）、
+  在段落锚点插入独立译文节点。**绝不把整句译文写进 `ruby/rb/rt/rp`**，也不全局隐藏所有 `<rt>`。
+- **双语**：译文里有换行时给节点加 `dt-lines`（`white-space: pre-line`），只作用在这种节点上。
+- **过期译文**：注入前 `DT.sourceChanged(unit)` 用采集时的文本节点快照复核；等译文期间站点改了这段
+  （SPA 重渲染、翻页复用元素）就放弃这次注入。同一元素连续 3 次都在翻译途中被改（计时器、实时数字）不再翻它。
+- **悬停对照**：消费 `unit.sentences` / `unit.align`。有结构化对齐（模型返回 `parts`，内容侧校验
+  `sum(n) === 源句数` 且片段按顺序出现在译文里）→ 句级；没有对齐时只有两边都来自真实换行且行数相同才按行；
+  否则段落级，气泡明确写「行级对应 / 段落级对应」。**不再**用句数相同 + 句界相对位置猜句子。
+- **渲染事务**：所有文本 / 节点 / 属性 / 样式修改都进 `DT.tx`；`DT.restore()` 逆序回放，只撤销仍是我们
+  写入的值。`DT.releaseReplaced` 只放回被站点改过的替换型 / Ruby 段落；`DT.refreshStale` 只撤掉源文本
+  确实变了的双语段落，兄弟段落不动。
+- **多译文节点**：同一个容器里多个 `[data-dt-target]` 是正常的；`cleanupDuplicateTargets` 只清理
+  `data-dt-unit` 相同的克隆副本，不能按「同一父级只留一个」清理。
 
 ### 5.3 `textOf()` 必须排除自己的节点
 
@@ -364,7 +387,10 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 | 23 | 用 `getComputedStyle().height` / `lineHeight` 判"单行"，控件判定只看元素自身 | GitHub 顶栏 `Code / 代码` 两行堆叠、整页错位：链接里的行内 `<span>` 高度是 `"auto"` → NaN → 不替换 → 追加把导航挤成两排；`line-height: normal` 同样 NaN | 统一走 `DT.areaOf()`：沿行内包裹链找所属控件；单行看 `getClientRects()` / `getBoundingClientRect()`，行高 `normal` 按字号 × 1.2 |
 | 25 | 把 computed 字号 / 行高按 px 复制给译文，并依赖 `<html data-dt>` 控制样式 | Aeon 的 H1 是 `72px/72px`（窄屏 `42px/42px`），中文标题异常放大、行高重叠；Next.js hydration 删掉 `data-dt` 后 `.dt-target` 归一化整组失效 | 译文用 `inherit` / `em` 跟随原站响应式；CJK 大标题 0.8em、紧行高 1.25；`::first-letter` 归一化；`data-dt` 被删时 MutationObserver 补回 |
 | 26 | 仅译文把多行段落整段写进第一个文本节点 | Pixiv 小说几行对白并成一大段，段尾留一串空行（`<br>` 还在、后面的 span 被清空） | 送翻保留分行，按行写回；行数对不上时收起多余 `<br>`（5.2.1） |
-| 27 | 句数不同时按相对位置猜对应句 | 悬停气泡显示相邻句子的原文，看起来像「翻译错位」 | 只在句数相同且句界一致时按句对应，否则退回整行 / 整段 |
+| 27 | 句数不同时按相对位置猜对应句 | 悬停气泡显示相邻句子的原文，看起来像「翻译错位」 | 0.9.1 删除比例猜测：只用模型返回的结构化 parts；没有就降级行 / 段 |
+| 28 | 同一容器多段落仍 append 到元素末尾 | 青空文库式「段1<br><br>段2」全部原文在前、译文堆在页尾 | 0.9.1 ParagraphUnit + 分隔 `<br>` 锚点；只有独占元素才 append |
+| 29 | 多个段落译文共享一个容器就按「同父级只留一个」清理 | 克隆清理把兄弟段落的译文节点删掉（E2E 抓到） | `cleanupDuplicateTargets` 只删 `data-dt-unit` 相同的克隆副本 |
+| 30 | 仅译文把整句中文写进 `<ruby>` / 全局隐藏 `<rt>` | 中文被 Ruby 排版规则撑开；未翻译段落的假名也没了 | 关联 Ruby 段落走 `injectRuby`：清空正文 + 只隐藏本段 `rt/rp` + 独立译文节点 |
 
 ---
 
@@ -374,17 +400,17 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-141 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数，以及振假名 `<rt>` / `<rp>` 不混进原文。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
+151 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、悬停句级 / 行级 / 段落级、代际隔离与段落级 SPA 更新。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
 
 ### 7.1b Node 单测（接口层）
 ```
 node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射 / 模型列表请求（48 条）
 node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（含术语表）/ 删除自定义服务商 / 输入框目标语言（45 条）
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
-node test/parse.test.mjs       # 回包解析 parseArray（围栏 / 说明文字 / 裸换行 / 结尾逗号 / 对象元素）/ 换行规范化 normalizeTranslationBreaks / 写入前校验 leaksWrapper / 思考过程兜底 / 输出长度护栏 / 单条拆句拼回（36 条）
+node test/parse.test.mjs       # 回包解析 parseArray / parseAlignedArray（结构化句子对齐）/ 换行规范化 / 写入前校验 / 思考过程兜底 / 输出长度护栏 / 单条拆句拼回（42 条）
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空、分段落盘与旧格式迁移（17 条）
-node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动只让用到它的段落重翻、glossary:add 路由、命中术语才注入提示词、输入框 noCache（18 条）
-node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度、保留分行规则、简繁转写（15 条）
+node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动、glossary:add、命中术语才注入提示词、输入框 noCache、align 对齐 / 旧缓存降级（22 条）
+node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、align 结构化输出、温度、保留分行规则、简繁转写（17 条）
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息、记住服务端不认的思考参数（6 条，假 fetch）
 node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹 / 按命中算的缓存指纹 / 一键收录 upsert（27 条）
 node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖（16 条）
@@ -495,7 +521,9 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 8. **不支持 OpenAI Responses 协议**（`/v1/responses`）——目前只有 OpenAI 兼容（chat completions）/ Anthropic / Gemini 三种。遇到只开 responses 的第三方接口会 404，见第 10 节 P3
 9. **网页夜间模式是反色实现**：`filter: invert(1) hue-rotate(180deg)` + 媒体元素反向回正；画布绘制的界面、CSS 背景图、自带深色主题的网站可能显示异常，所以默认关闭、只对名单里的网站生效。
 10. **置顶小窗依赖浏览器能力**：Document Picture-in-Picture 需要 Chrome 116+；退回的 `window.open` 小窗不会置顶，网页设置了 COOP 等隔离或拦截弹窗时打不开（会提示）。
-11. ~~振假名会混进原文~~（0.9.0 已修：切分和拼文本时跳过 `<rt>` / `<rp>`，自检页有两条用例；Pixiv 的真实注音页尚未实测）
+11. ~~振假名会混进原文~~（0.9.0 修了「混进送翻文本」；0.9.1 修了仅译文模式的显示：不残留假名、不把译文写进 ruby、可完整恢复。Pixiv 真实注音页仍只有 fixture，未实测）
+12. **Ruby 段落仅译文用独立译文容器**：为了不把整句中文写进 `<ruby>`，含注音的段落不再按基字逐词替换，局部排版可能与原页略有差异；竖排（縦書き）/ `writing-mode: vertical-*` 未验证
+13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
 
 ---
 
@@ -509,7 +537,8 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 | P1 | **划词快捷键**：监听在 `main.js`，等 P0 拆完再和整页翻译统一成"自适应快捷键" | 小 | 低 |
 | P2 | **站点规则库扩充**：0.7.0 已有规则机制，按真实站点补内置规则（每条都要在保存的真实页面上验证） | 小 | 低 |
 | P2 | **夜间模式改进**：自带深色主题的网站自动跳过反色；CSS 背景图更准确地回正 | 中 | 中 |
-| P2 | **按 `<br>` 拆行**：长帖逐行对照 | 小 | 低 |
+| ~~P2~~ | ~~**按 `<br>` 拆行**~~（0.9.1 已做：连续 `<br>` 拆段 + 段落锚点 + 结构化句子对齐） | — | — |
+| P1 | **对齐实测**：用真实模型统计 `align` 遵守率、悬停命中率、请求 / Token 变化；弱模型降级率 | 中 | 中 |
 | P3 | **OpenAI Responses 协议**（`/v1/responses`）：只有遇到"只开 responses 的第三方接口"时才需要 | 小 | 中（离线无法验证） |
 | P3 | PDF / 其它站点的视频字幕 / 图片 OCR | 大 | 高（单独立项，别混进这个仓库）；YouTube 字幕已做（见 5.4） |
 
@@ -521,7 +550,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **141 / 141**
+4. 跑自检页：必须 **151 / 151**
 4b. 跑 Node 单测：`node --test test/*.test.mjs`（21 个文件、按退出码判定，应全部通过；CI 发版前跑同一条命令）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -588,18 +617,18 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.9.0）
+## 14. 本版技术记录（0.9.1）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 翻译引擎的完整说明、外部项目参考（Wenyi / Agent Book Translate）、未完成方向与接手指南在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)，这里只记本版改了什么。
+> 翻译引擎的完整说明、外部项目参考、未完成方向与接手指南在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)，这里只记本版改了什么。
 
-- **来源**：按 [docs/ROADMAP.md](docs/ROADMAP.md) 4.1 的 0.9.0 计划分两步落地：`7706fd0`（步骤 0、1）、`8b00ad0`（步骤 2–4）。配置结构没变（`_v` 仍是 6）；缓存键里的术语指纹换了语义：升级后没命中术语的段落照常命中，命中过的按新键重翻一次
-- **步骤 0（补 0.8.9 尾巴）**：`tools/e2e-extension.mjs` 收进仓库（真实 Chrome / Edge + CDP `Extensions.loadUnpacked` 加载工作树 + 本地假 OpenAI 兼容接口，不需要 API Key），`--youtube` 追加真实页面字幕检查，`--verbose` 打印字幕请求、钩子消息和广告起止
-- **步骤 1（缓存键按命中术语）**：`lib/glossary.js` 新增 `createHitFingerprint(list)`，返回 `(text) => 指纹`，只把这段原文命中的术语算进去，没命中是 `none`；`background.js` 的 `keyOf` 按段计算并 memo（同一请求里每段只匹配一次）。以前用整张表的指纹，加一条术语全站缓存失效
-- **步骤 2（术语表一键收录）**：`lib/glossary.js` 新增 `upsertGlossaryEntry(list, entry, { overwrite })`（不改入参、保留分类、满 500 条返回 `full`）；后台新增 `glossary:add` 路由（两个字符串各 ≤200 字，回 `added` / `updated` / `same` / `conflict` / `full` / `bad_value` / `too_long`），保存走已有的 `saveConfig` 队列；`content/selection.js` 气泡加「加入术语表」按钮和两栏表单，冲突时先显示现有译法、让用户点「覆盖」
-- **步骤 3（输入框翻译）**：新增 `content/input.js`，manifest 里排在 `selection.js` 之后。`Alt+I`（`inputHotkey`，设置页可录制）和右键菜单的 `editable` 项「凛狐：翻译输入框内容」都进 `DT.inputTranslate()`；有选区只翻选区，否则整个框。写回用 `document.execCommand('insertText')`：进浏览器撤销栈、触发原生 `input` 事件（React 受控输入框能收到）；contenteditable 整段替换用 `selectNodeContents` + insertText。目标语言 `inputTargetLang` 默认 `auto`：内容脚本只把 `pageLang` 发过去，由后台 `resolveInputTarget()` 用 `LANGUAGES` 解析（页面 lang 认不出用英文，语言表只有一份）。`translate` 消息新增 `noCache`：不读也不写三层缓存，草稿和私信不落盘，隐私脱敏照常生效。跳过密码框、`autocomplete` 为 `cc-*` / `current-password` / `new-password` 的字段；`compositionstart` 期间不触发
-- **步骤 4（振假名）**：`content/dom.js` 的 `SKIP_TAGS` 与 `NON_TEXT_TAGS` 加 `RT` / `RP`：`<rt>` 读音和 `<rp>` 括号不再单独成段、也不拼进送翻文本；仅译文模式替换基字时读音节点原样保留
-- **设置页**：`options/options.js` 的快捷键录制抽成 `createHotkeyRecorder()`（两条快捷键共用，同一时刻只录一条）；「快捷键」分区新增输入框卡片（目标语言下拉 + 快捷键录制），中英文文案同步进 `lib/i18n.js`
-- **测试**：Node 21 个文件全过（config 39 → 45：`resolveInputTarget` 与导入校验；glossary 20 → 27：`upsertGlossaryEntry`；translate-pipeline 10 → 18：`glossary:add` 路由、命中术语才注入提示词、`noCache` 不读不写缓存；i18n 13 → 16），自检 139 → 141（振假名两条）
-- **真实浏览器**：`tools/e2e-extension.mjs` 34 / 34 通过。新增三节：划词气泡收录（新增 / 冲突先问 / 覆盖 / 配置落盘）、输入框翻译（textarea 整框、目标语言跟随 `<html lang>`、Ctrl+Z 撤销、只翻选区、`noCache` 再翻仍发新请求、模拟受控输入框收到 input、contenteditable 整段替换、密码框不动）、自检页（真实 Chrome 里跑 141 条，替代手动打开 `chrome-extension://<id>/selftest/index.html`）
-- **未验证**：YouTube 真实播放器与 Edge 本版没跑（`--youtube` 检查仍在脚本里）、Pixiv 真实注音页（只有自检夹具）、真实 API Key 下的输入框译文质量。商店包由 CI 在推送时用同一份白名单打，本地只生成不提交（`dist/` 和 `*.zip` 都在 `.gitignore` 里）
+- **来源**：任务书要求把 DOM 翻译从「元素识别 + 文本节点替换」升级为结构化单元系统；按阶段 A–F 在分支 `feat/0.9.1-dom-translation-units` 实施。配置结构没变（`_v` 仍是 6），缓存 `SCHEMA` 没变。
+- **结构层**：新增 `content/units.js`（纯函数）：`textMap`（规范化文本 + 每字符 DOM 映射）、`paragraphsOf`（空行分段）、`linesOf`、`sentencesOf` / `sentencesIn`（句子切分从 hover.js 搬来，只有一份实现）、`alignmentOf`（校验 `sum(n) === 源句数` 且片段按序出现在译文里）、`partAt` / `partAtTargetOffset`、`signature`（FNV-1a + 长度）。manifest 与 selftest 按 core → units → dom 的顺序加载，仍是零构建。
+- **采集**：`dom.js` 的 `walk` 改为 `addParagraphs`：一个元素里的规范化文本按空行切段；只有分隔空行来自 `<br>` 才拆成多个 ParagraphUnit，每段记录 `index/total/anchor/map/sentences/groups/snapshot/sig/gen/ruby`。共用容器不再写 `data-dt-src`（会误伤兄弟段落），改用 `rendered` 记录 + `findRenderedFor`（双语按签名、替换按文本节点身份）去重；独占元素继续保留 `data-dt-src` / `data-dt-sig`。
+- **渲染事务**：`DT.tx` 记录 `insert/text/attr/style`，`undoOps` 逆序回放，只撤销仍是自己写入的值；`DT.restore` 清空记录、代际 +1、兜底扫属性。`releaseReplaced`（替换 / Ruby）与 `refreshStale`（双语）改为按段落撤销。`DT.inject` 新增单元对象签名与代际检查；旧元素签名保留。
+- **Ruby**：`rubyAnnotationsFor` 只收集基字在本段内的 `rt/rp`；`injectRuby` 清空本段正文文本、隐藏这些 `rt/rp`、在段落锚点插入独立译文节点，绝不把整句中文写进 `ruby/rb/rt/rp`。还原走事务，未翻译段落的注音不受影响。
+- **句子对齐（不增加请求）**：整页翻译可发 `align: true`；`lib/prompt.js` 在 align 时把输出格式改成 `{"parts":[{"n":1,"t":"…"}]}`，其余规则逐字不变；`lib/parse.js` 新增 `parseAlignedArray`（非法结构退回普通数组）；`background.js` 新增 `alignments` 返回字段与内存旁路表（不进缓存 / 不升 SCHEMA / SW 重启丢失即降级）；`main.js` 只对多句段落请求对齐，校验后 `DT.units.alignmentOf` 才交给注入。划词 / 输入框 / 字幕不传 align，提示词与 0.9.0 一致。
+- **悬停**：`hover.js` 重写为消费 `unit.map` / `unit.sentences` / `unit.align`；双语在原文上显示译文气泡、在译文上显示原文；没有可靠对齐时按真实行 / 段落降级并标明。删除 `sentencesAgree` / `alignSentence` 的句界比例猜测。高亮仍用 CSS Custom Highlight API，开关复用 `hoverCompare`。
+- **观察器 / 动态**：`DT.isOwnNode` 只认真正写过的文本节点（原文节点不算），`cleanupDuplicateTargets` 只删 `data-dt-unit` 相同的克隆副本——同一容器多段落译文节点不再被误删（E2E 首次运行抓到该回归）。
+- **测试**：Node 21 个文件全过（parse 36 → 42、prompt 15 → 17、translate-pipeline 18 → 22）；自检 141 → 151（青空文库 3 段 / Ruby / 对齐 / 生命周期）；真实 Chrome E2E 31 → 42，新增段落单元 / Ruby 两节与两个 fixture。`tools/e2e-extension.mjs` 的假接口在 align 请求下返回结构化 parts。
+- **未验证**：真实 API 下模型对 `parts` 格式的遵守率与译文质量；Pixiv / 青空文库真实页面（只有 fixture）；竖排 / 縦書き；Edge 本版未跑。

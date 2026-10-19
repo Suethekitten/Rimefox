@@ -59,7 +59,7 @@ async function until(fn, ms = 15000, step = 200) {
 // ---------------- 假接口 + 测试页 ----------------
 // 模型：每条译文 = '译:' + 原文（目标是繁體中文时 '繁:'）；单条带 CITE 回纯文本「巴黎是首都[1]。」，带 SPLIT 回拆开的两句。
 // 带 reasoning_effort 的请求回 400（OpenAI 官方非推理模型就是这样），用来看扩展会不会记住、不再发
-const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, sent: [], lastSystem: '' };
+const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, aligned: 0, sent: [], lastSystem: '', lastAlignedSystem: '' };
 const PAGES = {
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
@@ -73,6 +73,12 @@ const PAGES = {
   '/simp.html': `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>简体</title></head><body>
 <p id="s1">这是一个完整的中文句子，用于测试简繁转换的效果。</p>
 <p id="s2">我们发现这个问题以后，马上开始处理相关的工作。</p>
+</body></html>`,
+  '/aozora.html': `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>Aozora</title></head><body>
+<div id="mt" class="main_text" style="width:640px;font:16px/2 serif">ある日の暮方の事である。一人の下人が、羅生門の下で雨やみを待っていた。<br><br>広い門の下には、この男のほかに誰もいない。ただ、所々丹塗りの剥げた、大きな円柱に、蟋蟀が一匹とまっている。<br><br>羅生門が、朱雀大路にある以上は、この男のほかにも、雨やみをする市女笠や揉烏帽子が、もう二三人はありそうなものである。</div>
+</body></html>`,
+  '/pixiv.html': `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>Pixiv</title></head><body>
+<div id="novel" style="white-space:pre-wrap;width:640px;font:16px/2 serif"><p id="np1"><span>「今日は何の日？」</span><br><span>「ポッキーの日だ。」</span></p><p id="np2">彼は<ruby>羅生門<rt>らしょうもん</rt></ruby>の下で、雨やみを待っていた。</p><p id="np3">静かな夜だった。</p></div>
 </body></html>`,
   '/input.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Inputs</title></head><body>
 <p id="hint">Text box translation fixture.</p>
@@ -124,11 +130,25 @@ const server = http.createServer((req, res) => {
       stats.sent.push(...texts);
       if (!stats.firstOk) stats.firstOk = Date.now();
       let content;
+      const wantsAlign = body.messages[0].content.includes('"parts"');
+      if (wantsAlign) {
+        stats.aligned += 1;
+        stats.lastAlignedSystem = String(body.messages[0].content || '');
+      }
+      const aligned = (text, prefix) => {
+        // 和内容脚本同一套简单切句：句末标点后断开；每句一个 n=1 的片段
+        const sents = String(text)
+          .split(/(?<=[。！？…])|(?<=[.!?])\s+/)
+          .map((one) => one.trim())
+          .filter(Boolean);
+        return { parts: (sents.length ? sents : [String(text)]).map((one) => ({ n: 1, t: prefix + one })) };
+      };
       if (texts.length === 1 && texts[0].includes('CITE')) content = '巴黎是首都[1]。';
       else if (texts.length === 1 && texts[0].includes('SPLIT')) content = '["Hello.","How are you?"]';
       else {
         const hant = body.messages[0].content.includes('目标语言（繁體中文）');
-        content = JSON.stringify(texts.map((t) => (hant ? '繁:' : '译:') + t));
+        const prefix = hant ? '繁:' : '译:';
+        content = JSON.stringify(texts.map((t) => (wantsAlign ? aligned(t, prefix) : prefix + t)));
       }
       res.writeHead(200, headers);
       res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
@@ -444,6 +464,55 @@ async function articleChecks() {
 }
 
 // ---------------- 设置页 ----------------
+
+// ---------------- 0.9.1 段落单元 / Ruby / 悬停 ----------------
+async function paragraphChecks() {
+  console.log('\n[段落单元 / Ruby]');
+
+  // 青空文库式：一个容器里连续 <br> 分段
+  const a = await openTab(ORIGIN + '/aozora.html');
+  const before = await pageEval(a, "return document.getElementById('mt').innerHTML");
+  await tabMsg(a.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(a, "return document.querySelectorAll('#mt [data-dt-target]').length === 3"), 20000);
+  await settled(a);
+  check('青空文库：3 个段落各有一个译文节点', !!ready, ready);
+
+  const layout = await pageEval(a, "return Array.from(document.getElementById('mt').childNodes).map(function (n) {\n    if (n.nodeType === 3) return n.nodeValue.trim() ? 'T' : '';\n    if (n.tagName === 'BR') return 'BR';\n    if (n.hasAttribute('data-dt-target')) return n.textContent.indexOf('译:') === 0 ? 'TGT' : 'TGT:' + n.textContent.slice(0, 12);\n    return 'X';\n  }).filter(Boolean)");
+  const seqOk = JSON.stringify(layout) === JSON.stringify(['T', 'TGT', 'BR', 'BR', 'T', 'TGT', 'BR', 'BR', 'T', 'TGT']);
+  check('青空文库：译文跟在各自段落后面，不堆到页面末尾', seqOk, JSON.stringify(layout));
+
+  const recollect = await contentEval(a, "window.__DT.collect(document.getElementById('mt')).length");
+  check('青空文库：已翻译段落不会被重复收集', recollect === 0, recollect);
+
+  const hover = await contentEval(a, "(function () {\n    var t = document.querySelectorAll('#mt [data-dt-target]')[1];\n    if (!t || !t.firstChild) return { error: 'no-target' };\n    var r = document.createRange();\n    r.setStart(t.firstChild, 1);\n    r.setEnd(t.firstChild, Math.min(4, t.firstChild.nodeValue.length));\n    var rect = r.getBoundingClientRect();\n    window.__DT.hover.updateAt(rect.left + 1, rect.top + 1, t.firstChild);\n    var src = CSS.highlights.get('dt-hover-src');\n    var tgt = CSS.highlights.get('dt-hover-target');\n    var tip = document.querySelector('.dt-hover-tip');\n    return {\n      src: src ? Array.from(src).map(function (x) { return x.toString(); }).join('|') : '',\n      tgt: tgt ? Array.from(tgt).map(function (x) { return x.toString(); }).join('|') : '',\n      tip: tip && !tip.hidden ? tip.innerText : ''\n    };\n  })()");
+  const alignInfo = await contentEval(a, "(function () {\n    var t = document.querySelectorAll('#mt [data-dt-target]')[1];\n    var u = window.__DT.unitOfNode(t.firstChild);\n    return { align: !!(u && u.align), want: !!(u && u.wantAlign), sentences: u ? u.sentences.length : -1, ali: u && u.ali ? u.ali.length : -1, first: u && u.ali ? u.ali[0] : null };\n  })()");
+  check('青空文库·对齐：结构化 parts 通过校验（句级映射可用）', alignInfo && alignInfo.align, JSON.stringify(alignInfo));
+  check('青空文库·请求：align 模式提示词确实发给模型', stats.aligned > 0, 'aligned=' + stats.aligned);
+  check('青空文库·悬停：译文上只高亮这一句并显示对应原文', !!hover && hover.tgt && hover.tip && hover.src, JSON.stringify(hover));
+
+  await tabMsg(a.tabId, { type: 'dt:toggle' });
+  const after = await pageEval(a, "return document.getElementById('mt').innerHTML");
+  check('青空文库：关闭翻译后原文逐字恢复', after === before, after === before ? '' : (after || '').slice(0, 120));
+
+  // Pixiv 式：pre-wrap 容器 + span/<br> 对白 + Ruby
+  const b = await openTab(ORIGIN + '/pixiv.html');
+  const pixivBefore = await pageEval(b, "return document.getElementById('novel').innerHTML");
+  await tabMsg(b.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(b, "return document.querySelectorAll('#novel [data-dt-target]').length >= 3"), 20000);
+  await settled(b);
+
+  await tabMsg(b.tabId, { type: 'dt:setMode', mode: 'translation' });
+  const rubyReady = await until(() => pageEval(b, "return document.querySelectorAll('#np2 [data-dt-rt-hidden]').length === 1"), 20000);
+  await settled(b);
+  const ruby = await pageEval(b, "return (function () {\n    var p = document.getElementById('np2');\n    var rt = p.querySelector('rt');\n    return {\n      hidden: !!rt && getComputedStyle(rt).display === 'none',\n      text: p.innerText,\n      rubyText: p.querySelector('ruby') ? p.querySelector('ruby').textContent : '',\n      target: (p.querySelector('[data-dt-target]') || {}).textContent || ''\n    };\n  })()");
+  check('Pixiv·仅译文：Ruby 注音被隐藏，译文不写进 ruby', !!rubyReady && ruby.hidden && !/らしょうもん|あめ/.test(ruby.text) && ruby.rubyText.indexOf('译:') < 0, JSON.stringify(ruby));
+  check('Pixiv·仅译文：译文显示在段落位置', ruby.target.startsWith('译:') && ruby.text.indexOf('译:') >= 0, JSON.stringify(ruby));
+
+  await tabMsg(b.tabId, { type: 'dt:toggle' });
+  const pixivAfter = await pageEval(b, "return document.getElementById('novel').innerHTML");
+  check('Pixiv：关闭翻译后 Ruby / 结构逐字恢复', pixivAfter === pixivBefore, pixivAfter === pixivBefore ? '' : (pixivAfter || '').slice(0, 160));
+}
+
 async function optionsChecks() {
   console.log('\n[设置页]');
   const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
@@ -739,6 +808,7 @@ async function inputChecks() {
 try {
   if (!flag('--youtube-only')) {
     await articleChecks();
+    await paragraphChecks();
     await optionsChecks();
     await selftestChecks();
     await inputChecks();

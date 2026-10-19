@@ -2,7 +2,7 @@
 import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
-import { parseArray, parseArrayFromReasoning, isRunaway, normalizeTranslationBreaks, leaksWrapper } from './lib/parse.js';
+import { parseArray, parseAlignedArray, parseArrayFromReasoning, isRunaway, normalizeTranslationBreaks, leaksWrapper } from './lib/parse.js';
 import {
   matchGlossary,
   normalizeGlossary,
@@ -23,6 +23,17 @@ const usageStats = createUsageStats();
 
 // 在途的翻译：缓存键 → Promise<{ value: 译文 | ''（无需翻译）| null（失败）, error }>，见 handleTranslate
 const inflight = new Map();
+// 句子对齐的旁路缓存（0.9.1）：键与翻译缓存相同，值 = 模型返回的 parts [{n,t}]。
+// 不写进三层缓存、不改 makeKey / SCHEMA：旧缓存命中没有对齐就降级为行 / 段落级；
+// service worker 重启后旁路表丢失，也只是悬停降级，不会让页面重翻。
+const alignCache = new Map();
+const ALIGN_CACHE_MAX = 4000;
+function rememberAlign(key, parts) {
+  if (!parts || !parts.length) return;
+  if (alignCache.has(key)) alignCache.delete(key);
+  alignCache.set(key, parts);
+  while (alignCache.size > ALIGN_CACHE_MAX) alignCache.delete(alignCache.keys().next().value);
+}
 
 // ---------------- 并发闸门 ----------------
 let running = 0;
@@ -51,7 +62,7 @@ function sleep(ms) {
 }
 
 // style：趣味翻译风格（lib/config.js 的 STYLES），普通翻译为 'plain'
-async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked) {
+async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked, align) {
   let attempt = 0;
   let lastErr = null;
   const temperature = temperatureFor(cfg, style);
@@ -76,12 +87,13 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
-          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked) },
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align) },
           { role: 'user', content: JSON.stringify(texts) }
         ]
       });
-      const parsed = parseArray(raw, texts.length);
-      if (parsed) return parsed;
+      // align：模型被要求返回 {parts:[{n,t}]}；解析失败一律退回普通字符串数组（页面照常显示）
+      const parsed = align ? parseAlignedArray(raw, texts.length) : parseArray(raw, texts.length);
+      if (parsed) return align ? parsed : { texts: parsed, aligns: parsed.map(() => null) };
       usageStats.discard();
       // 错误信息带上 finish_reason 和长度：一眼看出是被截断（length）还是格式不对，不只截一段原始返回
       lastErr = new ApiError(
@@ -96,7 +108,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
       // content 为空、但思考过程里有答案（推理模型偶尔把最终数组写进 reasoning_content）：从里面捞
       if (err && err.code === 'empty_content') {
         const salvaged = parseArrayFromReasoning(err.reasoningText, texts);
-        if (salvaged) return salvaged;
+        if (salvaged) return { texts: salvaged, aligns: salvaged.map(() => null) };
       }
       lastErr = err;
       const status = err && err.status ? err.status : 0;
@@ -128,21 +140,22 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
     let leftErr = null;
     let rightErr = null;
     try {
-      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked);
+      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked, align);
     } catch (err) {
       leftErr = err;
     }
     try {
-      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked);
+      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked, align);
     } catch (err) {
       rightErr = err;
     }
-    if (left && right) return left.concat(right);
+    if (left && right) return { texts: left.texts.concat(right.texts), aligns: left.aligns.concat(right.aligns) };
     if (!left && !right) throw leftErr || rightErr || new ApiError('翻译失败', 0, '');
     const out = new Array(texts.length).fill(null);
-    if (left) left.forEach((value, i) => { out[i] = value; });
-    if (right) right.forEach((value, i) => { out[mid + i] = value; });
-    return out;
+    const outAligns = new Array(texts.length).fill(null);
+    if (left) left.texts.forEach((value, i) => { out[i] = value; outAligns[i] = left.aligns[i] || null; });
+    if (right) right.texts.forEach((value, i) => { out[mid + i] = value; outAligns[mid + i] = right.aligns[i] || null; });
+    return { texts: out, aligns: outAligns };
   }
   usageStats.failure();
   throw lastErr || new ApiError('翻译失败', 0, '');
@@ -182,6 +195,9 @@ async function handleTranslate(msg, sender) {
   const rawTexts = Array.isArray(msg.texts) ? msg.texts : [];
   const texts = rawTexts.map((t) => (t == null ? '' : String(t)));
   const results = new Array(texts.length).fill(null);
+  // 结构化句子对齐（可选）：整页翻译才请求；划词 / 输入框 / 字幕不传，行为与 0.9.0 一致
+  const wantAlign = msg.align === true && !noCache;
+  const alignments = new Array(texts.length).fill(null);
 
   const active = activeConfig(cfg);
   if (!active.apiKey) {
@@ -218,20 +234,27 @@ async function handleTranslate(msg, sender) {
       return;
     }
     let hit = noCache ? undefined : cache.get(keyOf(text));
+    let hitAlign = alignCache.get(keyOf(text)) || null;
     // 旧版本存进去的译文可能带着多转义的字面 \n（Pixiv 中译英）：读出来同样规范化，改了就顺手写回；
     // 残留 JSON 包装的旧译文当作没命中，重新翻（不整体清缓存）
     if (typeof hit === 'string') {
       const fixed = normalizeTranslationBreaks(text, hit);
       if (leaksWrapper(text, fixed)) {
         cache.remove(keyOf(text));
+        alignCache.delete(keyOf(text));
         hit = undefined;
+        hitAlign = null;
       } else if (fixed !== hit) {
+        // 换行被改写后译文偏移变了，旧对齐不能再用（下次悬停降级）
         cache.set(keyOf(text), fixed);
+        alignCache.delete(keyOf(text));
         hit = fixed;
+        hitAlign = null;
       }
     }
     if (hit !== undefined) {
       results[index] = hit;
+      alignments[index] = hitAlign;
       cached += 1;
       usageStats.cacheHit();
     } else {
@@ -243,9 +266,10 @@ async function handleTranslate(msg, sender) {
   let firstError = null;
 
   // 这一条的结果定下来了：回填到它出现的所有位置；失败（null）时记下第一个原因
-  function fill(text, value, err) {
+  function fill(text, value, err, parts) {
     groups.get(text).forEach((index) => {
       results[index] = value;
+      alignments[index] = parts || null;
     });
     if (value === null && !firstError) firstError = err || new ApiError('翻译失败', 0, '');
   }
@@ -259,7 +283,7 @@ async function handleTranslate(msg, sender) {
     if (!running) return true;
     waits.push(
       running.then((done) => {
-        fill(text, done.value, done.error);
+        fill(text, done.value, done.error, done.parts);
       })
     );
     return false;
@@ -296,17 +320,17 @@ async function handleTranslate(msg, sender) {
       resolve = r;
     });
     inflight.set(key, running);
-    settles.set(text, (value, error) => {
+    settles.set(text, (value, error, parts) => {
       if (inflight.get(key) === running) inflight.delete(key);
-      resolve({ value, error });
+      resolve({ value, error, parts });
     });
   });
-  function settle(text, value, err) {
-    fill(text, value, err);
+  function settle(text, value, err, parts) {
+    fill(text, value, err, parts);
     const done = settles.get(text);
     if (done) {
       settles.delete(text);
-      done(value, value === null ? err || firstError : null);
+      done(value, value === null ? err || firstError : null, parts || null);
     }
   }
 
@@ -334,10 +358,11 @@ async function handleTranslate(msg, sender) {
       try {
         // 发出去的是脱敏后的文本；映射只在本地
         const wire = privacyRows ? payload.map((text) => privacyRows.get(text).masked) : payload;
-        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows);
-        if (!out) throw new ApiError('模型返回无法解析', 0, '');
+        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows, wantAlign);
+        if (!out || !out.texts) throw new ApiError('模型返回无法解析', 0, '');
         payload.forEach((text, k) => {
-          let value = out[k];
+          let value = out.texts[k];
+          let parts = (out.aligns && out.aligns[k]) || null;
           if (value === null) {
             // 拆批时一半失败：这一条按失败处理，另一半已经成功的照常写缓存
             settle(text, null, new ApiError('其中一部分译文失败，稍后重试', 0, ''));
@@ -351,9 +376,12 @@ async function handleTranslate(msg, sender) {
               return;
             }
             value = back.text;
+            parts = null; // 脱敏还原会改变字符偏移，旧对齐不再可靠
           }
           // 多转义的字面 \n 在写缓存之前就规范化（对照原文的分行，代码 / 路径原样保留）
+          const beforeBreaks = value;
           value = normalizeTranslationBreaks(text, value);
+          if (value !== beforeBreaks) parts = null;
           // 写入前兜底：残留 JSON 包装 / 字段名 / 提示词原句 → 这一条按失败处理，不插进网页、不进缓存
           if (typeof value === 'string' && leaksWrapper(text, value)) {
             settle(text, null, new ApiError('模型返回的译文里混进了 JSON 格式，已丢弃', 0, ''));
@@ -362,11 +390,16 @@ async function handleTranslate(msg, sender) {
           let result = '';
           if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {
             result = value;
-            if (!noCache) cache.set(keyOf(text), value);
+            if (!noCache) {
+              cache.set(keyOf(text), value);
+              if (wantAlign) rememberAlign(keyOf(text), parts);
+            }
+          } else {
+            parts = null;
           }
           // 否则：模型返回空（"EN"/"×" 这类不需要翻的），或译文长得离谱（见 isRunaway）：给 ''，
           // 和失败的 null 区分开，内容脚本据此记为"与原文相同"而不是失败。不进缓存，免得一次抽风永久生效。
-          settle(text, result);
+          settle(text, result, null, parts);
         });
       } catch (err) {
         if (!firstError) firstError = err;
@@ -384,12 +417,13 @@ async function handleTranslate(msg, sender) {
 
   const failed = results.filter((r) => r === null).length;
   if (results.length && failed === results.length) {
-    return { ok: false, error: describeError(firstError), results };
+    return { ok: false, error: describeError(firstError), results, alignments };
   }
 
   return {
     ok: true,
     results,
+    alignments,
     failed,
     cached,
     error: firstError ? describeError(firstError) : ''
@@ -655,6 +689,7 @@ const ROUTES = {
   },
   'cache:clear': async () => {
     await cache.clear();
+    alignCache.clear();
     return { ok: true };
   }
 };

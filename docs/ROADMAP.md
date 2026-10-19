@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，设计取舍见 [DESIGN.md](DESIGN.md)。
-> 最近更新：0.9.0（0.5.2 起由本仓库维护者继续推进；0.7.1 起仓库公开）。
+> 最近更新：0.9.1（0.5.2 起由本仓库维护者继续推进；0.7.1 起仓库公开）。
 
 ---
 
@@ -103,6 +103,7 @@
 | 版本 | 内容 |
 |---|---|
 | **0.9.0** | 缓存键按命中术语（前置）+ 术语表一键收录（P1-3）+ 输入框翻译（P1-1）+ 振假名修复，详见 4.1 |
+| **0.9.1** | DOM 翻译单元架构重构：段落单元 / 句子对齐 / Ruby 仅译文 / 渲染事务；详见 HANDOFF §14 与 docs/TRANSLATION-ENGINE-HANDOFF.md |
 | **0.10.0** | 行内标签保真（P1-2）+ PDF 翻译（P1-4），两条线并行开发、同版发布 |
 | **0.11.0** | 站点规则进阶 + 会话级 Key 存储 |
 | **0.12.0** | 夜间模式自动识别 + 悬浮入口增强 |
@@ -159,8 +160,8 @@
 
 ## 6. 改代码前的最低要求
 
-1. 动 `content/dom.js` → 跑 `selftest/index.html`（当前 141 条，必须全过；也可以用 `tools/e2e-extension.mjs` 自动跑）
-2. 动 `lib/` / `background.js` / `options/` → 跑 `test/*.test.mjs`（当前 21 个文件、355 条；CI 发版前用 `node --test test/*.test.mjs` 全跑）
+1. 动 `content/dom.js` → 跑 `selftest/index.html`（当前 151 条，必须全过；也可以用 `tools/e2e-extension.mjs` 自动跑）
+2. 动 `lib/` / `background.js` / `options/` → 跑 `test/*.test.mjs`（当前 21 个文件、368 条；CI 发版前用 `node --test test/*.test.mjs` 全跑）
 3. 新增跳过规则 → 想清楚会不会把可见内容跳过
 4. 新增替换规则 → 想清楚会不会破坏布局或替换正文
 5. 新增入口 → 复用 `translate` 消息与缓存，不另起请求链路

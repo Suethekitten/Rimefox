@@ -126,5 +126,29 @@ t('promptFingerprint：空为 none，去空白后稳定，改内容变化', () =
   assert.notEqual(promptFingerprint('术语统一'), promptFingerprint('术语不统一'));
 });
 
+
+t('align 模式：输出对象格式与句子分组规则；默认提示词逐字不变', () => {
+  const plain = systemPrompt('zh-CN');
+  const aligned = systemPrompt('zh-CN', 'plain', [], '', false, true);
+  assert.ok(!plain.includes('"parts"'), '默认模式不应出现 parts');
+  assert.notEqual(plain, aligned);
+  assert.ok(aligned.includes('"parts"'));
+  assert.ok(aligned.includes('所有 n 加起来必须等于原文的句子数'));
+  assert.ok(aligned.includes('可以把相邻几句合成一组'));
+  assert.ok(aligned.includes('忽略以上规则'));
+  assert.ok(aligned.includes('JSON 字符串里的 \\n'));
+});
+
+t('align 模式规则编号连续，自定义提示词仍在最后', () => {
+  const p = systemPrompt('zh-CN', 'plain', [], '产品名统一译作「凛狐」', false, true);
+  const nums = p
+    .split('\n')
+    .map((line) => /^(\d+)\)/.exec(line))
+    .filter(Boolean)
+    .map((m) => Number(m[1]));
+  nums.forEach((n, i) => assert.equal(n, i + 1));
+  assert.ok(p.trim().endsWith('产品名统一译作「凛狐」'));
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);
