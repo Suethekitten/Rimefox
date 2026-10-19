@@ -41,7 +41,7 @@ export function createModelPicker(opts) {
       if (isSlow && isSlow(id)) {
         const tag = document.createElement('span');
         tag.className = 'picker-tag';
-        tag.textContent = '慢';
+        tag.textContent = '思考模型 · 较慢';
         row.appendChild(tag);
       }
       row.addEventListener('mousedown', (event) => {

@@ -366,15 +366,7 @@
       event.stopPropagation();
       clear();
     });
-    head.appendChild(label);
-    head.appendChild(close);
-
-    var body = document.createElement('div');
-    body.className = 'dt-hover-body';
-    body.setAttribute('tabindex', '0');
-
-    var actions = document.createElement('div');
-    actions.className = 'dt-hover-actions';
+    // 铭牌栏：左上角层级徽章，右上角「展开全文 / 收起」胶囊 + ×
     var expand = document.createElement('button');
     expand.type = 'button';
     expand.className = 'dt-hover-expand';
@@ -383,7 +375,24 @@
       event.stopPropagation();
       toggleExpand();
     });
-    actions.appendChild(expand);
+    var tools = document.createElement('span');
+    tools.className = 'dt-hover-tools';
+    tools.appendChild(expand);
+    tools.appendChild(close);
+    head.appendChild(label);
+    head.appendChild(tools);
+
+    var body = document.createElement('div');
+    body.className = 'dt-hover-body';
+    body.setAttribute('tabindex', '0');
+    // 滚到底时去掉底部的渐隐遮罩（遮罩只是提示「下面还有」）
+    body.addEventListener('scroll', function () {
+      tip.classList.toggle('is-end', body.scrollTop + body.clientHeight >= body.scrollHeight - 2);
+    });
+
+    // 旧结构里展开按钮在底部这一行；现在移到铭牌栏，这一行保留为空（隐藏）
+    var actions = document.createElement('div');
+    actions.className = 'dt-hover-actions';
 
     tip.appendChild(head);
     tip.appendChild(body);
@@ -434,6 +443,8 @@
     tip._body.textContent = tipExpanded ? tipFull : tipPreview(tipFull);
     tip._expand.textContent = tipExpanded ? DT.uiText('收起', 'Collapse') : DT.uiText('展开全文', 'Show full text');
     tip._body.scrollTop = 0;
+    tip.classList.toggle('is-expanded', tipExpanded);
+    tip.classList.toggle('is-end', tip._body.scrollHeight <= tip._body.clientHeight + 2);
     positionTip(tipAnchor);
   }
 
@@ -467,7 +478,9 @@
     tip.classList.toggle('is-plain', !tipRich);
     tip._head.hidden = !tipRich;
     tip._close.hidden = !tipRich;
-    tip._actions.hidden = !truncated;
+    tip._actions.hidden = true;
+    tip._expand.hidden = !truncated;
+    tip.classList.remove('is-expanded');
     tip._label.textContent = tipRich ? scopeLabel(sc) : '';
     tip._expand.textContent = DT.uiText('展开全文', 'Show full text');
     tip._close.setAttribute('aria-label', DT.uiText('关闭提示', 'Close'));

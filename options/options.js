@@ -26,6 +26,8 @@ import { normalizeHosts } from '../lib/site-rules.js';
 import {
   createAccentPicker,
   updateTypoPreview,
+  enhanceTypoSelect,
+  bindPreviewScheme,
   renderBuiltinRules,
   parseSiteRulesText,
   showSiteRulesResult,
@@ -42,7 +44,8 @@ import {
   createCustomProvider,
   updateKeyLink,
   stashCurrentProvider,
-  providerSlot
+  providerSlot,
+  renderProviderPills
 } from './provider-list.js';
 import { createGlossaryEditor } from './glossary.js';
 
@@ -139,16 +142,20 @@ function previewLook() {
     typoFontScale: Number(fields.typoFontScale.value),
     typoLineHeight: Number(fields.typoLineHeight.value),
     typoGap: Number(fields.typoGap.value),
-    typoIndent: fields.typoIndent.checked
+    typoIndent: fields.typoIndent.checked,
+    theme: fields.theme.value
   };
   applyUiAppearance(form);
   updateTypoPreview($('typoPreview'), form);
 }
 
 const accentPicker = createAccentPicker({ container: $('accentSwatches'), input: fields.accentColor, onPick: previewLook });
-['reduceTransparency', 'disableShadow', 'typoFontScale', 'typoLineHeight', 'typoGap', 'typoIndent'].forEach((key) =>
+['reduceTransparency', 'disableShadow', 'typoFontScale', 'typoLineHeight', 'typoGap', 'typoIndent', 'theme'].forEach((key) =>
   fields[key].addEventListener('change', previewLook)
 );
+// 字号 / 行高 / 间距：下拉框换成刻度滑块（下拉框仍是唯一的数据来源，只是藏起来）
+['typoFontScale', 'typoLineHeight', 'typoGap'].forEach((key) => enhanceTypoSelect(fields[key], String(DEFAULTS[key])));
+bindPreviewScheme($('previewScheme'), $('miniBrowser'));
 fields.siteRules.addEventListener('input', () => showSiteRulesResult(fields.siteRules.value));
 fields.customCss.addEventListener('input', () => showCustomCssResult(fields.customCss.value));
 
@@ -187,9 +194,23 @@ function createHotkeyRecorder(opts) {
   const hint = $(opts.hint);
   let recording = false;
 
+  // 显示成立体键帽：每个键一个 <kbd>，键之间是「 + 」（textContent 仍是 "Alt + A"）
   function render() {
-    button.textContent = recording ? '按下组合键…' : prettyHotkey(opts.get());
     button.classList.toggle('recording', recording);
+    if (recording) {
+      button.textContent = '按下组合键…';
+      return;
+    }
+    button.textContent = '';
+    prettyHotkey(opts.get())
+      .split(' + ')
+      .forEach((key, i) => {
+        if (i) button.appendChild(document.createTextNode(' + '));
+        const cap = document.createElement('kbd');
+        cap.className = 'keycap';
+        cap.textContent = key;
+        button.appendChild(cap);
+      });
   }
 
   function stop(message) {
@@ -698,8 +719,16 @@ function countChanges(a, b) {
   return n;
 }
 
+// 服务商胶囊的绿点：当前服务商看表单里的 Key，其它服务商看内存里的配置槽位
+function providerHasKey(id) {
+  if (id === currentProvider) return !!fields.apiKey.value.trim();
+  const slot = ((currentCfg && currentCfg.providerConfig) || {})[id];
+  return !!(slot && slot.apiKey);
+}
+
 let lastChangeCount = 0;
 function updateDirty() {
+  renderProviderPills($('providerPills'), providerSelect, providerHasKey);
   if (!savedForm) return;
   const n = countChanges(savedForm, readForm());
   const dirty = n > 0;
@@ -737,6 +766,21 @@ $('discard').addEventListener('click', () => {
   updateDirty();
   setResult($('saveResult'), '已放弃未保存的更改');
 });
+
+// 悬浮保存岛：没有未保存的更改时收起；保存结果 / 别的页面改过配置等提示出现时短暂弹出
+$('saveKbd').textContent = IS_MAC ? '⌘S' : 'Ctrl+S';
+let flashTimer = 0;
+new MutationObserver(() => {
+  const node = $('saveResult');
+  if (!node.textContent.trim()) return;
+  savebar.dataset.flash = 'true';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => {
+    delete savebar.dataset.flash;
+    // 不在编辑中：提示随着保存岛一起收起，下次弹出不带旧提示
+    if (savebar.dataset.dirty !== 'true') setTimeout(() => setResult(node, ''), 400);
+  }, node.classList.contains('bad') ? 6000 : 2200);
+}).observe($('saveResult'), { childList: true, characterData: true, subtree: true });
 
 // Ctrl/⌘ + S 保存
 document.addEventListener('keydown', (event) => {
@@ -898,22 +942,56 @@ $('test').addEventListener('click', async () => {
       });
     });
     if (res && res.ok && res.reasoning) {
-      setResult(
-        $('testResult'),
-        '连接正常 · ' + res.ms + 'ms，但这个模型带"思考"过程：每批都要先想一阵再输出，整页翻译会慢很多。' +
-          '建议换成不带思考的模型，或在服务商那边关闭思考模式。',
-        'bad'
-      );
+      showTestBanner('warn', res.ms, '这个模型带"思考"过程：每批都要先想一阵再输出，整页翻译会慢很多。建议换成不带思考的模型，或在服务商那边关闭思考模式。');
     } else if (res && res.ok) {
-      setResult($('testResult'), '连接正常 · ' + res.ms + 'ms · ' + (res.sample || ''), 'ok');
+      showTestBanner('ok', res.ms, res.sample || '');
     } else {
-      setResult($('testResult'), '失败：' + ((res && res.error) || '未知错误'), 'bad');
+      showTestBanner('bad', null, (res && res.error) || '未知错误');
     }
   } catch (err) {
-    setResult($('testResult'), '失败：' + err.message, 'bad');
+    showTestBanner('bad', null, err.message);
   }
   btn.disabled = false;
 });
+
+// 测试连接的结果横幅：状态 + 耗时胶囊 + 当前协议 / 模型 + 译文样例（或错误详情，可选中复制）
+function showTestBanner(kind, ms, detail) {
+  const node = $('testResult');
+  setResult(node, '', kind === 'ok' ? 'ok' : 'bad');
+  node.textContent = '';
+  node.classList.add('test-banner');
+  node.dataset.kind = kind;
+  const head = document.createElement('span');
+  head.className = 'tb-head';
+  const title = document.createElement('span');
+  title.className = 'tb-title';
+  title.textContent = kind === 'bad' ? '连接失败' : kind === 'warn' ? '连接正常，但较慢' : '连接正常';
+  head.appendChild(title);
+  if (ms != null) {
+    const badge = document.createElement('span');
+    badge.className = 'tb-badge';
+    badge.textContent = ms + ' ms';
+    head.appendChild(badge);
+  }
+  // 协议和模型各一枚标签（分开放：协议名是界面文案，切英文时能单独翻译）
+  const model = fields.model.value.trim();
+  const engine = (engineList().find((e) => e.id === fields.engine.value) || {}).label || '';
+  if (kind !== 'bad') {
+    [engine, model].filter(Boolean).forEach((text) => {
+      const tag = document.createElement('span');
+      tag.className = 'tb-tag';
+      tag.textContent = text;
+      head.appendChild(tag);
+    });
+  }
+  node.appendChild(head);
+  if (detail) {
+    const body = document.createElement('span');
+    body.className = 'tb-detail';
+    body.textContent = detail;
+    node.appendChild(body);
+  }
+}
 
 // ---------------- 翻译缓存 ----------------
 function askBackground(msg) {
@@ -945,12 +1023,49 @@ async function renderCacheStats() {
   const memBytes = used.session != null ? used.session : memory.bytes;
   const diskBytes = used.local != null ? used.local : disk.bytes;
   const lookups = hits + misses;
+  renderCacheMeters($('cacheMeters'), [
+    { label: '会话缓存', value: memory.entries + ' · ' + formatBytes(memBytes), cap: formatBytes(memory.maxBytes), ratio: memBytes / (memory.maxBytes || 1) },
+    { label: '磁盘缓存', value: disk.entries + ' · ' + formatBytes(diskBytes), cap: formatBytes(disk.maxBytes), ratio: diskBytes / (disk.maxBytes || 1) },
+    { label: '命中率', value: lookups ? Math.round((hits / lookups) * 100) + '%' : '—', cap: lookups ? hits + ' / ' + lookups : '', big: true }
+  ]);
   node.textContent =
     '本次会话：' + memory.entries + ' 条 · ' + formatBytes(memBytes) +
     '（上限 ' + memory.maxEntries + ' 条 / ' + formatBytes(memory.maxBytes) + '）　' +
     '磁盘：' + disk.entries + ' 条 · ' + formatBytes(diskBytes) + '（上限 ' + formatBytes(disk.maxBytes) + '）　' +
     '命中率：' + (lookups ? Math.round((hits / lookups) * 100) + '%（' + hits + ' / ' + lookups + '）' : '—');
   node.classList.remove('ok', 'bad');
+}
+
+// 缓存的三张指标卡：会话 / 磁盘（带容量条）+ 命中率（大号数字）
+function renderCacheMeters(box, items) {
+  box.textContent = '';
+  items.forEach((item) => {
+    const tile = document.createElement('span');
+    tile.className = 'meter' + (item.big ? ' is-big' : '');
+    const label = document.createElement('span');
+    label.className = 'meter-label';
+    label.textContent = item.label;
+    const value = document.createElement('span');
+    value.className = 'meter-value';
+    value.textContent = item.value;
+    tile.append(label, value);
+    if (item.ratio != null) {
+      const bar = document.createElement('span');
+      bar.className = 'meter-bar';
+      const fill = document.createElement('span');
+      fill.style.width = Math.max(2, Math.min(100, Math.round(item.ratio * 100))) + '%';
+      bar.appendChild(fill);
+      tile.appendChild(bar);
+    }
+    if (item.cap) {
+      const cap = document.createElement('span');
+      cap.className = 'meter-cap';
+      cap.textContent = item.cap;
+      tile.appendChild(cap);
+    }
+    box.appendChild(tile);
+  });
+  box.hidden = false;
 }
 
 $('refreshCache').addEventListener('click', renderCacheStats);

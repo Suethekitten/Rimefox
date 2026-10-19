@@ -51,6 +51,90 @@
     return cfg().selectionTranslate !== false;
   }
 
+  // ---------------- 配色 ----------------
+  // 气泡和小按钮放在网页里（不在 Shadow DOM 里），只能用行内样式；
+  // 深色网页（深色适配 / 夜间模式开着）换一套深色玻璃。强调色跟随 --dt-accent
+  var ACCENT = 'var(--dt-accent,#6a5cf0)';
+  var FONT = '-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif';
+
+  function paletteOf() {
+    var html = document.documentElement;
+    var dark = html.getAttribute('data-dt-scheme') === 'dark' || html.getAttribute('data-dt-night') === 'on';
+    return dark
+      ? {
+          bg: 'rgba(24,28,40,.94)',
+          fg: '#eef1f7',
+          muted: '#94a3b8',
+          line: 'rgba(255,255,255,.12)',
+          subtle: 'rgba(255,255,255,.05)',
+          hover: 'rgba(255,255,255,.09)',
+          field: 'rgba(0,0,0,.25)',
+          shadow: 'inset 0 1px 0 rgba(255,255,255,.07),0 2px 6px rgba(0,0,0,.4),0 18px 44px -12px rgba(0,0,0,.7)',
+          warnBg: 'rgba(251,191,36,.12)',
+          warnLine: 'rgba(251,191,36,.35)',
+          warnFg: '#fcd34d',
+          errFg: '#fca5a5'
+        }
+      : {
+          bg: 'rgba(255,255,255,.94)',
+          fg: '#0f172a',
+          muted: '#64748b',
+          line: 'rgba(15,23,42,.1)',
+          subtle: '#f1f4f9',
+          hover: 'rgba(15,23,42,.06)',
+          field: '#ffffff',
+          shadow: 'inset 0 1px 0 rgba(255,255,255,.9),0 2px 6px rgba(15,23,42,.08),0 16px 40px -12px rgba(15,23,42,.28)',
+          warnBg: 'rgba(217,119,6,.1)',
+          warnLine: 'rgba(217,119,6,.3)',
+          warnFg: '#92400e',
+          errFg: '#b91c1c'
+        };
+  }
+
+  function paintBubble() {
+    var pal = paletteOf();
+    bubble.style.background = pal.bg;
+    bubble.style.color = pal.fg;
+    bubble.style.borderColor = pal.line;
+    bubble.style.boxShadow = pal.shadow;
+    bubble._pal = pal;
+    (bubble._pills || []).forEach(function (pill) {
+      pill.style.borderColor = pal.line;
+      pill.style.color = pal.muted;
+    });
+    if (bubble._form) paintForm(bubble._form, pal);
+  }
+
+  // 动作胶囊：图标 + 小字，平时弱化，悬停浮现底色
+  function pill(path, text) {
+    var el = document.createElement('span');
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    el.style.cssText =
+      'flex:none;display:none;align-items:center;gap:4px;height:24px;padding:0 9px;border:1px solid transparent;border-radius:999px;' +
+      'font:500 11.5px/1 ' + FONT + ';white-space:nowrap;cursor:pointer;user-select:none;transition:background .15s ease,color .15s ease;';
+    el.appendChild(DT.icon(path, 13));
+    var label = document.createElement('span');
+    label.textContent = text;
+    el.appendChild(label);
+    el._label = label;
+    el.addEventListener('mouseenter', function () {
+      el.style.background = (bubble._pal || paletteOf()).hover;
+      el.style.color = (bubble._pal || paletteOf()).fg;
+    });
+    el.addEventListener('mouseleave', function () {
+      el.style.background = 'transparent';
+      el.style.color = (bubble._pal || paletteOf()).muted;
+    });
+    el.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        el.click();
+      }
+    });
+    return el;
+  }
+
   // ---------------- 气泡 ----------------
   function ensureBubble() {
     if (bubble && bubble.isConnected) return bubble;
@@ -61,32 +145,36 @@
       'position:fixed',
       'z-index:2147483646',
       'display:none',
-      'max-width:360px',
-      'padding:10px 12px',
-      'border-radius:10px',
-      'background:#ffffff',
-      'color:#111111',
-      'border:1px solid rgba(0,0,0,.12)',
-      'box-shadow:0 8px 28px rgba(0,0,0,.18)',
-      'font:13px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif',
+      'box-sizing:border-box',
+      'max-width:420px',
+      'padding:12px 14px 8px',
+      'border-radius:12px',
+      'border:1px solid transparent',
+      '-webkit-backdrop-filter:blur(16px) saturate(140%)',
+      'backdrop-filter:blur(16px) saturate(140%)',
+      'font:13.5px/1.65 ' + FONT,
       'white-space:pre-wrap',
       'word-break:break-word',
       'cursor:pointer',
       'user-select:text'
     ].join(';');
 
-    // 内层：左边译文，右下角品牌 logo
+    // 内层：上面译文，下面一行动作胶囊（复制 / 置顶 / 加入术语表）+ 右下角品牌水印
     var body = document.createElement('div');
-    body.style.cssText = 'display:flex;align-items:flex-end;gap:8px;';
+    body.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
 
     var textEl = document.createElement('div');
-    textEl.style.cssText = 'flex:1 1 auto;min-width:0;';
+    textEl.style.cssText = 'min-width:0;';
     bubble._textEl = textEl;
+
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;align-items:center;gap:2px;margin:0 -6px;white-space:nowrap;';
+    bubble._actions = actions;
 
     var logo = document.createElement('img');
     logo.alt = '';
     logo.title = '凛狐 Rimefox';
-    logo.style.cssText = 'width:14px;height:14px;flex:none;opacity:.45;display:block;';
+    logo.style.cssText = 'width:14px;height:14px;flex:none;opacity:.4;display:block;margin:0 6px 0 auto;';
     logo.addEventListener('error', function () {
       logo.style.display = 'none'; // 取不到图标就不显示，别留个破图
     });
@@ -96,17 +184,29 @@
       logo.style.display = 'none';
     }
 
+    // 「复制」：和点气泡本身一样复制译文，只是更好找
+    var copy = pill('M9 9h11v11H9zM5 15V4h11', DT.uiText('复制', 'Copy'));
+    copy.addEventListener('click', function (event) {
+      event.stopPropagation();
+      var text = bubble._textEl.textContent || '';
+      if (!text) return;
+      try {
+        navigator.clipboard.writeText(text).then(function () {
+          copy._label.textContent = DT.uiText('已复制', 'Copied');
+          copy.style.color = '#10b981';
+          setTimeout(function () {
+            copy._label.textContent = DT.uiText('复制', 'Copy');
+            copy.style.color = (bubble._pal || paletteOf()).muted;
+          }, 1200);
+        });
+      } catch (err) {
+        /* 剪贴板不可用就算了 */
+      }
+    });
+    bubble._copyEl = copy;
+
     // 「置顶」：把这条译文放进始终在最上层的小窗（pip.js），翻完才显示
-    var pin = document.createElement('span');
-    pin.setAttribute('role', 'button');
-    pin.style.cssText = 'flex:none;display:none;width:14px;height:14px;opacity:.5;cursor:pointer;color:inherit;';
-    pin.appendChild(DT.icon('M9 3h6l-1 6 3 3H7l3-3-1-6zM12 15v6', 14));
-    pin.addEventListener('mouseenter', function () {
-      pin.style.opacity = '1';
-    });
-    pin.addEventListener('mouseleave', function () {
-      pin.style.opacity = '.55';
-    });
+    var pin = pill('M9 3h6l-1 6 3 3H7l3-3-1-6zM12 15v6', DT.uiText('置顶', 'Pin'));
     pin.addEventListener('click', function (event) {
       event.stopPropagation(); // 别触发气泡的「点击复制」
       if (DT.pip) DT.pip.open();
@@ -114,27 +214,21 @@
     bubble._pinEl = pin;
 
     // 「加入术语表」：把这条「原文 → 译法」收进术语表，不必再去设置页手填
-    var addTerm = document.createElement('span');
-    addTerm.setAttribute('role', 'button');
-    addTerm.style.cssText = 'flex:none;display:none;width:14px;height:14px;opacity:.5;cursor:pointer;color:inherit;';
-    addTerm.appendChild(DT.icon('M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 3H20v18H6.5A2.5 2.5 0 0 1 4 18.5v-13A2.5 2.5 0 0 1 6.5 3z', 14));
-    addTerm.addEventListener('mouseenter', function () {
-      addTerm.style.opacity = '1';
-    });
-    addTerm.addEventListener('mouseleave', function () {
-      addTerm.style.opacity = '.5';
-    });
+    var addTerm = pill('M12 5v14M5 12h14', DT.uiText('加入术语表', 'Add to glossary'));
     addTerm.addEventListener('click', function (event) {
       event.stopPropagation(); // 别触发气泡的「点击复制」
       openTermForm();
     });
     bubble._addEl = addTerm;
     bubble._body = body;
+    bubble._pills = [copy, pin, addTerm];
 
+    actions.appendChild(copy);
+    actions.appendChild(pin);
+    actions.appendChild(addTerm);
+    actions.appendChild(logo);
     body.appendChild(textEl);
-    body.appendChild(addTerm);
-    body.appendChild(pin);
-    body.appendChild(logo);
+    body.appendChild(actions);
     bubble.appendChild(body);
 
     bubble.addEventListener('mousedown', function (event) {
@@ -168,6 +262,7 @@
       bubble.style.display = 'none';
       if (bubble._form) bubble._form.style.display = 'none';
       if (bubble._body) bubble._body.style.display = 'flex';
+      if (bubble._actions) bubble._actions.style.display = 'flex';
     }
   }
 
@@ -193,18 +288,21 @@
     // 从收录表单切回译文：表单收起，正文重新露出来
     if (bubble._form) bubble._form.style.display = 'none';
     if (bubble._body) bubble._body.style.display = 'flex';
+    if (bubble._actions) bubble._actions.style.display = 'flex';
+    paintBubble();
     bubble.dataset.state = state || 'done';
     bubble._textEl.textContent = text;
     bubble._lastRect = rect;
     var canAdd = (state || 'done') === 'done' && !!lastPair;
-    bubble._addEl.style.display = canAdd ? 'block' : 'none';
+    bubble._copyEl.style.display = (state || 'done') === 'done' ? 'inline-flex' : 'none';
+    bubble._addEl.style.display = canAdd ? 'inline-flex' : 'none';
     var addTitle = DT.uiText('加入术语表', 'Add to glossary');
     bubble._addEl.title = addTitle;
     bubble._addEl.setAttribute('aria-label', addTitle);
     var pinTitle = DT.uiText('置顶：放进始终在最上层的小窗', 'Pin to an always-on-top window');
     bubble._pinEl.title = pinTitle;
     bubble._pinEl.setAttribute('aria-label', pinTitle);
-    bubble._pinEl.style.display = (state || 'done') === 'done' && DT.pip && DT.pip.supported() ? 'block' : 'none';
+    bubble._pinEl.style.display = (state || 'done') === 'done' && DT.pip && DT.pip.supported() ? 'inline-flex' : 'none';
     bubble.style.display = 'block';
     bubble.style.visibility = 'hidden'; // 先量尺寸再定位
     placeBubble(rect);
@@ -217,13 +315,16 @@
   function ensureTermForm() {
     if (bubble._form && bubble._form.isConnected) return bubble._form;
 
+    // 内嵌抽屉：译文下面一条细分割线，下半部是二级底色的表单区（原文 → 译法 两栏）
     var form = document.createElement('div');
     form.setAttribute('data-dt-ui', '1');
-    form.style.cssText = 'display:none;min-width:236px;max-width:320px;cursor:default;white-space:normal;';
+    form.style.cssText =
+      'display:none;min-width:300px;margin:8px -14px -8px;padding:10px 14px 12px;border-top:1px solid transparent;' +
+      'border-radius:0 0 12px 12px;cursor:default;white-space:normal;';
 
     function label(text) {
       var el = document.createElement('div');
-      el.style.cssText = 'font-size:12px;opacity:.7;margin:0 0 2px;';
+      el.style.cssText = 'font-size:11.5px;margin:0 0 3px;';
       el.textContent = text;
       return el;
     }
@@ -234,8 +335,16 @@
       input.maxLength = 200;
       input.setAttribute('data-dt-ui', '1');
       input.style.cssText =
-        'width:100%;box-sizing:border-box;margin:0 0 8px;padding:5px 7px;border:1px solid rgba(0,0,0,.18);' +
-        'border-radius:6px;background:#fff;color:#111;font:13px/1.4 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;';
+        'width:100%;box-sizing:border-box;height:28px;margin:0;padding:0 8px;border:1px solid transparent;' +
+        'border-radius:7px;font:12.5px/1.4 ' + FONT + ';outline:none;transition:border-color .15s ease,box-shadow .15s ease;';
+      input.addEventListener('focus', function () {
+        input.style.borderColor = ACCENT;
+        input.style.boxShadow = '0 0 0 3px color-mix(in srgb,' + ACCENT + ' 28%,transparent)';
+      });
+      input.addEventListener('blur', function () {
+        input.style.borderColor = (bubble._pal || paletteOf()).line;
+        input.style.boxShadow = 'none';
+      });
       input.addEventListener('keydown', function (event) {
         event.stopPropagation(); // 别让页面快捷键抢走 Enter / Esc
         if (event.key === 'Enter') {
@@ -249,29 +358,31 @@
     var src = field();
     var dst = field();
 
+    // 提示条：冲突（已有译法）是琥珀色微光条，出错是红字，「保存中…」是弱文字
     var note = document.createElement('div');
-    note.style.cssText = 'display:none;font-size:12px;line-height:1.5;margin:0 0 8px;color:#b91c1c;';
+    note.style.cssText = 'display:none;font-size:12px;line-height:1.5;margin:8px 0 0;padding:6px 8px;border-radius:8px;border:1px solid transparent;';
 
     var row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;';
+    row.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;margin-top:10px;';
 
     function button(text, primary) {
       var el = document.createElement('button');
       el.type = 'button';
       el.textContent = text;
       el.style.cssText =
-        'padding:4px 12px;border-radius:6px;cursor:pointer;font:13px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;' +
+        'height:28px;padding:0 12px;border-radius:8px;cursor:pointer;font:500 12.5px/1 ' + FONT + ';' +
         (primary
-          ? 'border:1px solid #2563eb;background:#2563eb;color:#fff;'
-          : 'border:1px solid rgba(0,0,0,.18);background:#fff;color:#111;');
+          ? 'border:1px solid transparent;background:' + ACCENT + ';color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.25);'
+          : 'border:1px solid transparent;background:transparent;');
+      el._primary = !!primary;
       return el;
     }
 
     var save = button(DT.uiText('保存', 'Save'), true);
     var overwrite = button(DT.uiText('覆盖', 'Overwrite'), true);
     overwrite.style.display = 'none';
-    overwrite.style.background = '#b45309';
-    overwrite.style.borderColor = '#b45309';
+    overwrite.style.background = '#d97706';
+    overwrite.style.fontWeight = '600';
     var cancel = button(DT.uiText('取消', 'Cancel'), false);
 
     save.addEventListener('click', function (event) {
@@ -291,12 +402,26 @@
     row.appendChild(overwrite);
     row.appendChild(cancel);
 
-    form.appendChild(label(DT.uiText('原文', 'Source')));
-    form.appendChild(src);
-    form.appendChild(label(DT.uiText('译法', 'Translation')));
-    form.appendChild(dst);
+    // 两栏：[原文] → [译法]
+    var grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:end;column-gap:6px;';
+    var left = document.createElement('div');
+    left.appendChild(label(DT.uiText('原文', 'Source')));
+    left.appendChild(src);
+    var arrow = document.createElement('div');
+    arrow.textContent = '→';
+    arrow.style.cssText = 'height:28px;line-height:28px;font-size:12px;opacity:.55;';
+    var right = document.createElement('div');
+    right.appendChild(label(DT.uiText('译法', 'Translation')));
+    right.appendChild(dst);
+    grid.appendChild(left);
+    grid.appendChild(arrow);
+    grid.appendChild(right);
+    form.appendChild(grid);
     form.appendChild(note);
     form.appendChild(row);
+    form._labels = [left.firstChild, right.firstChild];
+    form._cancel = cancel;
 
     form._src = src;
     form._dst = dst;
@@ -312,7 +437,22 @@
 
     bubble.appendChild(form);
     bubble._form = form;
+    paintForm(form, bubble._pal || paletteOf());
     return form;
+  }
+
+  function paintForm(form, pal) {
+    form.style.background = pal.subtle;
+    form.style.borderTopColor = pal.line;
+    form._labels.forEach(function (el) {
+      el.style.color = pal.muted;
+    });
+    [form._src, form._dst].forEach(function (input) {
+      input.style.background = pal.field;
+      input.style.color = pal.fg;
+      if (document.activeElement !== input) input.style.borderColor = pal.line;
+    });
+    form._cancel.style.color = pal.muted;
   }
 
   function openTermForm() {
@@ -322,7 +462,9 @@
     form._dst.value = lastPair.target;
     form._note.style.display = 'none';
     form._overwrite.style.display = 'none';
-    if (bubble._body) bubble._body.style.display = 'none';
+    // 译文留在上面，只收起动作胶囊；表单在下半部展开
+    if (bubble._actions) bubble._actions.style.display = 'none';
+    paintForm(form, bubble._pal || paletteOf());
     form.style.display = 'block';
     bubble.dataset.state = 'form'; // 表单里点击不再触发「复制译文」
     bubble.style.visibility = 'hidden';
@@ -340,14 +482,22 @@
     if (!bubble || !bubble._form) return;
     bubble._form.style.display = 'none';
     if (bubble._body) bubble._body.style.display = 'flex';
+    if (bubble._actions) bubble._actions.style.display = 'flex';
     bubble.dataset.state = 'done';
     if (bubble._lastRect) placeBubble(bubble._lastRect);
   }
 
-  function showTermNote(text) {
+  // kind：warn = 同名原文已有译法（琥珀色提示条）；info = 「保存中…」；默认 = 出错（红字）
+  function showTermNote(text, kind) {
     if (!bubble || !bubble._form) return;
-    bubble._form._note.textContent = text;
-    bubble._form._note.style.display = text ? 'block' : 'none';
+    var note = bubble._form._note;
+    var pal = bubble._pal || paletteOf();
+    note.textContent = text;
+    note.style.display = text ? 'block' : 'none';
+    note.style.background = kind === 'warn' ? pal.warnBg : 'transparent';
+    note.style.borderColor = kind === 'warn' ? pal.warnLine : 'transparent';
+    note.style.color = kind === 'warn' ? pal.warnFg : kind === 'info' ? pal.muted : pal.errFg;
+    note.style.padding = kind === 'warn' ? '6px 8px' : '0';
   }
 
   function termErrorOf(res) {
@@ -375,7 +525,7 @@
     }
     form._save.disabled = true;
     form._overwrite.disabled = true;
-    showTermNote(DT.uiText('保存中…', 'Saving…'));
+    showTermNote(DT.uiText('保存中…', 'Saving…'), 'info');
     try {
       var res = await DT.send(
         { type: 'glossary:add', source: source, target: target, overwrite: overwrite === true },
@@ -387,7 +537,8 @@
           DT.uiText(
             '已有译法：' + res.current + '。要覆盖吗？',
             'Already defined as ' + res.current + '. Overwrite?'
-          )
+          ),
+          'warn'
         );
         form._overwrite.style.display = 'inline-block';
         return;
@@ -424,19 +575,21 @@
     btn.setAttribute('data-dt-ui', '1');
     btn.textContent = '译';
     btn.title = '翻译所选文字';
+    // 28px 圆角方块，毛玻璃底 + 强调色「译」；出现时 120ms 从 0.88 弹到 1
     btn.style.cssText = [
       'position:fixed',
       'z-index:2147483645',
       'display:none',
-      'width:26px',
-      'height:26px',
-      'line-height:26px',
+      'box-sizing:border-box',
+      'width:28px',
+      'height:28px',
       'text-align:center',
-      'border-radius:6px',
-      'background:#2563eb',
-      'color:#ffffff',
-      'font:600 13px/26px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif',
-      'box-shadow:0 4px 12px rgba(0,0,0,.22)',
+      'border-radius:8px',
+      'border:1px solid transparent',
+      '-webkit-backdrop-filter:blur(12px) saturate(140%)',
+      'backdrop-filter:blur(12px) saturate(140%)',
+      'color:' + ACCENT,
+      'font:700 13px/26px ' + FONT,
       'cursor:pointer',
       'user-select:none'
     ].join(';');
@@ -467,7 +620,7 @@
   function showButton(rect, point) {
     ensureButton();
     var pad = 6;
-    var size = 26;
+    var size = 28;
     var gap = 10; // 别盖住指针本身
     var vw = window.innerWidth;
     var vh = window.innerHeight;
@@ -482,9 +635,17 @@
     left = Math.min(Math.max(pad, left), vw - size - pad);
     top = Math.min(Math.max(pad, top), vh - size - pad);
 
+    var wasHidden = btn.style.display === 'none';
+    var pal = paletteOf();
+    btn.style.background = pal.bg;
+    btn.style.borderColor = pal.line;
+    btn.style.boxShadow = pal.shadow;
     btn.style.left = Math.round(left) + 'px';
     btn.style.top = Math.round(top) + 'px';
     btn.style.display = 'block';
+    if (wasHidden && btn.animate && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+      btn.animate([{ transform: 'scale(.88)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: 120, easing: 'ease-out' });
+    }
   }
 
   // ---------------- 选区 ----------------
@@ -666,7 +827,17 @@
     });
   }
 
-  window.addEventListener('scroll', followSelection, true);
+  // 捕获阶段也会收到我们自己界面里的滚动（收录表单里 input.select() 会把长原文横向滚到末尾）：
+  // 那不是网页在滚，不能据此收起气泡
+  window.addEventListener(
+    'scroll',
+    function (event) {
+      var el = event.target;
+      if (el && el.nodeType === 1 && el.closest && el.closest('[data-dt-ui]')) return;
+      followSelection();
+    },
+    true
+  );
   window.addEventListener('resize', followSelection);
 
   // 让整页快捷键复用划词：有选区时由 main.js 调用（返回 false 表示没有可翻的选区）

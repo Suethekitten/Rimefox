@@ -105,28 +105,40 @@ html[data-dt="on"][data-dt-typo="on"] .dt-target.dt-cjk-tight {
 /* ---- 主题 ---- */
 /* 下划线用 text-decoration，只划在文字上；
    之前用 border-bottom 会横贯整个容器宽度，看起来像一条分隔线。 */
+/* 下划线 1.5px、离文字 3px，不压汉字底边 */
 html[data-dt="on"][data-dt-theme="underline"] .dt-target {
   border-bottom: 0;
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--dt-accent, #3b82f6) 55%, transparent);
-  text-decoration-thickness: 2px;
+  text-decoration-color: color-mix(in srgb, var(--dt-accent, #3b82f6) 60%, transparent);
+  text-decoration-thickness: 1.5px;
   text-underline-offset: 3px;
 }
 
+/* 虚线框 / 高亮：圆角 4px；垂直方向不加内边距，不把单行控件撑高 */
 html[data-dt="on"][data-dt-theme="dashed"] .dt-target {
   border: 1px dashed color-mix(in srgb, var(--dt-accent, #94a3b8) 70%, transparent);
   border-radius: 4px;
-  padding: 2px 6px;
+  padding: 0 4px;
 }
 
 html[data-dt="on"][data-dt-theme="highlight"] .dt-target {
   background: rgba(255, 214, 0, 0.24);
-  border-radius: 3px;
-  padding: 1px 4px;
+  border-radius: 4px;
+  padding: 0 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
+/* 半透明：平时淡出 + 轻微模糊，鼠标移上去恢复清晰 */
 html[data-dt="on"][data-dt-theme="mask"] .dt-target {
-  opacity: 0.55;
+  opacity: 0.38;
+  filter: blur(1.5px);
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+
+html[data-dt="on"][data-dt-theme="mask"] .dt-target:hover {
+  opacity: 1;
+  filter: none;
 }
 
 /* ---- 仅译文模式 ----
@@ -137,34 +149,37 @@ html[data-dt="on"][data-dt-theme="mask"] .dt-target {
    鼠标停在哪一句，就只给这一句原文（黄）和对应的那句译文（蓝）上底色；移开取消。
    用 CSS Custom Highlight API 直接给文字范围上色，不改页面 DOM。
    原地替换的单元（仅译文 / 控件 / 导航）原文不在页面上，弹小气泡显示对应的那句原文 */
+/* 原文句：柔和暖琥珀；译文句：跟随强调色的柔和底色（不再用刺眼的纯黄 / 纯蓝） */
 ::highlight(dt-hover-src) {
-  background-color: rgba(250, 204, 21, 0.38);
+  background-color: rgba(245, 158, 11, 0.16);
 }
 
 ::highlight(dt-hover-target) {
-  background-color: color-mix(in srgb, var(--dt-accent, #3b82f6) 26%, transparent);
+  background-color: color-mix(in srgb, var(--dt-accent, #6a5cf0) 16%, transparent);
 }
 
 /* 浏览器不支持 Highlight API 时的退路：整段高亮 */
 html[data-dt="on"] [data-dt-hover="src"] {
-  background-color: rgba(250, 204, 21, 0.18);
-  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.45);
-  border-radius: 3px;
+  background-color: rgba(245, 158, 11, 0.1);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
 }
 
-/* 译文在源元素内部：底色会叠在原文的黄色上，再加一条蓝色竖线区分 */
+/* 译文在源元素内部：底色会叠在原文的琥珀色上，再加一条强调色竖线区分 */
 html[data-dt="on"] [data-dt-hover="target"] {
-  background-color: color-mix(in srgb, var(--dt-accent, #3b82f6) 20%, transparent);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--dt-accent, #3b82f6) 75%, transparent);
-  border-radius: 3px;
+  background-color: color-mix(in srgb, var(--dt-accent, #6a5cf0) 12%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--dt-accent, #6a5cf0) 70%, transparent);
+  border-radius: 4px;
   opacity: 1;
+  filter: none;
 }
 
 html[data-dt="on"] [data-dt-hover="replaced"] {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dt-accent, #3b82f6) 45%, transparent);
-  border-radius: 3px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dt-accent, #6a5cf0) 40%, transparent);
+  border-radius: 4px;
 }
 
+/* 原文气泡：深色毛玻璃（深色网页上换浅色，见下面），圆角 12、顶部 1px 内高光 */
 html[data-dt="on"] .dt-hover-tip {
   position: fixed;
   z-index: 2147483646;
@@ -173,39 +188,61 @@ html[data-dt="on"] .dt-hover-tip {
   box-sizing: border-box;
   max-width: min(420px, calc(100vw - 24px));
   max-height: min(40vh, 340px);
-  border-radius: 8px;
-  background: rgba(22, 24, 30, 0.94);
-  color: #fff;
-  font: 12.5px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-  border-left: 3px solid var(--dt-accent, #60a5fa);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(18, 22, 33, 0.92);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  color: #f1f5f9;
+  font: 12.5px/1.55 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 2px 6px rgba(0, 0, 0, 0.2), 0 16px 36px -12px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   pointer-events: auto;
 }
 
 /* 短句：保持原来的轻量提示，不让鼠标进入 */
 html[data-dt="on"] .dt-hover-tip.is-plain {
-  padding: 6px 10px;
+  padding: 7px 11px;
+  border-radius: 10px;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
   pointer-events: none;
 }
 
+/* 铭牌栏：左层级徽章，右「展开全文 / 收起」胶囊 + × */
 .dt-hover-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   flex: 0 0 auto;
-  padding: 6px 8px 5px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 7px 7px 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .dt-hover-label {
-  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--dt-accent, #6a5cf0) 40%, transparent);
+  background: color-mix(in srgb, var(--dt-accent, #6a5cf0) 18%, transparent);
+  color: color-mix(in srgb, var(--dt-accent, #6a5cf0) 45%, white);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
   letter-spacing: 0.02em;
-  opacity: 0.78;
+  white-space: nowrap;
+}
+
+.dt-hover-label:empty {
+  display: none;
+}
+
+.dt-hover-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .dt-hover-close,
@@ -213,35 +250,43 @@ html[data-dt="on"] .dt-hover-tip.is-plain {
   all: unset;
   box-sizing: border-box;
   cursor: pointer;
-  border-radius: 5px;
   color: inherit;
 }
 
 .dt-hover-close {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   font-size: 16px;
   line-height: 1;
-  opacity: 0.72;
+  opacity: 0.7;
 }
 
 .dt-hover-close:hover,
 .dt-hover-close:focus-visible {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .dt-hover-body {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 7px 10px;
+  padding: 8px 11px 9px;
   overflow: auto;
   overscroll-behavior: contain;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+/* 展开后可滚动：底部 12px 渐隐提示「下面还有」，滚到底时去掉 */
+.dt-hover-tip.is-expanded:not(.is-end) .dt-hover-body {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent);
 }
 
 .dt-hover-actions {
@@ -250,14 +295,18 @@ html[data-dt="on"] .dt-hover-tip.is-plain {
 }
 
 .dt-hover-expand {
-  padding: 2px 4px;
-  font-size: 12px;
-  color: color-mix(in srgb, var(--dt-accent, #60a5fa) 70%, white);
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 11.5px;
+  line-height: 20px;
+  color: color-mix(in srgb, var(--dt-accent, #6a5cf0) 40%, white);
 }
 
 .dt-hover-expand:hover,
 .dt-hover-expand:focus-visible {
-  text-decoration: underline;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .dt-hover-head[hidden],
@@ -291,26 +340,43 @@ html[data-dt="on"][data-dt-scheme="dark"][data-dt-theme="dashed"] .dt-target {
 }
 
 html[data-dt-scheme="dark"] ::highlight(dt-hover-src) {
-  background-color: rgba(250, 204, 21, 0.26);
+  background-color: rgba(245, 158, 11, 0.24);
 }
 
 html[data-dt-scheme="dark"] ::highlight(dt-hover-target) {
-  background-color: color-mix(in srgb, var(--dt-accent, #60a5fa) 32%, transparent);
+  background-color: color-mix(in srgb, var(--dt-accent, #8b80f3) 26%, transparent);
 }
 
+/* 深色网页上气泡换成浅色玻璃，和页面拉开对比 */
 html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-tip {
-  background: rgba(241, 245, 249, 0.96);
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(248, 250, 252, 0.94);
   color: #0f172a;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(0, 0, 0, 0.3), 0 18px 40px -12px rgba(0, 0, 0, 0.6);
 }
 
 html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-head {
-  border-bottom-color: rgba(15, 23, 42, 0.14);
+  border-bottom-color: rgba(15, 23, 42, 0.1);
+}
+
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-label {
+  color: color-mix(in srgb, var(--dt-accent, #6a5cf0) 80%, black);
+}
+
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-expand {
+  border-color: rgba(15, 23, 42, 0.16);
+  color: color-mix(in srgb, var(--dt-accent, #6a5cf0) 85%, black);
+}
+
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-body {
+  scrollbar-color: rgba(15, 23, 42, 0.25) transparent;
 }
 
 html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-close:hover,
-html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-close:focus-visible {
-  background: rgba(15, 23, 42, 0.1);
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-close:focus-visible,
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-expand:hover,
+html[data-dt="on"][data-dt-scheme="dark"] .dt-hover-expand:focus-visible {
+  background: rgba(15, 23, 42, 0.08);
 }
 
 /* ---- 译文排版（设置页「外观 → 译文排版」，全是默认值时不生效）----

@@ -55,11 +55,91 @@ export function createAccentPicker({ container, input, onPick }) {
 }
 
 // ---------------- 译文排版预览 ----------------
+// 预览放在一个迷你浏览器窗口里：译文样式（data-theme）、排版变量、强调色都和网页里的译文同一套
 export function updateTypoPreview(preview, form) {
   const vars = typographyVars(form) || { '--dt-font-scale': '1', '--dt-line-height': 'inherit', '--dt-gap': '0.3em', '--dt-indent': '0' };
   Object.keys(vars).forEach((name) => preview.style.setProperty(name, vars[name]));
   const accent = isDefaultAccent(form.accentColor) ? '#3b82f6' : accentHex(form.accentColor);
   preview.style.setProperty('--dt-accent', accent);
+  preview.dataset.theme = form.theme || 'underline';
+}
+
+// 预览窗右上角的「深色网页」开关：看深色网页上译文颜色的自动调整
+export function bindPreviewScheme(button, box) {
+  if (!button || !box) return;
+  button.addEventListener('click', () => {
+    const dark = !box.classList.contains('is-dark-page');
+    box.classList.toggle('is-dark-page', dark);
+    button.setAttribute('aria-pressed', dark ? 'true' : 'false');
+  });
+}
+
+// 字号 / 行高 / 间距：把下拉框换成刻度滑块 + 数值胶囊 + 一键复位。
+// 下拉框留在原位（隐藏）并且仍是唯一的数据来源：options.js 照旧读写 select.value，
+// 这里拦截 value 的赋值来同步滑块；拖动滑块 = 选中对应选项并派发 change。
+const SELECT_VALUE = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+
+export function enhanceTypoSelect(select, defaultValue) {
+  if (!select || select.dataset.slider) return;
+  select.dataset.slider = '1';
+  select.classList.add('typo-select');
+  select.tabIndex = -1;
+  const row = select.closest('.row');
+  const title = row ? row.querySelector('.row-title') : null;
+
+  const wrap = document.createElement('span');
+  wrap.className = 'typo-slider';
+  const range = document.createElement('input');
+  range.type = 'range';
+  range.min = '0';
+  range.max = String(Math.max(0, select.options.length - 1));
+  range.step = '1';
+  const value = document.createElement('output');
+  value.className = 'typo-value';
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'typo-reset';
+  reset.textContent = '↺';
+  reset.title = '恢复默认';
+  reset.setAttribute('aria-label', '恢复默认');
+  wrap.append(range, value, reset);
+  select.after(wrap);
+
+  function sync() {
+    const index = Math.max(0, select.selectedIndex);
+    const opt = select.options[index];
+    range.value = String(index);
+    value.textContent = opt ? opt.textContent : '';
+    range.setAttribute('aria-valuetext', value.textContent);
+    if (title) range.setAttribute('aria-label', title.textContent);
+    reset.hidden = String(SELECT_VALUE.get.call(select)) === String(defaultValue);
+  }
+
+  function choose(index) {
+    if (select.selectedIndex === index) return;
+    select.selectedIndex = index;
+    sync();
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  Object.defineProperty(select, 'value', {
+    configurable: true,
+    get() {
+      return SELECT_VALUE.get.call(this);
+    },
+    set(next) {
+      SELECT_VALUE.set.call(this, next);
+      sync();
+    }
+  });
+  range.addEventListener('input', () => choose(Number(range.value)));
+  select.addEventListener('change', sync);
+  reset.addEventListener('click', (event) => {
+    event.preventDefault();
+    const index = Array.from(select.options).findIndex((opt) => opt.value === String(defaultValue));
+    if (index >= 0) choose(index);
+  });
+  sync();
 }
 
 // ---------------- 内置站点规则 ----------------

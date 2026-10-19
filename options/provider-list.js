@@ -80,3 +80,40 @@ export function providerSlot(cfg, id) {
 export function providerInfo(id) {
   return providerById(id);
 }
+
+// 服务商快捷胶囊：照着下拉框的选项渲染（官方模板 + 自定义 + 新建），点一下 = 在下拉框里选它，
+// 切换逻辑仍然只走下拉框的 change 事件。hasKey(id) 决定右上角的绿点（填过 Key 的服务商）。
+// 选项没变时只更新状态，不重建按钮（避免打断键盘焦点）。
+export function renderProviderPills(container, select, hasKey) {
+  if (!container || !select) return;
+  const options = Array.from(select.options).filter((opt) => opt.value !== SEP_ID);
+  const signature = options.map((opt) => opt.value + '\u0001' + opt.textContent).join('\u0002');
+  if (container.dataset.sig !== signature) {
+    container.dataset.sig = signature;
+    container.textContent = '';
+    options.forEach((opt) => {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'provider-pill' + (opt.value === NEW_CUSTOM_ID ? ' is-new' : '');
+      pill.dataset.id = opt.value;
+      const label = document.createElement('span');
+      label.className = 'provider-pill-name';
+      label.textContent = opt.textContent;
+      pill.appendChild(label);
+      pill.title = opt.textContent;
+      pill.addEventListener('click', () => {
+        if (select.value === opt.value && opt.value !== NEW_CUSTOM_ID) return;
+        select.value = opt.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      container.appendChild(pill);
+    });
+  }
+  Array.from(container.children).forEach((pill) => {
+    const id = pill.dataset.id;
+    const current = id === select.value;
+    pill.classList.toggle('is-current', current);
+    pill.setAttribute('aria-pressed', current ? 'true' : 'false');
+    pill.classList.toggle('has-key', id !== NEW_CUSTOM_ID && !!hasKey(id));
+  });
+}

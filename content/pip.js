@@ -13,21 +13,29 @@
   var win = null;
   var view = null; // { source, result, empty }
 
+  // 和扩展页面同一套冷调玻璃变量（lib/ui-tokens.css 的取值）：画布 / 卡片 / 三级文字
   var CSS = [
-    ':root{color-scheme:light dark;--bg:#ffffff;--fg:#14161f;--muted:#6b7285;--line:rgba(20,24,40,.1);--acc:#6a5cf0}',
-    '@media (prefers-color-scheme:dark){:root{--bg:#14161f;--fg:#edf0f9;--muted:#a3a9bd;--line:rgba(255,255,255,.12);--acc:#9182ff}}',
+    ':root{color-scheme:light dark;--canvas:#f4f6fa;--card:rgba(255,255,255,.86);--fg:#0f172a;--muted:#475569;--weak:#94a3b8;' +
+      '--line:rgba(15,23,42,.08);--hi:inset 0 1px 0 rgba(255,255,255,.9);--acc:#6a5cf0}',
+    '@media (prefers-color-scheme:dark){:root{--canvas:#090b10;--card:rgba(18,22,33,.8);--fg:#f1f5f9;--muted:#94a3b8;--weak:#64748b;' +
+      '--line:rgba(255,255,255,.08);--hi:inset 0 1px 0 rgba(255,255,255,.07);--acc:#8b80f3}}',
     '*{box-sizing:border-box}',
-    'html,body{margin:0;height:100%;background:var(--bg);color:var(--fg)}',
-    'body{display:flex;flex-direction:column;font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}',
-    'header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}',
-    'header img{width:16px;height:16px}',
-    'header span{flex:1}',
-    'button{border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:12px;padding:2px 8px;cursor:pointer}',
-    'button:hover{border-color:var(--acc);color:var(--acc)}',
-    'main{flex:1;overflow:auto;padding:12px 14px}',
-    '.src{margin:0 0 8px;color:var(--muted);font-size:12.5px;white-space:pre-wrap;word-break:break-word}',
-    '.out{margin:0;white-space:pre-wrap;word-break:break-word;font-size:15px}',
-    '.empty{color:var(--muted);font-size:13px}'
+    'html,body{margin:0;height:100%;background:var(--canvas);color:var(--fg)}',
+    'body{display:flex;flex-direction:column;font:14px/1.65 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;' +
+      'background-image:radial-gradient(600px 260px at 10% -20%,color-mix(in srgb,var(--acc) 9%,transparent),transparent 70%)}',
+    'header{position:sticky;top:0;display:flex;align-items:center;gap:8px;height:32px;padding:0 8px 0 10px;border-bottom:1px solid var(--line);' +
+      'background:color-mix(in srgb,var(--canvas) 82%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);font-size:12px;color:var(--muted)}',
+    'header img{width:16px;height:16px;border-radius:4px}',
+    '.title{flex:1;min-width:0;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.lang{padding:0 7px;border-radius:999px;border:1px solid var(--line);color:var(--weak);font:500 10.5px/18px "JetBrains Mono","SF Mono",Consolas,monospace}',
+    '.lang:empty{display:none}',
+    'button{height:22px;border:1px solid var(--line);border-radius:7px;background:var(--card);box-shadow:var(--hi);color:inherit;font:inherit;font-size:12px;padding:0 9px;cursor:pointer}',
+    'button:hover{border-color:color-mix(in srgb,var(--acc) 50%,transparent);color:var(--acc)}',
+    'main{flex:1;overflow:auto;padding:12px;scrollbar-width:thin}',
+    '.card{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--card);box-shadow:var(--hi),0 8px 24px -12px rgba(15,23,42,.18)}',
+    '.src{margin:0 0 8px;padding-bottom:8px;border-bottom:1px dashed var(--line);color:var(--muted);font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word}',
+    '.out{margin:0;white-space:pre-wrap;word-break:break-word;font-size:15px;line-height:1.65}',
+    '.empty{margin:24px 8px;color:var(--weak);font-size:13px;text-align:center}'
   ].join('\n');
 
   function supported() {
@@ -56,8 +64,12 @@
       main.appendChild(el(doc, 'p', 'empty', DT.uiText('划词翻译的结果会显示在这里：在原网页选中文字并翻译即可。', 'Selection translations will appear here: select text on the page and translate it.')));
       return;
     }
-    main.appendChild(el(doc, 'p', 'src', entry.source));
-    main.appendChild(el(doc, 'p', 'out', entry.result));
+    var card = el(doc, 'div', 'card');
+    card.appendChild(el(doc, 'p', 'src', entry.source));
+    card.appendChild(el(doc, 'p', 'out', entry.result));
+    main.appendChild(card);
+    var lang = doc.getElementById('dt-pip-lang');
+    if (lang) lang.textContent = (DT.state && DT.state.target) || '';
   }
 
   function build(target) {
@@ -79,7 +91,11 @@
       logo.hidden = true;
     }
     header.appendChild(logo);
-    header.appendChild(el(doc, 'span', '', DT.uiText('置顶译文', 'Pinned translation')));
+    header.appendChild(el(doc, 'span', 'title', DT.uiText('置顶译文', 'Pinned translation')));
+    // 目标语言小胶囊（例如 zh-CN）
+    var lang = el(doc, 'span', 'lang', (DT.state && DT.state.target) || '');
+    lang.id = 'dt-pip-lang';
+    header.appendChild(lang);
     var copy = el(doc, 'button', '', DT.uiText('复制', 'Copy'));
     copy.type = 'button';
     copy.addEventListener('click', function () {

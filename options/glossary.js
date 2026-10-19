@@ -94,7 +94,10 @@ export function createGlossaryEditor(opts) {
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'btn danger glossary-del';
-    del.textContent = '删除';
+    // 行尾的删除是一个 ×，平时隐藏，鼠标移到这一行 / 正在编辑这一行时才出现
+    del.textContent = '×';
+    del.title = '删除';
+    del.setAttribute('aria-label', '删除');
     del.addEventListener('click', () => {
       const list = current();
       const at = list.indexOf(item);
@@ -151,12 +154,17 @@ export function createGlossaryEditor(opts) {
       head.type = 'button';
       head.className = 'glossary-group-head';
       const open = openCats.has(cat);
+      // 折叠头：旋转小箭头 + 分类名 + 右侧词条数胶囊（箭头方向由 aria-expanded 控制）
       const arrow = document.createElement('span');
-      arrow.textContent = open ? '▾ ' : '▸ ';
+      arrow.className = 'glossary-caret';
+      arrow.setAttribute('aria-hidden', 'true');
+      arrow.textContent = '▸';
       const label = document.createElement('span');
+      label.className = 'glossary-cat';
       label.textContent = cat;
       const count = document.createElement('span');
-      count.textContent = '（' + items.length + '）';
+      count.className = 'glossary-count';
+      count.textContent = String(items.length);
       head.append(arrow, label, count);
       head.setAttribute('aria-expanded', open ? 'true' : 'false');
       head.addEventListener('click', () => {

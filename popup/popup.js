@@ -20,8 +20,13 @@ import { openWelcomePage } from '../lib/welcome.js';
 const el = {
   ver: document.getElementById('ver'),
   toggle: document.getElementById('toggle'),
+  toggleLabel: document.getElementById('toggleLabel'),
+  toggleKbd: document.getElementById('toggleKbd'),
+  statusTitle: document.getElementById('statusTitle'),
+  statusCount: document.getElementById('statusCount'),
+  heroFoot: document.getElementById('heroFoot'),
   modeSeg: document.getElementById('modeSeg'),
-  styleSeg: document.getElementById('styleSeg'),
+  styleSelect: document.getElementById('styleSelect'),
   target: document.getElementById('target'),
   hoverCompare: document.getElementById('hoverCompare'),
   stat: document.getElementById('stat'),
@@ -39,7 +44,10 @@ const el = {
   quickCopy: document.getElementById('quickCopy'),
   quickClear: document.getElementById('quickClear'),
   quickOut: document.getElementById('quickOut'),
+  quickKbd: document.getElementById('quickKbd'),
+  quickTarget: document.getElementById('quickTarget'),
   themeToggle: document.getElementById('themeToggle'),
+  langToggle: document.getElementById('langToggle'),
   nightRow: document.getElementById('nightRow'),
   hoverRow: document.getElementById('hoverRow'),
   nightSite: document.getElementById('nightSite'),
@@ -97,88 +105,121 @@ function renderState() {
   }
 }
 
+// 主按钮的文字放在 #toggleLabel 里：按钮里还有图标和快捷键徽章，不能整体改 textContent
+function setToggle(text) {
+  el.toggleLabel.textContent = text;
+}
+
+// 主按钮右侧的快捷键徽章：浏览器实际分配的快捷键；没分配到（被占用）就不显示
+function renderKbd() {
+  const keys = shortcut === '' ? '' : shortcut || hotkeyLabel(currentCfg.hotkey);
+  el.toggleKbd.textContent = keys || '';
+  el.toggleKbd.hidden = !keys || !supported;
+}
+
+// 状态卡：标题（未开启 / 翻译中… / 已译 N 段）+ 右侧计数胶囊 + 详情（提示、失败原因）
 function render() {
   el.ver.textContent = 'v' + (chrome.runtime.getManifest().version || '0.1.0');
   renderState();
+  renderKbd();
+  renderQuickTarget();
+  let title = '';
+  let count = '';
+  let detail = '';
 
   if (!supported) {
     el.toggle.disabled = true;
+    setToggle(t('翻译此页'));
     const url = tabUrl || '';
     const injectable = /^(https?|file):/i.test(url);
     if (/\.pdf($|[?#])/i.test(url)) {
       // 浏览器自带的 PDF 阅读器里不能注入脚本，刷新也没用
-      el.toggle.textContent = t('PDF 暂不支持');
-      el.stat.textContent = t('这是浏览器自带的 PDF 阅读器，扩展无法在里面翻译。');
+      title = t('PDF 暂不支持');
+      detail = t('这是浏览器自带的 PDF 阅读器，扩展无法在里面翻译。');
     } else if (/^file:/i.test(url)) {
       // Chrome / Edge 默认不让扩展碰本地文件，要用户手动开开关
-      el.toggle.textContent = t('本地文件需要授权');
-      el.stat.textContent = t(
+      title = t('本地文件需要授权');
+      detail = t(
         '打开 ' + EXTENSIONS_PAGE + ' → 本扩展的「详细信息」→ 开启「' + FILE_ACCESS_LABEL + '」，然后按 ' +
           KEYS.reload + ' 刷新这个页面。'
       );
     } else if (injectable) {
-      el.toggle.textContent = t('无法连接页面脚本');
-      el.stat.textContent = t(
+      title = t('无法连接页面脚本');
+      detail = t(
         '自动补注入失败。请在网页上按 ' + KEYS.reload + ' 刷新后重新打开本面板；仍然失败请按 ' +
           KEYS.console + ' 打开控制台看红色报错。'
       );
     } else if (!url) {
       // 没有 tabs 权限时，扩展读不到无权访问页面的地址：可能是浏览器内置页，也可能是没开文件访问的本地文件，两种都提示
-      el.toggle.textContent = t('当前页面不支持');
-      el.stat.textContent = t(
+      title = t('当前页面不支持');
+      detail = t(
         '浏览器内置页、扩展商店页无法翻译。如果这是本地文件，请打开 ' + EXTENSIONS_PAGE + ' → 本扩展的「详细信息」→ 开启「' +
           FILE_ACCESS_LABEL + '」，然后按 ' + KEYS.reload + ' 刷新。'
       );
     } else {
-      el.toggle.textContent = t('当前页面不支持');
-      el.stat.textContent = t(
-        '浏览器内置页、扩展商店页、扩展自身页面无法注入脚本。请切换到普通网页（http/https）。'
-      );
+      title = t('当前页面不支持');
+      detail = t('浏览器内置页、扩展商店页、扩展自身页面无法注入脚本。请切换到普通网页（http/https）。');
     }
     el.modeSeg.querySelectorAll('button').forEach((b) => (b.disabled = true));
-    el.styleSeg.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    el.styleSelect.disabled = true;
     el.target.disabled = true;
+    paintStatus(title, count, detail);
     return;
   }
 
   el.toggle.disabled = false;
   el.toggle.classList.toggle('on', !!status.enabled);
-  el.toggle.textContent = t(
-    status.busy ? '翻译中…（点此停止）' : status.enabled ? '还原原文' : '翻译此页'
-  );
+  setToggle(t(status.busy ? '翻译中…（点此停止）' : status.enabled ? '还原原文' : '翻译此页'));
 
   el.modeSeg.querySelectorAll('button').forEach((btn) => {
+    btn.disabled = false;
     btn.classList.toggle('active', btn.dataset.mode === status.mode);
   });
-  el.styleSeg.querySelectorAll('button').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.style === (status.style || 'plain'));
-  });
+  el.styleSelect.disabled = false;
+  el.styleSelect.value = status.style || 'plain';
+  el.target.disabled = false;
   el.target.value = status.target || 'zh-CN';
+  renderQuickTarget();
 
-  if (!status.enabled) {
+  if (status.busy) {
+    title = t('翻译中…');
+    if (status.total) {
+      const pct = Math.round((status.translated / status.total) * 100);
+      count = status.translated + ' / ' + status.total + ' · ' + pct + '%';
+    } else {
+      count = String(status.translated || 0);
+    }
+  } else if (!status.enabled) {
+    title = t('未开启');
+    // 快捷键已经在主按钮右侧；只有没设置成功时才多说一句
     if (shortcut === '') {
-      el.stat.textContent = t(
+      detail = t(
         '未开启。浏览器快捷键没有设置成功（' + hotkeyLabel('alt+a') + ' 可能被其它扩展占用），可在「设置」里重新设置。'
       );
-    } else {
-      el.stat.textContent = t('未开启。按 ' + (shortcut || hotkeyLabel(currentCfg.hotkey)) + ' 可直接翻译。');
     }
-  } else if (status.busy) {
-    var total = status.total || '?';
-    var pct = status.total ? Math.round((status.translated / status.total) * 100) : 0;
-    el.stat.textContent = t(
-      '翻译中… 已译 ' + status.translated + ' / ' + total + ' 段' + (status.total ? '（' + pct + '%）' : '')
-    );
   } else {
-    const parts = [t('已译 ' + status.translated + ' 段')];
-    if (status.skipped) parts.push(t('与原文相同 ' + status.skipped + ' 段'));
-    if (status.failed) parts.push(t('失败 ' + status.failed + ' 段'));
-    if (status.total) parts.push(t('共 ' + status.total + ' 段'));
-    el.stat.textContent = parts.join(' · ');
-    if (status.failed && status.lastError) {
-      el.stat.textContent += '\n' + t('失败原因：') + status.lastError;
-    }
+    title = t('已译 ' + status.translated + ' 段');
+    const parts = [];
+    if (status.skipped) parts.push(t('跳过 ' + status.skipped));
+    if (status.failed) parts.push(t('失败 ' + status.failed));
+    if (!parts.length && status.total) parts.push(t('共 ' + status.total + ' 段'));
+    count = parts.join(' · ');
+    if (status.failed && status.lastError) detail = t('失败原因：') + status.lastError;
   }
+  paintStatus(title, count, detail);
+}
+
+function paintStatus(title, count, detail) {
+  el.statusTitle.textContent = title;
+  el.statusCount.textContent = count;
+  el.statusCount.hidden = !count;
+  el.stat.textContent = detail;
+}
+
+// 随手翻译的目标语言提示（跟「译成」下拉框同一个值，文字已经过界面语言翻译）
+function renderQuickTarget() {
+  const opt = el.target.selectedOptions && el.target.selectedOptions[0];
+  el.quickTarget.textContent = opt ? '→ ' + opt.textContent : '';
 }
 
 // 当前服务商 + 模型：放在状态卡底部，省得为了确认"在用谁"再进设置
@@ -390,10 +431,15 @@ el.nightSite.addEventListener('change', async () => {
 
 // 设置页或另一个弹窗改了配置：外观、主题图标、服务商、夜间开关跟着变
 function onConfigElsewhere(next) {
+  const langBefore = currentCfg.uiLang;
   currentCfg = mergeConfig(DEFAULTS, next);
   uiTheme = currentCfg.uiTheme || 'auto';
   applyUiTheme(uiTheme);
   applyUiAppearance(currentCfg);
+  if (currentCfg.uiLang !== langBefore) {
+    applyI18n(document, currentCfg.uiLang);
+    render();
+  }
   renderThemeToggle();
   renderMeta();
   renderNight();
@@ -417,14 +463,14 @@ async function init() {
   });
   el.target.value = cfg.targetLang || 'zh-CN';
   STYLES.forEach((style) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.dataset.style = style.value;
-    btn.textContent = style.label;
-    el.styleSeg.appendChild(btn);
+    const opt = document.createElement('option');
+    opt.value = style.value;
+    opt.textContent = style.label;
+    el.styleSelect.appendChild(opt);
   });
-  // Mac 上是 ⌘+Enter（keydown 里本来就同时认 Ctrl 和 ⌘）
-  el.quickInput.placeholder = t('粘贴 / 输入要翻译的文字…（' + KEYS.submit + ' 翻译）');
+  el.styleSelect.value = 'plain';
+  // Mac 上是 ⌘+Enter（keydown 里本来就同时认 Ctrl 和 ⌘）：提示放在输入框右侧的键帽里
+  el.quickKbd.textContent = KEYS.submit;
 
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -480,11 +526,9 @@ el.modeSeg.addEventListener('click', async (event) => {
 });
 
 // 趣味翻译：当前页按风格重翻（不保存到配置，还原后回到普通）
-el.styleSeg.addEventListener('click', async (event) => {
-  const btn = event.target.closest('button[data-style]');
-  if (!btn) return;
+el.styleSelect.addEventListener('change', async () => {
   try {
-    status = await sendToTab({ type: 'dt:setStyle', style: btn.dataset.style });
+    status = await sendToTab({ type: 'dt:setStyle', style: el.styleSelect.value });
     stopPolling();
   } catch (err) {
     el.stat.textContent = t('切换失败：') + err.message;
@@ -495,6 +539,7 @@ el.styleSeg.addEventListener('click', async (event) => {
 
 el.target.addEventListener('change', async () => {
   const target = el.target.value;
+  renderQuickTarget();
   await saveAndRemember({ targetLang: target });
   try {
     status = await sendToTab({ type: 'dt:setTarget', target });
@@ -594,10 +639,13 @@ el.quickCopy.addEventListener('click', async () => {
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
-    el.quickCopy.textContent = t('已复制');
+    // 图标短暂变成绿色对勾（按钮里有图标，不能改 textContent）
+    el.quickCopy.classList.add('is-copied');
+    el.quickCopy.title = t('已复制');
     setTimeout(() => {
-      el.quickCopy.textContent = t('复制结果');
-    }, 1200);
+      el.quickCopy.classList.remove('is-copied');
+      el.quickCopy.title = t('复制结果');
+    }, 1500);
   } catch (err) {
     el.quickOut.textContent = t('复制失败，请手动选中复制。');
   }
@@ -612,6 +660,26 @@ el.quickClear.addEventListener('click', () => {
 
 el.openOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
+});
+
+// 状态卡底部的「服务商 · 模型」：点一下去设置页改
+el.heroFoot.addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
+});
+
+// 界面语言一键切换（中文 ⇄ English），和设置页「界面语言」是同一个配置项
+el.langToggle.addEventListener('click', async () => {
+  const next = currentCfg.uiLang === 'en' ? 'zh' : 'en';
+  el.langToggle.disabled = true;
+  const saved = await saveAndRemember({ uiLang: next });
+  el.langToggle.disabled = false;
+  if (!saved) return;
+  applyI18n(document, next);
+  render();
+  renderMeta();
+  renderThemeToggle();
+  renderNight();
+  renderHover();
 });
 
 // 使用指南：重新打开首次安装时的欢迎页，不改配置、不触发安装逻辑

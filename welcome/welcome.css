@@ -315,11 +315,56 @@ h2:focus-visible {
   line-height: 1;
 }
 
+/* 当前步骤：实心强调色 + 外发光环 */
 .step-btn[aria-current="step"] .step-num {
   border-color: transparent;
   background: var(--accent-grad);
   color: var(--on-accent);
-  box-shadow: 0 5px 12px -5px var(--accent-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 0 4px var(--accent-ring), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+/* 连线进度条：步骤圆点之间一条细线；当前步骤之前的线和圆点都已完成（强调色 + ✓） */
+.steps li {
+  position: relative;
+}
+
+.steps li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 26px;
+  top: 41px;
+  bottom: -11px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--divider);
+  pointer-events: none;
+  transition: background 0.3s ease;
+}
+
+.steps li:has(~ li .step-btn[aria-current="step"])::after {
+  background: var(--accent);
+}
+
+.step-num {
+  position: relative;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.steps li:has(~ li .step-btn[aria-current="step"]) .step-num {
+  border-color: transparent;
+  background: var(--accent);
+  color: transparent;
+}
+
+.steps li:has(~ li .step-btn[aria-current="step"]) .step-num::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .step-copy {
@@ -1459,6 +1504,16 @@ h2 {
 
   .steps li {
     flex: 0 0 auto;
+  }
+
+  /* 横排时连线改成水平：画在两个步骤之间的间隙里 */
+  .steps li:not(:last-child)::after {
+    left: auto;
+    right: -6px;
+    top: 50%;
+    bottom: auto;
+    width: 6px;
+    height: 2px;
   }
 
   .step-btn {

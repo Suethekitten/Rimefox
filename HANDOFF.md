@@ -585,6 +585,10 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 - 新增"跳过规则"前先想清楚：会不会把**可见内容**也跳过（坑 6、7）
 - 新增"替换规则"前先想清楚：会不会把**正文**也替换（坑：Tarkov 全页 flex）
 - 任何改动都先跑自检页，再上真实站点
+- **界面结构约定（0.9.5 UI 重构）**：
+  - 弹窗：主按钮文字写 `#toggleLabel`（按钮里还有图标和快捷键键帽 `#toggleKbd`，不能整体改 `#toggle.textContent`）；状态卡分成标题 `#statusTitle` / 计数胶囊 `#statusCount` / 详情 `#stat`（空时不占位）；趣味风格是下拉框 `#styleSelect`；分段控制器的滑块是 `.seg::before`，靠 `:has(.active)` 平移，不需要 JS。
+  - 设置页：服务商胶囊（`provider-list.js` 的 `renderProviderPills`）照着 `#provider` 下拉框的选项渲染，点胶囊 = 在下拉框里选它，切换逻辑仍只走下拉框的 change；排版滑块（`appearance-ui.js` 的 `enhanceTypoSelect`）只是隐藏下拉框的镜像，`select.value` 仍是唯一数据来源；保存栏是悬浮岛，`#saveResult` 有字时（保存结果、别处改了配置）靠 `data-flash` 短暂弹出；搜索命中用 CSS Highlight（`rimefox-settings-search`）。
+  - 网页内：划词气泡和「译」按钮在网页 DOM 里只能用行内样式，配色走 `selection.js` 的 `paletteOf()`（深色网页 / 夜间模式换深色玻璃）；e2e 依赖 `span[aria-label="加入术语表"]` 和按钮文字「保存 / 覆盖」，别改；页面级 `scroll` 捕获监听要忽略 `[data-dt-ui]` 里的滚动（`input.select()` 会横向滚动）。悬浮入口小球的状态点读 `DT.control.status()`（开着翻译时 700ms 一次）。
 - **扩展页面的样式只用 `lib/ui-tokens.css` 的变量**（`--bg-canvas / --bg-card / --bg-subtle / --bg-elevated`、`--text-1/2/3`、`--accent` 及其派生 `--accent-hover / -soft / -ring / -border / -grad / -fill`、`--r-lg / -md / -sm`、`--shadow-card / -raise / -pop`、`--font-mono`）。不要在页面里另写一套深色变量：深色、自定义强调色、减少透明、关闭阴影都只改 ui-tokens.css。页面里的 `--bg / --card / --line / --muted …` 只是旧名别名。多层阴影里的「空阴影」写 `0 0 #0000`，不能写 `none`（整条声明会失效）；最低 Chrome 114，不能用 `light-dark()`
 - **我们加到网页上的界面**（悬浮入口、置顶小窗、气泡、提示条）都带 `data-dt-ui`，切分 / 观察器 / 点击补扫都会跳过；大块界面放进 closed Shadow DOM，不受网页样式影响。文案用 `DT.uiText(zh, en)` 跟随界面语言
 - **配置变了要跟着变的模块**用 `DT.onConfig(fn)` 订阅（外观、站点规则、悬浮入口），`main.js` 的 `loadConfig` 读完后统一 `DT.emitConfig`

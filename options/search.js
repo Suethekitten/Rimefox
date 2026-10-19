@@ -40,15 +40,61 @@ export function bindSettingsSearch({ input, main, empty }) {
       if (secVisible) any = true;
     });
     empty.hidden = !q || any;
+    paintHits(q);
+  }
+
+  // 命中的文字用荧光笔高亮（CSS Custom Highlight API：给 Range 上色，不改页面结构）
+  function paintHits(q) {
+    if (typeof Highlight !== 'function' || !window.CSS || !CSS.highlights) return;
+    if (!q) {
+      CSS.highlights.delete(HIT);
+      return;
+    }
+    const ranges = [];
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const el = node.parentElement;
+        if (!el || el.closest('.search-hidden, select, option, textarea, script, style')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    let node;
+    while ((node = walker.nextNode()) && ranges.length < 300) {
+      const text = node.nodeValue.toLowerCase();
+      let at = text.indexOf(q);
+      while (at >= 0 && ranges.length < 300) {
+        const range = document.createRange();
+        range.setStart(node, at);
+        range.setEnd(node, at + q.length);
+        ranges.push(range);
+        at = text.indexOf(q, at + q.length);
+      }
+    }
+    if (ranges.length) CSS.highlights.set(HIT, new Highlight(...ranges));
+    else CSS.highlights.delete(HIT);
   }
 
   input.addEventListener('input', filter);
-  // Esc 清空搜索
+  // Esc 清空搜索并离开搜索框
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && input.value) {
+    if (event.key !== 'Escape') return;
+    if (input.value) {
       input.value = '';
       filter();
+    } else {
+      input.blur();
     }
+  });
+  // 按 / 直接聚焦搜索框（正在输入框里打字时不抢）
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return;
+    const el = event.target;
+    if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+    event.preventDefault();
+    input.focus();
+    input.select();
   });
   return { filter };
 }
+
+const HIT = 'rimefox-settings-search';

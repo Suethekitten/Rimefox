@@ -22,6 +22,7 @@
         <div class="search">
           <svg class="search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
           <input id="settingsSearch" type="search" placeholder="搜索设置" aria-label="搜索设置" spellcheck="false" autocomplete="off" />
+          <kbd class="search-kbd" aria-hidden="true">/</kbd>
         </div>
         <nav class="nav" aria-label="设置分类">
           <a class="nav-item" href="#sec-api"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg></span>接口</a>
@@ -52,6 +53,8 @@
 
           <div class="card">
             <div class="card-title">服务商</div>
+            <!-- 服务商快捷胶囊：由 options.js 按下拉框的选项渲染；填过 Key 的亮绿点，当前在用的高亮 -->
+            <div class="provider-pills" id="providerPills" role="group" aria-label="快速切换服务商"></div>
 
             <label class="row stack">
               <span class="row-text">
@@ -248,13 +251,16 @@
               指定某些词必须怎么翻（比如 Battle Pass → 战令）。全局一份，只把本页命中的词加进提示词。术语按「分类」分组折叠，CSV 第三列可以写分类。
             </p>
             <div class="glossary-list" id="glossaryList"></div>
+            <!-- 工具条：左 = 主操作，中 = 导入导出按钮组，右 = 次要 / 危险操作 -->
             <div class="glossary-actions">
-              <button id="glossaryAdd" type="button" class="btn">＋ 添加一行</button>
-              <button id="glossarySample" type="button" class="btn">导入示例</button>
-              <button id="glossaryImport" type="button" class="btn">导入 CSV</button>
+              <button id="glossaryAdd" type="button" class="btn soft">＋ 添加一行</button>
+              <span class="btn-group">
+                <button id="glossarySample" type="button" class="btn">导入示例</button>
+                <button id="glossaryImport" type="button" class="btn">导入 CSV</button>
+                <button id="glossaryExport" type="button" class="btn">导出 CSV</button>
+              </span>
               <input id="glossaryFile" type="file" accept=".csv,text/csv" hidden />
-              <button id="glossaryExport" type="button" class="btn">导出 CSV</button>
-              <button id="glossaryClear" type="button" class="btn danger">清空</button>
+              <button id="glossaryClear" type="button" class="btn danger glossary-clear">清空</button>
             </div>
             <div class="result" id="glossaryResult"></div>
           </div>
@@ -367,9 +373,21 @@
               <input id="typoIndent" type="checkbox" class="switch" />
             </label>
 
-            <div class="typo-preview" id="typoPreview" aria-hidden="true">
-              <p class="typo-src">The Arctic fox lives in the tundra and changes the color of its fur with the seasons.</p>
-              <p class="typo-target">北极狐生活在苔原上，皮毛颜色随季节变化。</p>
+            <!-- 迷你浏览器窗口：标题 + 正文双语 + 一句悬停对照高亮，实时跟着强调色 / 译文样式 / 排版变 -->
+            <div class="mini-browser" id="miniBrowser">
+              <div class="mb-bar" aria-hidden="true">
+                <span class="mb-dot"></span><span class="mb-dot"></span><span class="mb-dot"></span>
+                <span class="mb-url"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>example.com/article</span>
+              </div>
+              <button type="button" class="mb-scheme" id="previewScheme" aria-pressed="false" title="预览深色网页">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" /></svg>
+              </button>
+              <div class="typo-preview" id="typoPreview" aria-hidden="true">
+                <p class="typo-h typo-h-src">Life in the Arctic</p>
+                <p class="typo-h typo-target">北极的生活</p>
+                <p class="typo-src">The Arctic fox lives in the tundra and changes the color of its fur with the seasons. <span class="typo-hl-src">In winter it turns white.</span></p>
+                <p class="typo-target">北极狐生活在苔原上，皮毛颜色随季节变化。<span class="typo-hl-target">冬天它会变成白色。</span></p>
+              </div>
             </div>
           </div>
         </section>
@@ -679,6 +697,7 @@
             <div class="row">
               <span class="row-text">
                 <span class="row-title">当前缓存</span>
+                <span class="cache-meters" id="cacheMeters" hidden></span>
                 <span class="row-desc" id="cacheStats">正在读取…</span>
                 <span class="row-desc" id="cacheResult"></span>
               </span>
@@ -759,7 +778,7 @@
             <span class="result" id="saveResult"></span>
             <span class="savebar-actions">
               <button id="discard" class="btn" disabled>放弃更改</button>
-              <button id="save" class="btn primary" disabled>保存</button>
+              <button id="save" class="btn primary" disabled>保存<kbd class="save-kbd" id="saveKbd">Ctrl+S</kbd></button>
             </span>
           </div>
         </footer>
