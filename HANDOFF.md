@@ -39,7 +39,8 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **129 / 129 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **131 / 131 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+自检页只在直接加载仓库目录时才有：商店包和 0.8.6 起的 GitHub Release 包只收运行时文件（`tools/package-store.mjs` 的白名单），设置页里的「打开自检页」会自动隐藏。
 
 ---
 
@@ -81,7 +82,7 @@ edge-bilingual/
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
-└── selftest/              离线自检（126 条用例）
+└── selftest/              离线自检（131 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -367,7 +368,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-129 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
+131 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -500,14 +501,15 @@ node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **129 / 129**
-4b. 跑 Node 单测：`for f in test/*.test.mjs; do node $f; done`（应全绿）
+4. 跑自检页：必须 **131 / 131**
+4b. 跑 Node 单测：`node --test test/*.test.mjs`（19 个文件、按退出码判定，应全部通过；CI 发版前跑同一条命令）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
    每版 3–6 条、每条一句话且 ≤ 90 字、不许有子项、只写用户会感觉到什么、只写这一版。
    发版前跑 `python3 tools/check-release-notes.py <版本号>`，CI 也会跑，不合规就不发布
 6b. 实现细节、取舍、内部重构、测试变化写进本文件末尾的「本版技术记录」（整节替换成这一版），以及 commit message
-7. 推送到 `main`：`.github/workflows/release.yml` 会自动跑自检、打包 `Rimefox-v<版本号>.zip`、创建 `v<版本号>` 的 Release。
+7. 推送到 `main`：`.github/workflows/release.yml` 依次校验三处版本号、发版说明格式、跑全部 Node 单测（`node --test`）和离线自检，
+   再用 `node tools/package-store.mjs --release` 打 `Rimefox-v<版本号>.zip`（与商店包同一份白名单）、检查安装包清单，全部通过才创建 `v<版本号>` 的 Release。
    同一版本只发一次；没改版本号的推送不会发版。也可以在 GitHub 的 Actions 页面手动运行
 
 ---
@@ -566,22 +568,36 @@ node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络
 
 ---
 
-## 14. 本版技术记录（0.8.5）
+## 14. 本版技术记录（0.8.6）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.8.4 的小说分行 / 悬停修复细节看 `6d220b9` 与 CHANGELOG。
+> 0.8.5 的字幕会话代际 / 用量诊断 / 悬停气泡细节看 `cae1133`、`938f1bf`。
 
-- **字幕会话代际**（`content/subtitles.js`）：track 增加 `v / lang / kind / target / style` 与 `gen / inflight / pending`。目标语言或风格一变，`invalidate()` 清空译文、`gen` +1、`inflight` 归零；旧请求回调同时校验 `track === mine && gen === mine.gen`，不能写当前 `trans` 或 `shown`。新目标 = 原字幕语言时 `reset()`，交还原生字幕。
-- **视频 / 轨道竞态**：`inflight` 从全局移到 track；`process()` 用 `processSeq` 代际与 `track.key` 去重，异步 `fetchText()` 晚完成不能覆盖新轨道；旧视频请求的 `finally` 不改新 track 的 `pending / inflight / shown`。
-- **播放器重建**：显示缓存改为 `shownOverlay + sig`；`ensureOverlay()` 创建新叠层时清空缓存，`render()` 只在"同一叠层 + 同一 sig"时跳过。播放器 DOM 被替换后即使字幕文本相同也会重新写入；CC 关闭 / 字幕翻译关闭时移除 `rimefox-subs-on`，原生字幕恢复。
-- **字幕回归测试**：新增 `test/subtitles-session.test.mjs` 10 个场景（A–J），假 DOM + 可控 Promise 覆盖语言切换、视频切换、异步轨道乱序、播放器重建、全屏高度、CC/开关关闭、快速连续切换；验证叠层 `display:block` 与文本，不只检查元素存在。
-- **拆批失败保留**：`translateBatchWithRetry()` 拆批改为**顺序**执行；一半失败保留另一半已成功结果（失败项用 `null` 标记），`handleTranslate()` 对 `null` 不缓存并记为失败；避免 `Promise.all` 把成功一半整体丢弃。也避免一次拆批瞬间绕过并发闸门。
-- **超时阶梯**：翻译消息超时 90s → 190s、看门狗 100s → 200s，高于 provider 单请求 180s 总上限，减少"后台还在生成、内容脚本已超时重发"的重复计费。多轮重试仍可能超过 190s（剩余风险）。
-- **用量诊断**（`lib/usage.js` + 三个引擎 + `lib/provider.js` + `background.js`）：三协议 `parseResponse` 提取 usage；provider 的 `meta` 记 `http / usages / finishReasons`；background 聚合 `requests / responses / input / output / reasoning / cacheRead / cacheHits / cacheMisses / retries / splits / discarded / failed / finishReasons`。只在 `debug` 开启时通过 `usage:stats` / `usage:reset` 读取；只存数字，不存正文、Key、Prompt 或原始响应。
-- **中日 token 审计**：32 / 55 是"成功注入的单元数"，不是 token；代码没有按方向分支的计费逻辑。正常差异来自字符长度、输出膨胀、缓存冷热与语言跳过；最坏拆批 `8n−2` 次 HTTP。已修"拆批一半失败丢弃另一半"与"90s/180s 超时倒挂"；并发批次 in-flight 去重、`maxCharsPerBatch > 3744` 时 8000 输出上限、单条截断保护仍是后续项。详见 [docs/TOKEN-AUDIT.md](docs/TOKEN-AUDIT.md)。
-- **悬停原文气泡**（`content/hover.js` + `content/styles/inject.css`）：短句仍是 `pointer-events:none` 的轻量提示；长段落 / 行级 / 段落级改为有上限的富气泡：宽度 `min(420px, 100vw - 24px)`、高度 `min(40vh, 340px)`、正文可滚动；默认 180 字符节选，提供展开 / 收起 / 关闭，支持 Escape。鼠标可从原文移进气泡（200ms 延迟），内部滚动和按钮不会触发重新定位或隐藏循环。
-- **对应层级标注**：`matchReplaced()` 的 `scope` 原样传给气泡；段落级显示「段落级对应」（截断时加「原文节选」），行级显示「行级对应」。没有重新启用按字符比例猜句子；没有可靠局部依据时仍回退整段。双语的整段高亮保持原行为（原文在页面上，不弹大框）。
-- **悬停状态清理**：`clear()` 同时删除 CSS Custom Highlight、`data-dt-hover`、活动气泡、`cache` / `current` / `currentKey`；`DT.onConfig()` 在开关或任何配置变化时主动清理；`main.js` 的 `disable()` / `startOver()`（含切换双语 / 仅译文）也会清理，避免旧 Range 和残留高亮。
-- **三处快捷开关**：复用 `hoverCompare`，没有新配置。Dock 新增双向箭头按钮（`aria-pressed` + 中英文「开启/关闭悬停对照」）；Popup「显示」卡片加紧凑 switch，保存失败恢复显示并提示；Options 保留原开关并更新说明。内容脚本只能通过后台 `hover:set` 改这一个严格布尔值；后台保存后走现有广播 / `DT.onConfig()`，Dock 成功时先乐观更新，三处不写循环、不触发任何翻译 API。
-- **测试**：Node 19 个文件全部通过（新增 subtitles-session 10 条、usage 6 条、usage-pipeline 8 条、hover-config 6 条）；自检 **129 / 129**。另用 Chrome for Testing 155 + 本地页面做真实浏览器同步测试：Dock → Popup → Options 三处双向切换，`aria-pressed`、switch 状态和 storage 值一致，页面未发起翻译请求。
-- **未验证**：GitHub / Pixiv / Aeon / OWID 的真实站点矩阵本轮未重跑（注入 / 段落策略未改，风险集中在悬停层）；Edge 未测；真实模型的中日 token 对照没有 Key，未编造数值。
+- **气泡内部滚动被收起**（`content/hover.js`）：页面滚动清理挂在 `window` 的捕获阶段，元素自己的 `scroll`（气泡正文 `.dt-hover-body`，
+  以及「收起」时 `scrollTop = 0`）也会进来，于是一滚就 `clear()`。改为 `insideTip(event.target)` 时跳过；网页滚动、网页里其它容器滚动仍然清理
+  （锚点位置失效，不复用旧 Range）。`mousedown` 的判断改用同一个 `insideTip()`。真实页面（Aeon，CDP 真实滚轮）复现：0.8.5 滚一格气泡消失，修复后正文滚到底、页面不动
+- **节选正则**：`tipPreview()` 的 `/s+$/`（字母 s）改为 `/\s+$/`；截断点落在代理对高位时退一位，emoji / 扩展区汉字不截成半个字。`hover.tipPreview` 挂出来给自检测
+- **YouTube 原始轨道生命周期**（`content/subtitles.js`）：目标语言等于字幕语言、或关掉字幕翻译时不再 `reset()`（会把已解析的时间轴扔掉，
+  YouTube 不会重新请求字幕，切回中文就再也翻不了）。现在只 `render(null)` 交还原生字幕；目标 / 风格变化一律 `invalidate()`（`gen` +1、清译文与在途计数），
+  `pump()` 对同语言轨道不调度。`process()` 收到同语言字幕也照样建轨道。切回别的语言时按同一份 `units` 重新调度（后台翻译缓存命中，不额外花 API）
+- **重放校验**：`youtube-hook.js` 应 replay 重发时带 `replay: true`；`subtitles-source.js` 透传；`process()` 对重放回包核对 `v` 与当前视频，
+  不一致直接丢（钩子留着的是「最后一份」，可能是上一个视频的）。非重放回包照常接收（新字幕可能比地址栏先到）。当前视频没有可用轨道且 CC 开着时，
+  `recover()` 每个视频最多要一次重放（`start()` 那次算在内），不碰 CC 按钮
+- **安装包**（`tools/package-store.mjs`）：加 `--release`，同一份白名单 / 版本 / 图标 / manifest 引用 / 欢迎页 / 许可校验，输出 `dist/Rimefox-v<版本>.zip`、
+  条目加 `Rimefox/` 前缀；默认模式（商店包）输出与改动前逐字节相同。CI 不再 rsync 整仓。v0.8.5 Release zip 1,219,457 B / 105 个文件
+  （按旧流程在 v0.8.5 标签上重建，大小与线上资源一致）→ 同一棵树新规则 291,485 B / 58 个文件；少掉的 47 个是 `test/` 19、`docs/` 16（含商店截图 6 张）、
+  `selftest/` 2 与 `README / HANDOFF / CHANGELOG / AGENTS / CLAUDE / PRIVACY / SECURITY / STORE-READINESS` 等开发文档、`package.json`、`.gitattributes`；
+  许可文件与全部运行时文件都在。解压后用 CDP `Extensions.loadUnpacked` 在 Chrome 155 加载成功，Service Worker 起来，弹窗 / 设置 / 欢迎页无缺失资源。
+  设置页「打开自检页」在 Release 安装里会自动隐藏（和商店包一样）。`package.ps1` 是给协作者的源码交接包，不在本次范围
+- **CI 门禁**（`.github/workflows/release.yml`）：版本校验加上 `package.json`；新增 `actions/setup-node`（钉 SHA，v6.5.0，Node 24）与
+  `node --test --test-reporter=spec test/*.test.mjs`（每个文件独立子进程、按退出码判定）；打包改用脚本；新增「检查安装包清单」：`unzip -t`、
+  与商店包文件集合 `diff`、禁止 `test/ selftest/ docs/ tools/ dist/ .github/`、顶层 `.md`（THIRD-PARTY-NOTICES 除外）与 `package.json`、许可文件必须在。
+  本地按 workflow 原文逐步跑过（Node 24.19），并验证：一个测试文件失败 → `node --test` 退出 1；Release 包混进一张截图 → 清单检查退出 1
+- **回归测试**：`test/subtitles-session.test.mjs` 10 → 15（K 英文 CC 中→英→中→英→中两轮、晚到旧请求；L 同语言字幕先到；M 切语言途中换视频；
+  N 重放校验与每视频一次；O 切语言期间播放器重建），B / I 改成新语义（轨道保留）；新用例在 0.8.5 代码上 7 条失败。`test/package-store.test.mjs`
+  加 Release 模式（与商店包集合一致、`Rimefox/` 前缀、许可文件、排除开发文件、不改商店包）。自检 129 → 131：节选纯函数、气泡真实滚动 / 按钮 /
+  鼠标移出移入 / 网页滚动 / 其它容器滚动 / Escape（`checkAsync`，排在同步用例之后逐个跑，CI 的虚拟时间会快进计时器）；两条在 0.8.5 代码上失败
+- **真实浏览器**：假 YouTube 页面（`www.youtube.com` 映射到本地 HTTPS，真实 `youtube-hook.js` → postMessage → 来源层 → 运行时，真实计时器）12 项：
+  0.8.5 失败 6 项（切回中文后字幕不再出现），修复后全部通过。Node 19 个文件 / 280 条全部通过，自检 131 / 131（CI 参数连跑 3 次）
+- **未验证**：真实 youtube.com 播放器（需要登录态 / 广告 / 真实 Key，未做）；Edge；在扩展管理页手动「加载已解压」（本轮用 CDP 加载）；
+  Windows 资源管理器解压不带目录条目的 zip（标准 ZIP，理论上没问题，未实测）

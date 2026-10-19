@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "凛狐 · 双语对照翻译",
   "short_name": "凛狐",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "凛狐 Rimefox：用自己的 API 做整页双语对照翻译，动态内容自动补翻。",
   "minimum_chrome_version": "114",
   "permissions": [

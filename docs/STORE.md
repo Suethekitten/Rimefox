@@ -8,7 +8,8 @@
 - 商店包：`dist/Rimefox-v0.8.5-store.zip`（58 个文件，290,557 B），manifest.json 在 ZIP 根目录
 - GitHub Release：`v0.8.5`（整仓发布包，见下），商店包是单独的精简运行时包
 - 本文件只用于准备提交；**没有上传、没有提交审核、没有注册开发者账号、没有付款**
-- GitHub Release 的 `Rimefox-v0.8.5.zip` 是整仓发布包，**不能**当作商店包上传
+- GitHub Release 的 zip：0.8.5 及以前是整仓发布包；0.8.6 起与商店包用同一份运行时白名单（`node tools/package-store.mjs --release`），
+  文件相同但多一层 `Rimefox/` 文件夹，manifest.json 不在 ZIP 根目录，所以仍然**不能**当作商店包上传
 
 ## 商店包
 

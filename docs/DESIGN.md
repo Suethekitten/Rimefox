@@ -218,7 +218,7 @@ walk(el):
 
 ## 8. 改代码前的检查
 
-1. 改 `content/dom.js` → 先跑 `selftest/index.html`（126 条用例，离线）
+1. 改 `content/dom.js` → 先跑 `selftest/index.html`（131 条用例，离线）
 2. 新增"跳过规则" → 想清楚会不会把**可见内容**也跳过（弹层、下拉菜单常被 `opacity`/`aria-hidden` 标记）
 3. 新增"替换规则" → 想清楚会不会把**正文**也替换
 4. 发版 → 同步 `manifest.json` 与 `content/core.js` 的 `DT.VERSION`
