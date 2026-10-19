@@ -1,14 +1,18 @@
-// 悬停对照（0.9.1）：直接消费 dom.js 的 TranslationUnit / SentenceUnit / Alignment，
-// 不再自己解析一套文本结构，也不再用「两边句数相同 + 句界位置接近」猜句子。
+// 悬停对照：直接消费 dom.js 的 TranslationUnit / SentenceUnit，鼠标停在哪一句就只高亮这一句原文和对应译文。
 //
-// 对应关系只认两件事：
-//   1) 结构化对齐（unit.align）：模型返回 parts [{n,t}]，n 是覆盖的源句数；
-//      内容侧校验 sum(n) === 源句数，且每个 t 按顺序出现在最终译文里。
-//   2) 结构本身：行数来自真实 <br> / pre-* 换行，两边行数相同才按行对应。
-// 没有可靠句子映射就退回行级 / 段落级，气泡标明当前对应范围。
+// 句子对应关系，按可信程度依次取：
+//   1) 模型的结构化对齐（unit.align）：parts [{n,t}]，n 是覆盖的源句数；sum(n) === 源句数、
+//      每个 t 按顺序出现在最终译文里才算数。
+//   2) 本地句子对齐（units.alignLocal，0.9.3）：两边按同一套规则断句（缩写、首字母、脚注、小写续接），
+//      再用句长 + 数字 / 专名锚点 + 句末语气做动态规划，支持一对多 / 多对一，不确定的句界合并成组。
+//      旧缓存、后台重启、模型不按格式输出时都靠它，不发请求。
+//   3) 真实换行（<br> / pre-*）两边行数相同 → 行级；再不行 → 段落级。
+//
+// 双语模式原文和译文都在页面上，只高亮、不弹气泡；仅译文 / Ruby 页面上只剩译文，
+// 气泡显示鼠标下这句译文对应的原文（行级 / 段落级时标明范围）。
 //
 // 高亮用 CSS Custom Highlight API（直接给 Range 上色，不改页面文本节点）；
-// 不支持时退回整段标记 + 段落级气泡。
+// 不支持时退回整段标记。
 (function () {
   'use strict';
 
@@ -50,11 +54,6 @@
     return [a.start, b.end];
   }
 
-  function sentenceText(unit, from, to) {
-    var span = sentenceSpan(unit, from, to);
-    return (unit.map.text || '').slice(span[0], span[1]);
-  }
-
   // 源文本 offset 落在第几句
   function sourceSentenceAt(unit, offset) {
     return U.sentenceIndexAt(unit.sentences || [], offset);
@@ -66,7 +65,7 @@
 
   // 对齐的译文偏移必须和「实际渲染出来的目标文本」逐字对得上。
   // 仅译文按行写回 / 模型行数不一致时，joinSlots 的文本与页面文本可能略有差别；
-  // 对不上就丢掉句级映射，退回行 / 段落级，不能让高亮偏一格。
+  // 对不上就丢掉模型的映射，改用本地对齐（按页面上实际的译文算），不能让高亮偏一格。
   function usableAlign(unit, targetText) {
     var align = unit && unit.align;
     if (!align || !align.reliable) return null;
@@ -78,79 +77,70 @@
     return align;
   }
 
-  // 双语：鼠标在源文本 / 译文上，返回两边要高亮的范围与气泡内容。
-  // 有结构化对齐 → 句子级；否则行级（真实换行且行数相同）；再否则段落级。
-  hover.pairDual = function (unit, targetText, onTarget, offset) {
-    var srcText = unit.map.text;
-    var sourceOffset = offset;
-    if (onTarget) {
-      // 译文 offset → 对齐片段 → 源句范围；没有对齐时按行反推
-      var targetAlign = usableAlign(unit, targetText);
-      if (targetAlign) {
-        var part = U.partAtTargetOffset(targetAlign, offset);
-        if (part) {
-          return {
-            srcSpan: sentenceSpan(unit, part.srcFrom, part.srcTo),
-            tgtSpan: [part.tgtFrom, part.tgtTo],
-            scope: 'sentence',
-            sourceText: sentenceText(unit, part.srcFrom, part.srcTo),
-            targetText: part.text
-          };
-        }
-      }
-      var tgtLines = U.linesOf(targetText);
-      var lineIndex = 0;
-      for (var t = 0; t < tgtLines.length; t += 1) {
-        if (offset >= tgtLines[t][0] && offset < tgtLines[t][1]) lineIndex = t;
-      }
-      var srcLines = U.linesOf(srcText);
-      if (srcLines.length && srcLines.length === tgtLines.length) {
-        var srcSpan = srcLines[Math.min(lineIndex, srcLines.length - 1)];
-        return {
-          srcSpan: srcSpan,
-          tgtSpan: tgtLines[lineIndex],
-          scope: 'line',
-          sourceText: srcText.slice(srcSpan[0], srcSpan[1]),
-          targetText: targetText.slice(tgtLines[lineIndex][0], tgtLines[lineIndex][1])
-        };
-      }
-      return {
-        srcSpan: wholeSpan(srcText),
-        tgtSpan: wholeSpan(targetText),
-        scope: 'paragraph',
-        sourceText: srcText,
-        targetText: targetText
-      };
-    }
+  // 本地对齐按（单元, 源文本, 译文）记住：同一段里移动鼠标不重算
+  var localMemo = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function localAlign(unit, targetText) {
+    var src = (unit.map && unit.map.text) || '';
+    var tgt = String(targetText || '');
+    var memo = localMemo && localMemo.get(unit);
+    if (memo && memo.src === src && memo.tgt === tgt) return memo.align;
+    var align = U.alignLocal(src, unit.sentences || [], tgt);
+    if (localMemo) localMemo.set(unit, { src: src, tgt: tgt, align: align });
+    return align;
+  }
 
-    var si = sourceSentenceAt(unit, sourceOffset);
-    var sourceAlign = usableAlign(unit, targetText);
-    if (sourceAlign && si >= 0) {
-      var hit = U.partAt(sourceAlign, si);
-      if (hit) {
-        return {
-          srcSpan: sentenceSpan(unit, hit.srcFrom, hit.srcTo),
-          tgtSpan: [hit.tgtFrom, hit.tgtTo],
-          scope: 'sentence',
-          sourceText: sentenceText(unit, hit.srcFrom, hit.srcTo),
-          targetText: hit.text
-        };
+  hover.alignOf = function (unit, targetText) {
+    return usableAlign(unit, targetText) || localAlign(unit, targetText);
+  };
+
+  // 一组对应在什么范围：一句对一句（或几句合成的一组）是 sentence；
+  // 合成的组正好是整行（多行段落）标 line、覆盖整段标 paragraph，气泡要说明范围
+  function scopeOf(unit, align, part, srcSpan) {
+    var srcCount = part.srcTo - part.srcFrom;
+    var tgtCount = part.tgtCount || 1;
+    if (srcCount <= 1 && tgtCount <= 1) return 'sentence';
+    if ((align.parts || []).length <= 1) return 'paragraph';
+    var lines = U.linesOf(unit.map.text);
+    if (lines.length > 1) {
+      var startsLine = false;
+      var endsLine = false;
+      for (var i = 0; i < lines.length; i += 1) {
+        if (lines[i][0] === srcSpan[0]) startsLine = true;
+        if (lines[i][1] === srcSpan[1]) endsLine = true;
       }
+      if (startsLine && endsLine) return 'line';
     }
-    // 行级：行数相同才按行对应（行来自真实 <br> / pre-* 换行，不是长度比例猜的）
-    var srcLineList = U.linesOf(srcText);
-    var tgtLineList = U.linesOf(targetText);
-    if (srcLineList.length && srcLineList.length === tgtLineList.length) {
+    return 'sentence';
+  }
+
+  function pairOf(unit, targetText, align, part) {
+    var srcSpan = sentenceSpan(unit, part.srcFrom, part.srcTo);
+    return {
+      srcSpan: srcSpan,
+      tgtSpan: [part.tgtFrom, part.tgtTo],
+      scope: scopeOf(unit, align, part, srcSpan),
+      sourceText: unit.map.text.slice(srcSpan[0], srcSpan[1]),
+      targetText: String(targetText || '').slice(part.tgtFrom, part.tgtTo)
+    };
+  }
+
+  // 没有句子对齐时：两边都有多行且行数相同 → 行级；否则整段
+  function lineOrWhole(unit, targetText, onTarget, offset) {
+    var srcText = unit.map.text;
+    var srcLines = U.linesOf(srcText);
+    var tgtLines = U.linesOf(targetText);
+    if (srcLines.length > 1 && srcLines.length === tgtLines.length) {
+      var list = onTarget ? tgtLines : srcLines;
       var li = 0;
-      for (var lx = 0; lx < srcLineList.length; lx += 1) {
-        if (sourceOffset >= srcLineList[lx][0] && sourceOffset < srcLineList[lx][1]) li = lx;
+      for (var i = 0; i < list.length; i += 1) {
+        if (offset >= list[i][0]) li = i;
       }
       return {
-        srcSpan: srcLineList[li],
-        tgtSpan: tgtLineList[li],
+        srcSpan: srcLines[li],
+        tgtSpan: tgtLines[li],
         scope: 'line',
-        sourceText: srcText.slice(srcLineList[li][0], srcLineList[li][1]),
-        targetText: targetText.slice(tgtLineList[li][0], tgtLineList[li][1])
+        sourceText: srcText.slice(srcLines[li][0], srcLines[li][1]),
+        targetText: targetText.slice(tgtLines[li][0], tgtLines[li][1])
       };
     }
     return {
@@ -160,38 +150,24 @@
       sourceText: srcText,
       targetText: targetText
     };
+  }
+
+  // 双语：鼠标在源文本（onTarget=false）/ 译文（onTarget=true）的 offset 处，
+  // 返回两边要高亮的范围 { srcSpan, tgtSpan, scope, sourceText, targetText }
+  hover.pairDual = function (unit, targetText, onTarget, offset) {
+    var text = String(targetText || '');
+    var align = hover.alignOf(unit, text);
+    if (align) {
+      var part = onTarget ? U.partAtTargetOffset(align, offset) : U.partAt(align, sourceSentenceAt(unit, offset));
+      if (part) return pairOf(unit, text, align, part);
+    }
+    return lineOrWhole(unit, text, onTarget, offset);
   };
 
-  // 仅译文 / Ruby：页面上显示的是译文。返回 { span, sourceText, scope }。
-  // 有结构化对齐 → 鼠标下那句译文对应的源句；没有 → 行级（行数相同）或整段。
+  // 仅译文 / Ruby：页面上显示的是译文。返回 { span, sourceText, scope }
   hover.pairReplaced = function (unit, targetText, offset) {
-    var align = usableAlign(unit, targetText);
-    if (align) {
-      var part = U.partAtTargetOffset(align, offset);
-      if (part) {
-        return {
-          span: [part.tgtFrom, part.tgtTo],
-          sourceText: sentenceText(unit, part.srcFrom, part.srcTo),
-          scope: 'sentence'
-        };
-      }
-    }
-    var tgtLines = U.linesOf(targetText);
-    var srcLines = U.linesOf(unit.map.text);
-    var lineIndex = 0;
-    for (var i = 0; i < tgtLines.length; i += 1) {
-      if (offset >= tgtLines[i][0] && offset < tgtLines[i][1]) lineIndex = i;
-    }
-    if (tgtLines.length && tgtLines.length === srcLines.length) {
-      var span = tgtLines[lineIndex];
-      var src = srcLines[lineIndex];
-      return {
-        span: span,
-        sourceText: unit.map.text.slice(src[0], src[1]),
-        scope: 'line'
-      };
-    }
-    return { span: wholeSpan(targetText), sourceText: unit.map.text, scope: 'paragraph' };
+    var pair = hover.pairDual(unit, targetText, true, offset);
+    return { span: pair.tgtSpan, sourceText: pair.sourceText, scope: pair.scope };
   };
 
   // ---------------- 文本映射：单元文本偏移 ↔ DOM Range ----------------
@@ -363,7 +339,6 @@
   var TIP_HIDE_DELAY = 200;
   var tipText = '';
   var tipScope = '';
-  var tipKind = '';
   var tipFull = '';
   var tipExpanded = false;
   var tipRich = false;
@@ -429,12 +404,12 @@
     return tip;
   }
 
-  function scopeLabel(scope, kind) {
+  function scopeLabel(scope) {
     var label = '';
     if (scope === 'paragraph') label = DT.uiText('段落级对应', 'Paragraph-level match');
     else if (scope === 'line') label = DT.uiText('行级对应', 'Line-level match');
     if (!label) return '';
-    return label + ' · ' + (kind === 'source' ? DT.uiText('原文', 'source') : DT.uiText('译文', 'translation'));
+    return label + ' · ' + DT.uiText('原文', 'source');
   }
 
   function positionTip(anchor) {
@@ -476,16 +451,14 @@
     return !!tip && !!node && node.nodeType === 1 && tip.contains(node);
   }
 
-  // kind: 'translation'（鼠标在原文上，气泡显示译文）/ 'source'（鼠标在译文上，显示原文）
-  function showTip(anchor, text, scope, kind) {
+  // 气泡只在页面上看不到原文时出现（仅译文 / Ruby / 原地替换），内容是对应的原文
+  function showTip(anchor, text, scope) {
     ensureTip();
     var full = String(text || '');
     var truncated = full.length > TIP_PREVIEW_CHARS;
     var sc = scope || 'sentence';
-    var k = kind || 'source';
     tipText = full;
     tipScope = sc;
-    tipKind = k;
     tipFull = full;
     tipExpanded = false;
     tipAnchor = anchor;
@@ -495,7 +468,7 @@
     tip._head.hidden = !tipRich;
     tip._close.hidden = !tipRich;
     tip._actions.hidden = !truncated;
-    tip._label.textContent = tipRich ? scopeLabel(sc, k) : '';
+    tip._label.textContent = tipRich ? scopeLabel(sc) : '';
     tip._expand.textContent = DT.uiText('展开全文', 'Show full text');
     tip._close.setAttribute('aria-label', DT.uiText('关闭提示', 'Close'));
     tip._body.textContent = tipPreview(full);
@@ -551,7 +524,6 @@
     hideTip(true);
     tipText = '';
     tipScope = '';
-    tipKind = '';
     tipFull = '';
     tipExpanded = false;
     tipRich = false;
@@ -564,7 +536,7 @@
       var original = unit.map ? unit.map.text : '';
       unit.el.setAttribute('data-dt-hover', 'replaced');
       marked.push(unit.el);
-      showTip(unit.el, original, 'paragraph', 'source');
+      showTip(unit.el, original, 'paragraph');
       return;
     }
     var target = unit.targetNode;
@@ -572,7 +544,6 @@
     unit.el.setAttribute('data-dt-hover', 'src');
     target.setAttribute('data-dt-hover', 'target');
     marked.push(unit.el, target);
-    showTip(unit.el, unit.map ? unit.map.text : '', 'paragraph', 'source');
   }
 
   function mapsFor(unit) {
@@ -632,21 +603,13 @@
       var pair = hover.pairDual(unit, tgt.text, onTarget, at);
       if (!pair) return;
       var key = pair.srcSpan.join(':') + '|' + pair.tgtSpan.join(':');
-      if (unit === current && key === currentKey) {
-        if (tipRich && tip && tip.hidden) showTip(unit.el, pair.sourceText, pair.scope, 'source');
-        return;
-      }
+      if (unit === current && key === currentKey) return;
       clear();
       current = unit;
       currentKey = key;
+      // 双语：原文和译文都在页面上，只高亮这一组，不弹气泡（气泡会挡住下面的正文）
       paint(SRC_HL, hover.rangeOf(maps.src, pair.srcSpan));
       paint(TGT_HL, hover.rangeOf(tgt, pair.tgtSpan));
-      // 鼠标在原文上显示译文，在译文上显示原文；短句用轻量气泡
-      if (pair.scope === 'sentence') {
-        showTip(unit.el, onTarget ? pair.sourceText : pair.targetText, 'sentence', onTarget ? 'source' : 'translation');
-      } else {
-        showTip(unit.el, onTarget ? pair.sourceText : pair.targetText, pair.scope, onTarget ? 'source' : 'translation');
-      }
       return;
     }
 
@@ -657,14 +620,14 @@
     if (!hit) return;
     var rkey = 'r' + hit.span.join(':');
     if (unit === current && rkey === currentKey) {
-      if (tipRich && tip && tip.hidden) showTip(unit.el, hit.sourceText, hit.scope, 'source');
+      if (tipRich && tip && tip.hidden) showTip(unit.el, hit.sourceText, hit.scope);
       return;
     }
     clear();
     current = unit;
     currentKey = rkey;
     paint(TGT_HL, hover.rangeOf(tgt, hit.span));
-    showTip(unit.el, hit.sourceText, hit.scope, 'source');
+    showTip(unit.el, hit.sourceText, hit.scope);
   };
 
   hover.clear = clear;

@@ -1040,17 +1040,16 @@
       if (highlighted('dt-hover-src') !== 'Second sentence follows.') return '原文高亮的不是这一句：' + highlighted('dt-hover-src');
       if (highlighted('dt-hover-target') !== '第二句跟着来。') return '译文高亮的不是对应句：' + highlighted('dt-hover-target');
       if (a.hasAttribute('data-dt-hover')) return '不该再整段高亮';
+      // 双语：原文和译文都在页面上，只高亮，不弹气泡（0.9.1 的气泡会挡住下面的正文）
       var tip = document.querySelector('.dt-hover-tip');
-      if (!tip || tip.hidden || tip.querySelector('.dt-hover-body').textContent !== '第二句跟着来。') {
-        return '原文上悬停没有显示这句译文：' + (tip && tip.querySelector('.dt-hover-body') ? tip.querySelector('.dt-hover-body').textContent : '无气泡');
-      }
+      if (tip && !tip.hidden) return '双语模式不该弹气泡：' + tip.textContent;
       p = pointOf(target.firstChild, '第三句');
       DT.hover.updateAt(p.x, p.y, target); // 鼠标移到译文的第三句
       if (highlighted('dt-hover-src') !== 'Third one ends.' || highlighted('dt-hover-target') !== '第三句结束。') {
         return '移到译文上没对上：' + highlighted('dt-hover-src') + ' / ' + highlighted('dt-hover-target');
       }
       tip = document.querySelector('.dt-hover-tip');
-      if (!tip || tip.hidden || tip.querySelector('.dt-hover-body').textContent !== 'Third one ends.') return '译文上悬停没有显示原文';
+      if (tip && !tip.hidden) return '双语模式译文上也不该弹气泡';
       var b = box.querySelector('#hv-b');
       p = pointOf(b.firstChild, 'Not');
       DT.hover.updateAt(p.x, p.y, b); // 移到没翻译的段落
@@ -1059,6 +1058,42 @@
       p = pointOf(srcText, 'First');
       DT.hover.updateAt(p.x, p.y, a);
       return highlighted('dt-hover-src') ? '翻译关闭时不该高亮' : true;
+    });
+  });
+
+  check('悬停对照·双语没有模型对齐（旧缓存 / 后台重启）：本地对齐照样逐句高亮，不退回整段、不弹气泡', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    // 真实页面形状（Our World in Data）：脚注号 <sup>11</sup> 紧跟句号，译文把脚注号放到下一句开头
+    var html =
+      '<p id="hv-owid">The 9 charts show the data for different regions in the world. On the horizontal axis of each chart, you find the average income (GDP per capita) and on the vertical axis you see the share living in extreme poverty. ' +
+      'The starting point of each trajectory shows the data for 1820 and it tells us that two centuries ago the majority of people lived in extreme poverty, no matter where in the world they were at home.<sup>11</sup> ' +
+      'Since then, all world regions achieved growth – the production of goods and services increased – and the share living in poverty declined.</p>';
+    return withHoverFixture(html, function (box) {
+      var el = box.querySelector('#hv-owid');
+      var targetText =
+        '这9张图表展示了世界不同地区的数据。每张图表的横轴是平均收入（人均GDP），纵轴是生活在极端贫困中的人口比例。' +
+        '每条轨迹的起点显示的是1820年的数据，它告诉我们，两个世纪前，无论人们身处世界何处，大多数人都生活在极端贫困之中。' +
+        '11 自那时起，世界所有地区都实现了增长——商品和服务的生产增加了——生活在贫困中的人口比例下降了。';
+      if (!DT.inject(el, targetText, 'zh-CN')) return 'inject 返回 false';
+      var unit = DT.unitOfNode(el.firstChild);
+      if (!unit || unit.align) return '夹具应没有模型对齐';
+      if (unit.sentences.length !== 4) return '原文应切成 4 句（home.11 后断开）：' + unit.sentences.length;
+      var p = pointOf(el.firstChild, 'starting point');
+      DT.hover.updateAt(p.x, p.y, el);
+      var src = highlighted('dt-hover-src');
+      var tgt = highlighted('dt-hover-target');
+      // 第三句一直到脚注号（Range 末端落在 <sup> 里）
+      if (src.indexOf('The starting point') !== 0 || src.slice(-7) !== 'home.11') return '原文高亮的不是第三句：' + src;
+      if (tgt.indexOf('每条轨迹') !== 0 || tgt.slice(-1) !== '。' || tgt.indexOf('自那时起') >= 0) return '译文高亮的不是对应句：' + tgt;
+      var tip = document.querySelector('.dt-hover-tip');
+      if (tip && !tip.hidden) return '双语模式不该弹「行级对应」气泡';
+      // 译文上：第四句（含被挪到句首的脚注号）对回原文第四句
+      var t = el.querySelector('[data-dt-target]').firstChild;
+      p = pointOf(t, '自那时起');
+      DT.hover.updateAt(p.x, p.y, t.parentElement);
+      src = highlighted('dt-hover-src');
+      if (src.indexOf('Since then') !== 0) return '译文第四句没有对回原文第四句：' + src;
+      return true;
     });
   });
 
@@ -2097,7 +2132,20 @@
       ['“Hello.” She left. Version 3.5 is out!', ['“Hello.”', 'She left.', 'Version 3.5 is out!']],
       ['He said "Stop." Then he left…', ['He said "Stop."', 'Then he left…']],
       ['第一行没有句号\n第二行。', ['第一行没有句号', '第二行。']],
-      ['「没闭合的引号。\n下一行照常。断句。', ['「没闭合的引号。', '下一行照常。', '断句。']]
+      ['「没闭合的引号。\n下一行照常。断句。', ['「没闭合的引号。', '下一行照常。', '断句。']],
+      // 0.9.3：不再见句点就断
+      ['Mr. Smith met Dr. Jones at 5 p.m. on Monday. They left.', ['Mr. Smith met Dr. Jones at 5 p.m. on Monday.', 'They left.']],
+      ['We discussed the economy, e.g. inflation. Smith et al. (2020) agree. See Fig. 3 here.', ['We discussed the economy, e.g. inflation.', 'Smith et al. (2020) agree.', 'See Fig. 3 here.']],
+      ['J. K. Rowling wrote it. “Really?” she asked. I said no. Then I left.', ['J. K. Rowling wrote it.', '“Really?” she asked.', 'I said no.', 'Then I left.']],
+      ['"Wait!" he shouted. Wait... then he came.', ['"Wait!" he shouted.', 'Wait... then he came.']],
+      ['1. Introduction', ['1. Introduction']],
+      ['It was 3.5 in 2019. 2020 was worse. Node.js is great.', ['It was 3.5 in 2019.', '2020 was worse.', 'Node.js is great.']],
+      // 脚注号紧跟句号：归前一句
+      ['they were at home.11 Since then, it grew.', ['they were at home.11', 'Since then, it grew.']],
+      ['Growth was strong.[12] Poverty fell.¹³ It ended.', ['Growth was strong.[12]', 'Poverty fell.¹³', 'It ended.']],
+      ['2023年增长放缓。[4] 然而通胀仍高。', ['2023年增长放缓。[4]', '然而通胀仍高。']],
+      // 中西混排：半角问号后直接是汉字
+      ['真的吗?我不知道。', ['真的吗?', '我不知道。']]
     ];
     var bad = cases.filter(function (c) { return JSON.stringify(sents(c[0])) !== JSON.stringify(c[1]); });
     return bad.length ? bad.map(function (c) { return JSON.stringify(sents(c[0])); }).join(' | ') : true;
@@ -2128,44 +2176,81 @@
     };
   }
 
-  check('悬停匹配（纯函数）：有结构化对齐按句；没有对齐按真实行；行数不同退回整段', function () {
+  check('悬停匹配（纯函数）：模型对齐优先；没有就本地对齐按句；整段合成一句时标段落级', function () {
     var H = DT.hover;
     var from = 'One. Two.\nThree.';
     var to = '一。二。\n三。';
-    var unit = fakeUnit(from, null);
-    var m = H.pairDual(unit, to, false, from.indexOf('Two'));
-    var r = eq([m.scope, m.sourceText, m.targetText], ['line', 'One. Two.', '一。二。']);
-    if (r !== true) return '无对齐时按行：' + r;
-    var align = DT.units.alignmentOf([{ n: 1, t: '一。' }, { n: 1, t: '二。' }, { n: 1, t: '三。' }], '一。二。\n三。', 3);
+    // 没有模型对齐：本地对齐（逐行、行内按句）
+    var m = H.pairDual(fakeUnit(from, null), to, false, from.indexOf('Two'));
+    var r = eq([m.scope, m.sourceText, m.targetText], ['sentence', 'Two.', '二。']);
+    if (r !== true) return '无模型对齐时本地按句：' + r;
+    m = H.pairDual(fakeUnit(from, null), to, true, to.indexOf('三'));
+    r = eq([m.scope, m.sourceText], ['sentence', 'Three.']);
+    if (r !== true) return '译文上反查：' + r;
+    // 模型对齐优先：模型说前两句合成一组，就按组高亮
+    var align = DT.units.alignmentOf([{ n: 2, t: '一。二。' }, { n: 1, t: '三。' }], to, 3);
     if (!align) return '对齐夹具无效';
-    unit = fakeUnit(from, align);
-    m = H.pairDual(unit, to, false, from.indexOf('Two'));
-    r = eq([m.scope, m.sourceText, m.targetText], ['sentence', 'Two.', '二。']);
-    if (r !== true) return '有对齐时按句：' + r;
+    m = H.pairDual(fakeUnit(from, align), to, false, from.indexOf('Two'));
+    r = eq([m.sourceText, m.targetText, m.scope], ['One. Two.', '一。二。', 'line']);
+    if (r !== true) return '模型对齐应优先：' + r;
+    // 三句被译成一句：只能整段对应
     m = H.pairDual(fakeUnit(from, null), '一，二，三。', false, from.indexOf('Two'));
-    return eq([m.scope, m.sourceText], ['paragraph', from]);
+    r = eq([m.scope, m.sourceText], ['paragraph', from]);
+    if (r !== true) return r;
+    // 单行单句的段落不再标「行级对应」
+    m = H.pairDual(fakeUnit('Just one line, one sentence', null), '只有一行一句', false, 3);
+    return eq(m.scope, 'sentence');
   });
 
-  check('悬停匹配（纯函数）：仅译文有对齐给源句；没有对齐按行；对不上只给整段原文', function () {
+  check('本地句子对齐：一对多 / 多对一 / 数字锚点 / 调换语序整段合并', function () {
+    var U = DT.units;
+    function shape(src, tgt) {
+      var a = U.alignLocal(src, null, tgt);
+      return a ? a.parts.map(function (p) { return [p.srcTo - p.srcFrom, p.tgtCount]; }) : null;
+    }
+    var cases = [
+      ['It rained. We waited for hours at the station. Then the train came.', '下雨了，我们在车站等了好几个小时。然后火车来了。', [[2, 1], [1, 1]]],
+      ['It rained heavily all morning and the roads were flooded. We waited. Then the train came.', '整个上午都在下大雨，道路被淹了。我们等着，然后火车来了。', [[1, 1], [2, 1]]],
+      ['The committee, after months of deliberation and many heated arguments about the budget, finally approved the plan that would reshape the city. It was a historic day.', '委员会经过几个月的审议，并就预算进行了多次激烈争论。最终批准了这项将重塑城市的计划。这是历史性的一天。', [[1, 2], [1, 1]]],
+      ['The museum opened in 1998. It houses more than 5,000 artworks. Most of them were donated by local families. Every year, about 300,000 people visit it.', '这座博物馆于1998年开馆。馆内收藏了5000多件艺术品，其中大部分由当地家庭捐赠。每年约有30万人前来参观。', [[1, 1], [2, 1], [1, 1]]],
+      ['这项研究调查了2000名参与者，发现每天锻炼30分钟可以显著降低患心脏病的风险，而且这种效果在老年人中尤为明显。研究人员建议将锻炼纳入日常生活。', 'The study surveyed 2,000 participants. It found that exercising 30 minutes a day can significantly lower the risk of heart disease, and the effect is especially pronounced among older adults. The researchers recommend making exercise part of daily life.', [[1, 2], [1, 1]]],
+      ['What is economic growth? Why does it matter? In this article, we explain the basics.', '什么是经济增长？它为什么重要？在本文中，我们将解释基本概念。', [[1, 1], [1, 1], [1, 1]]],
+      // 模型调换了两句的顺序：没有单调对应，宁可整段，也不配错
+      ['The first rule is simple. The second rule, however, is much harder to explain to beginners.', '第二条规则对初学者来说要难解释得多。第一条规则很简单。', [[2, 2]]]
+    ];
+    var bad = cases.filter(function (c) { return JSON.stringify(shape(c[0], c[1])) !== JSON.stringify(c[2]); });
+    if (bad.length) return bad.map(function (c) { return JSON.stringify(shape(c[0], c[1])) + ' ≠ ' + JSON.stringify(c[2]); }).join(' | ');
+    // 译文偏移与文本逐字对得上
+    var src = 'One. Two.\nThree.';
+    var tgt = '一。二。\n三。';
+    var a = U.alignLocal(src, null, tgt);
+    var r = eq(a.parts.map(function (p) { return tgt.slice(p.tgtFrom, p.tgtTo) === p.text ? p.text : '错位'; }), ['一。', '二。', '三。']);
+    if (r !== true) return r;
+    // 两边行数相同：行界一定是组界（即使长度更像跨行合并）
+    a = U.alignLocal('A short line.\nAnother line that is quite a bit longer than the first one.', null, '短行。\n另一行。');
+    return eq(a.parts.map(function (p) { return [p.srcFrom, p.srcTo]; }), [[0, 1], [1, 2]]);
+  });
+
+  check('悬停匹配（纯函数）：仅译文给鼠标下这句的原文；模型对齐偏移对不上时按页面实际译文本地对齐', function () {
     var H = DT.hover;
     var from = 'One. Two.\nThree.';
     var page = '一。二。\n三。';
-    var unit = fakeUnit(from, null);
-    var m = H.pairReplaced(unit, page, page.indexOf('二'));
-    var r = eq([m.scope, m.sourceText, page.slice(m.span[0], m.span[1])], ['line', 'One. Two.', '一。二。']);
-    if (r !== true) return '无对齐时按行：' + r;
+    var m = H.pairReplaced(fakeUnit(from, null), page, page.indexOf('二'));
+    var r = eq([m.scope, m.sourceText, page.slice(m.span[0], m.span[1])], ['sentence', 'Two.', '二。']);
+    if (r !== true) return '无模型对齐时本地按句：' + r;
     var align = DT.units.alignmentOf([{ n: 1, t: '一。' }, { n: 1, t: '二。' }, { n: 1, t: '三。' }], '一。二。\n三。', 3);
     m = H.pairReplaced(fakeUnit(from, align), page, page.indexOf('二'));
     r = eq([m.scope, m.sourceText, page.slice(m.span[0], m.span[1])], ['sentence', 'Two.', '二。']);
     if (r !== true) return '有对齐时按句：' + r;
+    // 两行被并成一行、三句被译成两句：本地对齐给出「两句原文 ↔ 一句译文」这一组
     var merged = '一，二。三。';
     m = H.pairReplaced(fakeUnit(from, null), merged, merged.indexOf('二'));
-    var r = eq([m.scope, m.sourceText], ['paragraph', from]);
-    if (r !== true) return r;
-    // 对齐偏移是按另一段文本算的（页面实际文本前面多了字）→ 不能假装句级
+    r = eq([m.sourceText, merged.slice(m.span[0], m.span[1])], ['One. Two.', '一，二。']);
+    if (r !== true) return '合并句：' + r;
+    // 模型对齐的偏移是按另一段文本算的（页面实际文本前面多了字）→ 丢掉模型映射，按页面实际文本本地对齐
     var wrong = DT.units.alignmentOf([{ n: 1, t: '一。' }, { n: 1, t: '二。' }], '一。二。', 2);
     m = H.pairReplaced(fakeUnit('One. Two.', wrong), '前言一。二。', 3);
-    return m.scope === 'sentence' ? '目标文本与对齐偏移不一致时不能给句级' : true;
+    return eq([m.sourceText, '前言一。二。'.slice(m.span[0], m.span[1])], ['One.', '前言一。']);
   });
 
   check('悬停对照·仅译文小说段落：鼠标在第 2 行 → 只高亮这一行的句子，气泡是第 2 行原文', function () {
@@ -2192,7 +2277,7 @@
     });
   });
 
-  check('悬停对照·仅译文：模型合并了行 → 气泡给整段原文、高亮整段译文，不给错的精确句子', function () {
+  check('悬停对照·仅译文：模型把三行并成两句 → 气泡给对应的两行原文、高亮那一句译文', function () {
     if (!window.Highlight || !CSS.highlights) return true;
     return withHoverFixture('<p id="hv-mg" style="white-space:pre-wrap"><span>「今日は何の日？」</span><br><span>「ポッキーの日だ。」</span><br><span>「勝負しよう。」</span></p>', function (box) {
       var p = box.querySelector('#hv-mg');
@@ -2208,9 +2293,9 @@
       DT.hover.updateAt(pt.x, pt.y, node.parentElement);
       var tip = document.querySelector('.dt-hover-tip');
       if (!tip || tip.hidden) return '没有弹出原文气泡';
-      var r = eq(tip.querySelector('.dt-hover-body').textContent, '「今日は何の日？」\n「ポッキーの日だ。」\n「勝負しよう。」');
-      if (r !== true) return '应退回整段原文：' + r;
-      return highlighted('dt-hover-target') === '「今天是什么日子？」「是百奇日，来比一场。」' ? true : '应高亮整段：' + highlighted('dt-hover-target');
+      var r = eq(tip.querySelector('.dt-hover-body').textContent, '「ポッキーの日だ。」\n「勝負しよう。」');
+      if (r !== true) return '应给第 2、3 行原文：' + r;
+      return highlighted('dt-hover-target') === '「是百奇日，来比一场。」' ? true : '应只高亮鼠标下这句：' + highlighted('dt-hover-target');
     });
   });
 

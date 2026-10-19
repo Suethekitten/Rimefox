@@ -209,18 +209,125 @@
   };
 
   // ---------------- 3. 句子 ----------------
-  // 句末：西文的 .!?… 后面要跟空白或结尾（避开 3.5、e.g）；中日文的 。！？； 直接断；换行一定断。
+  // 句末：中日文的 。！？； 直接断；换行一定断。
   // 引号 / 括号里的句号不断句：「じゃーん。今日は？」“好的。”他说。都是一句。
-  // 只跟踪分得清左右的括号；直引号 " ' 分不清开合，交给西文规则（标点后要有空白）。
-  // 这套规则从 0.8.4 的 hover.sentencesOf 原样搬来（自检用例一起搬），现在只在这里维护一份。
+  // 只跟踪分得清左右的括号；直引号 " ' 分不清开合，交给西文规则。
+  // 西文的 .!?… 不是见到就断（1.0 只认「标点 + 空白」，悬停常常整段对不上），还要排除：
+  //   缩写       Mr. / Dr. / e.g. / i.e. / vs. / et al.；No. 5 / p. 12 / Fig. 3 / Jan. 5（后面跟数字才算）
+  //   首字母     J. K. Rowling（单个大写字母 + 后面大写开头）
+  //   编号       「1. 」「a. 」「iv. 」整句只有编号时不断
+  //   小写续接   "Really?" she asked. / approx. five / 5 p.m. on Monday：标点后接小写字母不是句末
+  // 并多认两种句末：
+  //   脚注       home.11 Since / home.¹¹ Since / home.[11] Since：脚注号跟在句号后面，归前一句
+  //   中西混排   真的吗?我不知道：半角 ?!… 后面直接是汉字 / 假名 / 谚文也断
   var OPEN = '「『“（《〈【';
   var CLOSE = '」』”）》〉】';
   var CJK_END = '。！？；';
   var WEST_END = '.!?…';
   var TRAIL = '"\'”’)]」』）';
+  var SUPER_DIGITS = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+  var DENSE_CHAR = /[ᄀ-ᇿ぀-ヿ㄰-㆏㐀-䶿一-鿿가-힯豈-﫿]/;
+  // 后面的句点永远不是句末（称谓、vs、cf、e.g、i.e）
+  var ABBR_ALWAYS = {};
+  'mr mrs ms mx dr prof sr jr st mt ft rev hon gen gov sen rep pres lt col capt sgt cmdr adm messrs mme mlle vs cf viz approx ca eg ie'
+    .split(' ')
+    .forEach(function (w) {
+      ABBR_ALWAYS[w] = 1;
+    });
+  // 后面跟数字时才是缩写：No. 5 / p. 12 / Fig. 3 / Jan. 5（「I said no. Then…」照常断）
+  var ABBR_NUM = {};
+  'no nos p pp vol vols fig figs eq eqs ch chap sec art ref refs op ed jan feb mar apr jun jul aug sep sept oct nov dec'
+    .split(' ')
+    .forEach(function (w) {
+      ABBR_NUM[w] = 1;
+    });
 
   function isSpace(c) {
     return !!c && /\s/.test(c);
+  }
+
+  function isLower(c) {
+    return !!c && c.toLowerCase() === c && c.toUpperCase() !== c;
+  }
+
+  function isUpper(c) {
+    return !!c && c.toUpperCase() === c && c.toLowerCase() !== c;
+  }
+
+  function isDigit(c) {
+    return c >= '0' && c <= '9';
+  }
+
+  function isLetter(c) {
+    return isLower(c) || isUpper(c);
+  }
+
+  // k 之后第一个非空白字符
+  function nextVisible(s, k) {
+    while (k < s.length && isSpace(s.charAt(k))) k += 1;
+    return s.charAt(k);
+  }
+
+  // 句点前面的那个词（含词内的点：e.g / U.S / Ph.D）
+  function wordBefore(s, i) {
+    var a = i;
+    while (a > 0 && (isLetter(s.charAt(a - 1)) || (s.charAt(a - 1) === '.' && isLetter(s.charAt(a - 2))))) a -= 1;
+    return s.slice(a, i);
+  }
+
+  // 句末标点 run 结束于 k：紧跟着的上标脚注（¹¹）和方括号引注（[11] / [a] / [12][13]）归前一句
+  function citationEnd(s, k) {
+    var j = k;
+    while (j < s.length && SUPER_DIGITS.indexOf(s.charAt(j)) >= 0) j += 1;
+    var guard = 0;
+    while (s.charAt(j) === '[' && guard < 4) {
+      var close = s.indexOf(']', j);
+      if (close < 0 || close - j > 24 || /[\n\[]/.test(s.slice(j + 1, close))) break;
+      j = close + 1;
+      guard += 1;
+    }
+    return j;
+  }
+
+  // 西文标点 run 结束于 k（已含后随引号 / 括号）：脚注号紧跟句号时把它并进前一句，返回新的 k
+  function footnoteEnd(s, i, k) {
+    var j = citationEnd(s, k);
+    if (j > k) return j;
+    // 普通数字：home.11 Since（句点前是字母，后面 1–3 位数字再接空白 / 结尾；3.14 和 v2.11 不算）
+    if (s.charAt(i) === '.' && isLetter(s.charAt(i - 1))) {
+      var d = k;
+      while (d < s.length && isDigit(s.charAt(d)) && d - k < 4) d += 1;
+      if (d > k && d - k <= 3 && (d >= s.length || isSpace(s.charAt(d)))) return d;
+    }
+    return k;
+  }
+
+  // 西文标点（下标 i，标点 + 后随引号到 k 为止）是不是句末；是就返回切分位置，不是返回 -1
+  function westernEnd(s, i, k, start) {
+    var c = s.charAt(i);
+    var end = footnoteEnd(s, i, k);
+    var after = s.charAt(end);
+    if (end < s.length && !isSpace(after)) {
+      // 标点后面没有空白：3.5 / Node.js / e.g. 内部的点都不断；
+      // 中西混排的「?!…」后面直接是中日韩文字才断
+      return c !== '.' && DENSE_CHAR.test(after) ? end : -1;
+    }
+    var next = nextVisible(s, end);
+    if (end >= s.length || !next) return end;
+    // 小写续接：标点后面是小写字母，不是句末
+    if (isLower(next)) return -1;
+    if (c === '.' && s.charAt(i + 1) !== '.') {
+      var word = wordBefore(s, i);
+      var key = word.replace(/\./g, '').toLowerCase();
+      if (ABBR_ALWAYS[key]) return -1;
+      if (key === 'al' && /\bet\s+$/i.test(s.slice(Math.max(start, i - 6), i - 2))) return -1; // et al.
+      if (ABBR_NUM[key] && isDigit(next)) return -1;
+      // 首字母：J. K. Rowling
+      if (word.length === 1 && isUpper(word) && isUpper(next)) return -1;
+      // 整句只有一个编号：「1. 」「(a). 」「iv. 」
+      if (/^\(?(?:\d{1,3}|[A-Za-z]|[ivxlcdm]{1,5}|[IVXLCDM]{1,5})\)?$/.test(s.slice(start, i).trim())) return -1;
+    }
+    return end;
   }
 
   U.sentencesOf = function (text) {
@@ -253,13 +360,22 @@
       if (CLOSE.indexOf(c) >= 0 && depth > 0) {
         depth -= 1;
         i += 1;
-        // 「……。」收尾：后面是空白 / 行尾 / 下一段引号才断，「……。」と言った 这种接着往下
-        if (!depth && (CJK_END + WEST_END).indexOf(s.charAt(i - 2)) >= 0 && (i >= s.length || isSpace(s.charAt(i)) || OPEN.indexOf(s.charAt(i)) >= 0)) cut(i);
+        // 「……。」收尾：后面是空白 / 行尾 / 下一段引号才断，「……。」と言った 这种接着往下；
+        // “Really?” she asked. 引号后面是小写也接着往下
+        if (
+          !depth &&
+          (CJK_END + WEST_END).indexOf(s.charAt(i - 2)) >= 0 &&
+          (i >= s.length || isSpace(s.charAt(i)) || OPEN.indexOf(s.charAt(i)) >= 0) &&
+          !isLower(nextVisible(s, i))
+        ) {
+          cut(i);
+        }
         continue;
       }
       if (!depth && CJK_END.indexOf(c) >= 0) {
         var j = i + 1;
         while (j < s.length && (CJK_END.indexOf(s.charAt(j)) >= 0 || TRAIL.indexOf(s.charAt(j)) >= 0)) j += 1;
+        j = citationEnd(s, j); // 。[4] 引注归前一句
         cut(j);
         i = j;
         continue;
@@ -267,8 +383,13 @@
       if (!depth && WEST_END.indexOf(c) >= 0) {
         var k = i + 1;
         while (k < s.length && (WEST_END.indexOf(s.charAt(k)) >= 0 || TRAIL.indexOf(s.charAt(k)) >= 0)) k += 1;
-        if (k >= s.length || isSpace(s.charAt(k))) cut(k);
-        i = k;
+        var end = westernEnd(s, i, k, start);
+        if (end >= 0) {
+          cut(end);
+          i = end;
+        } else {
+          i = k;
+        }
         continue;
       }
       i += 1;
@@ -365,6 +486,294 @@
       if (offset < parts[i].tgtFrom) return parts[i - 1] || parts[i];
     }
     return parts.length ? parts[parts.length - 1] : null;
+  };
+
+  // ---------------- 4b. 本地句子对齐（模型没给对齐时） ----------------
+  // 0.9.1 只认模型返回的 parts：旧缓存、后台重启、非结构化输出、两边断句数不一致时一律整段，
+  // 实际用起来几乎总是整段高亮。这里在页面上直接对齐两边已有的句子，不发请求：
+  //   动态规划（Gale–Church 句长模型）：每一组可以是 1–1、1–2、2–1、2–2、1–3、3–1，
+  //     句长按本段的整体译文 / 原文比例归一化，中日韩字按 2.5 个西文字符计；
+  //   锚点：两边都出现的数字（1820、3.5）、缩写 / 专名（GDP、iPhone、COVID-19）必须落在同一组，
+  //     问句 / 感叹句尽量对问句 / 感叹句；
+  //   置信度：对最优路径上每个句界，和「往前 / 往后挪一句」的最优路径比代价；
+  //     差距不到 MARGIN 就不信这个句界，把两边的组合并——宁可高亮两句，也不高亮错的一句。
+  // 两边行数相同（真实 <br> / pre-* 换行）时逐行对齐，行界一定是组界。
+  var ALIGN_BEADS = [
+    [1, 1, 0],
+    [1, 2, 2.0],
+    [2, 1, 2.0],
+    [2, 2, 4.0],
+    [1, 3, 4.5],
+    [3, 1, 4.5]
+  ];
+  var ALIGN_VAR = 8; // 句长差的方差（每个字符），Gale–Church 原文 6.8；中英互译句长波动更大
+  // 句界置信度：比「挪一句」的最优路径至少便宜这么多（自然对数）。
+  // 38 段人工对照语料（中英日法、合并 / 拆分 / 调换）上正确句界的最小差距是 0.61，
+  // 调换语序的段落整段合并；0.5 只拦真正两可的句界
+  var ALIGN_MARGIN = 0.5;
+  var ALIGN_MAX_CELLS = 6400; // 一段最多 80×80 句；更长的段落退回行 / 段落级
+
+  function weightOf(text) {
+    var w = 0;
+    var gap = false;
+    for (var i = 0; i < text.length; i += 1) {
+      var c = text.charAt(i);
+      if (isSpace(c)) {
+        if (!gap) w += 1;
+        gap = true;
+        continue;
+      }
+      gap = false;
+      w += DENSE_CHAR.test(c) ? 2.5 : 1;
+    }
+    return Math.max(1, w);
+  }
+
+  // 锚点：数字（千分位逗号去掉）和缩写 / 混合大小写 / 带数字的西文词
+  function anchorsOf(text) {
+    var out = {};
+    var m;
+    var num = /\d+(?:[.,]\d+)*/g;
+    while ((m = num.exec(text))) {
+      var v = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(m[0]) ? m[0].replace(/,/g, '') : m[0];
+      var nk = 'n:' + v;
+      out[nk] = (out[nk] || 0) + 1;
+    }
+    var word = /[A-Za-z][A-Za-z0-9]*(?:[-'][A-Za-z0-9]+)*/g;
+    while ((m = word.exec(text))) {
+      var t = m[0];
+      if (t.length < 2) continue;
+      if (!(/[A-Z]/.test(t.slice(1)) || /\d/.test(t))) continue; // GDP / iPhone / COVID-19；普通词不算
+      var tk = 't:' + t;
+      out[tk] = (out[tk] || 0) + 1;
+    }
+    return out;
+  }
+
+  function anchorWeight(key) {
+    if (key.charAt(0) === 't') return 1.5;
+    // 一两位的数字常是脚注号 / 序号，弱锚点；三位以上（年份、金额）强锚点
+    return key.replace(/\D/g, '').length >= 3 ? 2 : 0.6;
+  }
+
+  // 句末语气：问句 q / 感叹 e / 其它 p（去掉后随引号括号）
+  function moodOf(text) {
+    var s = String(text || '').replace(/[\s"'”’)\]」』）》〉】]+$/, '');
+    var c = s.charAt(s.length - 1);
+    if (c === '?' || c === '？') return 'q';
+    if (c === '!' || c === '！') return 'e';
+    return 'p';
+  }
+
+  // erfc 近似（Numerical Recipes erfcc，相对误差 < 1.2e-7）
+  function erfc(x) {
+    var z = Math.abs(x);
+    var t = 1 / (1 + 0.5 * z);
+    var r =
+      t *
+      Math.exp(
+        -z * z -
+          1.26551223 +
+          t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277))))))))
+      );
+    return x >= 0 ? r : 2 - r;
+  }
+
+  function sideOf(list) {
+    return list.map(function (one) {
+      return { w: weightOf(one.text), anchors: anchorsOf(one.text), mood: moodOf(one.text) };
+    });
+  }
+
+  // 两组句子（各自的 { w, anchors, mood } 列表）做对齐，返回组的列表 [{ s0, s1, t0, t1 }]；
+  // 算不了（太长 / 没有可行路径）返回 null。纯函数，自检直接测。
+  U.alignBeads = function (src, tgt) {
+    var m = src.length;
+    var n = tgt.length;
+    if (!m || !n) return null;
+    if (m === 1 || n === 1) return [{ s0: 0, s1: m, t0: 0, t1: n }];
+    if ((m + 1) * (n + 1) > ALIGN_MAX_CELLS) return null;
+    var LS = 0;
+    var LT = 0;
+    var i;
+    var j;
+    for (i = 0; i < m; i += 1) LS += src[i].w;
+    for (j = 0; j < n; j += 1) LT += tgt[j].w;
+    var ratio = LT / LS;
+    // 两边都出现的锚点才有意义（只出现在一边的数字可能被模型改写成文字）
+    var shared = {};
+    var srcAll = {};
+    src.forEach(function (one) {
+      for (var key in one.anchors) srcAll[key] = 1;
+    });
+    tgt.forEach(function (one) {
+      for (var key in one.anchors) if (srcAll[key]) shared[key] = anchorWeight(key);
+    });
+
+    function beadCost(s0, s1, t0, t1) {
+      var ls = 0;
+      var lt = 0;
+      var k;
+      for (k = s0; k < s1; k += 1) ls += src[k].w;
+      for (k = t0; k < t1; k += 1) lt += tgt[k].w;
+      lt /= ratio;
+      var delta = (lt - ls) / Math.sqrt(Math.max(1, (ls + lt) / 2) * ALIGN_VAR);
+      var cost = -Math.log(Math.max(1e-12, erfc(Math.abs(delta) / Math.SQRT2)));
+      var diff = {};
+      for (k = s0; k < s1; k += 1) for (var a in src[k].anchors) if (shared[a]) diff[a] = (diff[a] || 0) + src[k].anchors[a];
+      for (k = t0; k < t1; k += 1) for (var b in tgt[k].anchors) if (shared[b]) diff[b] = (diff[b] || 0) - tgt[k].anchors[b];
+      for (var d in diff) cost += shared[d] * Math.abs(diff[d]) * 0.5;
+      var ms = src[s1 - 1].mood;
+      var mt = tgt[t1 - 1].mood;
+      if (ms !== mt && (ms !== 'p' || mt !== 'p')) cost += 0.8;
+      return cost;
+    }
+
+    var W = n + 1;
+    var INF = Infinity;
+    var F = new Array((m + 1) * W);
+    var back = new Array((m + 1) * W);
+    var B = new Array((m + 1) * W);
+    for (i = 0; i < F.length; i += 1) {
+      F[i] = INF;
+      B[i] = INF;
+    }
+    F[0] = 0;
+    var memo = {};
+    function cost(s0, s1, t0, t1) {
+      var key = s0 + ',' + s1 + ',' + t0 + ',' + t1;
+      if (!(key in memo)) memo[key] = beadCost(s0, s1, t0, t1);
+      return memo[key];
+    }
+    var x;
+    for (i = 0; i <= m; i += 1) {
+      for (j = 0; j <= n; j += 1) {
+        if (!i && !j) continue;
+        for (x = 0; x < ALIGN_BEADS.length; x += 1) {
+          var a1 = ALIGN_BEADS[x][0];
+          var b1 = ALIGN_BEADS[x][1];
+          if (i < a1 || j < b1) continue;
+          var prev = F[(i - a1) * W + (j - b1)];
+          if (prev === INF) continue;
+          var c1 = prev + ALIGN_BEADS[x][2] + cost(i - a1, i, j - b1, j);
+          if (c1 < F[i * W + j]) {
+            F[i * W + j] = c1;
+            back[i * W + j] = x;
+          }
+        }
+      }
+    }
+    if (F[m * W + n] === INF) return null;
+    B[m * W + n] = 0;
+    for (i = m; i >= 0; i -= 1) {
+      for (j = n; j >= 0; j -= 1) {
+        if (i === m && j === n) continue;
+        for (x = 0; x < ALIGN_BEADS.length; x += 1) {
+          var a2 = ALIGN_BEADS[x][0];
+          var b2 = ALIGN_BEADS[x][1];
+          if (i + a2 > m || j + b2 > n) continue;
+          var next = B[(i + a2) * W + (j + b2)];
+          if (next === INF) continue;
+          var c2 = next + ALIGN_BEADS[x][2] + cost(i, i + a2, j, j + b2);
+          if (c2 < B[i * W + j]) B[i * W + j] = c2;
+        }
+      }
+    }
+    var best = F[m * W + n];
+    var beads = [];
+    i = m;
+    j = n;
+    while (i > 0 || j > 0) {
+      var bx = ALIGN_BEADS[back[i * W + j]];
+      beads.unshift({ s0: i - bx[0], s1: i, t0: j - bx[1], t1: j });
+      i -= bx[0];
+      j -= bx[1];
+    }
+    // 句界置信度：挪一句的最优路径（经过邻点、且不经过这个句界）有多贵
+    function through(p, q) {
+      if (p < 0 || q < 0 || p > m || q > n) return INF;
+      return F[p * W + q] + B[p * W + q];
+    }
+    var out = [beads[0]];
+    for (var k = 1; k < beads.length; k += 1) {
+      var bi = beads[k].s0;
+      var bj = beads[k].t0;
+      var alt = Math.min(
+        through(bi - 1, bj),
+        through(bi + 1, bj),
+        through(bi, bj - 1),
+        through(bi, bj + 1),
+        through(bi - 1, bj + 1),
+        through(bi + 1, bj - 1)
+      );
+      if (alt - best < ALIGN_MARGIN) {
+        var last = out[out.length - 1];
+        last.s1 = beads[k].s1;
+        last.t1 = beads[k].t1;
+      } else {
+        out.push(beads[k]);
+      }
+    }
+    return out;
+  };
+
+  // 段落级本地对齐：src 句子是 unit.sentences（{start,end,text}，段落相对偏移），
+  // 译文句子按同一套规则现切。返回与 alignmentOf 同形的结果（parts 的 srcFrom/srcTo 是句序号，
+  // tgtFrom/tgtTo 是译文字符偏移），另带 local:true 和每组的译文句数 tgtCount。
+  U.alignLocal = function (srcText, srcSentences, tgtText) {
+    var source = String(srcText == null ? '' : srcText);
+    var target = String(tgtText == null ? '' : tgtText);
+    var ss = srcSentences && srcSentences.length ? srcSentences : U.sentencesIn(source, 0, source.length);
+    var ts = U.sentencesIn(target, 0, target.length);
+    if (!ss.length || !ts.length) return null;
+    // 两边真实行数相同：逐行对齐，行界一定是组界
+    var sl = U.linesOf(source);
+    var tl = U.linesOf(target);
+    var chunks = [];
+    function within(list, span) {
+      var a = -1;
+      var b = -1;
+      for (var q = 0; q < list.length; q += 1) {
+        if (list[q].start >= span[0] && list[q].end <= span[1]) {
+          if (a < 0) a = q;
+          b = q + 1;
+        }
+      }
+      return a < 0 ? null : [a, b];
+    }
+    if (sl.length > 1 && sl.length === tl.length) {
+      for (var li = 0; li < sl.length; li += 1) {
+        var sr = within(ss, sl[li]);
+        var tr = within(ts, tl[li]);
+        if (!sr || !tr) return null;
+        chunks.push([sr, tr]);
+      }
+    } else {
+      chunks.push([[0, ss.length], [0, ts.length]]);
+    }
+    var srcSide = sideOf(ss);
+    var tgtSide = sideOf(ts);
+    var parts = [];
+    for (var ci = 0; ci < chunks.length; ci += 1) {
+      var s = chunks[ci][0];
+      var t = chunks[ci][1];
+      var beads = U.alignBeads(srcSide.slice(s[0], s[1]), tgtSide.slice(t[0], t[1]));
+      if (!beads) return null;
+      beads.forEach(function (bead) {
+        var from = ts[t[0] + bead.t0].start;
+        var to = ts[t[0] + bead.t1 - 1].end;
+        parts.push({
+          n: bead.s1 - bead.s0,
+          srcFrom: s[0] + bead.s0,
+          srcTo: s[0] + bead.s1,
+          tgtFrom: from,
+          tgtTo: to,
+          tgtCount: bead.t1 - bead.t0,
+          text: target.slice(from, to)
+        });
+      });
+    }
+    return { reliable: true, local: true, parts: parts, text: target };
   };
 
   // ---------------- 5. 签名 / 工具 ----------------

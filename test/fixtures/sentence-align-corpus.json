@@ -1,0 +1,611 @@
+{
+ "note": "悬停对照·本地句子对齐的人工语料（content/units.js alignLocal）。gold：每组 [原文句数, 译文句数]；'merge' = 没有单调对应（调换语序），必须整段一组；'any' = 两种分法都对，只要求不报错。改断句 / 对齐参数后跑 test/sentence-align.test.mjs。",
+ "cases": [
+  {
+   "src": "The 9 charts show the data for different regions in the world. On the horizontal axis of each chart, you find the average income (GDP per capita) and on the vertical axis you see the share living in extreme poverty. The starting point of each trajectory shows the data for 1820 and it tells us that two centuries ago the majority of people lived in extreme poverty, no matter where in the world they were at home.11 Since then, all world regions achieved growth – the production of goods and services increased – and the share living in poverty declined.",
+   "tgt": "这9张图表展示了世界不同地区的数据。每张图表的横轴是平均收入（人均GDP），纵轴是生活在极端贫困中的人口比例。每条轨迹的起点显示的是1820年的数据，它告诉我们，两个世纪前，无论人们身处世界何处，大多数人都生活在极端贫困之中。11 自那时起，世界所有地区都实现了增长——商品和服务的生产增加了——生活在贫困中的人口比例下降了。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "It rained heavily all morning and the roads were flooded. We waited. Then the train came.",
+   "tgt": "整个上午都在下大雨，道路被淹了。我们等着，然后火车来了。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "It rained. We waited for hours at the station. Then the train came.",
+   "tgt": "下雨了，我们在车站等了好几个小时。然后火车来了。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "The committee, after months of deliberation and many heated arguments about the budget, finally approved the plan that would reshape the city. It was a historic day.",
+   "tgt": "委员会经过几个月的审议，并就预算进行了多次激烈争论。最终批准了这项将重塑城市的计划。这是历史性的一天。",
+   "gold": [
+    [
+     1,
+     2
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "The company reported revenue of $4.2 billion for the quarter. That was up 12% from a year earlier. Analysts had expected $4.0 billion. Shares rose 5% in after-hours trading.",
+   "tgt": "该公司公布本季度营收为42亿美元，同比增长12%。分析师此前预期为40亿美元。该公司股价在盘后交易中上涨5%。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Paris is the capital and most populous city of France. With an estimated population of 2,102,650 residents in January 2023 in an area of more than 105 km2, Paris is the fourth-most populous city in the European Union and the 30th most densely populated city in the world in 2022. Since the 17th century, Paris has been one of the world's major centres of finance, diplomacy, commerce, culture, fashion, and gastronomy.",
+   "tgt": "巴黎是法国的首都和人口最多的城市。截至2023年1月，巴黎估计有2102650名居民，面积超过105平方公里，是欧盟人口第四多的城市，也是2022年世界上人口密度第30高的城市。自17世纪以来，巴黎一直是世界金融、外交、商业、文化、时尚和美食的主要中心之一。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "\"Are you coming?\" she asked. \"No,\" he said. \"I have work to do.\"",
+   "tgt": "“你来吗？”她问。“不，”他说，“我还有工作要做。”",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "To install the package, run npm install. Then import it in your code. The API returns a Promise that resolves to the result. If an error occurs, the Promise is rejected with an Error object.",
+   "tgt": "要安装该软件包，请运行 npm install。然后在代码中导入它。该 API 返回一个 Promise，解析为结果；如果发生错误，Promise 会以 Error 对象被拒绝。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Although the weather was terrible and most of the roads had been closed since the early morning, the volunteers managed to deliver food to every household in the village before nightfall. Everyone was grateful.",
+   "tgt": "尽管天气恶劣，大部分道路从清晨起就已封闭。但志愿者们还是在天黑前把食物送到了村里的每一户人家。大家都很感激。",
+   "gold": [
+    [
+     1,
+     2
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "今天天气很好。我们去公园散步，看到了很多花。孩子们在草地上玩耍。",
+   "tgt": "The weather was nice today. We went for a walk in the park and saw lots of flowers. The children played on the grass.",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "这项研究调查了2000名参与者，发现每天锻炼30分钟可以显著降低患心脏病的风险，而且这种效果在老年人中尤为明显。研究人员建议将锻炼纳入日常生活。",
+   "tgt": "The study surveyed 2,000 participants. It found that exercising 30 minutes a day can significantly lower the risk of heart disease, and the effect is especially pronounced among older adults. The researchers recommend making exercise part of daily life.",
+   "gold": [
+    [
+     1,
+     2
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "彼は駅に向かって走った。電車はもう出ていた。仕方なく、彼は次の電車を待つことにした。",
+   "tgt": "他朝车站跑去。电车已经开走了。没办法，他只好等下一班电车。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "The museum opened in 1998. It houses more than 5,000 artworks. Most of them were donated by local families. Every year, about 300,000 people visit it.",
+   "tgt": "这座博物馆于1998年开馆。馆内收藏了5000多件艺术品，其中大部分由当地家庭捐赠。每年约有30万人前来参观。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Click Save. Your changes will be applied immediately. You can undo them at any time from the History panel.",
+   "tgt": "点击“保存”。你的更改会立即生效。你可以随时在“历史记录”面板中撤销这些更改。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "The cat sat on the mat. It was a sunny day. Everyone was happy.",
+   "tgt": "Le chat était assis sur le tapis. C'était une journée ensoleillée. Tout le monde était content.",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "What is economic growth? Why does it matter? In this article, we explain the basics.",
+   "tgt": "什么是经济增长？它为什么重要？在本文中，我们将解释基本概念。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "He paused. Then he laughed. It was the first time in years that anyone had heard him laugh like that.",
+   "tgt": "他停顿了一下，然后笑了起来。这是多年来第一次有人听到他这样笑。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Researchers at the university developed a new battery that charges in five minutes and lasts twice as long as current models. They hope to commercialize it by 2027.",
+   "tgt": "该大学的研究人员开发出一种新型电池。它只需五分钟即可充满电，续航时间是现有型号的两倍。他们希望在2027年前将其商业化。",
+   "gold": [
+    [
+     1,
+     2
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "In 2015, world leaders adopted 17 goals. The first goal is to end poverty. The second is to end hunger. Progress has been uneven. Some countries are far behind.",
+   "tgt": "2015年，世界各国领导人通过了17项目标。第一个目标是消除贫困，第二个是消除饥饿。进展并不均衡，一些国家远远落后。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     1
+    ],
+    [
+     2,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "She opened the door. The room was dark. She turned on the light and saw a letter on the table. It was addressed to her.",
+   "tgt": "她打开门。房间里很黑。她打开灯，看见桌上有一封信。信是写给她的。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "The results were clear. Treatment A reduced symptoms by 40%, while treatment B had no measurable effect. Further trials are planned for 2025.",
+   "tgt": "结果很明确：A疗法使症状减轻了40%，而B疗法没有可测量的效果。更多试验计划于2025年进行。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "The first rule is simple. The second rule, however, is much harder to explain to beginners.",
+   "tgt": "第二条规则对初学者来说要难解释得多。第一条规则很简单。",
+   "gold": "merge"
+  },
+  {
+   "src": "Yes. No. Maybe.",
+   "tgt": "是的。不，也许吧。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "I came. I saw. I conquered.",
+   "tgt": "我来了，我看见了。我征服了。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "The law passed in 2010. It changed everything.",
+   "tgt": "该法律于2010年通过。（译注：指平价医疗法案。）它改变了一切。",
+   "gold": "any"
+  },
+  {
+   "src": "Prices rose. Wages fell. Workers protested. The government responded.",
+   "tgt": "物价上涨，工资下降。工人们举行抗议，政府作出回应。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     2,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Prices rose sharply last year. Wages fell. Workers protested in every major city across the country. The government responded.",
+   "tgt": "去年物价大幅上涨，工资下降。全国各大城市的工人都举行了抗议。政府作出了回应。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "See the chart below. It shows GDP per capita from 1820 to 2018. Each line is a country.",
+   "tgt": "请看下图，它显示了1820年至2018年的人均GDP。每条线代表一个国家。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Short one. Another short one. A third short one. And a fourth.",
+   "tgt": "短句一。另一个短句。第三个短句。还有第四个。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Short one. Another short one. A third short one. And a fourth.",
+   "tgt": "短句一，另一个短句。第三个短句，还有第四个。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     2,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Short one. Another short one. A third short one. And a fourth.",
+   "tgt": "短句一。另一个短句，第三个短句。还有第四个。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Honestly, I didn't expect much. But the food was amazing. The service, on the other hand, was painfully slow, and our waiter seemed to have forgotten about us entirely.",
+   "tgt": "说实话，我本来没抱太大期望，但食物非常棒。不过服务慢得要命，服务员好像完全把我们忘了。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "This is important. Please read carefully. Failure to follow these instructions may result in injury.",
+   "tgt": "这一点很重要，请仔细阅读。不遵守这些说明可能会导致受伤。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "We tested 12 models. Three of them failed. The rest passed all 50 tests.",
+   "tgt": "我们测试了12个模型，其中3个未通过。其余模型通过了全部50项测试。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "The sun rose. Birds began to sing. The village slowly woke up. Farmers headed to the fields. Children ran to school.",
+   "tgt": "太阳升起来了，鸟儿开始歌唱。村庄慢慢苏醒。农民们走向田野。孩子们跑去上学。",
+   "gold": [
+    [
+     2,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "It works. However, the configuration file must be placed in the root directory of the project, and it must be named exactly config.json, otherwise the tool will ignore it.",
+   "tgt": "它可以工作。但是，配置文件必须放在项目的根目录下，并且必须精确命名为 config.json。否则，该工具会忽略它。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     2
+    ]
+   ]
+  },
+  {
+   "src": "Mr. Brown arrived at 9 a.m. on Friday. He met Dr. Lee, who works for the U.N. in Geneva. They discussed the report, i.e. the one published in Jan. 2024.",
+   "tgt": "布朗先生于周五上午9点抵达。他会见了在日内瓦为联合国工作的李博士。他们讨论了那份报告，即2024年1月发布的那份。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "src": "Growth slowed in 2023.[4] Inflation, however, remained high.[5] Economists disagree about why.",
+   "tgt": "2023年经济增长放缓。[4] 然而，通货膨胀率仍然居高不下。[5] 经济学家对其原因看法不一。",
+   "gold": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  }
+ ]
+}

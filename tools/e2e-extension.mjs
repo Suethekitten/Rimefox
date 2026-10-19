@@ -68,6 +68,11 @@ async function until(fn, ms = 15000, step = 200) {
 // 模型：每条译文 = '译:' + 原文（目标是繁體中文时 '繁:'）；单条带 CITE 回纯文本「巴黎是首都[1]。」，带 SPLIT 回拆开的两句。
 // 带 reasoning_effort 的请求回 400（OpenAI 官方非推理模型就是这样），用来看扩展会不会记住、不再发
 const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, aligned: 0, aozoraLive: false, sent: [], lastSystem: '', lastAlignedSystem: '' };
+const OWID_ZH =
+  '这9张图表展示了世界不同地区的数据。每张图表的横轴是平均收入（人均GDP），纵轴是生活在极端贫困中的人口比例。' +
+  '每条轨迹的起点显示的是1820年的数据，它告诉我们，两个世纪前，无论人们身处世界何处，大多数人都生活在极端贫困之中。' +
+  '11 自那时起，世界所有地区都实现了增长——商品和服务的生产增加了——生活在贫困中的人口比例下降了。';
+
 const PAGES = {
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
@@ -87,6 +92,11 @@ const PAGES = {
 </body></html>`,
   '/pixiv.html': `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>Pixiv</title></head><body>
 <div id="novel" style="white-space:pre-wrap;width:640px;font:16px/2 serif"><p id="np1"><span>「今日は何の日？」</span><br><span>「ポッキーの日だ。」</span></p><p id="np2">彼は<ruby>羅生門<rt>らしょうもん</rt></ruby>の下で、雨やみを待っていた。</p><p id="np3">静かな夜だった。</p></div>
+</body></html>`,
+  // Our World in Data 式：脚注号 <sup> 紧跟句号；假接口对这段只回普通字符串（没有 parts），模拟旧缓存 / 模型不按格式输出
+  '/owid.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>OWID</title></head><body>
+<div style="width:640px;font:16px/1.7 sans-serif"><p id="ow">The 9 charts show the data for different regions in the world. On the horizontal axis of each chart, you find the average income (GDP per capita) and on the vertical axis you see the share living in extreme poverty. The starting point of each trajectory shows the data for 1820 and it tells us that two centuries ago the majority of people lived in extreme poverty, no matter where in the world they were at home.<sup><a href="#n11">11</a></sup> Since then, all world regions achieved growth – the production of goods and services increased – and the share living in poverty declined.</p>
+<p id="ow2">[See also my related article: 'What is Economic Growth?']</p></div>
 </body></html>`,
   '/input.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Inputs</title></head><body>
 <p id="hint">Text box translation fixture.</p>
@@ -163,6 +173,7 @@ const server = http.createServer((req, res) => {
         const prefix = hant ? '繁:' : '译:';
         content = JSON.stringify(
           texts.map((t) => {
+            if (String(t).includes('trajectory')) return OWID_ZH;
             if (wantsAlign) return aligned(t, prefix);
             if (stats.aozoraLive && /[\u3040-\u30ff]/.test(String(t))) return '汉'.repeat(Math.max(4, String(t).length));
             return prefix + t;
@@ -507,7 +518,7 @@ async function paragraphChecks() {
   const alignInfo = await contentEval(a, "(function () {\n    var t = document.querySelectorAll('#mt [data-dt-target]')[1];\n    var u = window.__DT.unitOfNode(t.firstChild);\n    return { align: !!(u && u.align), want: !!(u && u.wantAlign), sentences: u ? u.sentences.length : -1, ali: u && u.ali ? u.ali.length : -1, first: u && u.ali ? u.ali[0] : null };\n  })()");
   check('青空文库·对齐：结构化 parts 通过校验（句级映射可用）', alignInfo && alignInfo.align, JSON.stringify(alignInfo));
   check('青空文库·请求：align 模式提示词确实发给模型', stats.aligned > 0, 'aligned=' + stats.aligned);
-  check('青空文库·悬停：译文上只高亮这一句并显示对应原文', !!hover && hover.tgt && hover.tip && hover.src, JSON.stringify(hover));
+  check('青空文库·悬停：译文上只高亮这一句和对应原文，双语模式不弹气泡', !!hover && hover.tgt && hover.src && !hover.tip, JSON.stringify(hover));
 
   await tabMsg(a.tabId, { type: 'dt:toggle' });
   const after = await pageEval(a, "return document.getElementById('mt').innerHTML");
@@ -532,6 +543,49 @@ async function paragraphChecks() {
   check('Pixiv：关闭翻译后 Ruby / 结构逐字恢复', pixivAfter === pixivBefore, pixivAfter === pixivBefore ? '' : (pixivAfter || '').slice(0, 160));
 }
 
+
+// 悬停对照：模型没有给结构化对齐时，本地对齐仍然逐句高亮（0.9.3）
+async function hoverLocalChecks() {
+  console.log('\n[悬停·本地对齐]');
+  const tab = await openTab(ORIGIN + '/owid.html');
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(tab, "return !!document.querySelector('#ow [data-dt-target]')"), 20000);
+  await settled(tab);
+  check('OWID：段落已翻译', !!ready, ready);
+  const probe = (word, onTarget) =>
+    contentEval(
+      tab,
+      "(function () {\n" +
+        "  var el = document.getElementById('ow');\n" +
+        "  var t = el.querySelector('[data-dt-target]');\n" +
+        "  var node = " + (onTarget ? 't.firstChild' : 'el.firstChild') + ";\n" +
+        "  var i = node.nodeValue.indexOf(" + JSON.stringify(word) + ");\n" +
+        "  var r = document.createRange(); r.setStart(node, i); r.setEnd(node, i + 1);\n" +
+        "  var rect = r.getBoundingClientRect();\n" +
+        "  window.__DT.hover.clear();\n" +
+        "  window.__DT.hover.updateAt(rect.left + 2, rect.top + rect.height / 2, node);\n" +
+        "  var u = window.__DT.unitOfNode(el.firstChild);\n" +
+        "  var get = function (name) { var h = CSS.highlights.get(name); return h ? Array.from(h).map(function (x) { return x.toString(); }).join('|') : ''; };\n" +
+        "  var tip = document.querySelector('.dt-hover-tip');\n" +
+        "  return { align: !!(u && u.align), sentences: u ? u.sentences.length : -1, src: get('dt-hover-src'), tgt: get('dt-hover-target'), tip: tip && !tip.hidden ? tip.innerText : '' };\n" +
+        "})()"
+    );
+  const onSrc = await probe('starting point', false);
+  check('OWID·悬停：没有模型对齐（只回了字符串）', onSrc && !onSrc.align && onSrc.sentences === 4, JSON.stringify(onSrc && { align: onSrc.align, sentences: onSrc.sentences }));
+  check(
+    'OWID·悬停：原文第三句只高亮这一句（到脚注号为止）和对应译文，不是整段',
+    !!onSrc && onSrc.src.indexOf('The starting point') === 0 && /home\.11$/.test(onSrc.src) && onSrc.tgt.indexOf('每条轨迹') === 0 && onSrc.tgt.indexOf('自那时起') < 0,
+    JSON.stringify(onSrc && { src: onSrc.src.slice(0, 30) + '…' + onSrc.src.slice(-12), tgt: onSrc.tgt.slice(0, 12) + '…' + onSrc.tgt.slice(-8) })
+  );
+  check('OWID·悬停：双语模式不弹「行级对应」气泡', !!onSrc && !onSrc.tip, onSrc && onSrc.tip);
+  const onTgt = await probe('横轴', true);
+  check(
+    'OWID·悬停：译文第二句对回原文第二句',
+    !!onTgt && onTgt.src.indexOf('On the horizontal axis') === 0 && onTgt.tgt.indexOf('每张图表') === 0 && !onTgt.tip,
+    JSON.stringify(onTgt && { src: onTgt.src.slice(0, 24), tgt: onTgt.tgt.slice(0, 12), tip: onTgt.tip })
+  );
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+}
 
 // ---------------- 真实青空文库《罗生门》验收（--aozora-live [url]） ----------------
 async function captureScreenshot(tab, file) {
@@ -935,6 +989,7 @@ try {
     await articleChecks();
     await paragraphChecks();
     await dockChecks();
+    await hoverLocalChecks();
     await optionsChecks();
     await selftestChecks();
     await inputChecks();
