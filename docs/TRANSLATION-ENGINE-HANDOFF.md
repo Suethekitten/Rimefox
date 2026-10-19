@@ -1,8 +1,8 @@
-# 翻译引擎技术交接（0.9.1 DOM 单元模型）
+# 翻译引擎技术交接（0.9.2 DOM 单元模型）
 
 > 给接手翻译引擎的 Agent / 协作者。先读 [AGENTS.md](../AGENTS.md)、[HANDOFF.md](../HANDOFF.md) 和本文。
 > 本文只讲**翻译引擎**：从网页收集文字 → 段落 / 句子 → API 请求分片 → 渲染写回 → 悬停 → 还原的整条链路。
-> 最近更新：0.9.1（2026-10-19）。0.9.1 把「一个元素 = 一个翻译单元」的松散模型换成了
+> 最近更新：0.9.2（2026-10-19）。0.9.2 修了真实青空文库《罗生门》的分段与仅译文空白 / 注音残留；0.9.1 把「一个元素 = 一个翻译单元」的松散模型换成了
 > **ParagraphUnit + SentenceUnit + Alignment + RenderTransaction**；旧文档里「所有译文 append 到元素末尾」的说法只适用于独占元素的段落。
 
 ---
@@ -33,7 +33,7 @@ content script（网页里，classic script，ES5）                          se
 dom.js   DT.collectAll(accept)
          walk()：容器下钻 / 段落整体 → addParagraphs()
            tokensOf / ownTokens → units.textMap(tokens)
-           units.paragraphsOf() 按空行切段（只有空行来自 <br> 才拆成多个单元）
+           units.paragraphsOf() 按排版语义切段（空行 / 单 <br>+全角缩进 / 块级边界）
            每段：{ text, index, anchor, map, sentences, groups, snapshot, sig, gen }
          accept()：skipText / looksLikeTarget（简繁按 DT.chineseScript）/ settled / churn / 懒翻译 / 失败退避
 main.js  DT.splitLong(text, maxUnitChars) → slots + seps（只控制请求长度，不决定页面段落）
@@ -125,10 +125,15 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 
 ### 2.3 段落识别
 
-- 空行（规范化后的 `\n\n`）是段落边界；**单个 `\n` 是同一段里的行**（对白、诗行），不拆段。
-- 只有分隔空行来自 `<br>` 时才真正拆成多个单元：分处不同文本节点，锚点就是分隔 `<br>`，不需要 `splitText`。
-- `pre-*` 单文本节点内部的空行（`nl` 分隔）仍合并成一个单元，保留行级结构；悬停按行级降级。
-- 块级元素（`p` / `li` / `td` / 标题…）由 `walk` 下钻，每个块一个或多个单元。
+- 段落边界按**原始 DOM / 排版语义**判断，不靠规范化文本里是否恰好有两个换行：
+  1. 中间有空行（连续 `<br>` / `pre-*` 的连续换行）→ 新段落；
+  2. 单个 `<br>` 后的新行同时满足「源码换行 + 行首全角缩进 U+3000」→ 新段落（青空文库 / 日文小说的典型结构）；
+  3. 块级元素（`p` / `li` / `td` / 标题…）由 `walk` 下钻，天然分开；
+  4. 其它单个 `<br>` / `pre-*` 换行只是同一段里的行（诗行、信件、地址、Pixiv 的连续对白行、源码折行）。
+- **不能**简单把每个 `<br>` 都当段落：Pixiv 的每行对白都带 `　`，但没有源码换行，按行级结构保留在同一段；青空文库里「まるで<br>「おのれ…」」这种对白续行也不会被拆开。
+- 字符映射 `textMap` 在规范化时**先记录**行首全角缩进和源码换行信号，再 trim；这样段落边界不会在规范化阶段丢失。
+- `pre-*` 单文本节点内部的空行 / 缩进仍合并成一个单元（不引入 `splitText`），保留行级结构；悬停按行级降级。
+- **巨大单元的兜底**：如果整棵子树只切出一个单元、却有 8 个以上真实 `<br>` 行且超过 800 字（说明没有任何可识别的段落签名），按行拆成可诊断的单元（`unit.fallback = 'line'`），而不是静默把整篇文章 append 成一个单元。
 - 标准段落 `<p>Hello <strong>beautiful</strong> world.</p>` 是一个单元，跨 3 个文本节点；不会因为 `strong` 拆段。
 - `walk` 的其他规则（flex/grid 下钻、控件容器下钻、子级全跳过时只翻 ownText、已翻译子树防线）沿用 0.9.0。
 
@@ -168,8 +173,8 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 ### 3.2 双语
 
 - 独占元素（`whole`）：`el.appendChild(译文节点)`，保留 0.9.0 的布局继承。
-- 共用容器（`index/total`）：`parent.insertBefore(译文节点, anchor.before)`，`anchor.before` 是分隔空行的第一个 `<br>`。
-  结果：P1 → 译文1 → 空行 → P2 → 译文2 …
+- 共用容器（`index/total`）：`parent.insertBefore(译文节点, anchor.before)`，`anchor.before` 是本段之后的分隔 `<br>`；最后一段插在尾部空行的第一个 `<br>` 之前。
+  结果：P1 → 译文1 → 分隔 <br> → P2 → 译文2 …（不是所有译文堆到容器末尾）
 - 译文节点始终带 `data-dt-target` / `data-dt-unit` / `data-dt-lang`；`makeNode` 负责排版继承、
   CJK 大标题、紧行高、窄容器、`dt-lines`（多行译文）。
 - 同一个容器里多个 `[data-dt-target]` 是**正常**的。`main.js` 的 `cleanupDuplicateTargets` 只清理
@@ -186,7 +191,8 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 ### 3.4 Ruby（仅译文模式）
 
 - `tokensOf` / `ownTokens` 已经排除 `rt` / `rp`；段落文本只有汉字 / 假名正文。
-- `rubyAnnotationsFor(el, chars)` 找出「基字落在本段内」的 `<ruby>`，收集它的 `rt/rp`。
+- `rubyAnnotationsFor(el, chars, bounds, own)` 先按字符映射找基字在本段的 `<ruby>`；再按**本段的 DOM 范围**（上一段分隔 `<br>` 之后到本段分隔 `<br>` 之前）扫一遍所有 `<ruby>`。
+  第二遍是必须的：青空文库有些 Ruby 的基字是 `<img class="gaiji">`（外字图片），没有任何文本字符，只靠字符映射会漏掉它们的 `rt/rp`，仅译文模式就会残留假名（真实《罗生门》里有 3 个）。
 - `injectRuby`：
   1. 清空本段落的所有正文文本片段（含 ruby 基字）；
   2. 对关联的 `rt/rp`：`style.display = 'none'` + `data-dt-rt-hidden="1"`（事务记录原值）；
@@ -225,6 +231,8 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 | 扩展自身写入触发观察器 | `DT.isOwnWrite`（characterData）、`DT.isOwnNode`（childList）；只认真正写过的文本节点 |
 | 克隆整块内容 | `cleanupDuplicateTargets` 只删 `data-dt-unit` 相同的副本 |
 | 内存 | `tx` / `rendered` 在 restore 时清空；`nodeUnit` / `elUnits` 重建；单页单元数受 `MAX_UNITS` 限制 |
+| 失败退避 / settled / churn | 按「元素 → Map(源文本签名 + 段序号)」记，不按元素；同容器一段失败 / 抖动不影响其它段 |
+| 懒翻译 / 批次优先级 | `DT.rectOfUnit(unit)` 用段首文本节点矩形；不能用整个容器矩形，否则长正文所有段都被算成同一屏 |
 
 ---
 
@@ -240,14 +248,28 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 
 ---
 
+## 6.1 真实网页验收（0.9.2）
+
+- 页面：<https://www.aozora.gr.jp/cards/000879/files/127_15260.html>（芥川龍之介《羅生門》，青空文库，Shift_JIS）。
+- 真实结构：`<div class="main_text">` 里 40 个 `<br>`、129 个 `<ruby>`（`<rb>/<rp>/<rt>`，部分基字是 `<img class="gaiji">`），
+  每个段落是「单个 `<br>` + 源码换行 + 全角缩进 `　`」，没有 `<br><br>`。
+- 0.9.1（旧）：`DT.collect` 只得到 **1 个单元**（约 5000 字，ruby 81 个），双语只有 1 个译文节点、在页面 **y=738**；
+  仅译文只有 1 个译文节点、y=210，前面是清空正文后留下的一串 `<br>` 空白；3 个图片基字 Ruby 的 `rt` 仍可见。
+- 0.9.2（新）：`DT.collect` 得到 **29 个段落单元**（每段独立锚点），双语 **29 个译文节点**，前 8 个 y=60/232/617/…；
+  仅译文首段译文 y=30，最大段间空白 30px，可见 `rt` **0**、页面无假名，关闭后 DOM **逐字恢复**；模式切换 / 动态新增段落 / 悬停均通过。
+- 记录：`docs/verification/2026-10-19-aozora-roshomon/` 下的 before / dual / only / restored 截图与 `*-diagnostics.json`
+  （`edge-bilingual-*` 是新版，`rimefox-old-*` 是旧版失败证据）。真实页面验收只能通过网络环境复现；CI 默认不跑，fixture 在
+  `test/fixtures/aozora-roshomon.html`。
+
 ## 7. 测试
 
 ```bash
 node --test test/*.test.mjs          # 21 个文件，CI 发版前同一条
+node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp）
 # 自检页（本机 headless Chrome 需要 --no-sandbox）
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \
   --user-data-dir=/tmp/chrome-selftest --allow-file-access-from-files \
-  --virtual-time-budget=25000 --dump-dom "file://$PWD/selftest/index.html"   # 151 / 151
+  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 159 / 159
 node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 ```
 
@@ -265,7 +287,7 @@ node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 
 **先读**：`AGENTS.md` → `HANDOFF.md` §5–§6 → 本文 §1–§5。
 
-**先跑**：`git status -sb && node --test test/*.test.mjs`，再跑自检页（151 / 151），再跑 E2E。
+**先跑**：`git status -sb && node --test test/*.test.mjs`，再跑自检页（159 / 159），再跑 E2E；能上网时加 `--aozora-live` 跑真实《罗生门》。
 
 **不要重复实现**（已经有了）：
 
@@ -287,7 +309,7 @@ node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 
 **当前待办**（按顺序）：
 
-1. 真实网站验证：青空文库（罗生门）、Pixiv 注音小说、GitHub、Aeon、OWID、YouTube 字幕；记录哪些只过了 fixture。
+1. 真实网站验证：青空文库（罗生门）0.9.2 已通过并记录；Pixiv 注音小说、GitHub、Aeon、OWID、YouTube 字幕仍待真实页面验证（不要只凭 fixture 宣称通过）。
 2. 真实模型下观察 `align` 结构化输出的遵守率与译文质量（需要用户同意的 API 调用）；弱模型可能不遵守，降级路径已就绪。
 3. 竖排 / 縦書き、`writing-mode: vertical-*` 的段落与 Ruby 布局未验证。
 4. 行内格式保真（`<b>` / `<a>` 在译文里保留）仍是独立方向，不要混进单元模型。
@@ -296,7 +318,7 @@ node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 
 ## 9. 第三方代码合规
 
-- 0.9.1 的 `textMap` / `paragraphsOf` / `alignmentOf` / RenderTransaction / `injectRuby` 都是按 Rimefox 需求新写的 JavaScript；
+- 0.9.1 / 0.9.2 的 `textMap` / `paragraphsOf` / `alignmentOf` / RenderTransaction / `injectRuby` 都是按 Rimefox 需求新写的 JavaScript；
   没有复制、翻译或改编第三方源码。
 - 0.8.7 / 0.8.9 的参考项目（Wenyi、Agent Book Translate，均 MIT）仍只是思路参考；详见 HANDOFF §13 与 `THIRD-PARTY-NOTICES.md`。
 - 因此本次**不需要**更新 `THIRD-PARTY-NOTICES.md` / `licenses/`。以后真的移植代码（哪怕改写成 JS）必须补条目、放 LICENSE 原文、在文件头注明来源与提交号。

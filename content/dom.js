@@ -64,7 +64,11 @@
   // nodeUnit 把原文节点 / <br> / 译文节点映射回所属单元，悬停不再自己解析一套。
   var unitSeq = 0;
   var rendered = [];
-  var renderedByEl = new WeakMap(); // 元素 → 该元素已渲染的记录：去重时只看这个元素的几段
+  var renderedByEl = new WeakMap(); // 元素 → 该元素已渲染的记录（兼容 / 调试）
+  var renderedByIndex = new WeakMap(); // 元素 → Map(段序号 → 记录)
+  var renderedBySig = new WeakMap(); // 元素 → Map(源文本签名 → 记录[])
+  var savedRecord = new WeakMap(); // 我们写过的文本节点 → 替换型记录（O(1) 找同段）
+  var targetRegistry = new Map(); // data-dt-unit → 真正的译文节点（识别克隆副本）
   var tx = [];
   var nodeUnit = new WeakMap();
   var elUnits = new WeakMap(); // 共用容器的多个段落：元素 → 单元列表（悬停兜底解析）
@@ -86,6 +90,27 @@
     // 只认我们真正写过的文本节点；不能把 nodeUnit 里的原文节点也算成自己的，
     // 否则站点新增一个文本节点（childList）时观察器会当成本身变化而忽略。
     return ownWrites.has(node) || ownNodes.has(node);
+  };
+
+  // 段落单元的屏幕矩形：用第一段原文文本节点算，不能用整个容器（多段落共用容器时
+  // 容器有多高，整页段落就会被算成"离屏幕一样近"，懒翻译失效）。
+  DT.rectOfUnit = function (unit) {
+    if (!unit) return null;
+    var node = unit.firstNode;
+    if (node && node.isConnected) {
+      try {
+        // 只量第一个字符：selectNodeContents 在长段落上会横跨所有行，
+        // 懒翻译每轮对每个单元都做一次会很贵。
+        var range = document.createRange();
+        range.setStart(node, 0);
+        range.setEnd(node, Math.min(1, node.nodeValue ? node.nodeValue.length : 1));
+        var box = range.getBoundingClientRect();
+        if (box && (box.width || box.height)) return box;
+      } catch (err) {
+        /* 节点被移走 / 老浏览器：退回元素矩形 */
+      }
+    }
+    return unit.el && unit.el.getBoundingClientRect ? unit.el.getBoundingClientRect() : null;
   };
 
   // 鼠标下的节点属于哪个单元（悬停用）：原文文本节点、<br>、译文节点都在 nodeUnit 里
@@ -111,12 +136,55 @@
     return String(el.tagName || '').toUpperCase();
   }
 
+  // 一次 collect 内缓存 getComputedStyle：isSkipped / tokensOf / shouldDescend / areaOf
+  // 会对同一个元素反复取样式，10k 节点时这是明显的主线程开销。
+  var scanStyles = null;
+  var renderStyles = null;
+  // 一轮同步注入内缓存源元素的 computed style：makeNode / copyTypography / 首字下沉
+  // 会对同一个容器反复 getComputedStyle；每次插入译文后再读样式会触发整段重排。
+  DT.beginRenderCache = function () {
+    renderStyles = new WeakMap();
+  };
+  DT.endRenderCache = function () {
+    renderStyles = null;
+  };
   function styleOf(el) {
-    try {
-      return getComputedStyle(el);
-    } catch (err) {
-      return null;
+    var cache = scanStyles || renderStyles;
+    if (cache) {
+      var hit = cache.get(el);
+      if (hit !== undefined) return hit;
     }
+    var cs = null;
+    try {
+      cs = getComputedStyle(el);
+    } catch (err) {
+      cs = null;
+    }
+    // 缓存时复制成普通对象：CSSStyleDeclaration 是实时的，读过一次后
+    // 页面再插入节点，再读任意属性都可能触发 style recalc（3000 段注入会变成 O(n²)）。
+    var snap = cs
+      ? {
+          display: cs.display,
+          whiteSpace: cs.whiteSpace,
+          whiteSpaceCollapse: cs.whiteSpaceCollapse,
+          position: cs.position,
+          float: cs.float,
+          width: cs.width,
+          fontSize: cs.fontSize,
+          lineHeight: cs.lineHeight,
+          fontWeight: cs.fontWeight,
+          fontStyle: cs.fontStyle,
+          letterSpacing: cs.letterSpacing,
+          textTransform: cs.textTransform,
+          color: cs.color,
+          paddingTop: cs.paddingTop,
+          paddingBottom: cs.paddingBottom,
+          borderTopWidth: cs.borderTopWidth,
+          borderBottomWidth: cs.borderBottomWidth
+        }
+      : null;
+    if (cache) cache.set(el, snap);
+    return snap;
   }
 
   function isSkipped(el) {
@@ -166,8 +234,9 @@
         } else if (kid.nodeType === 1) {
           if (kid.hasAttribute('data-dt-target')) continue;
           if (kid.hasAttribute('data-dt-ui')) continue;
-          if (NON_TEXT_TAGS[tagOf(kid)]) continue;
-          if (tagOf(kid) === 'BR') {
+          var tag = tagOf(kid);
+          if (NON_TEXT_TAGS[tag]) continue;
+          if (tag === 'BR') {
             // 仅译文模式下因译文行数不够而收起的换行，不算一行
             if (!kid.hasAttribute('data-dt-collapsed')) out.push({ br: kid });
             continue;
@@ -175,6 +244,12 @@
           // 隐藏子树（display:none 的对话框 / 展开菜单）不算正文：
           // 以前会把 GitHub 设置页里隐藏的确认对话框文案拼进按钮文本，整行布局被撑坏
           if (kid.hidden) continue;
+          // Ruby 的基字/读音是行内结构，几乎不会自己 display:none；父级隐藏已经拦过。
+          // 长文里每个 ruby 都 getComputedStyle 一次，在已注入译文的页面上会反复触发样式计算。
+          if (tag === 'RUBY' || tag === 'RB') {
+            visit(kid, keep);
+            continue;
+          }
           var cs = styleOf(kid);
           if (cs && cs.display === 'none') continue;
           visit(kid, cs ? keepsBreaks(cs) : keep);
@@ -363,8 +438,9 @@
     return usable >= 3;
   }
 
-  // ---------------- 0.9.1 段落单元收集 ----------------
-  // 一个元素里的文本先摊成带 DOM 映射的规范化文本（DT.units.textMap），再按空行切段。
+  // ---------------- 0.9.2 段落单元收集 ----------------
+  // 一个元素里的文本先摊成带 DOM 映射的规范化文本（DT.units.textMap），
+  // 再按排版语义（空行 / 单 <br>+源码换行+全角缩进）切段。
   // 只有「空行来自 <br>」时才真正拆成多个单元：分处不同文本节点，插入锚点就是分隔 <br>，
   // 不需要 splitText，也不会打乱后续段落的偏移。
   // pre-wrap 文本节点内部的空行仍然是一个单元（行级结构保留），悬停退回行级对应。
@@ -385,6 +461,35 @@
       }
       out.push({ start: p.start, end: p.end, sepStart: p.sepStart, sepEnd: p.sepEnd, splittable: split });
     });
+    // 兜底：整篇文章被识别成一个巨大单元（没有任何全角缩进 / 空行 / 块级边界），
+    // 但里面有 8 个以上真实 <br> 行、超过 800 字。宁可按行拆成可诊断的单元，
+    // 也不静默把整篇文章 append 成一个单元、在页尾堆一大块译文。
+    // 只在分隔都是 <br>（可以安全插入锚点）时启用；pre-* 的 nl 分隔仍交给上层合并。
+    if (out.length === 1 && map.text.length > 800) {
+      var hard = DT.units.linesOf(map.text);
+      if (hard.length >= 8) {
+        var lineRanges = [];
+        var canSplit = true;
+        for (var hi = 0; hi < hard.length; hi += 1) {
+          var edge = map.chars[hard[hi][1]];
+          if (hi < hard.length - 1 && (!edge || !edge.br)) {
+            canSplit = false;
+            break;
+          }
+          lineRanges.push({
+            start: hard[hi][0],
+            end: hard[hi][1],
+            sepStart: hard[hi][1],
+            sepEnd: hi < hard.length - 1 ? hard[hi + 1][0] : map.text.length,
+            splittable: true
+          });
+        }
+        if (canSplit) {
+          lineRanges.fallback = 'line';
+          return lineRanges;
+        }
+      }
+    }
     return out;
   }
 
@@ -397,10 +502,14 @@
 
   // 段落里关联的振假名节点：<ruby> 基字落在本段内 → 它的 <rt>/<rp> 属于本段。
   // 仅译文模式只隐藏这些，不全局隐藏页面上的所有 <rt>（未翻译的 Ruby 要原样保留）。
-  function rubyAnnotationsFor(el, chars) {
+  function rubyAnnotationsFor(el, chars, bounds, own, assigned) {
     var out = [];
+    var seen = new Set();
     function add(node) {
-      if (out.indexOf(node) < 0) out.push(node);
+      if (!seen.has(node)) {
+        seen.add(node);
+        out.push(node);
+      }
     }
     (chars || []).forEach(function (c) {
       if (!c || !c.node) return;
@@ -414,26 +523,154 @@
         }
       }
     });
+    // assigned：addParagraphs 按 DOM 顺序一次分好的本段 <ruby>（图片基字也能覆盖）。
+    // 这条路径是 O(段落数 + ruby 数)，不会每段都对所有 ruby 做 querySelectorAll + Range。
+    if (assigned) {
+      assigned.forEach(function (ruby) {
+        var kids = ruby.querySelectorAll('rt, rp');
+        for (var i = 0; i < kids.length; i += 1) add(kids[i]);
+      });
+      return out;
+    }
+    // 兼容旧调用（legacyUnit / 外部）：按段落的 DOM 范围再扫一遍 <ruby>。
+    if (bounds && !own) {
+      try {
+        var range = document.createRange();
+        if (bounds.startAfter && bounds.startAfter.parentNode) range.setStartAfter(bounds.startAfter);
+        else range.setStart(el, 0);
+        if (bounds.endBefore && bounds.endBefore.parentNode) range.setEndBefore(bounds.endBefore);
+        else range.setEnd(el, el.childNodes.length);
+        var rubies = el.querySelectorAll('ruby');
+        for (var r = 0; r < rubies.length; r += 1) {
+          if (!range.intersectsNode(rubies[r])) continue;
+          var inner = rubies[r].querySelectorAll('rt, rp');
+          for (var k = 0; k < inner.length; k += 1) add(inner[k]);
+        }
+      } catch (err) {
+        /* DOM 范围不可用（节点被移走 / 老浏览器）：退回字符映射，不阻断翻译 */
+      }
+    }
     return out;
   }
 
   function fillSnapshot(unit) {
     var snap = [];
+    var seen = new Set();
     (unit.map.chars || []).forEach(function (c) {
       if (!c) return;
       var node = c.node || (c.nl && c.nl.node) || null;
-      if (!node) return;
-      for (var k = 0; k < snap.length; k += 1) if (snap[k].node === node) return;
+      if (!node || seen.has(node)) return;
+      seen.add(node);
       snap.push({ node: node, value: node.nodeValue });
     });
     unit.snapshot = snap;
   }
 
+  // 一个元素的「源文本签名」：正文文本 / <br> / 可见性相关属性，跳过译文节点、RT/RP、UI。
+  // 全部段落已渲染且签名没变时，addParagraphs 可以直接返回，不必重跑 textMap / 行分组。
+  function sourceSignature(el) {
+    var h = 2166136261;
+    var chars = 0;
+    var brs = 0;
+    function mix(code) {
+      h ^= code;
+      h = (h * 16777619) >>> 0;
+    }
+    function mixText(value) {
+      for (var i = 0; i < value.length; i += 1) mix(value.charCodeAt(i));
+    }
+    mixText(el.getAttribute('class') || '');
+    mixText(el.getAttribute('style') || '');
+    mixText(el.getAttribute('aria-hidden') || '');
+    mix(el.hidden ? 1 : 0);
+    (function visit(node) {
+      var kids = node.childNodes;
+      for (var i = 0; i < kids.length; i += 1) {
+        var kid = kids[i];
+        if (kid.nodeType === 3) {
+          var v = kid.nodeValue || '';
+          for (var c = 0; c < v.length; c += 1) mix(v.charCodeAt(c));
+          chars += v.length;
+          continue;
+        }
+        if (kid.nodeType !== 1) continue;
+        if (kid.hasAttribute('data-dt-target') || kid.hasAttribute('data-dt-ui')) continue;
+        var tag = tagOf(kid);
+        if (NON_TEXT_TAGS[tag]) continue;
+        if (tag === 'BR') {
+          mix(10);
+          brs += 1;
+          continue;
+        }
+        // 可见性 / 弹出的 class 变化也要进签名：否则隐藏对话框显示出来时
+        // 源文本可能一样，整块早退会把它漏掉。只混入属性字符串，不读 computed style。
+        var cls = kid.getAttribute('class') || '';
+        var sty = kid.getAttribute('style') || '';
+        var aria = kid.getAttribute('aria-hidden') || '';
+        for (var c2 = 0; c2 < cls.length; c2 += 1) mix(cls.charCodeAt(c2));
+        for (var s2 = 0; s2 < sty.length; s2 += 1) mix(sty.charCodeAt(s2));
+        for (var a2 = 0; a2 < aria.length; a2 += 1) mix(aria.charCodeAt(a2));
+        mix(kid.hidden ? 1 : 0);
+        if (kid.hidden) continue;
+        visit(kid);
+      }
+    })(el);
+    return chars + ':' + brs + ':' + (h >>> 0);
+  }
+
+  function refreshElementSignature(el) {
+    if (!el || !el.__dtRanges) return;
+    var map = renderedByIndex.get(el);
+    if (map && map.size >= el.__dtRanges) el.__dtSourceSig = sourceSignature(el);
+  }
+
+  function elementFullyRendered(el) {
+    var known = renderedByIndex.get(el);
+    if (!known || !el.__dtRanges || known.size < el.__dtRanges) return false;
+    if (el.__dtSourceSig !== sourceSignature(el)) return false;
+    var all = true;
+    known.forEach(function (rec) {
+      if (!stillOurs(rec)) all = false;
+    });
+    return all;
+  }
+
   function addParagraphs(out, el, tokens, own) {
+    // 全部段落已渲染、源文本签名没变：整块直接跳过，不重跑 textMap / 行分组。
+    if (elementFullyRendered(el)) return;
     var map = DT.units.textMap(tokens);
     if (!map.text) return;
     var ranges = paragraphRanges(map);
+    // 同一容器里的多个段落共用区域判定：长正文里每段都 areaOf() 会反复量整块布局。
+    // 但它是布局读取：全部段落都已渲染时不能白量一次（增量重扫在长文上会强制整页重排）。
+    var sharedArea = null;
+    var areaComputed = false;
     var groups = lineGroups(el, tokens);
+    // Ruby 一次分配：按文档顺序扫一遍所有 <ruby>，用段落分隔 <br> 当边界。
+    // 以前每个段落都 querySelectorAll('ruby') + Range.intersectsNode，长文 + 多 ruby 是 O(n²)。
+    // 懒执行：全部段落都已渲染时不需要分配。
+    var rubyGroups = null;
+    function ensureRubyGroups() {
+      if (rubyGroups) return;
+      rubyGroups = [];
+      if (own || ranges.length <= 1) return;
+      var allRubies = el.querySelectorAll('ruby');
+      if (!allRubies.length) return;
+      var rp = 0;
+      for (var ri = 0; ri < allRubies.length; ri += 1) {
+        var ruby = allRubies[ri];
+        while (rp < ranges.length - 1) {
+          var endMeta = map.chars[ranges[rp].sepStart];
+          var endNode = endMeta && endMeta.br;
+          if (!endNode) break;
+          // ruby 在分隔 <br> 之后 → 不属于当前段
+          if (!(endNode.compareDocumentPosition(ruby) & 4)) break;
+          rp += 1;
+        }
+        if (!rubyGroups[rp]) rubyGroups[rp] = [];
+        rubyGroups[rp].push(ruby);
+      }
+    }
     var allFilled = [];
     groups.forEach(function (g, gi) {
       if (g.filled) allFilled.push(gi);
@@ -452,13 +689,38 @@
       picks = [allFilled];
     }
 
+    el.__dtRanges = ranges.length;
     ranges.forEach(function (range, index) {
+      // MAX_UNITS 必须在单元生成循环里也生效：一个容器可以切出上万个段落，
+      // 不能只靠 walk() 入口的检查。
+      if (out.length >= MAX_UNITS) return;
       var text = map.text.slice(range.start, range.end);
       if (!text) return;
+      // 已翻译的段落：在构建 map / snapshot / ruby 之前就跳过。
+      // 否则每次增量重扫 3000 段都要再建一遍单元对象，几百毫秒到秒级。
+      var indexMap = renderedByIndex.get(el);
+      var early = indexMap ? indexMap.get(index) : null;
+      if (early && stillOurs(early)) {
+        // Ruby 段落的正文被清空了，字符映射里没有可核对的节点；译文节点在就够了。
+        if (early.mode === 'ruby') return;
+        if (early.mode === 'dual') {
+          if (early.unit.sig === DT.units.signature(text) && !sourceChangedSnapshot(early.unit)) {
+            return;
+          }
+        } else if (early.savedNodes) {
+          for (var ec = range.start; ec < range.end; ec += 1) {
+            var ecMeta = map.chars[ec];
+            if (ecMeta && ecMeta.node && early.savedNodes.has(ecMeta.node)) return;
+          }
+        }
+      }
       var anchor = null;
       if (ranges.length > 1 && range.splittable) {
         var meta = map.chars[range.sepStart];
         if (meta && meta.br && meta.br.parentNode) anchor = { parent: meta.br.parentNode, before: meta.br };
+      } else if (ranges.length > 1 && index === ranges.length - 1 && map.trailingBreak && map.trailingBreak.br) {
+        // 最后一段：插在尾部空行之前，不能 append 到容器最末尾
+        anchor = { parent: map.trailingBreak.br.parentNode, before: map.trailingBreak.br };
       }
       var picked = picks[index] || [];
       var lastFilled = picked.length ? picked[picked.length - 1] : -1;
@@ -466,9 +728,31 @@
       if (ranges.length === 1) {
         for (var gi = lastFilled + 1; gi < groups.length; gi += 1) tail.push(groups[gi]);
       }
+      // Ruby 的 DOM 范围：从上一段分隔 <br> 之后到本段分隔 <br> 之前，
+      // 这样基字是 <img> 的 ruby 也能归到本段。
+      var rubyBounds = null;
+      if (ranges.length > 1) {
+        var prevSep = index > 0 ? map.chars[ranges[index - 1].sepStart] : null;
+        var endSep = range.splittable ? map.chars[range.sepStart] : null;
+        rubyBounds = {
+          startAfter: prevSep && prevSep.br ? prevSep.br : null,
+          endBefore: endSep && endSep.br ? endSep.br : null
+        };
+      }
+      if (!areaComputed && ranges.length > 1) {
+        sharedArea = DT.areaOf(el);
+        areaComputed = true;
+      }
+      if (!rubyGroups) ensureRubyGroups();
+      var firstNode = null;
+      for (var ci = 0; ci < map.chars.length; ci += 1) {
+        var cm = map.chars[ci];
+        if (cm && cm.node) { firstNode = cm.node; break; }
+      }
       var unit = {
         id: 'u' + (unitSeq += 1),
         el: el,
+        firstNode: firstNode,
         text: text,
         own: !!own,
         whole: ranges.length === 1,
@@ -486,8 +770,9 @@
         snapshot: [],
         sig: DT.units.signature(text),
         gen: DT.generation,
-        area: '',
-        ruby: rubyAnnotationsFor(el, map.chars.slice(range.start, range.end))
+        area: sharedArea,
+        fallback: ranges.fallback || '',
+        ruby: rubyAnnotationsFor(el, map.chars.slice(range.start, range.end), rubyBounds, own, rubyGroups ? rubyGroups[index] : null)
       };
       fillSnapshot(unit);
       // 已经翻过这个段落：原文没变就跳过；站点改过就先撤销旧记录再按新内容收集。
@@ -507,6 +792,9 @@
   function walk(el, out) {
     if (out.length >= MAX_UNITS) return;
     if (!el || el.nodeType !== 1) return;
+    // 整块已翻译且源文本没变：在 isSkipped 的 getComputedStyle 之前返回。
+    // 站点插入译文后，容器首次取样式会强制整块重排，长文增量重扫会因此卡住。
+    if (elementFullyRendered(el)) return;
     if (isSkipped(el)) return;
 
     var own = directText(el);
@@ -576,10 +864,13 @@
     var body = document.body;
     if (!siteText || !body) return body ? [body] : [];
     var found = Array.prototype.slice.call(body.querySelectorAll(siteText));
+    // 站点规则可能匹配上万个根：不要用 found.some(contains) 做 O(n²) 嵌套过滤。
+    var set = new Set(found);
     return found.filter(function (el) {
-      return !found.some(function (other) {
-        return other !== el && other.contains(el);
-      });
+      for (var parent = el.parentElement; parent; parent = parent.parentElement) {
+        if (set.has(parent)) return false;
+      }
+      return true;
     });
   };
 
@@ -587,10 +878,16 @@
   DT.collectAll = function (accept) {
     var out = [];
     var full = false;
-    DT.collectRoots().forEach(function (root) {
-      out = out.concat(DT.collect(root, accept));
+    var roots = DT.collectRoots();
+    for (var i = 0; i < roots.length; i += 1) {
+      if (out.length >= MAX_UNITS) {
+        full = true;
+        break;
+      }
+      out = out.concat(DT.collect(roots[i], accept));
       if (DT.lastCollectFull) full = true;
-    });
+    }
+    if (out.length >= MAX_UNITS) full = true;
     DT.lastCollectFull = full;
     return out;
   };
@@ -601,12 +898,14 @@
     DT.lastCollectFull = false;
     if (!start) return out;
     collectAccept = accept || null;
+    scanStyles = new WeakMap();
     try {
       walk(start, out);
     } catch (err) {
       DT.log('collect error', err);
     } finally {
       collectAccept = null;
+      scanStyles = null;
     }
     DT.lastCollectFull = out.length >= MAX_UNITS;
     DT.log('collect units:', out.length);
@@ -749,6 +1048,9 @@
     op.gen = DT.generation;
     tx.push(op);
     if (ops) ops.push(op);
+    // 局部撤销的 op 会标 done；正常翻译也会不断追加。超过阈值定期压掉已完成的，
+    // 避免长时间运行的页面让 DT.tx 只增不减。
+    if (tx.length > 4000 && tx.length % 1000 === 0) compactTx();
     return op;
   }
 
@@ -786,6 +1088,7 @@
   function undoOps(ops) {
     for (var i = (ops || []).length - 1; i >= 0; i -= 1) {
       var op = ops[i];
+      if (op.done) continue;
       try {
         if (op.op === 'insert') {
           if (op.node && op.node.parentNode) op.node.parentNode.removeChild(op.node);
@@ -810,7 +1113,19 @@
       } catch (err) {
         /* 节点被站点移除 / 框架重建：放弃这一条，继续还原别的 */
       }
+      op.done = true;
     }
+  }
+
+  // 局部撤销（模式切换 / 站点改写 / 节点删除）后，事务里的旧 op 不能再留着：
+  // 它们仍引用已经恢复或脱离页面的节点，长时间运行会让 DT.tx 无限增长。
+  function compactTx() {
+    if (tx.length < 4000) return;
+    var kept = [];
+    for (var i = 0; i < tx.length; i += 1) {
+      if (!tx[i].done) kept.push(tx[i]);
+    }
+    tx = kept;
   }
 
   // ---------------- 渲染记录（去重 / 释放 / 悬停） ----------------
@@ -839,22 +1154,42 @@
   // 双语的锚点在 DOM 里，段落重排后译文仍跟着原文走 → 按源文本签名匹配，不只看 index；
   // 替换型按「我们写过的文本节点」匹配，站点重排 / 插入段落也不会认错。
   function findRenderedFor(el, unit) {
-    var byIndex = null;
-    var list = renderedByEl.get(el) || [];
-    for (var i = 0; i < list.length; i += 1) {
-      var rec = list[i];
-      if (rec.mode === 'dual' && rec.unit.sig === unit.sig) return rec;
-      if (rec.mode === 'replace' || rec.mode === 'ruby') {
-        var saved = rec.saved || [];
-        for (var k = 0; k < saved.length; k += 1) {
-          for (var s = 0; s < (unit.snapshot || []).length; s += 1) {
-            if (unit.snapshot[s].node === saved[k].node) return rec;
-          }
+    // 替换型 / Ruby：我们写过的文本节点 → 记录，O(源节点数)；
+    // 同容器里文本相同的两段也不会认错。
+    if (unit.snapshot && unit.snapshot.length) {
+      for (var s = 0; s < unit.snapshot.length; s += 1) {
+        var byNode = savedRecord.get(unit.snapshot[s].node);
+        if (byNode && byNode.unit.el === el) return byNode;
+      }
+    }
+    var indexMap = renderedByIndex.get(el);
+    var same = indexMap ? indexMap.get(unit.index) : null;
+    if (same) {
+      // 同序号：双语的源文本签名变了也先返回，交给 addParagraphs 撤销后重收；
+      // 替换型没有节点重叠说明站点重建了这一段，先释放旧记录。
+      if (same.mode === 'dual' || !unit.snapshot || !same.savedNodes || same.savedNodes.size === 0) return same;
+      var overlap = false;
+      for (var i = 0; i < unit.snapshot.length; i += 1) {
+        if (same.savedNodes.has(unit.snapshot[i].node)) {
+          overlap = true;
+          break;
         }
       }
-      if (rec.unit.index === unit.index && !byIndex) byIndex = rec;
+      if (overlap) return same;
+      dropRendered(same);
+      return null;
     }
-    return byIndex;
+    // 双语段落重排：同一签名 + 同一分隔 <br> 锚点 → 还是同一段
+    if (!unit.anchor) return null;
+    var sigMap = renderedBySig.get(el);
+    var list = sigMap ? sigMap.get(unit.sig) : null;
+    if (list) {
+      for (var k = 0; k < list.length; k += 1) {
+        var rec = list[k];
+        if (rec.mode === 'dual' && rec.unit.anchor && rec.unit.anchor.before === unit.anchor.before) return rec;
+      }
+    }
+    return null;
   }
 
   function sourceChangedSnapshot(unit) {
@@ -880,25 +1215,90 @@
     return rec.mode === 'ruby' ? !!rec.node && rec.node.isConnected : true;
   }
 
+  function registerTarget(node, id) {
+    if (node && id) targetRegistry.set(id, node);
+  }
+  DT.isKnownTarget = function (node) {
+    if (!node || node.nodeType !== 1) return false;
+    var id = node.getAttribute('data-dt-unit');
+    return !!(id && targetRegistry.get(id) === node);
+  };
+  // 克隆节点带着同一个 data-dt-unit：只有登记过的那一个是原节点。
+  DT.removeCloneTarget = function (node) {
+    if (!node || node.nodeType !== 1) return false;
+    var id = node.getAttribute('data-dt-unit');
+    if (!id) return false;
+    var original = targetRegistry.get(id);
+    return !!(original && original !== node);
+  };
+
   function pushRendered(rec) {
     rendered.push(rec);
-    var list = renderedByEl.get(rec.unit.el);
+    var el = rec.unit.el;
+    var list = renderedByEl.get(el);
     if (!list) {
       list = [];
-      renderedByEl.set(rec.unit.el, list);
+      renderedByEl.set(el, list);
     }
     list.push(rec);
+
+    var indexMap = renderedByIndex.get(el);
+    if (!indexMap) {
+      indexMap = new Map();
+      renderedByIndex.set(el, indexMap);
+    }
+    indexMap.set(rec.unit.index, rec);
+
+    if (rec.mode === 'dual') {
+      var sigMap = renderedBySig.get(el);
+      if (!sigMap) {
+        sigMap = new Map();
+        renderedBySig.set(el, sigMap);
+      }
+      var arr = sigMap.get(rec.unit.sig);
+      if (!arr) {
+        arr = [];
+        sigMap.set(rec.unit.sig, arr);
+      }
+      arr.push(rec);
+    } else {
+      var nodes = new Set();
+      (rec.saved || []).forEach(function (one) {
+        if (one.node) nodes.add(one.node);
+      });
+      rec.savedNodes = nodes;
+      nodes.forEach(function (node) {
+        savedRecord.set(node, rec);
+      });
+    }
+    refreshElementSignature(el);
   }
 
   function dropRendered(rec) {
     if (!rec) return;
     undoOps(rec.ops);
+    compactTx();
     var i = rendered.indexOf(rec);
     if (i >= 0) rendered.splice(i, 1);
-    var elList = renderedByEl.get(rec.unit.el);
+    var el = rec.unit.el;
+    var elList = renderedByEl.get(el);
     if (elList) {
       var j = elList.indexOf(rec);
       if (j >= 0) elList.splice(j, 1);
+    }
+    var indexMap = renderedByIndex.get(el);
+    if (indexMap && indexMap.get(rec.unit.index) === rec) indexMap.delete(rec.unit.index);
+    if (rec.mode === 'dual') {
+      var sigMap = renderedBySig.get(el);
+      var arr = sigMap ? sigMap.get(rec.unit.sig) : null;
+      if (arr) {
+        var k = arr.indexOf(rec);
+        if (k >= 0) arr.splice(k, 1);
+      }
+    } else if (rec.savedNodes) {
+      rec.savedNodes.forEach(function (node) {
+        if (savedRecord.get(node) === rec) savedRecord.delete(node);
+      });
     }
     var list = rec.unit && rec.unit.el ? elUnits.get(rec.unit.el) : null;
     if (list) {
@@ -908,6 +1308,9 @@
     if (rec.replaced) {
       var ri = (DT.replaced || []).indexOf(rec.replaced);
       if (ri >= 0) DT.replaced.splice(ri, 1);
+    }
+    if (rec.node && rec.node.getAttribute && targetRegistry.get(rec.node.getAttribute('data-dt-unit')) === rec.node) {
+      targetRegistry.delete(rec.node.getAttribute('data-dt-unit'));
     }
     if (rec.unit && rec.unit.whole) {
       rec.unit.el.removeAttribute('data-dt-src');
@@ -922,6 +1325,7 @@
     var sourceEl = unit.el;
     var node = makeNode(sourceEl, text, lang, !unit.whole);
     node.setAttribute('data-dt-unit', unit.id);
+    registerTarget(node, unit.id);
     nodeUnit.set(node, unit);
     unit.renderMode = 'dual';
     unit.targetNode = node;
@@ -1134,6 +1538,7 @@
     unit.renderMode = 'replace';
     unit.targetNode = null;
     unit.renderedText = text;
+    fillSnapshot(unit); // 快照改成"替换后的源文本"，下次 sourceChangedSnapshot 不会误报
     pushRendered({ unit: unit, mode: 'replace', ops: ops, saved: saved, collapsed: [], replaced: item });
     linkUnit(unit);
     record('replace', null, unit.el, text, area);
@@ -1159,6 +1564,7 @@
     });
     var target = makeNode(unit.el, text, lang, true);
     target.setAttribute('data-dt-unit', unit.id);
+    registerTarget(target, unit.id);
     nodeUnit.set(target, unit);
     unit.renderMode = 'ruby';
     unit.targetNode = target;
@@ -1337,9 +1743,14 @@
     });
     var from = filled.length ? filled[filled.length - 1] + 1 : 0;
     for (var gi = from; gi < groups.length; gi += 1) tail.push(groups[gi]);
+    var legacyFirst = null;
+    for (var li = 0; li < map.chars.length; li += 1) {
+      if (map.chars[li] && map.chars[li].node) { legacyFirst = map.chars[li].node; break; }
+    }
     var unit = {
       id: 'u' + (unitSeq += 1),
       el: el,
+      firstNode: legacyFirst,
       text: map.text,
       own: !!own,
       whole: true,
@@ -1474,7 +1885,8 @@
         u.paragraph = {
           index: index,
           total: ranges.length,
-          anchor: ranges.length > 1 && range.splittable ? 'before-br' : 'inside'
+          anchor: ranges.length > 1 && range.splittable ? 'before-br' : 'inside',
+          fallback: ranges.fallback || ''
         };
         u.skipByLength = DT.skipText(text);
         u.alreadyTarget = DT.looksLikeTarget(text, DT.state.target);
@@ -1556,13 +1968,36 @@
     return removed;
   };
 
+  // 页面把整块内容删掉（无限滚动 / SPA 重建）后，rendered / tx 里仍会持有旧节点。
+  // 每次翻译前清一次，避免长时间运行内存只增不减。
+  DT.pruneDetached = function () {
+    var list = rendered.slice();
+    var removed = 0;
+    list.forEach(function (rec) {
+      // 元素还在、译文也还在：保留。元素 / 译文节点被站点删掉，或替换型源文本
+      // 已被站点改写（stillOurs 为 false）：释放记录和事务，避免旧节点长期被持有。
+      if (rec.unit && rec.unit.el && rec.unit.el.isConnected && stillOurs(rec)) return;
+      dropRendered(rec);
+      removed += 1;
+    });
+    compactTx();
+    return removed;
+  };
+
   // 对外：还原原文。逆序回放 RenderTransaction：
   // 只撤销仍是我们写入的值 / 仍是我们的节点；站点已经改过 / 删除的，保留站点的新状态。
   DT.restore = function () {
-    for (var i = tx.length - 1; i >= 0; i -= 1) undoOps([tx[i]]);
+    for (var i = tx.length - 1; i >= 0; i -= 1) {
+      if (!tx[i].done) undoOps([tx[i]]);
+    }
     tx = [];
+    renderStyles = null;
     rendered = [];
     renderedByEl = new WeakMap();
+    renderedByIndex = new WeakMap();
+    renderedBySig = new WeakMap();
+    savedRecord = new WeakMap();
+    targetRegistry = new Map();
     nodeUnit = new WeakMap();
     elUnits = new WeakMap();
     ownNodes = new WeakSet();

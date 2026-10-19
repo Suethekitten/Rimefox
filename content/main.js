@@ -21,17 +21,17 @@
   // 否则长页面正常翻到 90 秒就会被误杀。
   var lastBeat = 0;
   var dirty = false; // 翻译过程中页面又变了
-  // 译文与原文相同 / 模型返回空的单元：记下当时的源文本，内容没变就不再重复送翻和计数
+  // 译文与原文相同 / 模型返回空的单元：按「元素 → 段落键 → 当时的源文本」记，内容没变就不再重复送翻和计数
   var settled = new WeakMap();
   // 翻译失败的单元按段落各自退避：失败后等 5s / 15s / 45s 再试，第 4 次失败就放弃，
   // 直到内容变了、用户手动重翻或改了设置。
   // 以前失败段在每次点击、悬停、页面变动时都整页重发，遇到限流（429）只会越试越被限；
   // 也不能整页一起退避 —— 一批固定出错的段落会把新加载内容的翻译一起拖住。
   // 退避表本身在 core.js 的 DT.RETRY_DELAYS / DT.nextRetry（纯函数，自检可测）
-  var failures = new WeakMap(); // el → { text, count, until }
+  var failures = new WeakMap(); // el → Map(段键 → { text, count, until })
   // 等译文期间原文又被站点改掉的次数（DT.sourceChanged）。连续 CHURN_MAX 次就不再翻这个元素：
   // 计时器、实时行情这类一直在变的内容，否则每变一次就重发一次请求
-  var churn = new WeakMap();
+  var churn = new WeakMap(); // el → Map(段键 → 连续被站点改写次数)
   var CHURN_MAX = 3;
   var retryTimer = 0;
   var retryAt = 0;
@@ -42,8 +42,44 @@
   var lazyTimer = 0;
 
   // 懒翻译的范围（屏幕上方 1 屏到下方 2 屏）在 core.js：DT.LAZY_ABOVE / DT.LAZY_BELOW
-  function nearView(el, viewH) {
-    return DT.nearView(el.getBoundingClientRect(), viewH);
+  function rectOfUnit(unit) {
+    if (unit.__rect) return unit.__rect;
+    var rect = DT.rectOfUnit ? DT.rectOfUnit(unit) : unit.el.getBoundingClientRect();
+    unit.__rect = rect;
+    return rect;
+  }
+  function nearViewUnit(unit, viewH) {
+    return DT.nearView(rectOfUnit(unit), viewH);
+  }
+
+  // 0.9.2：一个 HTMLElement 可以有多个 ParagraphUnit（同一容器里的多段小说）。
+  // settled / failures / churn 不能只按元素记，否则 A 段的退避 / 抖动会误伤 B 段。
+  // 键 = 段序号：状态表按容器段落位置隔离，同时不会因文本不断变化而无限增长。
+  function unitKey(unit) {
+    if (!unit) return '';
+    // 只按段序号，不用源文本签名：无限滚动 / 聊天页面不断换文本时，
+    // 签名键会让每个历史文本各留一条状态，长时间运行会持续涨内存。
+    // 失败记录里仍带 text，内容变了自然不会再命中旧的退避。
+    return String(unit.index == null ? 0 : unit.index);
+  }
+  function unitState(map, unit) {
+    var bucket = map.get(unit.el);
+    return bucket ? bucket.get(unitKey(unit)) : undefined;
+  }
+  var MAX_UNIT_STATE = 5000;
+  function setUnitState(map, unit, value) {
+    var bucket = map.get(unit.el);
+    if (!bucket) {
+      bucket = new Map();
+      map.set(unit.el, bucket);
+    }
+    bucket.set(unitKey(unit), value);
+    // 同一个容器里无限追加段落时，状态表也要有上限（最早插入的先丢）
+    while (bucket.size > MAX_UNIT_STATE) bucket.delete(bucket.keys().next().value);
+  }
+  function dropUnitState(map, unit) {
+    var bucket = map.get(unit.el);
+    if (bucket) bucket.delete(unitKey(unit));
   }
 
   // 滚动 / 改窗口大小：待翻队列按新位置重排；懒翻译时还要补翻新进入范围的内容。
@@ -146,16 +182,17 @@
   // ---------------- 失败退避 ----------------
   // DT.state.failed = 当前处于失败状态的段落数（有退避记录的单元），不是累计失败次数
   function noteFailure(unit) {
-    var prev = failures.get(unit.el);
+    var prev = unitState(failures, unit);
     if (!prev) DT.state.failed += 1;
     var plan = DT.nextRetry(prev, unit.text, Date.now());
-    failures.set(unit.el, { text: unit.text, count: plan.count, until: plan.until });
+    setUnitState(failures, unit, { text: unit.text, count: plan.count, until: plan.until });
     return plan.delay;
   }
 
-  function clearFailure(el) {
-    if (!failures.has(el)) return;
-    failures.delete(el);
+  function clearFailure(unit) {
+    var had = unitState(failures, unit);
+    if (!had) return;
+    dropUnitState(failures, unit);
     DT.state.failed = Math.max(0, DT.state.failed - 1);
   }
 
@@ -219,8 +256,10 @@
       var docLang = String((document.documentElement && document.documentElement.lang) || '').toLowerCase();
       var jaPageToZh = docLang.indexOf('ja') === 0 && String(target || '').indexOf('zh') === 0;
 
-      // 仅译文 / 控件替换过的元素，如果站点又改了它的文字，先放回待翻译
+      // 仅译文 / 控件替换过的元素，如果站点又改了它的文字，先放回待翻译；
+      // 被站点删除的节点（无限滚动 / SPA）连同事务记录一起释放
       DT.releaseReplaced();
+      if (DT.pruneDetached) DT.pruneDetached();
 
       if (options.reset) {
         DT.state.translated = 0;
@@ -231,6 +270,10 @@
       var now = Date.now();
       var lazy = cfg.lazy !== false;
       var viewH = window.innerHeight || 800;
+      // 这一轮收集时已经按当前视口量过段首矩形；takeBatch 首轮不必再清缓存重量
+      viewMoved = false;
+      lastScrollY = window.scrollY;
+      lastViewH = window.innerHeight;
       var deferred = 0; // 离屏幕太远、留到滚过去再翻的单元数
       var pageStyle = DT.state.style || 'plain';
       var queue = DT.collectAll(function (unit) {
@@ -238,15 +281,15 @@
         // 趣味翻译：正文里够长的段落按风格改写；中文页面也要改写，所以风格单元不跳过「已是目标语言」
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
         if (unit.style === 'plain' && cfg.skipSameLang !== false && !jaPageToZh && DT.looksLikeTarget(unit.text, target)) return false;
-        if (settled.get(unit.el) === unit.text) return false;
-        if ((churn.get(unit.el) || 0) >= CHURN_MAX) return false;
+        if (unitState(settled, unit) === unit.text) return false;
+        if ((unitState(churn, unit) || 0) >= CHURN_MAX) return false;
         // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
         // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
-        if (lazy && !nearView(unit.el, viewH)) {
+        if (lazy && !nearViewUnit(unit, viewH)) {
           deferred += 1;
           return false;
         }
-        var fail = failures.get(unit.el);
+        var fail = unitState(failures, unit);
         if (fail && fail.text === unit.text) {
           if (fail.count > DT.RETRY_DELAYS.length) return false; // 已放弃
           if (now < fail.until) {
@@ -293,6 +336,7 @@
         return window.innerHeight || 800;
       }
       function reprioritize() {
+        var scrolled = viewMoved || window.scrollY !== lastScrollY || window.innerHeight !== lastViewH;
         viewMoved = false;
         lastScrollY = window.scrollY;
         lastViewH = window.innerHeight;
@@ -300,7 +344,9 @@
         pending.forEach(function (seg) {
           if (seen[seg.ui]) return;
           seen[seg.ui] = true;
-          queue[seg.ui].prio = DT.distanceOf(queue[seg.ui].el.getBoundingClientRect(), viewHeight());
+          // 滚动后布局位置变了，清掉这一轮缓存的矩形再量一次
+          if (scrolled) queue[seg.ui].__rect = null;
+          queue[seg.ui].prio = DT.distanceOf(rectOfUnit(queue[seg.ui]), viewHeight());
         });
         pending.sort(function (a, b) {
           return queue[a.ui].prio - queue[b.ui].prio || a.ui - b.ui || a.k - b.k;
@@ -360,14 +406,14 @@
         // 等译文期间站点改了这段原文（SPA 重渲染、翻页复用同一个元素）：
         // 旧译文不能写进新内容，也不记成「已处理」；本轮结束后按新内容重新收集
         if (DT.sourceChanged(unit)) {
-          churn.set(unit.el, (churn.get(unit.el) || 0) + 1);
+          setUnitState(churn, unit, (unitState(churn, unit) || 0) + 1);
           dirty = true;
           return;
         }
-        churn.delete(unit.el);
+        dropUnitState(churn, unit);
         if (!text) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
-          settled.set(unit.el, unit.text);
+          setUnitState(settled, unit, unit.text);
           return;
         }
 
@@ -381,7 +427,7 @@
             : DT.isNearDuplicate(unit.text, text, target);
         if (dup) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
-          settled.set(unit.el, unit.text);
+          setUnitState(settled, unit, unit.text);
           return;
         }
 
@@ -444,9 +490,14 @@
             queue[seg.ui].failed = true;
           }
         });
-        batch.forEach(function (seg) {
-          tryInject(queue[seg.ui]);
-        });
+        if (DT.beginRenderCache) DT.beginRenderCache();
+        try {
+          batch.forEach(function (seg) {
+            tryInject(queue[seg.ui]);
+          });
+        } finally {
+          if (DT.endRenderCache) DT.endRenderCache();
+        }
       }
 
       async function worker() {
@@ -463,7 +514,12 @@
       await Promise.all(workers);
 
       // 兜底：把剩余能拼的补上
-      queue.forEach(tryInject);
+      if (DT.beginRenderCache) DT.beginRenderCache();
+      try {
+        queue.forEach(tryInject);
+      } finally {
+        if (DT.endRenderCache) DT.endRenderCache();
+      }
 
       // 记账：失败的进退避，成功（含"与原文相同"）的清掉旧的失败记录
       if (!cancelled()) {
@@ -472,7 +528,7 @@
             wantRetry(noteFailure(unit));
             progressed = true;
           } else if (unit.done) {
-            clearFailure(unit.el);
+            clearFailure(unit);
             progressed = true;
           }
         });
@@ -624,17 +680,23 @@
   }
 
   // ---------------- 动态内容 ----------------
+  var incrementalDue = 0;
   function scheduleIncremental() {
     if (!DT.state.enabled) return;
+    // 防抖，但要有上限：持续更新的页面（聊天 / 论坛 / 直播）每次变动都重置 600ms，
+    // 会永远等不到翻译。第一次变动定一个截止时间，之后只提前不推迟。
+    var now = Date.now();
+    if (!incrementalDue) incrementalDue = now + 600;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(function () {
+      incrementalDue = 0;
       if (!DT.state.enabled) return;
       if (running) {
         dirty = true;
         return;
       }
       translatePage({ silent: true });
-    }, 600);
+    }, Math.max(0, incrementalDue - now));
   }
 
   // 悬停/聚焦时补扫：下拉菜单、浮层往往是 hover 时才把内容塞进 DOM，
@@ -687,23 +749,23 @@
 
       for (var k = 0; k < targets.length; k += 1) {
         var target = targets[k];
-        var parent = target.parentElement;
-        if (!parent) continue;
-        // 0.9.1：同一个容器里可以有多个段落译文节点，这是正常的。
-        // 只清理「克隆出来的同一条译文」：副本带着相同的 data-dt-unit。
-        var id = target.getAttribute('data-dt-unit');
-        var siblings = parent.querySelectorAll(':scope > [data-dt-target]');
-        if (siblings.length <= 1) continue;
-        if (!id) {
-          // 旧版本 / 外部写入的节点没有单元 id：维持原来的保守清理
-          for (var s = 1; s < siblings.length; s += 1) siblings[s].remove();
+        if (target.nodeType !== 1 || !target.hasAttribute || !target.hasAttribute('data-dt-target')) continue;
+        // 我们自己刚插入的译文节点：登记过、id 对得上，直接跳过。
+        // 以前这里每个新增节点都 querySelectorAll(':scope > [data-dt-target]')，
+        // 3000 段页面会变成 O(n²)。
+        if (DT.isKnownTarget && DT.isKnownTarget(target)) continue;
+        if (DT.removeCloneTarget && DT.removeCloneTarget(target)) {
+          target.remove();
           continue;
         }
-        var same = [];
-        for (var q = 0; q < siblings.length; q += 1) {
-          if (siblings[q].getAttribute('data-dt-unit') === id) same.push(siblings[q]);
-        }
-        for (var r = 1; r < same.length; r += 1) same[r].remove();
+        // 旧版本 / 外部写入的节点没有登记：维持保守清理，但只处理没有 id 的
+        var id = target.getAttribute('data-dt-unit');
+        if (id) continue;
+        var parent = target.parentElement;
+        if (!parent) continue;
+        var siblings = parent.querySelectorAll(':scope > [data-dt-target]');
+        if (siblings.length <= 1) continue;
+        for (var s = 1; s < siblings.length; s += 1) siblings[s].remove();
       }
     }
   }
@@ -988,6 +1050,12 @@
   // ---------------- 启动 ----------------
   (async function boot() {
     await loadConfig();
+    // iframe 只保留配置（划词 / 输入框 / 外观模块要用），不装观察器、快捷键、
+    // 定时器和滚动监听：嵌入广告 / 评论区不需要这些，否则每个子框架都在空转。
+    if (window.top !== window) {
+      DT.log('content script ready (iframe)', DT.VERSION);
+      return;
+    }
     startObserver();
     bindHoverRescan();
     bindHotkey();
@@ -1015,13 +1083,7 @@
     setTimeout(keepChromeState, 1200);
     setTimeout(keepChromeState, 4000);
 
-    // 自动开始翻译只在顶层页面：弹窗按钮和快捷键都只发给主框架（frameId 0），
-    // iframe 自己开起来的话，「还原原文」关不掉它，它还会一直替广告位、嵌入页补翻、计费
-    if (window.top !== window) {
-      DT.log('content script ready (iframe)', DT.VERSION);
-      return;
-    }
-
+    // 自动开始翻译只在顶层页面（上面的 iframe 提前返回已经保证）
     // 同一个标签页里"刚才正在翻译"：刷新 / 返回后自动接着翻
     var resume = null;
     try {

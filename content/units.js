@@ -2,7 +2,7 @@
 //
 // 0.9.1 把翻译拆成五个互不混用的概念：
 //   DOM 结构      —— dom.js 按元素树收集 token
-//   视觉段落      —— ParagraphUnit：本文件 paragraphsOf() 按「空行」切分
+//   视觉段落      —— ParagraphUnit：本文件 textMap() 在规范化前按排版语义（空行 / 单 <br>+全角缩进 / 块级）切分
 //   语义句子      —— SentenceUnit：本文件 sentencesIn() 在段落内切句
 //   API 请求分片  —— core.js splitLong()：只负责请求长度，不决定页面段落
 //   渲染单元      —— dom.js 的一个 ParagraphUnit = 一个翻译单元 = 一个渲染锚点
@@ -54,7 +54,11 @@
         }
         if (c === '\n' && keep) {
           raw.push({ brk: { nl: node, at: i } });
-        } else if (c === '\n' || c === ' ' || c === '\t' || c === '\f' || c === '\v' || c === '\u00a0') {
+        } else if (c === '\n') {
+          // 源码里的折行：在普通元素里只是空白，但它和紧跟的全角缩进一起构成
+          // 青空文库「单 <br> + 　」的段落签名；保留 nl 标记，规范化后仍在行首可见。
+          raw.push({ space: true, nl: true });
+        } else if (c === ' ' || c === '\t' || c === '\f' || c === '\v' || c === '\u00a0') {
           raw.push({ space: true });
         } else {
           raw.push({ ch: c, meta: { node: node, off: i } });
@@ -77,15 +81,22 @@
       }
       if (part.space) {
         var cs = line.chars;
-        if (cs.length && !(cs[cs.length - 1] && cs[cs.length - 1].space)) cs.push({ space: true, meta: null });
+        var last = cs.length ? cs[cs.length - 1] : null;
+        if (!last || !last.space) {
+          cs.push({ space: true, nl: !!part.nl, meta: null });
+        } else if (part.nl) {
+          last.nl = true; // 同一段空白里只要有一个源码换行就记住
+        }
         return;
       }
       line.chars.push({ ch: part.ch, meta: part.meta });
     });
     lines.push({ chars: line.chars, startBreak: line.startBreak });
 
-    // 行首尾去空白：ASCII 合成空格 + Unicode 空白（全角缩进 \u3000 等，和 String.trim 一致）。
-    // 注意只去行首尾：行内的全角空格是正文（normalizeText 也不会折叠它）
+    // 行首尾去空白，同时记录两个**排版语义**信号（在规范化把它们丢掉之前）：
+    //   one.indent  —— 行首有全角缩进 U+3000（青空文库 / 日文小说的段落标记）
+    //   one.quote   —— 行首是引号（对白段落）
+    // 只有「硬换行后的新行」才用这两个信号判断段落；第一行 / 块级元素由调用方处理。
     lines.forEach(function (one) {
       var cs = one.chars;
       var a = 0;
@@ -93,9 +104,18 @@
       function blank(c) {
         return c.space || (c.ch && /\s/.test(c.ch));
       }
-      while (a < b && blank(cs[a])) a += 1;
+      var sawIndent = false;
+      var sawSourceNewline = false;
+      while (a < b && blank(cs[a])) {
+        if (cs[a].ch === '\u3000') sawIndent = true;
+        if (cs[a].nl) sawSourceNewline = true;
+        a += 1;
+      }
       while (b > a && blank(cs[b - 1])) b -= 1;
+      one.indent = sawIndent;
+      one.sourceNewline = sawSourceNewline;
       one.chars = cs.slice(a, b);
+      one.first = one.chars.length ? one.chars[0].ch : '';
     });
     // 去掉首尾空行；中间的空行只留一个（normalizeLines 的规则）
     var firstNonEmpty = 0;
@@ -107,6 +127,7 @@
     var chars = [];
     var gap = 0;
     var gapBreak = null;
+    var trailingBreak = null;
     for (var li = firstNonEmpty; li <= lastNonEmpty; li += 1) {
       var row = lines[li];
       if (!row.chars.length) {
@@ -115,12 +136,19 @@
         continue;
       }
       if (text) {
-        // 段落边界上的第一个换行映射到分隔空行里的第一个 <br>（插入锚点用它）
+        // 段落边界（换两个 \n）：
+        //   1) 中间有空行（连续 <br> / 空行）；
+        //   2) 新行以全角缩进开头，并且缩进前有源码换行（青空文库的 <br>\n　）。
+        //      只认全角缩进会把 Pixiv 里「每行都带　」的连续对白误拆成多段；
+        //      「源码换行 + 全角缩进」是 Aozora 段落的结构签名，Pixiv 的 span 行没有。
+        // 其它硬换行只是同一段里的行（诗行、信件、地址、源码折行）。
+        // 行首引号**不单独**算段落：青空文库里对白常常紧接上一行的「まるで」。
+        var newPara = gap > 0 || (!!row.startBreak && row.indent && row.sourceNewline);
         text += '\n';
         chars.push(gapBreak || row.startBreak);
-        if (gap > 0) {
+        if (newPara) {
           text += '\n';
-          chars.push(row.startBreak);
+          chars.push(row.startBreak || gapBreak);
         }
       }
       gap = 0;
@@ -130,11 +158,15 @@
         chars.push(c.meta);
       });
     }
-    return { text: text, chars: chars };
+    // 最后一段后面的空行（通常是一串 <br>）：最后一篇译文应该插在它们**之前**，
+    // 不能 append 到整个容器末尾，否则最后一段译文会和原文隔着一串空行。
+    if (lastNonEmpty + 1 < lines.length) trailingBreak = lines[lastNonEmpty + 1].startBreak;
+    return { text: text, chars: chars, paragraphs: U.paragraphsOf(text), trailingBreak: trailingBreak };
   };
 
   // ---------------- 2. 段落 ----------------
-  // 空行（规范化后的 \n\n）是段落边界；单个 \n 是同一段里的行（小说对白）。
+  // textMap() 已经把排版语义（空行 / 单 <br>+源码换行+全角缩进）编码成 \n\n；
+  // 这里只按 \n\n 切分。单个 \n 是同一段里的行（诗行 / 对白续行 / 源码折行）。
   // 返回 [{ start, end, sepStart, sepEnd }]：
   //   start / end  段落文本在 text 里的范围（不含分隔空行）
   //   sepStart     分隔空行第一个 \n 的下标（= end）

@@ -452,6 +452,36 @@
   });
 
   // ---------------- 还原 ----------------
+  check('整块早退不会漏掉后来显示的隐藏段落', function () {
+    var box = document.createElement('div');
+    box.innerHTML = '<p>Visible paragraph before hidden dialog.</p><div id="dt-hidden-probe" style="display:none"><p>Hidden paragraph that appears later.</p></div>';
+    document.body.appendChild(box);
+    var visible = DT.collect(box);
+    if (!visible.length) { box.remove(); return '可见段没有收集到'; }
+    DT.state.mode = 'dual';
+    if (!DT.inject(visible[0], '可见段译文', 'zh-CN')) { box.remove(); return '可见段注入失败'; }
+    box.querySelector('#dt-hidden-probe').style.display = 'block';
+    var after = DT.collect(box);
+    var ok = after.some(function (u) { return u.text.indexOf('Hidden paragraph') >= 0; });
+    DT.restore();
+    box.remove();
+    return ok ? true : '隐藏段显示后没有被重新收集';
+  });
+
+  check('pruneDetached: 页面删除的节点会被释放，不拖到 restore', function () {
+    var host = document.createElement('div');
+    host.innerHTML = '<p>Detached paragraph stays out of the live tree.</p>';
+    document.body.appendChild(host);
+    var u = DT.collect(host)[0];
+    if (!u) { host.remove(); return '没有收集到单元'; }
+    DT.state.mode = 'dual';
+    if (!DT.inject(u, '已脱离页面的译文', 'zh-CN')) { host.remove(); return 'inject 返回 false'; }
+    host.remove();
+    var removed = DT.pruneDetached();
+    if (removed < 1) return '没有释放已脱离页面的记录';
+    return true;
+  });
+
   check('restore: 还原被就地替换的文本', function () {
     DT.restore();
     var td = fixture.querySelector('td');
@@ -1006,6 +1036,7 @@
       var target = a.querySelector('[data-dt-target]');
       var p = pointOf(srcText, 'Second');
       a.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: p.x, clientY: p.y }));
+      DT.hover.flushMove();
       if (highlighted('dt-hover-src') !== 'Second sentence follows.') return '原文高亮的不是这一句：' + highlighted('dt-hover-src');
       if (highlighted('dt-hover-target') !== '第二句跟着来。') return '译文高亮的不是对应句：' + highlighted('dt-hover-target');
       if (a.hasAttribute('data-dt-hover')) return '不该再整段高亮';
@@ -1542,6 +1573,223 @@
       if (again.length !== 2) return '应重新收集两段新内容，实际 ' + again.length;
       return again[0].text.indexOf('新しい第一段') === 0 ? true : '新内容不对：' + again[0].text;
     });
+  });
+
+
+  // ---------------- 0.9.2 真实《罗生门》DOM 夹具回归 ----------------
+  function rectOfNode(node) {
+    var r = document.createRange();
+    r.selectNodeContents(node);
+    return r.getBoundingClientRect();
+  }
+  function realAozoraMetrics(box) {
+    var mt = box.querySelector('.main_text');
+    var targets = Array.prototype.slice.call(mt.querySelectorAll('[data-dt-target]'));
+    var pieces = [];
+    Array.prototype.forEach.call(mt.childNodes, function (n) {
+      if (n.nodeType === 3) {
+        if (n.nodeValue.trim()) {
+          var b = rectOfNode(n);
+          if (b.height > 0) pieces.push({ top: b.top, height: b.height });
+        }
+      } else if (n.nodeType === 1 && n.tagName !== 'BR') {
+        var rb = n.getBoundingClientRect();
+        if (rb.height > 0) pieces.push({ top: rb.top, height: rb.height });
+      }
+    });
+    pieces.sort(function (a, b) { return a.top - b.top; });
+    var maxGap = 0;
+    for (var i = 1; i < pieces.length; i += 1) {
+      var g = pieces[i].top - (pieces[i - 1].top + pieces[i - 1].height);
+      if (g > maxGap) maxGap = g;
+    }
+    return {
+      top: mt.getBoundingClientRect().top,
+      height: mt.getBoundingClientRect().height,
+      targets: targets,
+      maxGap: maxGap
+    };
+  }
+
+  check('真实罗生门夹具：单 <br> + 全角缩进分成 6 个段落单元（不是整篇一个）', function () {
+    return withTemplate('tpl-aozora-real', 'dual', function (box) {
+      var mt = box.querySelector('.main_text');
+      var units = DT.collect(box);
+      if (units.length !== 6) {
+        return '应为 6 个段落单元，实际 ' + units.length + '：' + JSON.stringify(units.map(function (u) { return u.text.slice(0, 10); }));
+      }
+      var r = eq(units[0].text.indexOf('げにん') < 0 && units[0].text.indexOf('（') < 0, true);
+      if (r !== true) return '<rb>/<rt>/<rp> 混进了正文';
+      if (units[0].text.indexOf('ある日の暮方') !== 0) return '首段文本不对：' + units[0].text.slice(0, 20);
+      if (units[0].ruby.length !== 6) return '首段应关联 6 个 rt/rp，实际 ' + units[0].ruby.length;
+      if (units[3].map.text.split('\n').length !== 2) return '对白续行应与上一段同段（2 行），实际 ' + units[3].map.text.split('\n').length;
+      if (units[3].text.indexOf('「おのれ、どこへ行く。」') < 0) return '对白续行丢了';
+      if (units[4].text !== '「では、また。」') return '全角缩进的对白段落不对：' + units[4].text;
+      if (units[5].map.text.split('\n').length !== 2) return '无缩进续行不应拆段';
+      if (units[5].text.indexOf('インデントのない続きの行。') < 0) return '续行文本丢了';
+      for (var i = 0; i < 5; i += 1) {
+        if (!units[i].anchor || units[i].anchor.before.tagName !== 'BR') return '第 ' + (i + 1) + ' 段缺少分隔 <br> 锚点';
+      }
+      if (units[5].anchor) return '最后一段在当前夹具里应追加到容器末尾';
+      if (DT.sourceChanged(units[0]) || DT.sourceChanged(units[5])) return '采集后原文快照就变了';
+      return true;
+    });
+  });
+
+  check('真实罗生门·双语：译文交错在各自段落后，首段译文不在页尾', function () {
+    return withTemplate('tpl-aozora-real', 'dual', function (box) {
+      var html = box.innerHTML;
+      var units = DT.collect(box);
+      units.forEach(function (u, i) {
+        if (!DT.inject(u, '中文译文' + (i + 1), 'zh-CN')) throw new Error('第 ' + (i + 1) + ' 段注入失败');
+      });
+      var m = realAozoraMetrics(box);
+      if (m.targets.length !== 6) return '应有 6 个译文节点，实际 ' + m.targets.length;
+      var tops = m.targets.map(function (t) { return t.getBoundingClientRect().top; });
+      for (var i = 1; i < tops.length; i += 1) {
+        if (tops[i] < tops[i - 1]) return '译文节点顺序不对';
+      }
+      var firstParaTop = box.querySelector('.main_text').getBoundingClientRect().top;
+      if (tops[0] - firstParaTop > 120) return '首段译文离首段原文太远（' + Math.round(tops[0] - firstParaTop) + 'px）';
+      // 每个译文节点都在本段原文之后、下一段原文之前
+      for (var k = 0; k < units.length; k += 1) {
+        var srcNode = units[k].groups.filled[0].pieces[0].node;
+        var srcRect = rectOfNode(srcNode);
+        var tgtRect = m.targets[k].getBoundingClientRect();
+        if (tgtRect.top < srcRect.top - 2) return '第 ' + (k + 1) + ' 段译文跑到了原文前面';
+        if (k + 1 < units.length) {
+          var nextNode = units[k + 1].groups.filled[0].pieces[0].node;
+          var nextRect = rectOfNode(nextNode);
+          if (tgtRect.top > nextRect.top + 2) return '第 ' + (k + 1) + ' 段译文跑到了下一段原文之后';
+        }
+      }
+      var text = box.innerText;
+      var order = [1, 2, 3, 4, 5, 6].map(function (n) { return text.indexOf('中文译文' + n); });
+      for (var j = 1; j < order.length; j += 1) if (order[j] < order[j - 1]) return '译文阅读顺序不对：' + JSON.stringify(order);
+      DT.restore();
+      if (box.innerHTML !== html) return '双语还原后结构不一致';
+      return true;
+    });
+  });
+
+  check('真实罗生门·仅译文：首段译文在原位置、无巨大空白、无可见假名、Ruby 不被写入', function () {
+    return withTemplate('tpl-aozora-real', 'translation', function (box) {
+      var html = box.innerHTML;
+      var m0 = realAozoraMetrics(box);
+      var units = DT.collect(box);
+      units.forEach(function (u, i) {
+        if (!DT.inject(u, '中文译文' + (i + 1), 'zh-CN')) throw new Error('第 ' + (i + 1) + ' 段注入失败');
+      });
+      var m = realAozoraMetrics(box);
+      if (m.targets.length < 1) return '没有独立译文节点';
+      var firstTop = m.targets[0].getBoundingClientRect().top - m.top;
+      if (firstTop > 80) return '首段译文离容器顶部太远（' + Math.round(firstTop) + 'px，疑似巨大空白）';
+      if (m.maxGap > 80) return '正文中出现巨大空白（最大 ' + Math.round(m.maxGap) + 'px）';
+      if (m.height > m0.height * 1.3) return '仅译文高度异常：' + Math.round(m.height) + ' vs ' + Math.round(m0.height);
+      var rt = Array.prototype.slice.call(box.querySelectorAll('rt'));
+      var visible = rt.filter(function (x) { return getComputedStyle(x).display !== 'none'; });
+      if (visible.length) return '还有 ' + visible.length + ' 个注音可见';
+      var text = box.innerText;
+      if (/[\u3040-\u30ff]/.test(text)) return '页面上残留假名：' + text.slice(0, 60);
+      var rubies = box.querySelectorAll('ruby');
+      for (var i = 0; i < rubies.length; i += 1) {
+        if (rubies[i].textContent.indexOf('中文译文') >= 0) return '整句译文被写进了 ruby：' + rubies[i].textContent.slice(0, 30);
+      }
+      var rb = box.querySelector('rb');
+      if (!rb) return 'rb 节点被删掉了';
+      if (rb.textContent.indexOf('中文译文') >= 0) return '译文被写进了 rb';
+      DT.restore();
+      if (box.innerHTML !== html) return '仅译文还原后结构不一致';
+      if (getComputedStyle(box.querySelector('rt')).display === 'none') return '还原后注音仍隐藏';
+      return true;
+    });
+  });
+
+  check('真实罗生门·生命周期：模式切换 / 重新开启 / 动态新增段落都不重复', function () {
+    return withTemplate('tpl-aozora-real', 'dual', function (box) {
+      var html = box.innerHTML;
+      function injectAll(label) {
+        var us = DT.collect(box);
+        us.forEach(function (u, i) {
+          if (!DT.inject(u, label + (i + 1), 'zh-CN')) throw new Error(label + ' 注入失败');
+        });
+        return us.length;
+      }
+      if (injectAll('A') !== 6) return '首轮应 6 段';
+      if (box.querySelectorAll('[data-dt-target]').length !== 6) return '双语节点数不对';
+      DT.state.mode = 'translation';
+      DT.restore();
+      if (injectAll('B') <= 0) return '仅译文没有重新收集';
+      DT.state.mode = 'dual';
+      DT.restore();
+      if (injectAll('C') !== 6) return '切回双语应重新 6 段';
+      DT.restore();
+      if (box.innerHTML !== html) return '生命周期还原不一致';
+
+      // 动态新增：单个 <br> + 全角缩进
+      injectAll('D');
+      var mt = box.querySelector('.main_text');
+      var br = document.createElement('br');
+      mt.appendChild(br);
+      var tn = document.createTextNode('\n　動的に追加した段落。');
+      mt.insertBefore(tn, br.nextSibling);
+      var added = DT.collect(mt);
+      if (added.length !== 1) return '动态新增应只收集 1 段，实际 ' + added.length;
+      if (!DT.inject(added[0], '动态译文', 'zh-CN')) return '动态段落注入失败';
+      if (box.querySelectorAll('[data-dt-target]').length !== 7) return '动态补翻后节点数不对';
+      // 先把站点自己新增的节点移除，再还原我们注入的内容
+      if (tn.parentNode) tn.parentNode.removeChild(tn);
+      if (br.parentNode) br.parentNode.removeChild(br);
+      DT.restore();
+      if (box.innerHTML !== html) return '动态新增节点移除后还原不一致';
+      return true;
+    });
+  });
+
+  check('真实罗生门·对齐：Ruby 段落的句子映射与悬停配对可用', function () {
+    return withTemplate('tpl-aozora-real', 'dual', function (box) {
+      var units = DT.collect(box);
+      var u = units[1]; // 第二段 4 句，含多个 ruby
+      if (u.sentences.length !== 4) return '夹具第二段应为 4 句，实际 ' + u.sentences.length;
+      var texts = ['中一。', '中二。', '中三。', '中四。'];
+      var joined = texts.join('');
+      var align = DT.units.alignmentOf(texts.map(function (t) { return { n: 1, t: t }; }), joined, u.sentences.length);
+      if (!align) return '合法对齐没有建立';
+      if (!DT.inject(u, joined, 'zh-CN', align)) return '带对齐注入失败';
+      var pair = DT.hover.pairDual(u, joined, false, u.sentences[2].start);
+      if (!pair || pair.scope !== 'sentence') return '有对齐时没有句级对应';
+      if (pair.targetText !== '中三。') return '目标句不对：' + pair.targetText;
+      if (pair.sourceText !== u.sentences[2].text) return '源句不对：' + pair.sourceText;
+      var hit = DT.hover.pairReplaced(u, joined, joined.indexOf('中二'));
+      if (!hit || hit.scope !== 'sentence' || hit.sourceText !== u.sentences[1].text) return '目标文本上反查源句失败';
+      return true;
+    });
+  });
+
+
+  check('降级策略：无法识别的巨型多行单元按行拆分，不静默 append 到页尾', function () {
+    var box = document.createElement('div');
+    box.style.cssText = 'width:600px;font:16px/1.6 sans-serif';
+    var line = 'This line has no full-width indent and no blank line around it, but it is part of a long block.';
+    var lines = [];
+    for (var i = 0; i < 12; i += 1) lines.push(line);
+    box.innerHTML = lines.join('<br>');
+    document.getElementById('fixture').appendChild(box);
+    try {
+      var units = DT.collect(box);
+      if (units.length < 8) return '应降级为多行单元，实际 ' + units.length;
+      if (units[0].fallback !== 'line') return '没有标记 fallback=line';
+      units.forEach(function (u, k) {
+        if (!DT.inject(u, '按行译文' + (k + 1), 'zh-CN')) {
+          throw new Error('降级单元注入失败 #' + k);
+        }
+      });
+      if (box.querySelectorAll('[data-dt-target]').length !== units.length) return '降级后译文节点数不对';
+      return true;
+    } finally {
+      DT.restore();
+      box.remove();
+    }
   });
 
   check('normalizeLines / splitLines：保留分行，行内照常折叠；没有换行时与 normalizeText 相同', function () {
