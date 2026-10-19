@@ -1,6 +1,7 @@
 # Rimefox 0.9.2 稳定性 / 性能 / 恶性 Bug 审计
 
 - 审计基线 commit：`1081411`（0.9.1 已发布，0.9.2 修复分支 `fix/0.9.2-aozora-regression`）
+- 审计修复 commit：`26bd85d`（本分支；未推送）
 - 审计日期：2026-10-19
 - 审计范围：`content/core.js`、`units.js`、`dom.js`、`main.js`、`hover.js`、`appearance.js`、`selection.js`、`input.js`、`subtitles.js`、`dock.js`、`background.js`、`lib/cache.js`、`lib/parse.js`、`lib/provider.js`、`manifest.json`、现有 Node / 自检 / E2E 架构
 - 基线测试：Node `21/21`、离线自检 `157/157`、普通 E2E `44/44`、真实青空文库 `13/13`
