@@ -805,10 +805,47 @@ async function inputChecks() {
   check('密码框不翻译', pw === 'secret', pw);
 }
 
+// ---------------- 0.9.3 悬浮入口拖拽 ----------------
+async function dockChecks() {
+  console.log('\n[悬浮入口拖拽]');
+  await patchConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'right', dockPos: null });
+  const d = await openTab(ORIGIN + '/page.html?dock');
+  await until(() => pageEval(d, "return !!document.getElementById('dt-dock')"));
+  await sleep(400);
+  const rectOf = () =>
+    pageEval(d, `const h = document.getElementById('dt-dock'); const r = h.getBoundingClientRect(); return { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height), vw: innerWidth, side: h.getAttribute('data-side') }`);
+  async function dragTo(tx, ty) {
+    const r = await rectOf();
+    const sx = r.left + r.width / 2;
+    const sy = r.top + r.height - 20; // 小球在 dock 底部
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: sx, y: sy, button: 'left', clickCount: 1, pointerType: 'mouse' }, d.s);
+    for (let i = 1; i <= 6; i += 1) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sx + ((tx - sx) * i) / 6, y: sy + ((ty - sy) * i) / 6, button: 'left', pointerType: 'mouse' }, d.s);
+      await sleep(30);
+    }
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: tx, y: ty, button: 'left', clickCount: 1, pointerType: 'mouse' }, d.s);
+    await sleep(400);
+  }
+  await dragTo(24, 320);
+  const r1 = await rectOf();
+  check('拖到左边缘松手：吸附到左边、side 翻转', r1.left === 0 && r1.side === 'left', JSON.stringify(r1));
+  await evaluate(d.s, 'location.reload(); true');
+  await until(() => pageEval(d, "return !!document.getElementById('dt-dock')"));
+  await sleep(400);
+  const r2 = await rectOf();
+  check('位置写进配置：刷新页面后仍贴左边', r2.left === 0 && r2.side === 'left', JSON.stringify(r2));
+  await dragTo(Math.round(r2.vw / 2), 240);
+  const r3 = await rectOf();
+  check('页面中间松手：自由悬浮、不贴任何边', r3.left > 80 && r3.left < r3.vw - 80, JSON.stringify(r3));
+  await patchConfig({ dockEnabled: false, dockPos: null });
+  await sleep(300);
+}
+
 try {
   if (!flag('--youtube-only')) {
     await articleChecks();
     await paragraphChecks();
+    await dockChecks();
     await optionsChecks();
     await selftestChecks();
     await inputChecks();

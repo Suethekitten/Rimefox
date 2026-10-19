@@ -42,18 +42,19 @@
 
   var CSS = [
     // 只有小球和展开后的面板接收鼠标：收起时看不见的面板区域不能挡住网页
-    ':host{all:initial;position:fixed;z-index:2147483644;top:58%;right:0;transform:translateY(-50%);pointer-events:none}',
-    ':host([data-side="left"]){right:auto;left:0}',
+    ':host{all:initial;position:fixed;z-index:2147483644;left:0;top:0;pointer-events:none;transition:left .16s ease,top .16s ease}',
+    ':host([data-drag]){transition:none}',
     ':host([hidden]){display:none!important}',
     '@media print{:host{display:none!important}}',
     '.dock{--acc:var(--dt-accent,#6a5cf0);--bg:rgba(255,255,255,.97);--fg:#1d2030;--line:rgba(20,24,40,.12);--hover:color-mix(in srgb,var(--acc) 14%,transparent);' +
       'position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 6px;' +
       'font:13px/1.4 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--fg);' +
-      'transition:transform .2s ease,opacity .2s ease}',
+      'transition:transform .2s ease,opacity .2s ease;touch-action:none;cursor:grab}',
     '.dock[data-dark]{--bg:rgba(30,32,42,.97);--fg:#eef0f8;--line:rgba(255,255,255,.14);--acc:color-mix(in srgb,var(--dt-accent,#6a5cf0) 72%,white)}',
     // 自动隐藏：收起时只露出小球的一半，半透明
-    '.dock[data-auto]:not([data-open]){transform:translateX(40%);opacity:.72}',
-    ':host([data-side="left"]) .dock[data-auto]:not([data-open]){transform:translateX(-40%)}',
+    '.dock[data-auto][data-snapped]:not([data-open]){transform:translateX(40%);opacity:.72}',
+    ':host([data-side="left"]) .dock[data-auto][data-snapped]:not([data-open]){transform:translateX(-40%)}',
+    '.dock[data-drag],.dock[data-drag] .ball{cursor:grabbing}',
     '.panel{display:flex;flex-direction:column;gap:4px;padding:5px;border-radius:14px;background:var(--bg);border:1px solid var(--line);' +
       'box-shadow:0 12px 32px -12px rgba(0,0,0,.35);opacity:0;transform:translateY(8px) scale(.96);pointer-events:none;' +
       'transition:opacity .16s ease,transform .16s ease}',
@@ -83,7 +84,7 @@
     '.menu-name{font-size:12.5px;font-weight:600;white-space:nowrap}',
     '.menu-model{font-size:11px;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}',
     '.menu-empty{padding:6px 8px;font-size:12px;opacity:.78}',
-    '@media (prefers-reduced-motion:reduce){.dock,.panel,.tip{transition:none}}'
+    '@media (prefers-reduced-motion:reduce){:host,.dock,.panel,.tip{transition:none}}'
   ].join('\n');
 
   function cfg() {
@@ -189,10 +190,12 @@
 
     // 悬停 / 键盘聚焦时展开，移开 / 失焦后收起
     dock.addEventListener('mouseenter', function () {
+      if (drag && drag.moved) return;
       clearTimeout(closeTimer);
       openTimer = setTimeout(setOpen.bind(null, true), OPEN_DELAY);
     });
     dock.addEventListener('mouseleave', function () {
+      if (drag && drag.moved) return;
       clearTimeout(openTimer);
       closeTimer = setTimeout(setOpen.bind(null, false), CLOSE_DELAY);
     });
@@ -209,6 +212,44 @@
         if (shadow.activeElement) shadow.activeElement.blur();
       }
     });
+    // ---- 拖拽：按住移动 >5px 起拖，松手按离边距离吸附或悬浮，并写回配置 ----
+    dock.addEventListener('pointerdown', function (event) {
+      if (drag) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      var rect = host.getBoundingClientRect();
+      drag = {
+        id: event.pointerId,
+        dx: event.clientX - rect.left,
+        dy: event.clientY - rect.top,
+        sx: event.clientX,
+        sy: event.clientY,
+        moved: false
+      };
+      // 注意：这里不能立刻 setPointerCapture。捕获后 pointerup 会重定向到 dock，
+      // 浏览器据此把 click 也算到 dock 上，按钮自己的 click 永远收不到（0.9.3 实测
+      // 服务商按钮点不开菜单、翻译按钮点了没反应）。等真正开始拖再捕获。
+      window.addEventListener('pointermove', onDragMove, true);
+      window.addEventListener('pointerup', onDragEnd, true);
+      window.addEventListener('pointercancel', onDragEnd, true);
+    });
+
+    dock.addEventListener('click', function (event) {
+      if (!suppressClick) return;
+      event.stopPropagation();
+      event.preventDefault();
+    }, true);
+
+    window.addEventListener('resize', function () {
+      place();
+    });
+    // 内容变长 / 变短导致滚动条出现或消失时只有 clientWidth 变，没有 resize 事件
+    if (window.ResizeObserver) {
+      var viewportObserver = new ResizeObserver(function () {
+        place();
+      });
+      viewportObserver.observe(document.documentElement);
+    }
+
     // 点菜单外面收起（服务商按钮自己负责开关，不在这里抢）
     dock.addEventListener('mousedown', function (event) {
       if (!menu || menu.hidden) return;
@@ -225,6 +266,95 @@
       attributeFilter: ['data-dt', 'data-dt-mode', 'data-dt-scheme', 'data-dt-night']
     });
     document.addEventListener('fullscreenchange', render);
+  }
+
+  // ---------------- 位置与拖拽（0.9.3） ----------------
+  var suppressClick = false;
+  var drag = null;
+
+  function viewOf() {
+    var r = dock ? dock.getBoundingClientRect() : null;
+    // 用布局视口（clientWidth/clientHeight）：innerWidth 含经典滚动条，
+    // 按它贴右会把悬浮入口塞到滚动条下面（0.9.3 实测被盖住一截）
+    return {
+      vw: document.documentElement.clientWidth || window.innerWidth || 1,
+      vh: document.documentElement.clientHeight || window.innerHeight || 1,
+      w: r && r.width ? r.width : 52,
+      h: r && r.height ? r.height : 240
+    };
+  }
+
+  // 按配置（或刚拖完的位置）摆放 host；data-side / data-snapped 也在这里一起定
+  function place() {
+    if (!host || host.hidden) return null;
+    var view = viewOf();
+    var saved = cfg().dockPos;
+    var want = saved && typeof saved.x === 'number' && typeof saved.y === 'number'
+      ? saved
+      : DT.dockDefault(cfg().dockSide === 'left' ? 'left' : 'right', view);
+    var got = DT.dockPlace(want, view);
+    host.style.left = got.x + 'px';
+    host.style.top = got.y + 'px';
+    host.setAttribute('data-side', got.side);
+    dock.toggleAttribute('data-snapped', !!got.snapped);
+    return got;
+  }
+
+  function endDragListeners() {
+    window.removeEventListener('pointermove', onDragMove, true);
+    window.removeEventListener('pointerup', onDragEnd, true);
+    window.removeEventListener('pointercancel', onDragEnd, true);
+  }
+
+  function onDragMove(event) {
+    if (!drag || event.pointerId !== drag.id) return;
+    if (!drag.moved) {
+      // 移动超过 5px 才算拖，否则保持「点击按钮」的语义
+      if (Math.abs(event.clientX - drag.sx) + Math.abs(event.clientY - drag.sy) < 5) return;
+      drag.moved = true;
+      // 真正开始拖了才捕获指针：太早捕获会把按钮的 click 抢到 dock 上
+      try {
+        dock.setPointerCapture(event.pointerId);
+      } catch (err) {
+        /* 合成事件 / 旧浏览器拿不到捕获：靠 window 监听也能拖 */
+      }
+      host.setAttribute('data-drag', '');
+      dock.setAttribute('data-drag', '');
+      clearTimeout(openTimer);
+      clearTimeout(closeTimer);
+      hideTip();
+      hideMenu();
+    }
+    if (event.cancelable) event.preventDefault();
+    host.style.left = Math.round(event.clientX - drag.dx) + 'px';
+    host.style.top = Math.round(event.clientY - drag.dy) + 'px';
+  }
+
+  function onDragEnd(event) {
+    if (!drag || event.pointerId !== drag.id) return;
+    var moved = drag.moved;
+    drag = null;
+    endDragListeners();
+    try {
+      dock.releasePointerCapture(event.pointerId);
+    } catch (err) {
+      /* 合成事件拿不到捕获，忽略 */
+    }
+    host.removeAttribute('data-drag');
+    dock.removeAttribute('data-drag');
+    if (!moved) return;
+    // 拖完紧跟的那次 click 是「拖拽余波」：吞掉，避免误触翻译开关
+    suppressClick = true;
+    setTimeout(function () {
+      suppressClick = false;
+    }, 0);
+    var rect = host.getBoundingClientRect();
+    var got = DT.dockPlace({ x: rect.left, y: rect.top }, viewOf());
+    host.style.left = got.x + 'px';
+    host.style.top = got.y + 'px';
+    host.setAttribute('data-side', got.side);
+    dock.toggleAttribute('data-snapped', !!got.snapped);
+    DT.send({ type: 'dock:pos', pos: { x: got.x, y: got.y } }, 5000).catch(function () {});
   }
 
   function setOpen(open) {
@@ -400,7 +530,7 @@
     var c = cfg();
     var html = document.documentElement;
     host.hidden = !!document.fullscreenElement;
-    host.setAttribute('data-side', c.dockSide === 'left' ? 'left' : 'right');
+    place();
     dock.toggleAttribute('data-auto', c.dockAutoHide !== false);
     dock.toggleAttribute('data-dark', html.getAttribute('data-dt-scheme') === 'dark' || html.getAttribute('data-dt-night') === 'on');
     var st = DT.control ? DT.control.status() : { enabled: false, mode: 'dual' };
@@ -450,6 +580,8 @@
       return menu;
     },
     run: run,
-    setOpen: setOpen
+    setOpen: setOpen,
+    place: place,
+    view: viewOf
   };
 })();

@@ -156,6 +156,14 @@ t('标量字段直接覆盖', () => {
   assert.equal(mergeConfig({ targetLang: 'zh-CN' }, { targetLang: 'ja' }).targetLang, 'ja');
 });
 
+t('dockPos：合并时清洗成 {x,y} 或 null，坏数据不落盘（0.9.3）', () => {
+  assert.deepEqual(mergeConfig({}, { dockPos: { x: 1.4, y: '2' } }).dockPos, { x: 1, y: 2 });
+  assert.equal(mergeConfig({}, { dockPos: { x: 'a', y: 2 } }).dockPos, null);
+  assert.equal(mergeConfig({}, { dockPos: 'right' }).dockPos, null);
+  assert.deepEqual(mergeConfig({ dockPos: { x: 3, y: 4 } }, {}).dockPos, { x: 3, y: 4 });
+  assert.equal(mergeConfig({ dockPos: { x: 3, y: 4 } }, { dockPos: null }).dockPos, null);
+});
+
 // ---------------- 导入校验 ----------------
 console.log('\n[导入校验]');
 

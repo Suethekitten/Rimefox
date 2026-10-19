@@ -2146,6 +2146,76 @@
     return document.getElementById('dt-dock') ? '关掉后还在' : true;
   });
 
+  // ---- 0.9.3 拖拽与吸附：合成 pointer 事件模拟「按住小球 - 移动 - 松手」 ----
+  function dragBall(toX, toY) {
+    var root = DT.dock.root();
+    var ball = root.querySelector('.ball');
+    var dockEl = root.querySelector('.dock');
+    var r = ball.getBoundingClientRect();
+    var sx = r.left + r.width / 2;
+    var sy = r.top + r.height / 2;
+    function pe(type, x, y) {
+      return new PointerEvent(type, {
+        bubbles: true, cancelable: true, composed: true,
+        pointerId: 7, isPrimary: true, button: 0, buttons: 1, pointerType: 'mouse',
+        clientX: x, clientY: y
+      });
+    }
+    ball.dispatchEvent(pe('pointerdown', sx, sy));
+    dockEl.dispatchEvent(pe('pointermove', (sx + toX) / 2, (sy + toY) / 2));
+    dockEl.dispatchEvent(pe('pointermove', toX, toY));
+    dockEl.dispatchEvent(pe('pointerup', toX, toY));
+  }
+
+  check('悬浮入口：拖小球到左边缘松手 → 吸附到左边，data-side 翻成 left', function () {
+    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'right', dockPos: null, page: {} });
+    var host = DT.dock.host();
+    var dockEl = DT.dock.root().querySelector('.dock');
+    if (host.getAttribute('data-side') !== 'right') return '初始不该在左边';
+    dragBall(20, 300);
+    if (host.style.left !== '0px') return '没吸到左边：' + host.style.left;
+    if (host.getAttribute('data-side') !== 'left') return 'data-side 没翻：' + host.getAttribute('data-side');
+    if (!dockEl.hasAttribute('data-snapped')) return '吸边时该带 data-snapped';
+    return true;
+  });
+
+  check('悬浮入口：页面中间松手 → 自由悬浮不吸附，位置跟着手走', function () {
+    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'right', dockPos: null, page: {} });
+    var host = DT.dock.host();
+    var dockEl = DT.dock.root().querySelector('.dock');
+    dragBall(Math.round(window.innerWidth / 2), 260);
+    var left = parseInt(host.style.left, 10);
+    if (!(left > 100 && left < window.innerWidth - 100)) return '位置不对：' + host.style.left;
+    if (dockEl.hasAttribute('data-snapped')) return '中间不该吸附';
+    return true;
+  });
+
+  check('悬浮入口：原地点按（不移动）不算拖拽，位置不变', function () {
+    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'right', dockPos: null, page: {} });
+    var host = DT.dock.host();
+    var before = host.style.left;
+    var ball = DT.dock.root().querySelector('.ball');
+    var r = ball.getBoundingClientRect();
+    var pe = function (type) {
+      return new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 9, isPrimary: true, button: 0, pointerType: 'mouse', clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+    };
+    ball.dispatchEvent(pe('pointerdown'));
+    ball.dispatchEvent(pe('pointerup'));
+    ball.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    if (host.style.left !== before) return '点按后位置变了：' + before + ' → ' + host.style.left;
+    return true;
+  });
+
+  check('悬浮入口：配置里的 dockPos 优先于 dockSide，清空后回贴边', function () {
+    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'left', dockPos: { x: 400, y: 120 }, page: {} });
+    var host = DT.dock.host();
+    if (host.style.left !== '400px' || host.style.top !== '120px') return 'dockPos 没生效：' + host.style.left + ',' + host.style.top;
+    emitConfig({ dockEnabled: true, dockAutoHide: false, dockSide: 'left', dockPos: null, page: {} });
+    if (host.style.left !== '0px') return '清空后没回贴边：' + host.style.left;
+    emitConfig({ dockEnabled: false, page: {} });
+    return true;
+  });
+
   // own 单元（子元素被跳过 / 已翻过，只翻直接文本）原地替换时，只改送去翻译的那些文本节点
   check('仅译文：own 单元不清空 notranslate / translate="no" / 已翻过的子元素', function () {
     var box = document.createElement('div');

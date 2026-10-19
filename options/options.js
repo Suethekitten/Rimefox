@@ -104,7 +104,8 @@ const fields = {
   customCss: $('customCss'),
   dockEnabled: $('dockEnabled'),
   dockSide: $('dockSide'),
-  dockAutoHide: $('dockAutoHide')
+  dockAutoHide: $('dockAutoHide'),
+  dockPosReset: $('dockPosReset')
 };
 
 // 设置页 / 弹窗的界面主题；auto 交给 CSS 的 prefers-color-scheme
@@ -372,6 +373,7 @@ function applyConfig(cfg) {
   fields.dockEnabled.checked = !!cfg.dockEnabled;
   fields.dockSide.value = cfg.dockSide === 'left' ? 'left' : 'right';
   fields.dockAutoHide.checked = cfg.dockAutoHide !== false;
+  fields.dockPosReset.disabled = !cfg.dockPos;
   previewLook();
   showSiteRulesResult(fields.siteRules.value);
   showCustomCssResult(fields.customCss.value);
@@ -868,6 +870,16 @@ $('reset').addEventListener('click', () => {
   applyConfig(currentCfg);
   updateDirty();
   setResult($('saveResult'), '已填入默认值，点「保存」后生效');
+});
+
+// 悬浮窗拖拽位置：恢复成「位置」里的贴边默认值（立即生效，和导入 / 测试连接一样直接落盘）
+fields.dockPosReset.addEventListener('click', async () => {
+  fields.dockPosReset.disabled = true;
+  currentCfg = await saveConfig({ dockPos: null });
+  rememberSaved(currentCfg);
+  markSaved(currentCfg);
+  applyConfig(currentCfg);
+  setResult($('saveResult'), '悬浮窗位置已恢复默认', 'ok');
 });
 
 $('test').addEventListener('click', async () => {

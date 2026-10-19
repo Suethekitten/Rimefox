@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.9.1';
+  DT.VERSION = '0.9.3';
   // 允许重复注入：页面还没加载完就打开弹窗 / 按快捷键时，后台补注入（ensureInjected）的这批脚本
   // 会和 manifest 声明的那批各跑一次。只初始化一次：再跑会清空 DT.state 和 onConfig 的订阅，
   // 而 main.js、appearance.js、dock.js 这些已经启动过的模块不会重新订阅，站点规则 / 外观就再也不生效
@@ -623,5 +623,40 @@
     } catch (err) {
       /* 忽略 */
     }
+  };
+  // ---------------- 悬浮入口位置（0.9.3）：纯函数，dock.js / 自检 / 单测共用 ----------------
+  // view = { vw, vh, w, h }：视口尺寸与 dock 自身尺寸；pos = { x, y } 期望左上角，可以越界、可以是 NaN
+  // 返回 { x, y, side, snapped }：snapped 为 'left' / 'right'（吸附到边）或 null（自由悬浮）；side 给说明气泡 / 菜单决定弹出方向
+  DT.dockPlace = function (pos, view, opt) {
+    var o = opt || {};
+    var margin = o.margin == null ? 8 : o.margin;
+    var vw = Math.max(1, view.vw);
+    var vh = Math.max(1, view.vh);
+    var w = Math.min(view.w, vw);
+    var h = Math.min(view.h, vh);
+    var room = vw - w - margin * 2;
+    var snap = o.snap == null ? 72 : o.snap;
+    // 视口窄到两边吸附区会重叠时，把吸附区收窄到不重叠为止
+    if (room < snap * 2) snap = Math.max(0, Math.floor(room / 2));
+    var maxY = Math.max(margin, vh - h - margin);
+    var y = Math.round(pos.y >= margin ? (pos.y <= maxY ? pos.y : maxY) : margin);
+    if (pos.x <= snap) return { x: 0, y: y, side: 'left', snapped: 'left' };
+    if (vw - (pos.x + w) <= snap) return { x: Math.max(0, vw - w), y: y, side: 'right', snapped: 'right' };
+    var maxX = Math.max(margin, vw - w - margin);
+    var x = Math.round(pos.x >= margin ? (pos.x <= maxX ? pos.x : maxX) : margin);
+    return { x: x, y: y, side: x + w / 2 < vw / 2 ? 'left' : 'right', snapped: null };
+  };
+
+  // 没拖过时的默认位置：跟 dockSide 贴边，竖直方向在视口高度 58% 处居中（与旧 CSS top:58% 一致）
+  DT.dockDefault = function (side, view) {
+    var vw = Math.max(1, view.vw);
+    var vh = Math.max(1, view.vh);
+    var w = Math.min(view.w, vw);
+    var h = Math.min(view.h, vh);
+    var maxY = Math.max(8, vh - h - 8);
+    var y = Math.round(vh * 0.58 - h / 2);
+    if (y > maxY) y = maxY;
+    if (y < 8) y = 8;
+    return side === 'left' ? { x: 0, y: y } : { x: Math.max(0, vw - w), y: y };
   };
 })();

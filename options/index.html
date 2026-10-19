@@ -442,12 +442,23 @@
             </label>
 
             <label class="row sub">
-              <span class="row-text"><span class="row-title">位置</span></span>
+              <span class="row-text">
+                <span class="row-title">位置</span>
+                <span class="row-desc">没拖拽过时贴在哪一边；在网页上拖过之后以拖拽位置为准。</span>
+              </span>
               <select id="dockSide" class="control">
                 <option value="right">右侧</option>
                 <option value="left">左侧</option>
               </select>
             </label>
+
+            <div class="row sub">
+              <span class="row-text">
+                <span class="row-title">拖拽后的位置</span>
+                <span class="row-desc">在网页上按住小球拖动：靠近左 / 右边缘松手会吸附到边上，其它位置保持悬浮。</span>
+              </span>
+              <button id="dockPosReset" type="button" class="btn">恢复默认</button>
+            </div>
 
             <label class="row sub">
               <span class="row-text">

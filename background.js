@@ -606,7 +606,15 @@ const ROUTES = {
     await saveConfig({ mode: msg.mode });
     return { ok: true };
   },
-  // 内容脚本不能直接写配置（完整配置含 Key）：只允许改这一个布尔开关
+  // 网页里的悬浮入口拖拽后上报位置：只接受 {x,y} 或 null（恢复默认），内容脚本改不了其它配置项
+  'dock:pos': async (msg) => {
+    const pos = msg.pos === undefined ? null : msg.pos;
+    if (pos !== null && (typeof pos !== 'object' || typeof pos.x !== 'number' || typeof pos.y !== 'number' || !Number.isFinite(pos.x) || !Number.isFinite(pos.y))) {
+      return { ok: false, error: 'bad_value' };
+    }
+    await saveConfig({ dockPos: pos === null ? null : { x: Math.round(pos.x), y: Math.round(pos.y) } });
+    return { ok: true };
+  },  // 内容脚本不能直接写配置（完整配置含 Key）：只允许改这一个布尔开关
   'hover:set': async (msg) => {
     if (typeof msg.value !== 'boolean') return { ok: false, error: 'bad_value' };
     const cfg = await getConfig();
