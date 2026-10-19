@@ -3,7 +3,14 @@
 // 只读 dom.js 注入时留下的标记，不改注入逻辑：
 //   双语追加   源元素 [data-dt-src] 的直接子节点 [data-dt-target] 是它的译文
 //   原地替换   （仅译文模式、控件 / 导航）原文已经不在页面上 → 高亮鼠标下那句译文，
-//             用 DT.replaced 记下的原值弹小气泡，只显示对应的那一句原文
+//             用 DT.replacedOf 记下的原文弹小气泡
+//
+// 对应关系从粗到细，只认靠得住的那一层：
+//   段落   一个翻译单元就是一段，原文和译文一定对应
+//   行     原文有分行（<br> / pre-*）且译文行数相同 → 第 i 行对第 i 行
+//   句子   行（或段）里两边句数相同，并且每个句界在各自范围里的相对位置接近 → 第 i 句对第 i 句
+// 句子对不上（模型合并 / 拆分 / 调换了句子）就退回整行或整段：高亮范围和气泡都放大到那一层，
+// 不拿按长度比例猜出来的句子冒充精确对照。
 //
 // 句子高亮用 CSS Custom Highlight API（CSS.highlights + ::highlight()）：直接给 Range 上色，
 // 不拆分、不改动页面的文本节点。样式在 content/styles/inject.css。
@@ -41,70 +48,202 @@
     return (src && src.querySelector(':scope > [data-dt-target]')) || null;
   };
 
-  // 原地替换单元的原文：DT.replaced 里每个文本节点的原值
+  // 原地替换单元的原文（保留分行）；老记录没有 src 时退回拼各文本节点的原值
   hover.originalOf = function (src) {
-    var list = DT.replaced || [];
-    for (var i = 0; i < list.length; i += 1) {
-      if (list[i].el !== src) continue;
-      return DT.normalizeText(
-        list[i].nodes
-          .map(function (saved) {
-            return saved.value;
-          })
-          .join(' ')
-      );
-    }
-    return '';
+    var item = DT.replacedOf ? DT.replacedOf(src) : null;
+    if (!item) return '';
+    if (item.src) return item.src;
+    return DT.normalizeText(
+      item.nodes
+        .map(function (saved) {
+          return saved.value;
+        })
+        .join(' ')
+    );
   };
 
   // ---------------- 句子（纯函数，自检直接测） ----------------
 
-  // 句末：西文的 .!?… 后面要跟空白或结尾（避开 3.5、e.g 这种）；中日文的 。！？； 直接断
-  var SENT_END = /[.!?…]+["'”’)\]]*(?=\s|$)|[。！？；]+["'”’）」』]*/g;
+  // 句末：西文的 .!?… 后面要跟空白或结尾（避开 3.5、e.g 这种）；中日文的 。！？； 直接断；换行一定断。
+  // 引号 / 括号里的句号不断句：「じゃーん。今日は？」“好的。”他说。都是一句。
+  // 只跟踪分得清左右的括号；直引号 " ' 分不清开合，交给西文规则（标点后要有空白）
+  var OPEN = '「『“（《〈【';
+  var CLOSE = '」』”）》〉】';
+  var CJK_END = '。！？；';
+  var WEST_END = '.!?…';
+  var TRAIL = '"\'”’)]」』）';
+
+  function isSpace(c) {
+    return !!c && /\s/.test(c);
+  }
 
   // 把文本切成句子：返回 [[start, end], ...]（去掉首尾空白，偏移对应原文本）
   hover.sentencesOf = function (text) {
     var s = String(text || '');
     var out = [];
     var start = 0;
-    var m;
-    function push(a, b) {
-      while (a < b && /\s/.test(s[a])) a += 1;
-      while (b > a && /\s/.test(s[b - 1])) b -= 1;
+    var depth = 0;
+    function cut(end) {
+      var a = start;
+      var b = end;
+      while (a < b && isSpace(s[a])) a += 1;
+      while (b > a && isSpace(s[b - 1])) b -= 1;
       if (b > a) out.push([a, b]);
+      start = end;
     }
-    SENT_END.lastIndex = 0;
-    while ((m = SENT_END.exec(s))) {
-      push(start, m.index + m[0].length);
-      start = m.index + m[0].length;
+    var i = 0;
+    while (i < s.length) {
+      var c = s[i];
+      if (c === '\n') {
+        cut(i);
+        depth = 0; // 引号跨行没闭合：下一行重新算
+        i += 1;
+        continue;
+      }
+      if (OPEN.indexOf(c) >= 0) {
+        depth += 1;
+        i += 1;
+        continue;
+      }
+      if (CLOSE.indexOf(c) >= 0 && depth > 0) {
+        depth -= 1;
+        i += 1;
+        // 「……。」收尾：后面是空白 / 行尾 / 下一段引号才断，「……。」と言った 这种接着往下
+        if (!depth && (CJK_END + WEST_END).indexOf(s[i - 2]) >= 0 && (i >= s.length || isSpace(s[i]) || OPEN.indexOf(s[i]) >= 0)) cut(i);
+        continue;
+      }
+      if (!depth && CJK_END.indexOf(c) >= 0) {
+        var j = i + 1;
+        while (j < s.length && (CJK_END.indexOf(s[j]) >= 0 || TRAIL.indexOf(s[j]) >= 0)) j += 1;
+        cut(j);
+        i = j;
+        continue;
+      }
+      if (!depth && WEST_END.indexOf(c) >= 0) {
+        var k = i + 1;
+        while (k < s.length && (WEST_END.indexOf(s[k]) >= 0 || TRAIL.indexOf(s[k]) >= 0)) k += 1;
+        if (k >= s.length || isSpace(s[k])) cut(k);
+        i = k;
+        continue;
+      }
+      i += 1;
     }
-    push(start, s.length);
+    cut(s.length);
     return out;
   };
 
-  // 第 i 句对应另一边的第几句：句数相同按序号；不同就按这句的中点在全文里的相对位置找
-  hover.alignSentence = function (fromSents, fromLen, toSents, toLen, i) {
-    if (!toSents.length || i < 0) return -1;
-    if (fromSents.length === toSents.length) return i;
-    var s = fromSents[i];
-    var pos = ((s[0] + s[1]) / 2 / Math.max(1, fromLen)) * toLen;
-    for (var j = 0; j < toSents.length; j += 1) {
-      if (pos < toSents[j][1]) return j;
+  // 非空的行：[[start, end], ...]（去掉行首尾空白）
+  hover.linesOf = function (text) {
+    var s = String(text || '');
+    var out = [];
+    var start = 0;
+    for (var i = 0; i <= s.length; i += 1) {
+      if (i < s.length && s[i] !== '\n') continue;
+      var a = start;
+      var b = i;
+      while (a < b && isSpace(s[a])) a += 1;
+      while (b > a && isSpace(s[b - 1])) b -= 1;
+      if (b > a) out.push([a, b]);
+      start = i + 1;
     }
-    return toSents.length - 1;
+    return out;
   };
 
-  function sentenceAt(sents, offset) {
-    for (var i = 0; i < sents.length; i += 1) {
-      if (offset < sents[i][1]) return offset >= sents[i][0] ? i : Math.max(0, i - 1);
-    }
-    return sents.length - 1;
+  // span 范围里的句子（偏移仍对应整段文本）
+  function sentencesIn(text, span) {
+    return hover.sentencesOf(String(text || '').slice(span[0], span[1])).map(function (r) {
+      return [r[0] + span[0], r[1] + span[0]];
+    });
   }
+
+  function spanOf(x) {
+    return typeof x === 'number' ? [0, x] : x;
+  }
+
+  // 两边的句子能不能一一对应：句数相同，且每个句界在各自范围里的相对位置相差不超过 SENT_DRIFT。
+  // 位置只用来否决：一边合并、一边拆分凑出相同句数时，句界会明显错开
+  hover.SENT_DRIFT = 0.25;
+  hover.sentencesAgree = function (a, aSpan, b, bSpan) {
+    if (!a.length || a.length !== b.length) return false;
+    var sa = spanOf(aSpan);
+    var sb = spanOf(bSpan);
+    var la = Math.max(1, sa[1] - sa[0]);
+    var lb = Math.max(1, sb[1] - sb[0]);
+    for (var i = 0; i < a.length - 1; i += 1) {
+      var pa = (a[i][1] - sa[0]) / la;
+      var pb = (b[i][1] - sb[0]) / lb;
+      if (Math.abs(pa - pb) > hover.SENT_DRIFT) return false;
+    }
+    return true;
+  };
+
+  // 第 i 句对应另一边的第几句：句子能一一对应时就是 i；对不上返回 -1，
+  // 调用方退回整行 / 整段（不按相对位置去猜）。范围可以传 [start, end] 或文本长度
+  hover.alignSentence = function (fromSents, fromSpan, toSents, toSpan, i) {
+    if (i < 0 || i >= fromSents.length) return -1;
+    return hover.sentencesAgree(fromSents, fromSpan, toSents, toSpan) ? i : -1;
+  };
+
+  // offset 落在第几个范围里（落在两个范围之间算前一个）
+  function indexAt(ranges, offset) {
+    for (var i = 0; i < ranges.length; i += 1) {
+      if (offset < ranges[i][1]) return offset >= ranges[i][0] ? i : Math.max(0, i - 1);
+    }
+    return ranges.length - 1;
+  }
+
+  function wholeOf(lines, len) {
+    return lines.length ? [lines[0][0], lines[lines.length - 1][1]] : [0, len];
+  }
+
+  // 双语：鼠标在 fromText 的 at 处，返回两边要高亮的范围 { from, to, scope }。
+  // 两边行数相同按行配对，否则整段配对；行 / 段里再看句子能不能一一对应
+  hover.matchDual = function (fromText, toText, at) {
+    var fl = hover.linesOf(fromText);
+    var tl = hover.linesOf(toText);
+    if (!fl.length || !tl.length) return null;
+    var byLine = fl.length === tl.length;
+    var L = byLine ? indexAt(fl, at) : 0;
+    var fromSpan = byLine ? fl[L] : wholeOf(fl, fromText.length);
+    var toSpan = byLine ? tl[L] : wholeOf(tl, toText.length);
+    var fs = sentencesIn(fromText, fromSpan);
+    var ts = sentencesIn(toText, toSpan);
+    var i = indexAt(fs, at);
+    var j = hover.alignSentence(fs, fromSpan, ts, toSpan, i);
+    if (j >= 0) return { from: fs[i], to: ts[j], scope: 'sentence' };
+    return { from: fromSpan, to: toSpan, scope: byLine ? 'line' : 'paragraph' };
+  };
+
+  // 原地替换：页面上显示的是译文 pageText，鼠标在 at 处；item 是 DT.replacedOf 的记录
+  // （src 原文、lines 原文各行、aligned 译文是否逐行写回）。
+  // 返回 { span: 页面上要高亮的范围, tip: 气泡里的原文, scope }
+  hover.matchReplaced = function (pageText, at, item) {
+    var orig = (item && item.src) || '';
+    var pl = hover.linesOf(pageText);
+    if (!orig || !pl.length) return null;
+    var span = wholeOf(pl, pageText.length);
+    var scope = 'paragraph';
+    var srcLines = item.lines || [];
+    if (item.aligned && srcLines.length === pl.length) {
+      var L = indexAt(pl, at);
+      span = pl[L];
+      orig = srcLines[L];
+      scope = 'line';
+    }
+    var ps = sentencesIn(pageText, span);
+    var os = hover.sentencesOf(orig);
+    var i = indexAt(ps, at);
+    var j = hover.alignSentence(ps, span, os, orig.length, i);
+    if (j >= 0) return { span: ps[i], tip: orig.slice(os[j][0], os[j][1]), scope: 'sentence' };
+    return { span: span, tip: orig, scope: scope };
+  };
 
   // ---------------- 文本表：单元里的文本节点 ↔ 拼起来的文本偏移 ----------------
   var NON_TEXT = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, SVG: 1, MATH: 1, TEXTAREA: 1, SELECT: 1 };
 
-  // root 里的文本节点（不含译文节点和我们自己的界面），拼成一段文本并记下每个节点的起点
+  // root 里的文本节点（不含译文节点、我们自己的界面、隐藏子树），拼成一段文本并记下每个节点的起点。
+  // <br> 记成一个换行（不对应任何节点；收起的不算）。不保留换行的元素里，源码折行的 \n 按空格算
+  // （长度不变，偏移照样对得上），和 dom.js 送翻时的分行规则一致
   hover.textMap = function (root) {
     var nodes = [];
     var text = '';
@@ -112,16 +251,26 @@
       acceptNode: function (n) {
         if (n.nodeType === 3) return NodeFilter.FILTER_ACCEPT;
         if (n !== root && (n.hasAttribute('data-dt-target') || n.hasAttribute('data-dt-ui'))) return NodeFilter.FILTER_REJECT;
-        if (NON_TEXT[String(n.tagName).toUpperCase()]) return NodeFilter.FILTER_REJECT;
+        var tag = String(n.tagName).toUpperCase();
+        if (NON_TEXT[tag]) return NodeFilter.FILTER_REJECT;
+        if (tag === 'BR') return n.hasAttribute('data-dt-collapsed') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+        if (n !== root && (n.hidden || getComputedStyle(n).display === 'none')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_SKIP;
       }
     });
     var node;
     while ((node = walker.nextNode())) {
-      nodes.push({ node: node, start: text.length });
-      text += node.nodeValue;
+      if (node.nodeType === 1) {
+        text += '\n';
+        continue;
+      }
+      var value = node.nodeValue;
+      var cs = node.parentElement ? getComputedStyle(node.parentElement) : null;
+      if (!cs || !DT.keepsLineBreaks(cs.whiteSpace, cs.whiteSpaceCollapse)) value = value.replace(/[\r\n]/g, ' ');
+      nodes.push({ node: node, start: text.length, len: value.length });
+      text += value;
     }
-    return { text: text, nodes: nodes, sents: hover.sentencesOf(text) };
+    return { text: text, nodes: nodes };
   };
 
   function offsetIn(map, node, offset) {
@@ -135,18 +284,18 @@
     for (var i = 0; i < map.nodes.length; i += 1) {
       var n = map.nodes[i];
       var len = n.node.nodeValue.length;
-      if (offset < n.start + len || (isEnd && offset === n.start + len)) return { node: n.node, offset: offset - n.start };
+      // 落在 <br> 记的那个换行上时取下一个节点的开头
+      if (offset < n.start + len || (isEnd && offset === n.start + len)) return { node: n.node, offset: Math.max(0, offset - n.start) };
     }
     var last = map.nodes[map.nodes.length - 1];
     return last ? { node: last.node, offset: last.node.nodeValue.length } : null;
   }
 
-  // 第 i 句在页面上的 Range
-  hover.rangeOf = function (map, i) {
-    var s = map.sents[i];
-    if (!s) return null;
-    var a = pointIn(map, s[0], false);
-    var b = pointIn(map, s[1], true);
+  // 文本里 [start, end) 这一段在页面上的 Range
+  hover.rangeOf = function (map, span) {
+    if (!span) return null;
+    var a = pointIn(map, span[0], false);
+    var b = pointIn(map, span[1], true);
     if (!a || !b) return null;
     var range = document.createRange();
     range.setStart(a.node, a.offset);
@@ -226,7 +375,7 @@
   function markWhole(unit) {
     if (unit.hasAttribute('data-dt-replaced')) {
       var original = hover.originalOf(unit);
-      if (!original || original === DT.normalizeText(unit.textContent)) return;
+      if (!original || DT.normalizeText(original) === DT.normalizeText(unit.textContent)) return;
       unit.setAttribute('data-dt-hover', 'replaced');
       marked.push(unit);
       showTip(unit, original);
@@ -239,12 +388,18 @@
     marked.push(unit, target);
   }
 
+  // 同一个单元里移动时复用文本表；节点被换掉、或者文字变了（重新翻译、切换模式）就重建
   function mapsFor(unit) {
     var fresh =
       cache &&
       cache.unit === unit &&
-      cache.src.nodes.every(function (n) {
-        return n.node.isConnected;
+      [cache.src, cache.tgt].every(function (map) {
+        return (
+          !map ||
+          map.nodes.every(function (n) {
+            return n.node.isConnected && n.node.nodeValue.length === n.len;
+          })
+        );
       });
     if (fresh) return cache;
     var target = unit.hasAttribute('data-dt-replaced') ? null : hover.targetOf(unit);
@@ -273,23 +428,20 @@
     var maps = mapsFor(unit);
 
     if (unit.hasAttribute('data-dt-replaced')) {
-      // 页面上显示的是译文：高亮鼠标下那句，气泡里放对应的那句原文
+      // 页面上显示的是译文：高亮鼠标下那句（对不上时是那一行 / 整段），气泡里放对应的原文
       var page = maps.src;
       var at = offsetIn(page, caret.node, caret.offset);
-      if (at < 0 || !page.sents.length) return;
-      var i = sentenceAt(page.sents, at);
-      var key = 'r' + i;
+      if (at < 0) return;
+      var hit = hover.matchReplaced(page.text, at, DT.replacedOf(unit));
+      if (!hit) return;
+      var key = 'r' + hit.span.join(':');
       if (unit === current && key === currentKey) return;
       clear();
       current = unit;
       currentKey = key;
-      paint(TGT_HL, hover.rangeOf(page, i));
-      var original = hover.originalOf(unit);
-      var origSents = hover.sentencesOf(original);
-      var j = hover.alignSentence(page.sents, page.text.length, origSents, original.length, i);
-      var sentence = j >= 0 ? original.slice(origSents[j][0], origSents[j][1]) : original;
-      if (sentence && DT.normalizeText(sentence) !== DT.normalizeText(page.text.slice(page.sents[i][0], page.sents[i][1]))) {
-        showTip(unit, sentence);
+      paint(TGT_HL, hover.rangeOf(page, hit.span));
+      if (DT.normalizeText(hit.tip) !== DT.normalizeText(page.text.slice(hit.span[0], hit.span[1]))) {
+        showTip(unit, hit.tip);
       }
       return;
     }
@@ -299,18 +451,18 @@
     var from = onTarget ? maps.tgt : maps.src;
     var to = onTarget ? maps.src : maps.tgt;
     var pos = offsetIn(from, caret.node, caret.offset);
-    if (pos < 0 || !from.sents.length) return;
-    var fi = sentenceAt(from.sents, pos);
-    var ti = hover.alignSentence(from.sents, from.text.length, to.sents, to.text.length, fi);
-    var srcIndex = onTarget ? ti : fi;
-    var tgtIndex = onTarget ? fi : ti;
-    var k = srcIndex + ':' + tgtIndex;
+    if (pos < 0) return;
+    var pair = hover.matchDual(from.text, to.text, pos);
+    if (!pair) return;
+    var srcSpan = onTarget ? pair.to : pair.from;
+    var tgtSpan = onTarget ? pair.from : pair.to;
+    var k = srcSpan.join(':') + '|' + tgtSpan.join(':');
     if (unit === current && k === currentKey) return;
     clear();
     current = unit;
     currentKey = k;
-    paint(SRC_HL, hover.rangeOf(maps.src, srcIndex));
-    paint(TGT_HL, hover.rangeOf(maps.tgt, tgtIndex));
+    paint(SRC_HL, hover.rangeOf(maps.src, srcSpan));
+    paint(TGT_HL, hover.rangeOf(maps.tgt, tgtSpan));
   };
 
   hover.clear = clear;

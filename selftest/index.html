@@ -217,6 +217,17 @@
       </div>
     </div>
 
+    <!-- 0.8.4 小说正文夹具（每个用例克隆一份挂进 #fixture，互不影响）：
+         nv-reader 仿 Pixiv 阅读器：white-space: pre-wrap 容器里，每个自然段一个 <p>，段内几行用 span + <br> 分隔，
+         标签之间不留空白（和真实页面一样，否则 pre-wrap 会把源码缩进渲染成空行）。
+         覆盖：普通段落 / 多个 <br> / 行首全角缩进 / 人物对白 / 连续空行 / 多文本节点 + 行内强调 / 末尾空行；
+         nv-preline：单个文本节点里用 \n 分行的 pre-line 块（诗、帖子） -->
+    <template id="tpl-novel"><div class="nv-reader" style="white-space: pre-wrap; width: 600px; font: 16px/2 serif"><p class="nv-plain">The rain had stopped by the time we reached the station.</p><p class="nv-lines"><span class="text-count">　The classroom was empty after school.</span><br><span class="text-count">　Only the four of us were left.</span></p><p class="nv-dialogue"><span class="text-count">「今日は何の日でしょう？」</span><br><span class="text-count">「ポッキーの日だ。」</span><br><span class="text-count">「じゃあ、勝負しよう。」</span><br><span class="text-count"></span></p><p class="nv-blank">First paragraph of the letter.<br><br>Second paragraph after a blank line.</p><p class="nv-multi">She said <em>very quietly</em> that it was <b>over</b>.<br>Nobody answered.</p></div><div class="nv-preline" style="white-space: pre-line; width: 600px">Line one of the poem.
+Line two of the poem.
+
+A new stanza begins here.</div><p class="nv-source-newline">Hello
+      world, this newline is only source formatting.</p></template>
+
     <script src="../content/core.js"></script>
     <script src="../content/dom.js"></script>
     <script src="../content/appearance.js"></script>

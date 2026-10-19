@@ -46,6 +46,20 @@
   overflow: visible !important;
 }
 
+/* 原文有分行（几行对白、<br> 分隔的帖子、white-space: pre-*）时译文同样分行。
+   只作用在带 dt-lines 的译文节点上（dom.js 按译文里有没有换行加类），不改其它译文 */
+.dt-target.dt-lines {
+  white-space: pre-line !important;
+}
+.dt-target.dt-narrow.dt-lines {
+  white-space: pre !important;
+}
+
+/* 仅译文：模型给的行数比原文少时，后面空出来的 <br> 收起，段尾不留一串空行（还原时去掉属性） */
+br[data-dt-collapsed] {
+  display: none !important;
+}
+
 /* 首字下沉：原站常给 p::first-letter / .dropcap 配 4em 字号和 float。
    译文自己也是块级元素，必须把 ::first-letter 归一化，否则目标首字会被放大。 */
 .dt-target::first-letter {

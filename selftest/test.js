@@ -431,8 +431,8 @@
     return got.length === 1 ? got[0].text : '收集到 ' + got.length + ' 个单元';
   }
 
-  check('<br> 分隔的两行不会粘成一个词', function () {
-    return eq(onlyText('fx-br'), 'First line Second line');
+  check('<br> 分隔的两行不会粘成一个词（0.8.4 起按换行送翻）', function () {
+    return eq(onlyText('fx-br'), 'First line\nSecond line');
   });
 
   check('行内 <code> 留在句子里，不被丢掉', function () {
@@ -911,7 +911,7 @@
     return out.join('|');
   }
 
-  check('悬停对照：句子切分与对齐（句数不同按相对位置）', function () {
+  check('悬停对照：句子切分与对齐（句数不同不按位置猜）', function () {
     var text = 'First one. Version 3.5 is out! 第三句。第四句？';
     var parts = DT.hover.sentencesOf(text).map(function (s) { return text.slice(s[0], s[1]); });
     var r = eq(parts, ['First one.', 'Version 3.5 is out!', '第三句。', '第四句？']);
@@ -919,7 +919,7 @@
     var a = [[0, 10], [11, 20], [21, 30]];
     var b = [[0, 15], [16, 30]];
     var got = [0, 1, 2].map(function (i) { return DT.hover.alignSentence(a, 30, b, 30, i); });
-    if (JSON.stringify(got) !== '[0,1,1]') return '按位置对齐不对：' + JSON.stringify(got);
+    if (JSON.stringify(got) !== '[-1,-1,-1]') return '句数不同时不该给出对应句：' + JSON.stringify(got);
     return DT.hover.alignSentence(a, 30, a, 30, 2) === 2 ? true : '句数相同应按序号';
   });
 
@@ -967,6 +967,370 @@
       p = pointOf(c.firstChild, 'Else');
       DT.hover.updateAt(p.x, p.y, c);
       return tip.hidden && !highlighted('dt-hover-target') ? true : '移开后气泡 / 高亮没收起';
+    });
+  });
+
+  // ---------------- 0.8.4 小说正文：分行保留 / 按行写回 / 还原 ----------------
+  function mountNovel() {
+    var box = document.createElement('div');
+    box.appendChild(document.getElementById('tpl-novel').content.cloneNode(true));
+    document.getElementById('fixture').appendChild(box);
+    return box;
+  }
+  // 模拟遵守分行规则的模型：每行加前缀，行数不变
+  function fakeLines(text) {
+    return text.split('\n').map(function (line) { return line ? '译：' + line : ''; }).join('\n');
+  }
+  function withNovel(mode, fn) {
+    var box = mountNovel();
+    var prev = DT.state.mode;
+    DT.state.mode = mode;
+    try {
+      return fn(box, function (cls) { return box.querySelector('.' + cls); });
+    } finally {
+      DT.state.mode = prev;
+      DT.restore();
+      box.remove();
+    }
+  }
+  function unitOfEl(el) {
+    return DT.collect(el).filter(function (u) { return u.el === el; })[0];
+  }
+  // 页面上实际排出来的行（innerText 认 <br>、pre-*、display:none）
+  function shownLines(el) {
+    return el.innerText.replace(/\n+$/, '').split('\n');
+  }
+
+  check('normalizeLines / splitLines：保留分行，行内照常折叠；没有换行时与 normalizeText 相同', function () {
+    var r = eq(DT.normalizeLines('  a \t b \n\n\n  c  \n'), 'a b\n\nc');
+    if (r !== true) return r;
+    r = eq(DT.normalizeLines('\n　\n x \n　\n'), 'x');
+    if (r !== true) return '全角空格行应算空行：' + r;
+    var plain = '  Some   text here  ';
+    if (DT.normalizeLines(plain) !== DT.normalizeText(plain)) return '单行结果应与 normalizeText 一致';
+    return eq(DT.splitLines('一\n\n 二 \n　'), ['一', '二']);
+  });
+
+  check('小说：每个自然段一个单元，<br> / pre-line 的换行进入送翻文本，源码折行不算', function () {
+    return withNovel('dual', function (box, q) {
+      var units = DT.collect(box);
+      if (units.length !== 7) return '应为 7 个单元，实际 ' + units.length + '：' + JSON.stringify(units.map(function (u) { return u.text.slice(0, 12); }));
+      var r = eq(unitOfEl(q('nv-lines')).text, 'The classroom was empty after school.\nOnly the four of us were left.');
+      if (r !== true) return 'span + <br>：' + r;
+      r = eq(unitOfEl(q('nv-dialogue')).text, '「今日は何の日でしょう？」\n「ポッキーの日だ。」\n「じゃあ、勝負しよう。」');
+      if (r !== true) return '对白（末尾空 span 不算一行）：' + r;
+      r = eq(unitOfEl(q('nv-blank')).text, 'First paragraph of the letter.\n\nSecond paragraph after a blank line.');
+      if (r !== true) return '连续 <br> 留一个空行：' + r;
+      r = eq(unitOfEl(q('nv-multi')).text, 'She said very quietly that it was over.\nNobody answered.');
+      if (r !== true) return '行内强调：' + r;
+      r = eq(unitOfEl(q('nv-preline')).text, 'Line one of the poem.\nLine two of the poem.\n\nA new stanza begins here.');
+      if (r !== true) return 'pre-line：' + r;
+      return eq(unitOfEl(q('nv-source-newline')).text, 'Hello world, this newline is only source formatting.');
+    });
+  });
+
+  check('小说·仅译文：多行段落逐行写回，不并成一段，<br> 与 span 数量不变', function () {
+    return withNovel('translation', function (box, q) {
+      var p = q('nv-dialogue');
+      var u = unitOfEl(p);
+      var before = { spans: p.querySelectorAll('span').length, brs: p.querySelectorAll('br').length };
+      if (!DT.inject(u.el, fakeLines(u.text), 'zh-CN')) return 'inject 返回 false';
+      if (p.querySelector('[data-dt-target]')) return '仅译文不该追加节点';
+      var spans = p.querySelectorAll('span');
+      if (spans.length !== before.spans || p.querySelectorAll('br').length !== before.brs) return '段落结构变了';
+      var r = eq([spans[0].textContent, spans[1].textContent, spans[2].textContent], ['译：「今日は何の日でしょう？」', '译：「ポッキーの日だ。」', '译：「じゃあ、勝負しよう。」']);
+      if (r !== true) return '没有逐行写回：' + r;
+      var lines = shownLines(p);
+      if (lines.length !== 3) return '页面上应排成 3 行，实际 ' + JSON.stringify(lines);
+      return DT.replacedOf(p) && DT.replacedOf(p).aligned === true ? true : '行数一致时应记为逐行对齐';
+    });
+  });
+
+  check('小说·仅译文：行首全角缩进、连续空行、pre-line 文本节点里的分行都保留', function () {
+    return withNovel('translation', function (box, q) {
+      var lines = q('nv-lines');
+      var u = unitOfEl(lines);
+      DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+      var first = lines.querySelector('span').textContent;
+      if (first !== '　译：The classroom was empty after school.') return '行首缩进丢了：' + JSON.stringify(first);
+      var blank = q('nv-blank');
+      u = unitOfEl(blank);
+      DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+      var r = eq(shownLines(blank), ['译：First paragraph of the letter.', '', '译：Second paragraph after a blank line.']);
+      if (r !== true) return '连续空行：' + r;
+      var pre = q('nv-preline');
+      u = unitOfEl(pre);
+      DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+      if (pre.childNodes.length !== 1) return 'pre-line 块的文本节点数变了';
+      return eq(pre.firstChild.nodeValue, '译：Line one of the poem.\n译：Line two of the poem.\n\n译：A new stanza begins here.');
+    });
+  });
+
+  check('小说·仅译文：行内强调所在行单独写回，<em>/<b> 元素仍在，下一行不受影响', function () {
+    return withNovel('translation', function (box, q) {
+      var p = q('nv-multi');
+      var u = unitOfEl(p);
+      DT.inject(u.el, '她非常小声地说，一切都结束了。\n没有人回答。', 'zh-CN');
+      if (!p.querySelector('em') || !p.querySelector('b')) return '行内元素被删了';
+      return eq(shownLines(p), ['她非常小声地说，一切都结束了。', '没有人回答。']);
+    });
+  });
+
+  check('小说·双语：原文结构一字不动，译文节点保留分行', function () {
+    return withNovel('dual', function (box, q) {
+      var p = q('nv-dialogue');
+      var html = p.innerHTML;
+      var u = unitOfEl(p);
+      if (!DT.inject(u.el, fakeLines(u.text), 'zh-CN')) return 'inject 返回 false';
+      var node = p.querySelector(':scope > [data-dt-target]');
+      if (!node) return '双语应追加译文';
+      if (p.innerHTML.slice(0, html.length) !== html) return '原文被改动了';
+      if (!node.classList.contains('dt-lines')) return '多行译文缺少 dt-lines';
+      if (getComputedStyle(node).whiteSpace !== 'pre-line') return '译文分行没生效：' + getComputedStyle(node).whiteSpace;
+      var single = q('nv-plain');
+      u = unitOfEl(single);
+      DT.inject(u.el, '雨停了。', 'zh-CN');
+      var one = single.querySelector('[data-dt-target]');
+      return one && !one.classList.contains('dt-lines') && getComputedStyle(one).whiteSpace === 'normal'
+        ? true
+        : '单行译文不该改 white-space';
+    });
+  });
+
+  check('小说·仅译文：模型把几行并成一行 → 依次填写、多余换行收起不留空行，记为未对齐', function () {
+    return withNovel('translation', function (box, q) {
+      var p = q('nv-dialogue');
+      var html = p.innerHTML;
+      var u = unitOfEl(p);
+      DT.inject(u.el, '「今天是什么日子？」「百奇日。」「那就来比一场。」', 'zh-CN');
+      var lines = shownLines(p);
+      if (lines.length !== 1) return '段尾不该留空行：' + JSON.stringify(lines);
+      if (p.querySelectorAll('br').length !== 3) return '<br> 不该被删除';
+      if (DT.replacedOf(p).aligned !== false) return '行数对不上时不能记为逐行对齐';
+      DT.restore();
+      if (p.innerHTML !== html) return '还原后结构不一致：' + p.innerHTML;
+      return document.querySelector('[data-dt-collapsed]') ? '还原后还有收起的换行' : true;
+    });
+  });
+
+  check('小说·仅译文：模型多拆了行 → 多出来的并进最后一行，不丢字', function () {
+    return withNovel('translation', function (box, q) {
+      var p = q('nv-lines');
+      var u = unitOfEl(p);
+      DT.inject(u.el, '放学后的教室空荡荡的。\n只剩我们四个人。\n谁也没说话。', 'zh-CN');
+      var r = eq(shownLines(p), ['　放学后的教室空荡荡的。', '　只剩我们四个人。', '谁也没说话。']);
+      if (r !== true) return r;
+      return DT.replacedOf(p).aligned === false ? true : '行数对不上时不能记为逐行对齐';
+    });
+  });
+
+  check('小说·还原：两种模式下段落、空白、原始文本逐字恢复', function () {
+    var bad = [];
+    ['dual', 'translation'].forEach(function (mode) {
+      withNovel(mode, function (box) {
+        var html = box.innerHTML;
+        DT.collect(box).forEach(function (u) {
+          DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+        });
+        if (box.innerHTML === html) bad.push(mode + '：没有注入');
+        DT.restore();
+        if (box.innerHTML !== html) bad.push(mode + '：还原后不一致');
+      });
+    });
+    return bad.length ? bad.join('；') : true;
+  });
+
+  check('小说：切换模式、重复翻译不残留旧译文，段落 / 换行数量不增长', function () {
+    return withNovel('dual', function (box) {
+      function count() {
+        return [box.querySelectorAll('p').length, box.querySelectorAll('br').length, box.querySelectorAll('span:not([data-dt-target])').length].join('/');
+      }
+      var start = count();
+      var html = box.innerHTML;
+      var rounds = ['dual', 'translation', 'dual', 'translation'];
+      for (var i = 0; i < rounds.length; i += 1) {
+        DT.state.mode = rounds[i];
+        DT.collect(box).forEach(function (u) {
+          DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+        });
+        // 同一轮再收集一次：已翻过的不再出现，也不会二次注入
+        if (DT.collect(box).length) return rounds[i] + '：已翻译的段落又被收集';
+        var targets = box.querySelectorAll('[data-dt-target]').length;
+        if (rounds[i] === 'dual' && targets !== 7) return '双语应有 7 个译文节点，实际 ' + targets;
+        if (rounds[i] === 'translation' && targets) return '仅译文残留了双语节点 ' + targets;
+        if (count() !== start) return rounds[i] + '：数量变了 ' + count() + ' vs ' + start;
+        DT.restore(); // 切换模式 = 还原后重建（main.js 的 startOver）
+        if (box.innerHTML !== html) return rounds[i] + '：切换后没有回到原文';
+      }
+      return true;
+    });
+  });
+
+  check('小说：翻译途中网站改了原文 → 旧译文不写入；改了已替换的行 → 还原不覆盖新内容', function () {
+    return withNovel('translation', function (box, q) {
+      var p = q('nv-dialogue');
+      var u = unitOfEl(p);
+      if (DT.sourceChanged(u)) return '原文没变时不该判成已改';
+      p.querySelectorAll('span')[1].firstChild.nodeValue = '「ちがうよ。」';
+      if (!DT.sourceChanged(u)) return '原文变了没认出来（旧译文会写进新内容）';
+      u = unitOfEl(p);
+      DT.inject(u.el, fakeLines(u.text), 'zh-CN');
+      var spans = p.querySelectorAll('span');
+      spans[2].firstChild.nodeValue = '「サイトの新しい文」'; // 站点重渲染改了第 3 行
+      DT.restore();
+      return eq([spans[0].textContent, spans[1].textContent, spans[2].textContent], ['「今日は何の日でしょう？」', '「ちがうよ。」', '「サイトの新しい文」']);
+    });
+  });
+
+  check('长篇多段落：splitLong 在换行处切开，joinSlots 拼回仍是换行；单行长文本照旧', function () {
+    var lines = [];
+    for (var i = 0; i < 30; i += 1) lines.push('Paragraph ' + i + ' tells a short part of the story and then it ends here.');
+    var text = lines.slice(0, 15).join('\n') + '\n\n' + lines.slice(15).join('\n');
+    var parts = DT.splitLong(text, 300);
+    if (parts.length < 5) return '应拆成多段，实际 ' + parts.length;
+    if (parts.some(function (p) { return p.length > 300; })) return '有超过上限的段';
+    if (parts.some(function (p) { return /^\n|\n$/.test(p); })) return '段首 / 段尾不该是换行';
+    if (DT.joinSlots(parts, parts.seps) !== text) return '按 seps 拼回与原文不一致（换行丢了）';
+    var long = 'This is a sentence number one. '.repeat(60).trim() + '\nShort tail line.';
+    var p2 = DT.splitLong(long, 300);
+    if (DT.joinSlots(p2, p2.seps).replace(/\s+/g, ' ') !== long.replace(/\s+/g, ' ')) return '超长行内按句切后内容丢失';
+    if (DT.joinSlots(p2, p2.seps).indexOf('\nShort tail line.') < 0) return '超长行之后的换行丢了';
+    var flat = DT.splitLong('One sentence here. '.repeat(100), 300);
+    return flat.seps.every(function (sep) { return sep === ' '; }) ? true : '没有换行的长文本应按空格拼回';
+  });
+
+  check('joinSlots：丢掉空段时保留换行分隔', function () {
+    return eq(DT.joinSlots(['一', '', '二', '三'], ['\n', ' ', '\n\n']), '一\n二\n\n三');
+  });
+
+  // ---------------- 0.8.4 悬停对照：句子 / 行 / 段落三级对应（纯函数） ----------------
+  function sents(text) {
+    return DT.hover.sentencesOf(text).map(function (r) { return text.slice(r[0], r[1]); });
+  }
+
+  check('句子切分：中文 / 日文 / 英文标点、引号、换行', function () {
+    var cases = [
+      ['他来了。她走了！真的吗？', ['他来了。', '她走了！', '真的吗？']],
+      ['「じゃーん。今日は何の日？」「ポッキーの日。」と岩崎が言った。', ['「じゃーん。今日は何の日？」', '「ポッキーの日。」と岩崎が言った。']],
+      ['“好的。”他说。“走吧！”', ['“好的。”他说。', '“走吧！”']],
+      ['“Hello.” She left. Version 3.5 is out!', ['“Hello.”', 'She left.', 'Version 3.5 is out!']],
+      ['He said "Stop." Then he left…', ['He said "Stop."', 'Then he left…']],
+      ['第一行没有句号\n第二行。', ['第一行没有句号', '第二行。']],
+      ['「没闭合的引号。\n下一行照常。断句。', ['「没闭合的引号。', '下一行照常。', '断句。']]
+    ];
+    var bad = cases.filter(function (c) { return JSON.stringify(sents(c[0])) !== JSON.stringify(c[1]); });
+    return bad.length ? bad.map(function (c) { return JSON.stringify(sents(c[0])); }).join(' | ') : true;
+  });
+
+  check('句子对齐：句数相同且句界一致才认；合并、拆分、一并一拆都不给精确对应', function () {
+    var src = 'It rained. We waited for hours at the station. Then the train came.';
+    var same = '下雨了。我们在车站等了好几个小时。然后火车来了。';
+    var merged = '下雨了，我们在车站等了好几个小时。然后火车来了。';
+    var split = '下雨了。我们在车站等。等了好几个小时。然后火车来了。';
+    var shuffled = '下雨了，我们在车站等了好几个小时，然后火车。终于来了。了。'; // 句数相同但句界错开
+    var S = DT.hover.sentencesOf(src);
+    function at(t, i) { return DT.hover.alignSentence(S, src.length, DT.hover.sentencesOf(t), t.length, i); }
+    if (at(same, 1) !== 1) return '一一对应时应给出对应句';
+    if (at(merged, 1) !== -1 || at(split, 1) !== -1) return '句数不同时不该给对应句';
+    if (DT.hover.sentencesOf(shuffled).length !== 3) return '夹具应是 3 句：' + JSON.stringify(sents(shuffled));
+    return at(shuffled, 0) === -1 ? true : '句界明显错开时不该给对应句';
+  });
+
+  check('悬停匹配（纯函数）：按行配对 → 行内按句；行数不同退回整段', function () {
+    var H = DT.hover;
+    var from = 'One. Two.\nThree.';
+    var to = '一。二。\n三。';
+    var m = H.matchDual(from, to, from.indexOf('Two'));
+    var r = eq([m.scope, to.slice(m.to[0], m.to[1])], ['sentence', '二。']);
+    if (r !== true) return '行内按句：' + r;
+    m = H.matchDual(from, '一。二。三。', from.indexOf('Three'));
+    r = eq([m.scope, from.slice(m.from[0], m.from[1])], ['sentence', 'Three.']);
+    if (r !== true) return '行数不同但整段句子一致：' + r;
+    m = H.matchDual(from, '一二。\n三。四。', from.indexOf('Two'));
+    r = eq([m.scope, to.length >= 0 && '一二。\n三。四。'.slice(m.to[0], m.to[1])], ['line', '一二。']);
+    if (r !== true) return '行内句子对不上应退回整行：' + r;
+    m = H.matchDual(from, '一，二，三。', from.indexOf('Two'));
+    return eq([m.scope, from.slice(m.from[0], m.from[1])], ['paragraph', from]);
+  });
+
+  check('悬停匹配（纯函数）：仅译文按行对齐给对应句；未对齐只给整段原文', function () {
+    var H = DT.hover;
+    var page = '一。二。\n三。';
+    var item = { src: 'One. Two.\nThree.', lines: ['One. Two.', 'Three.'], aligned: true };
+    var m = H.matchReplaced(page, page.indexOf('二'), item);
+    var r = eq([m.scope, m.tip, page.slice(m.span[0], m.span[1])], ['sentence', 'Two.', '二。']);
+    if (r !== true) return '逐行对齐：' + r;
+    m = H.matchReplaced('一二。\n三。', 1, item);
+    r = eq([m.scope, m.tip], ['line', 'One. Two.']);
+    if (r !== true) return '行内句数不同应给整行：' + r;
+    // 行没对齐（模型合并了行）：整段句子仍一一对应时可以给句子，对不上就只给整段
+    item.aligned = false;
+    m = H.matchReplaced('一。二。三。', 3, item);
+    r = eq([m.scope, m.tip], ['sentence', 'Two.']);
+    if (r !== true) return '整段句子一一对应：' + r;
+    var merged = '一，二。三。';
+    m = H.matchReplaced(merged, merged.indexOf('二'), item);
+    return eq([m.scope, m.tip, merged.slice(m.span[0], m.span[1])], ['paragraph', 'One. Two.\nThree.', merged]);
+  });
+
+  check('悬停对照·仅译文小说段落：鼠标在第 2 行 → 只高亮这一行的句子，气泡是第 2 行原文', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    return withHoverFixture('<p id="hv-nv" style="white-space:pre-wrap"><span>「今日は何の日？」</span><br><span>「ポッキーの日だ。」</span></p><p id="hv-nv2">Elsewhere</p>', function (box) {
+      var p = box.querySelector('#hv-nv');
+      var prev = DT.state.mode;
+      DT.state.mode = 'translation';
+      try {
+        if (!DT.inject(p, '「今天是什么日子？」\n「是百奇日。」', 'zh-CN')) return 'inject 返回 false';
+      } finally {
+        DT.state.mode = prev;
+      }
+      var line2 = p.querySelectorAll('span')[1].firstChild;
+      var pt = pointOf(line2, '百奇');
+      DT.hover.updateAt(pt.x, pt.y, line2.parentElement);
+      var tip = document.querySelector('.dt-hover-tip');
+      if (!tip || tip.hidden) return '没有弹出原文气泡';
+      if (tip.textContent !== '「ポッキーの日だ。」') return '气泡不是第 2 行原文：' + tip.textContent;
+      return highlighted('dt-hover-target') === '「是百奇日。」' ? true : '高亮的不是鼠标下这一句：' + highlighted('dt-hover-target');
+    });
+  });
+
+  check('悬停对照·仅译文：模型合并了行 → 气泡给整段原文、高亮整段译文，不给错的精确句子', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    return withHoverFixture('<p id="hv-mg" style="white-space:pre-wrap"><span>「今日は何の日？」</span><br><span>「ポッキーの日だ。」</span><br><span>「勝負しよう。」</span></p>', function (box) {
+      var p = box.querySelector('#hv-mg');
+      var prev = DT.state.mode;
+      DT.state.mode = 'translation';
+      try {
+        DT.inject(p, '「今天是什么日子？」「是百奇日，来比一场。」', 'zh-CN');
+      } finally {
+        DT.state.mode = prev;
+      }
+      var node = p.querySelector('span').firstChild;
+      var pt = pointOf(node, '百奇');
+      DT.hover.updateAt(pt.x, pt.y, node.parentElement);
+      var tip = document.querySelector('.dt-hover-tip');
+      if (!tip || tip.hidden) return '没有弹出原文气泡';
+      var r = eq(tip.textContent, '「今日は何の日？」\n「ポッキーの日だ。」\n「勝負しよう。」');
+      if (r !== true) return '应退回整段原文：' + r;
+      return highlighted('dt-hover-target') === '「今天是什么日子？」「是百奇日，来比一场。」' ? true : '应高亮整段：' + highlighted('dt-hover-target');
+    });
+  });
+
+  check('悬停对照·双语小说段落：鼠标在原文第 2 行 → 译文高亮第 2 行', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    return withHoverFixture('<p id="hv-dl" style="white-space:pre-wrap"><span>“Is it today?”</span><br><span>“Yes. It is Pocky Day.”</span></p>', function (box) {
+      var p = box.querySelector('#hv-dl');
+      if (!DT.inject(p, '“是今天吗？”\n“对。是百奇日。”', 'zh-CN')) return 'inject 返回 false';
+      var node = p.querySelectorAll('span')[1].firstChild;
+      var pt = pointOf(node, 'Pocky');
+      DT.hover.updateAt(pt.x, pt.y, node.parentElement);
+      // 引号里的一句对白整体算一句，不在引号里面断开
+      var r = eq([highlighted('dt-hover-src'), highlighted('dt-hover-target')], ['“Yes. It is Pocky Day.”', '“对。是百奇日。”']);
+      if (r !== true) return r;
+      var t = p.querySelector('[data-dt-target]').firstChild;
+      pt = pointOf(t, '是今天');
+      DT.hover.updateAt(pt.x, pt.y, t.parentElement);
+      return eq([highlighted('dt-hover-src'), highlighted('dt-hover-target')], ['“Is it today?”', '“是今天吗？”']);
     });
   });
 

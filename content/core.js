@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.8.3';
+  DT.VERSION = '0.8.4';
 
   DT.state = {
     enabled: false,
@@ -167,6 +167,42 @@
       .trim();
   };
 
+  // 折叠空白，但保留有阅读意义的换行（<br>、white-space: pre-* 里的 \n，由 dom.js 换成 \n 传进来）：
+  // 每行内部照 normalizeText 折叠；首尾空行去掉；连续空行只留一个（段落间隔）。
+  // 没有换行的文本结果与 normalizeText 完全相同（缓存键、已有站点不受影响）
+  DT.normalizeLines = function (text) {
+    var out = [];
+    var gap = false;
+    String(text == null ? '' : text)
+      .split(/\r\n?|\n/)
+      .forEach(function (line) {
+        var t = DT.normalizeText(line);
+        if (!t) {
+          gap = out.length > 0;
+          return;
+        }
+        if (gap) out.push('');
+        out.push(t);
+        gap = false;
+      });
+    return out.join('\n');
+  };
+
+  // 文本里的非空行（每行已折叠空白）
+  DT.splitLines = function (text) {
+    return String(text == null ? '' : text)
+      .split(/\r\n?|\n/)
+      .map(DT.normalizeText)
+      .filter(Boolean);
+  };
+
+  // 这种 white-space 下文本里的 \n 是不是真换行（pre / pre-wrap / pre-line / break-spaces）。
+  // 参数是 getComputedStyle 的 whiteSpace 与 whiteSpaceCollapse（新写法的长属性）
+  DT.keepsLineBreaks = function (whiteSpace, collapse) {
+    if (/^(pre|pre-wrap|pre-line|break-spaces)$/.test(String(whiteSpace || ''))) return true;
+    return /^(preserve|preserve-breaks|break-spaces)$/.test(String(collapse || ''));
+  };
+
   // 译文排版归一化：只对 CJK 做，不按网站写死字号。
   // 中文 / 日文 / 韩文的字面比拉丁字母更"满"（汉字占满 em 方框），
   // 原站给英文大标题的 72px/1.0 行高直接套到中文上会显得过大且换行重叠。
@@ -289,11 +325,66 @@
     return DT.isMostlyTargetLanguage(a, lang) && DT.similarity(a, b) >= DT.NEAR_DUP_THRESHOLD;
   };
 
-  // 长段落按句切开，避免单条请求过大
+  // 长段落按句切开，避免单条请求过大。
+  // 有分行（\n）的文本先按整行装段，一行本身超长才在行内按句切。
+  // 返回的数组带 seps：seps[i] 是第 i 段和第 i+1 段之间原来的分隔（换行 '\n' / '\n\n'，行内 ' '），
+  // 拼回时交给 DT.joinSlots(slots, seps)，段落换行不会被拼成空格
   DT.splitLong = function (text, max) {
     var limit = Math.max(200, Number(max) || 1200);
-    if (text.length <= limit) return [text];
+    var out;
+    if (text.length <= limit) {
+      out = [text];
+    } else if (text.indexOf('\n') < 0) {
+      out = splitSentences(text, limit);
+    } else {
+      return splitByLines(text, limit);
+    }
+    out.seps = out.slice(1).map(function () {
+      return ' ';
+    });
+    return out;
+  };
 
+  function splitByLines(text, limit) {
+    // 先拆成「块」：一整行，或超长行按句切出的一截；sep 是它和前一块之间的分隔
+    var atoms = [];
+    var gap = '';
+    text.split('\n').forEach(function (line) {
+      if (!line.trim()) {
+        if (atoms.length) gap += '\n';
+        return;
+      }
+      var sep = atoms.length ? '\n' + gap : '';
+      gap = '';
+      if (line.length <= limit) {
+        atoms.push({ text: line, sep: sep });
+        return;
+      }
+      splitSentences(line, limit).forEach(function (piece, k) {
+        atoms.push({ text: piece, sep: k ? ' ' : sep });
+      });
+    });
+    // 再把相邻的块装进不超过 limit 的段
+    var out = [];
+    var seps = [];
+    var buf = '';
+    atoms.forEach(function (atom) {
+      if (buf && buf.length + atom.sep.length + atom.text.length <= limit) {
+        buf += atom.sep + atom.text;
+        return;
+      }
+      if (buf) out.push(buf);
+      if (out.length) seps.push(atom.sep);
+      buf = atom.text;
+    });
+    if (buf) out.push(buf);
+    if (!out.length) out.push(text.slice(0, limit));
+    out.seps = seps;
+    return out;
+  }
+
+  // 一行之内按句切（0.8.3 及以前的 splitLong，原样保留）
+  function splitSentences(text, limit) {
     var marked = text.replace(/([.!?。！？；;:：])\s*/g, '$1\u0001');
     var parts = marked.split('\u0001');
 
@@ -321,7 +412,7 @@
     });
 
     return safe.length ? safe : [text.slice(0, limit)];
-  };
+  }
 
   // ---------------- 调度用的纯函数 ----------------
   // 这些函数不读 window、不调 getBoundingClientRect：矩形由调用方传进来。
@@ -373,14 +464,21 @@
     return { count: count, delay: delay, until: (Number(now) || Date.now()) + delay };
   };
 
-  // 长段落被切成多段后拼回去：丢掉空段，用空格连接
-  DT.joinSlots = function (slots) {
-    return (slots || [])
-      .filter(function (part) {
-        return part;
-      })
-      .join(' ')
-      .trim();
+  // 长段落被切成多段后拼回去：丢掉空段。seps 是 splitLong 记下的原分隔（换行拼回仍是换行），
+  // 没给就用空格连接（旧行为）。中间有空段被丢掉时，保留其中换行最多的那个分隔
+  DT.joinSlots = function (slots, seps) {
+    var out = '';
+    var sep = '';
+    (slots || []).forEach(function (part, i) {
+      if (i > 0) {
+        var s = seps && typeof seps[i - 1] === 'string' ? seps[i - 1] : ' ';
+        if (!sep || s.split('\n').length > sep.split('\n').length) sep = s;
+      }
+      if (!part) return;
+      out = out ? out + sep + part : part;
+      sep = '';
+    });
+    return out.trim();
   };
 
   // 是否正在可编辑控件里（输入框 / 文本域 / 下拉 / contenteditable）。

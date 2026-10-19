@@ -39,7 +39,7 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **88 / 88 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **126 / 126 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 
 ---
 
@@ -80,7 +80,7 @@ edge-bilingual/
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页）
-└── selftest/              离线自检（105 条用例）
+└── selftest/              离线自检（126 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -251,7 +251,7 @@ lib/
 
 **默认追加**（双语）：把译文节点 append 到源元素**内部末尾**，这样它跟随源元素的盒子、字号、对齐。
 
-**三种情况改为原地替换**（`injectOnly`：替换元素的文本节点，保留子元素如图标）：
+**三种情况改为原地替换**（`injectOnly`：替换元素的文本节点，保留子元素如图标；单元有分行时按行写回，见 5.2.1）：
 
 | 条件 | 原因 |
 |---|---|
@@ -271,6 +271,27 @@ lib/
 > ⚠️ **不要**把"文本短"或"元素是 flex"单独作为替换条件。
 > 0.3.1 试过"短文本 + 父级是 flex-row 就替换"，结果在 Tarkov 这种整页 flex 布局的站点上，
 > 标题和正文全被替换，用户看到的是"原文被译文顶掉了"。现在的判据必须同时满足上面表格。
+
+### 5.2.1 分行：`<br>` / `white-space: pre-*` 的换行（0.8.4）
+
+Pixiv 小说的正文是 `pre-wrap` 容器里一段一个 `<p>`，段内几行对白用 `<span>` + `<br>` 分隔。以前 `<br>` 被折成空格，
+仅译文模式又把整段译文写进第一个文本节点、其余清空，几行对白并成一大段，段尾还留一串空行。现在：
+
+- **送翻文本**用 `DT.unitText(el)`：`<br>` 和保留换行的元素（`white-space: pre / pre-wrap / pre-line`）里的 `\n` 记成换行，
+  每行内部照常折叠空白（`DT.normalizeLines`）；HTML 源码里的折行在普通元素里仍算空格。**没有分行的单元文本与以前逐字相同**（缓存键不变）。
+  `textOf()` 仍是全折叠的版本，区域判定 / 签名 / 长度判断继续用它
+- **提示词**多一条规则：段落里的 `\n` 是原文分行，译文保留同样的行数；`lib/parse.js` 能修复字符串里直接写换行的回包
+- **长段落**：`DT.splitLong` 先按整行装段，返回的数组带 `seps`；`DT.joinSlots(slots, seps)` 在换行处拼回仍是换行
+- **仅译文写回**（`injectLines`）：按行分组（`lineGroups`，与 `unitText` 同一套切法），第 i 行译文写进第 i 行第一个有字的文本节点
+  （保留行首全角缩进），同一行其余节点清空；`<br>`、空行、各行所在的元素都不动。模型改了行数时按顺序填，多出的并进最后一行，
+  不够的把后面空出来的 `<br>` 加 `data-dt-collapsed` 收起（CSS `display:none`，还原时去掉）。只有一行的单元（按钮、导航、普通段落）
+  仍走原来的「整段写进第一个文本节点」
+- **双语**：译文里有换行时给节点加 `dt-lines`（`white-space: pre-line`），只作用在这种节点上，不全局改样式
+- **过期译文**：注入前 `DT.sourceChanged(unit)` 复核原文；等译文期间站点改了这段（SPA 重渲染、翻页复用元素）就放弃这次注入，
+  下一轮按新内容重翻。同一元素连续 3 次都在翻译途中被改（计时器、实时数字）就不再翻它，免得每变一次重发一次请求
+- **悬停对照**按「段落 → 行 → 句子」三级对应，只认靠得住的那一层：行数相同才按行配对；句子要句数相同且句界相对位置相差
+  ≤ 0.25 才一一对应，否则退回整行 / 整段（高亮和气泡一起放大）。不再按长度比例猜句子。仅译文的原文与逐行对应关系
+  记在 `DT.replacedOf(el)`（`src` / `lines` / `aligned`）
 
 ### 5.3 `textOf()` 必须排除自己的节点
 
@@ -327,6 +348,8 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 | 24 | 直接请求 YouTube 字幕地址 | 200 + 空内容：地址要带播放器生成的 `pot` 令牌 | 页面主环境挂钩播放器自己的请求（`youtube-hook.js`）；要别的轨道时拿它的地址改参数同源再请求 |
 | 23 | 用 `getComputedStyle().height` / `lineHeight` 判"单行"，控件判定只看元素自身 | GitHub 顶栏 `Code / 代码` 两行堆叠、整页错位：链接里的行内 `<span>` 高度是 `"auto"` → NaN → 不替换 → 追加把导航挤成两排；`line-height: normal` 同样 NaN | 统一走 `DT.areaOf()`：沿行内包裹链找所属控件；单行看 `getClientRects()` / `getBoundingClientRect()`，行高 `normal` 按字号 × 1.2 |
 | 25 | 把 computed 字号 / 行高按 px 复制给译文，并依赖 `<html data-dt>` 控制样式 | Aeon 的 H1 是 `72px/72px`（窄屏 `42px/42px`），中文标题异常放大、行高重叠；Next.js hydration 删掉 `data-dt` 后 `.dt-target` 归一化整组失效 | 译文用 `inherit` / `em` 跟随原站响应式；CJK 大标题 0.8em、紧行高 1.25；`::first-letter` 归一化；`data-dt` 被删时 MutationObserver 补回 |
+| 26 | 仅译文把多行段落整段写进第一个文本节点 | Pixiv 小说几行对白并成一大段，段尾留一串空行（`<br>` 还在、后面的 span 被清空） | 送翻保留分行，按行写回；行数对不上时收起多余 `<br>`（5.2.1） |
+| 27 | 句数不同时按相对位置猜对应句 | 悬停气泡显示相邻句子的原文，看起来像「翻译错位」 | 只在句数相同且句界一致时按句对应，否则退回整行 / 整段 |
 
 ---
 
@@ -336,16 +359,16 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-105 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归。**改 `dom.js` 前后必跑。**
+126 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
 node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射（45 条）
 node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（30 条）
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
-node test/parse.test.mjs       # 回包解析 parseArray / 思考过程兜底 parseArrayFromReasoning / 输出长度护栏 isRunaway（15 条）
+node test/parse.test.mjs       # 回包解析 parseArray / 思考过程兜底 parseArrayFromReasoning / 输出长度护栏 isRunaway / 字符串里裸换行的修复（18 条）
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、清空（13 条）
-node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度（13 条）
+node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度、保留分行规则（14 条）
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息（5 条，假 fetch）
 node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹（18 条）
 node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖（13 条）
@@ -432,7 +455,7 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 
 1. **仅译文模式下短中文会留下空白** —— 站点给容器写了固定高度，中文比英文短 40%，填不满。无通用解，只能按站点写规则或改用双语。
 2. **行内标签不在译文里保留** —— 段落里的 `<b>` / `<a>` 会被整段重写，译文是纯文本，不带原格式。
-3. **`<br>` 分隔的长帖**读起来是"一整段"，没做逐行对照（route 在图中的 `roadmap`）。
+3. **`<br>` 分隔的长帖**：0.8.4 起译文保留分行（双语、仅译文都是），但双语仍是整段译文追加在段末，没做「一行原文一行译文」的逐行穿插对照。
 4. ~~没有图标~~（0.4.7 已加：`icons/`，源文件是 `icon.svg` / `icon-small.svg`，PNG 用无头 Chrome 渲染）
 5. **站点规则库还很小**：内置规则只有 GitHub 文件列表和 Wikipedia 语言列表两条，其余靠通用启发式和用户自己写的规则；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
 6. **浏览器快捷键（manifest 里的 Alt+A）只是建议**：被其它扩展占用时浏览器不会分配给我们，而且按键在浏览器层就被那个扩展拿走，页面内快捷键也收不到。扩展没法自己改浏览器快捷键，只能引导用户去 `chrome://extensions/shortcuts`（Edge：`edge://extensions/shortcuts`）；设置页和弹窗会用 `chrome.commands.getAll()` 显示实际绑定结果
@@ -465,7 +488,7 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **106 / 106**
+4. 跑自检页：必须 **126 / 126**
 4b. 跑 Node 单测：`for f in test/*.test.mjs; do node $f; done`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -531,14 +554,39 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 
 ---
 
-## 14. 本版技术记录（0.8.3）
+## 14. 本版技术记录（0.8.4）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **问题现场**：悬浮入口的「服务商」按钮原本只读——点一下弹提示「当前服务商：X」，没有任何切换入口；用户想换一家只能进设置页。
-- **纯函数**（`lib/config.js`）：新增 `providerChoices(cfg)`，返回 `[{ id, name, model, hasKey, current }]`，只列配置过的槽位，**不含 Key**；排序：当前 → 有 Key → 其余。自定义服务商取保存的名字。
-- **后台**（`background.js`）：`config:get` 增加 `providers: providerChoices(cfg)`，并给每个槽位补 `hasKey` 布尔；新增路由 `provider:set`，只接受「已知且已填 Key」的槽位，`saveConfig({ currentProvider })` 后返回 `{ ok, provider, name }`，无 Key 返回 `no_key`。
-- **悬浮入口**（`content/dock.js`）：点服务商按钮弹出菜单（closed shadow 内新增 `.menu`），列出有 Key 的服务商 + 模型名，当前项标 `aria-current`；点选后调 `provider:set`，成功 toast「已切换到 X，重新翻译后生效」；再点收起、点外面收起、Esc / 收起 dock 时一并关闭。按钮说明改为「切换服务商（当前：X）」。
-- **i18n**：所有新文案走 `DT.uiText(zh, en)`（切换服务商、当前、已切换到、重新翻译后生效、没有可切换的服务商、切换失败），没有新增词典键。
-- **回归测试**：`test/config.test.mjs` 30 → 33（列表排序、无 Key 靠后、不泄露 Key、自定义名字）；`selftest` 105 → 106（菜单只列有 Key 的服务商、当前项标记、再点收起）；悬浮入口原有断言同步改成新说明文案。
-- **未验证 / 剩余**：菜单在真实网页里的点击与剪贴板式 toast 需人工过一遍；`provider:set` 只改 `currentProvider`，不会自动重翻当前页（提示里已写明「重新翻译后生效」）。
+- **问题现场**：Pixiv 小说（阅读器是 `white-space: pre-wrap` 容器，一段一个 `<p>`，段内几行用 `span.text-count` + `<br>` 分隔）切到仅译文后，
+  几行对白并成一大段、段尾留 n−1 行空白；双语译文同样不分行；悬停气泡有时显示相邻句子的原文。用户给的测试页 29390937 是 R-18、需要登录，
+  验证改用同一阅读器的全年龄作品 29392114（日文）/ 29416270（中文）
+- **根因（已在真实页面复现）**：`textOf()` 把 `<br>` 当空格、`normalizeText` 折叠 `\n`，模型看不到分行；`injectOnly()` 把整段译文写进第一个文本节点、
+  其余清空，`<br>` 还在；`.dt-target` 的 `white-space: normal !important` 让双语译文也不分行；`hover.alignSentence()` 句数不同时按长度比例猜句子；
+  只有 `<br>` 子元素的段落走 `ownText()`，同样被压平；`tryInject` 注入前不复核原文，SPA 复用元素时旧译文可能写进新内容
+- **送翻文本**（`content/dom.js`）：`tokensOf()` 统一遍历（文本节点 + `<br>` + 所在元素是否保留换行）；`DT.unitText()` / `ownText()` 把 `<br>` 和
+  `pre / pre-wrap / pre-line / break-spaces` 里的 `\n` 记成换行，经 `DT.normalizeLines()`（`core.js`）每行折叠、连续空行留一个；
+  普通元素里源码折行仍算空格。没有分行的单元文本与 0.8.3 逐字相同（缓存键、GitHub / OWID / Aeon 不受影响）。`textOf()` 仍是全折叠版
+- **仅译文写回**：`lineGroups()` 与 `unitText` 同一套切法；有 2 行以上时走 `injectLines()`：第 i 行译文写进第 i 行第一个有字的片段（保留行首缩进），
+  同行其余片段清空，`<br>` / 空行 / 行所在元素不动；首字下沉在第一行里照旧拆分。模型行数不同：按顺序填、多出的并进最后一行，
+  不够时后面的 `<br>` 加 `data-dt-collapsed`（`inject.css` 里 `display:none`），`DT.restore()` / `releaseReplaced()` 去掉。单行单元仍走原逻辑
+- **记录**：`DT.replaced` 每条多了 `src`（原文，含分行）、`lines`、`aligned`、`collapsed`；`DT.replacedOf(el)` 给悬停用
+- **双语**：译文含换行时节点加 `dt-lines`（`white-space: pre-line`，窄容器 `pre`），只作用在这种节点上
+- **长段落**：`DT.splitLong()` 有换行时先按整行装段（超长行才行内按句切，原算法原样保留为 `splitSentences`），返回数组带 `seps`；
+  `DT.joinSlots(slots, seps)` 按原分隔拼回，丢空段时保留换行最多的分隔；不带 `seps` 时与旧行为相同
+- **过期译文**（`main.js`）：`tryInject` 先 `DT.sourceChanged(unit)`（按收集时同样的取法重算原文），变了就放弃注入、置 `dirty` 重收；
+  同一元素连续 3 次（`CHURN_MAX`）在翻译途中被改就不再翻，`disable` / `startOver` 清零
+- **悬停**（`hover.js`）：`sentencesOf` 改为逐字扫描（换行必断；「」『』“”（）《》〈〉【】里不断句，「……。」后接空白 / 行尾 / 下一段引号才断）；
+  新增 `linesOf`、`sentencesAgree`（句数相同且句界相对位置差 ≤ `SENT_DRIFT` 0.25）、纯函数 `matchDual` / `matchReplaced`；
+  `alignSentence` 对不上返回 −1（不再按位置猜）。`textMap` 把 `<br>` 记成换行、跳过隐藏子树和收起的 `<br>`，`mapsFor` 发现文字变了就重建
+- **接口层**：`lib/prompt.js` 加一条「段落里的 `\n` 是原文分行，行数与原文一致」；`lib/parse.js` 新增 `escapeRawControls()`，
+  回包字符串里直接写了换行时修复后再解析，不再整批失败、对半拆开重发
+- **回归测试**：`selftest` 106 → 126（`tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、源码折行；按行写回、缩进、
+  合并 / 拆分行、两种模式还原、切换模式与重翻、途中改原文、长篇 `splitLong`/`joinSlots`、句子切分与对齐、`matchDual`/`matchReplaced`、
+  仅译文 / 双语悬停 DOM 用例）；旧用例「句数不同按相对位置」改为不猜，`fx-br` 期望改为换行。`test/parse` 15 → 18，`test/prompt` 13 → 14
+- **真实页面验证**（CDP 把内容脚本 + 假 `chrome.runtime` / 假翻译器注入真实页面，不调 API）：Pixiv 29392114 双语 / 仅译文 / 悬停 / 还原，
+  模型保持 / 合并 / 合并句子三种行为，翻译途中改原文、重翻 3 次、SPA 跳到上一话；GitHub / OWID / Aeon 与 0.8.3 差分：单元与布局一致
+  （唯一差异是 OWID logo `Our World<br>in Data` 按两行送翻），还原逐字一致
+- **未验证 / 剩余**：真实模型是否遵守行数（对不上时按顺序填、悬停只给整段）；R-18 测试页（需登录）、Edge、Pixiv 竖排模式；
+  扩展实装后的弹窗 / 快捷键入口（本机 Chrome 155 无头不加载 `--load-extension`）；`welcome` / `package-store` 两个 Node 测试需要真 Node；
+  `<rt>` 振假名会混进原文（原有问题，未改）；`dist/` 商店包未重打（需要 Node 跑 `tools/package-store.mjs`）

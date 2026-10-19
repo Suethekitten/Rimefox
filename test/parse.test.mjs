@@ -2,7 +2,7 @@
 // 运行：node test/parse.test.mjs
 import assert from 'node:assert/strict';
 
-import { parseArray, parseArrayFromReasoning, isRunaway } from '../lib/parse.js';
+import { parseArray, parseArrayFromReasoning, isRunaway, escapeRawControls } from '../lib/parse.js';
 
 let pass = 0;
 let fail = 0;
@@ -39,6 +39,19 @@ t('单条被拆成几句 → 拼回一段', () => {
 
 t('单条直接回纯文本', () => {
   assert.deepEqual(parseArray('这是译文', 1), ['这是译文']);
+});
+
+t('保留分行的译文：\\n 转义照常解析，行数不变', () => {
+  assert.deepEqual(parseArray('["第一行\\n第二行","单行"]', 2), ['第一行\n第二行', '单行']);
+});
+
+t('字符串里直接写了换行（不合法 JSON）→ 修复后照常解析，不整批失败', () => {
+  const raw = '[\n  "「来吧。」\n「好。」",\n  "第二段"\n]';
+  assert.deepEqual(parseArray(raw, 2), ['「来吧。」\n「好。」', '第二段']);
+});
+
+t('escapeRawControls 只转义字符串里面的换行，已转义的 \\" 不打乱', () => {
+  assert.equal(escapeRawControls('[\n"a\nb",\n"c\\"d"]'), '[\n"a\\nb",\n"c\\"d"]');
 });
 
 // ---------------- isRunaway ----------------

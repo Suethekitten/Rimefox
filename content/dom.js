@@ -88,23 +88,30 @@
     return false;
   }
 
-  // 取元素的"纯净文本"：必须排除我们自己注入的译文节点，
-  // 否则增量重扫时会把「原文 + 已注入的译文」当成新文本再翻一次，
+  function keepsBreaks(cs) {
+    return !!cs && DT.keepsLineBreaks(cs.whiteSpace, cs.whiteSpaceCollapse);
+  }
+
+  // 按阅读顺序列出元素里的文字：{ node, keep } 是文本节点，{ br } 是换行元素。
+  // keep = 所在元素保留换行（white-space: pre / pre-wrap / pre-line），节点里的 \n 是真换行；
+  // 否则 \n 只是 HTML 源码里的折行，等同空格。
+  // 必须排除我们自己注入的译文节点，否则增量重扫时会把「原文 + 已注入的译文」当成新文本再翻一次，
   // 表现为同一段译文出现两遍（social__text-wrapper 那种）。
-  function textOf(el) {
-    var parts = [];
-    (function visit(node) {
+  function tokensOf(el) {
+    var out = [];
+    (function visit(node, keep) {
       var kids = node.childNodes;
       for (var i = 0; i < kids.length; i += 1) {
         var kid = kids[i];
         if (kid.nodeType === 3) {
-          if (kid.nodeValue) parts.push(kid.nodeValue);
+          if (kid.nodeValue) out.push({ node: kid, keep: keep });
         } else if (kid.nodeType === 1) {
           if (kid.hasAttribute('data-dt-target')) continue;
           if (kid.hasAttribute('data-dt-ui')) continue;
           if (NON_TEXT_TAGS[tagOf(kid)]) continue;
-          if (kid.tagName === 'BR') {
-            parts.push(' ');
+          if (tagOf(kid) === 'BR') {
+            // 仅译文模式下因译文行数不够而收起的换行，不算一行
+            if (!kid.hasAttribute('data-dt-collapsed')) out.push({ br: kid });
             continue;
           }
           // 隐藏子树（display:none 的对话框 / 展开菜单）不算正文：
@@ -112,11 +119,69 @@
           if (kid.hidden) continue;
           var cs = styleOf(kid);
           if (cs && cs.display === 'none') continue;
-          visit(kid);
+          visit(kid, cs ? keepsBreaks(cs) : keep);
         }
       }
-    })(el);
-    return DT.normalizeText(parts.join(''));
+    })(el, keepsBreaks(styleOf(el)));
+    return out;
+  }
+
+  // 取元素的"纯净文本"，所有空白（含换行）折叠成一个空格：区域判定、签名、长度判断用
+  function textOf(el) {
+    return DT.normalizeText(
+      tokensOf(el)
+        .map(function (tok) {
+          return tok.br ? ' ' : tok.node.nodeValue;
+        })
+        .join('')
+    );
+  }
+
+  // 送翻的文本：和 textOf 一样折叠空白，但 <br> 与保留换行的 \n 记成换行。
+  // Pixiv 小说一个 <p> 里是几行对白（span + <br>），以前换行被折成空格，模型只能回一整段
+  DT.unitText = function (el) {
+    return DT.normalizeLines(
+      tokensOf(el)
+        .map(function (tok) {
+          if (tok.br) return '\n';
+          return tok.keep ? tok.node.nodeValue : tok.node.nodeValue.replace(/[\r\n]/g, ' ');
+        })
+        .join('')
+    );
+  };
+
+  // 把元素里的文字按行分组（和 DT.unitText 同一套切法，非空行一一对应）：
+  // 每行 { pieces: [{ node, start, end }], filled: 有没有字, keep, br: 行首的 <br>, nl: 行首在文本节点里的 \n }
+  function lineGroups(el) {
+    var groups = [{ pieces: [], filled: false, keep: false, br: null, nl: null }];
+    function last() {
+      return groups[groups.length - 1];
+    }
+    function add(node, start, end, keep) {
+      var g = last();
+      if (!g.pieces.length) g.keep = keep;
+      g.pieces.push({ node: node, start: start, end: end });
+      if (/\S/.test(node.nodeValue.slice(start, end))) g.filled = true;
+    }
+    tokensOf(el).forEach(function (tok) {
+      if (tok.br) {
+        groups.push({ pieces: [], filled: false, keep: false, br: tok.br, nl: null });
+        return;
+      }
+      var value = tok.node.nodeValue;
+      if (!tok.keep) {
+        add(tok.node, 0, value.length, false);
+        return;
+      }
+      var start = 0;
+      for (var i = 0; i <= value.length; i += 1) {
+        if (i < value.length && value.charAt(i) !== '\n') continue;
+        if (i > start) add(tok.node, start, i, true);
+        if (i < value.length) groups.push({ pieces: [], filled: false, keep: true, br: null, nl: { node: tok.node, at: i } });
+        start = i + 1;
+      }
+    });
+    return groups;
   }
 
   function usableChildren(el) {
@@ -140,20 +205,22 @@
 
   // 子元素全被跳过时，父级要翻的文本。不能只拼直接文本节点：
   // "First<br>Second" 会粘成 "FirstSecond"，"Run <code>npm i</code> first" 会变成 "Run first"。
-  // <br> 当空格，行内代码照样拼进句子；已翻译 / 隐藏 / 非正文的子元素只留一个分隔空格，
-  // 免得把子级已翻过的内容再翻一遍。
+  // <br> 记成换行（和 DT.unitText 一样；「第一段<br><br>第二段」这种只有 <br> 子元素的段落就走这里），
+  // 行内代码照样拼进句子；已翻译 / 隐藏 / 非正文的子元素只留一个分隔空格，免得把子级已翻过的内容再翻一遍。
   function ownText(el) {
     var parts = [];
+    var keep = keepsBreaks(styleOf(el));
     var kids = el.childNodes;
     for (var i = 0; i < kids.length; i += 1) {
       var kid = kids[i];
       if (kid.nodeType === 3) {
-        parts.push(kid.nodeValue);
+        parts.push(keep ? kid.nodeValue : kid.nodeValue.replace(/[\r\n]/g, ' '));
       } else if (kid.nodeType === 1) {
-        parts.push(INLINE_CODE_TAGS[tagOf(kid)] ? textOf(kid) : ' ');
+        if (tagOf(kid) === 'BR') parts.push(kid.hasAttribute('data-dt-collapsed') ? '' : '\n');
+        else parts.push(INLINE_CODE_TAGS[tagOf(kid)] ? textOf(kid) : ' ');
       }
     }
-    return DT.normalizeText(parts.join(''));
+    return DT.normalizeLines(parts.join(''));
   }
 
   function isStructural(el) {
@@ -215,8 +282,10 @@
     return usable >= 3;
   }
 
-  function addUnit(out, el, text) {
+  // own = 子元素都已翻过 / 被跳过，只翻自己的直接文本（ownText）。DT.sourceChanged 按同样的取法复核
+  function addUnit(out, el, text, own) {
     var unit = { el: el, text: text };
+    if (own) unit.own = true;
     if (!collectAccept || collectAccept(unit)) out.push(unit);
   }
 
@@ -229,7 +298,7 @@
 
     // 1) 真叶子：直接作为一个单元
     if (!el.children.length) {
-      var leafText = textOf(el);
+      var leafText = DT.unitText(el);
       if (leafText) addUnit(out, el, leafText);
       return;
     }
@@ -238,7 +307,7 @@
     //    以前这里会 fallback 成"整块翻译"，把子级已注入的译文一起送进去，
     //    于是同一段内容被翻第二遍 —— 重复译文的直接来源。
     if (!usableChildren(el)) {
-      if (own) addUnit(out, el, ownText(el));
+      if (own) addUnit(out, el, ownText(el), true);
       return;
     }
 
@@ -254,7 +323,7 @@
         }
         return;
       }
-      var text = textOf(el);
+      var text = DT.unitText(el);
       if (text) addUnit(out, el, text);
       return;
     }
@@ -412,6 +481,11 @@
       node.style.whiteSpace = 'nowrap';
       node.style.overflow = 'visible';
     }
+    // 原文有分行（对白、<br> 分隔的帖子）时译文也分行：只给这种节点加类，不全局改 white-space
+    if (String(text).indexOf('\n') >= 0) {
+      node.classList.add('dt-lines');
+      node.style.whiteSpace = narrow ? 'pre' : 'pre-line';
+    }
     return node;
   }
 
@@ -503,6 +577,14 @@
   // 每个节点记下原值和我们写入的值：站点之后改了它（SPA 重渲染），
   // 我们就不能再当它是"已翻译"，还原时也不能拿旧原文盖掉站点的新内容。
   function injectOnly(sourceEl, text, area) {
+    var srcText = DT.unitText(sourceEl);
+    var groups = lineGroups(sourceEl);
+    var filledLines = groups.filter(function (g) {
+      return g.filled;
+    }).length;
+    if (filledLines >= 2) return injectLines(sourceEl, text, groups, srcText, area);
+
+    // 单行（导航、按钮、普通段落）：整段写进第一个文本节点，其余清空（0.8.3 及以前的做法）
     var nodes = collectTextNodes(sourceEl);
     if (!nodes.length) return false;
 
@@ -539,12 +621,149 @@
       ownWrites.set(nodes[i], wrote);
       nodes[i].nodeValue = wrote;
     }
-    DT.replaced.push({ el: sourceEl, nodes: saved });
+    DT.replaced.push({ el: sourceEl, nodes: saved, collapsed: [], src: srcText, lines: DT.splitLines(srcText), aligned: true });
     sourceEl.setAttribute('data-dt-src', '1');
     sourceEl.setAttribute('data-dt-replaced', '1');
     record('replace', null, sourceEl, text, area);
     return true;
   }
+
+  function pieceText(piece) {
+    return piece.node.nodeValue.slice(piece.start, piece.end);
+  }
+
+  // 一行译文写进这一行：第一个有字的片段换成「原来的行首缩进 + 译文」，同一行后面的片段清空
+  // （行内的 <b> / <a> 和以前一样不保留格式，但只影响这一行）
+  function writeLine(group, line, edits, first) {
+    var pieces = group.pieces;
+    var lead = 0;
+    while (lead < pieces.length && !/\S/.test(pieceText(pieces[lead]))) lead += 1;
+    var head = pieces[lead];
+    var indent = /^\s*/.exec(pieceText(head))[0];
+    var value = indent + line;
+    var restAt = -1;
+    var rest = '';
+    // 首字下沉：首字留在下沉节点，这一行其余的译文写进后面的正文节点
+    if (first && isDropcapNode(head.node)) {
+      var dropParent = head.node.parentElement;
+      for (var j = lead + 1; j < pieces.length; j += 1) {
+        if (!dropParent.contains(pieces[j].node)) {
+          restAt = j;
+          break;
+        }
+      }
+      if (restAt >= 0) {
+        var chars = Array.from(line);
+        value = indent + chars.shift();
+        rest = chars.join('');
+      }
+    }
+    edits.push({ node: head.node, start: head.start, end: head.end, value: value });
+    for (var k = lead + 1; k < pieces.length; k += 1) {
+      edits.push({ node: pieces[k].node, start: pieces[k].start, end: pieces[k].end, value: k === restAt ? rest : '' });
+    }
+  }
+
+  // 按文本节点合并改动后写入；返回 [{ node, value: 原值, wrote: 写入值 }]，还原和观察器都靠它
+  function applyEdits(edits) {
+    var order = [];
+    var byNode = new Map();
+    edits.forEach(function (edit) {
+      if (!byNode.has(edit.node)) {
+        byNode.set(edit.node, []);
+        order.push(edit.node);
+      }
+      byNode.get(edit.node).push(edit);
+    });
+    return order.map(function (node) {
+      var value = node.nodeValue;
+      var wrote = value;
+      byNode
+        .get(node)
+        .sort(function (a, b) {
+          return b.start - a.start;
+        })
+        .forEach(function (edit) {
+          wrote = wrote.slice(0, edit.start) + edit.value + wrote.slice(edit.end);
+        });
+      ownWrites.set(node, wrote);
+      node.nodeValue = wrote;
+      return { node: node, value: value, wrote: wrote };
+    });
+  }
+
+  // 有分行的单元（<br> 分隔的几行对白、white-space: pre-* 里的 \n）：译文按行写回原来那一行，
+  // <br>、空行和各行所在的元素都原样保留。以前整段译文塞进第一个文本节点、其余清空，
+  // 几行对白并成一大段，段尾还留下一串空行（Pixiv 小说仅译文模式）。
+  // 行数对不上（模型合并 / 拆分了行）：按顺序一行一行填，多出来的并进最后一行；
+  // 不够时把后面空出来的行连同换行收起（<br> 加 data-dt-collapsed），段尾不留空行。
+  // 这时 aligned = false：悬停对照不按行对应，只给整段原文
+  function injectLines(sourceEl, text, groups, srcText, area) {
+    var lines = DT.splitLines(text);
+    if (!lines.length) return false;
+    var filled = [];
+    groups.forEach(function (g, gi) {
+      if (g.filled) filled.push(gi);
+    });
+    var n = filled.length;
+    var assign = lines.slice(0, n);
+    if (lines.length > n) assign[n - 1] = lines.slice(n - 1).join(groups[filled[n - 1]].keep ? '\n' : ' ');
+    var cut = filled[assign.length - 1]; // 最后一个写了译文的行
+    var edits = [];
+    var collapsed = [];
+    groups.forEach(function (g, gi) {
+      if (gi > cut) {
+        if (g.br) collapsed.push(g.br);
+        if (g.nl) edits.push({ node: g.nl.node, start: g.nl.at, end: g.nl.at + 1, value: '' });
+        g.pieces.forEach(function (p) {
+          edits.push({ node: p.node, start: p.start, end: p.end, value: '' });
+        });
+        return;
+      }
+      var k = filled.indexOf(gi);
+      if (k >= 0) writeLine(g, assign[k], edits, k === 0);
+    });
+    var saved = applyEdits(edits);
+    collapsed.forEach(function (br) {
+      br.setAttribute('data-dt-collapsed', '1');
+    });
+    var srcLines = DT.splitLines(srcText);
+    DT.replaced.push({
+      el: sourceEl,
+      nodes: saved,
+      collapsed: collapsed,
+      src: srcText,
+      lines: srcLines,
+      aligned: lines.length === n && srcLines.length === n
+    });
+    sourceEl.setAttribute('data-dt-src', '1');
+    sourceEl.setAttribute('data-dt-replaced', '1');
+    record('replace', null, sourceEl, text, area);
+    return true;
+  }
+
+  function uncollapse(item) {
+    (item.collapsed || []).forEach(function (br) {
+      br.removeAttribute('data-dt-collapsed');
+    });
+  }
+
+  // 原地替换单元的记录（悬停对照用：原文、逐行对应关系）
+  DT.replacedOf = function (el) {
+    var list = DT.replaced || [];
+    for (var i = 0; i < list.length; i += 1) {
+      if (list[i].el === el) return list[i];
+    }
+    return null;
+  };
+
+  // 等译文回来期间，站点改了这段原文（SPA 重渲染、翻页时复用了同一个元素）：
+  // 旧译文不能再写进新内容，调用方放弃这次注入，下一轮按新内容重翻
+  DT.sourceChanged = function (unit) {
+    if (!unit || !unit.el) return true;
+    var now = unit.own ? ownText(unit.el) : DT.unitText(unit.el);
+    return now !== unit.text;
+  };
 
   // 这个文本节点的当前值是不是我们写进去的（MutationObserver 用来忽略自己的改动）
   DT.isOwnWrite = function (node) {
@@ -569,6 +788,7 @@
         if (saved.node.nodeValue === saved.wrote) saved.node.nodeValue = saved.value;
         ownWrites.delete(saved.node);
       });
+      uncollapse(item);
       item.el.removeAttribute('data-dt-src');
       item.el.removeAttribute('data-dt-replaced');
       released += 1;
@@ -788,6 +1008,7 @@
         var leafUnit = info(el);
         leafUnit.text = previewText(leafText);
         leafUnit.length = leafText.length;
+        leafUnit.lines = DT.splitLines(DT.unitText(el)).length;
         leafUnit.skipByLength = DT.skipText(leafText);
         leafUnit.alreadyTarget = DT.looksLikeTarget(leafText, DT.state.target);
         report.units.push(leafUnit);
@@ -808,6 +1029,7 @@
         var u = info(el);
         u.text = previewText(text);
         u.length = text.length;
+        u.lines = DT.splitLines(DT.unitText(el)).length; // >1 = 有分行（<br> / pre-*），仅译文按行写回
         u.skipByLength = DT.skipText(text);
         u.alreadyTarget = DT.looksLikeTarget(text, DT.state.target);
         report.units.push(u);
@@ -875,8 +1097,12 @@
           /* 节点可能已被站点移除 */
         }
       });
+      uncollapse(item);
     });
     DT.replaced = [];
+    // 兜底：记录丢了（站点克隆过节点）也不能留下收起的换行
+    var folded = document.querySelectorAll('[data-dt-collapsed]');
+    for (var f = 0; f < folded.length; f += 1) folded[f].removeAttribute('data-dt-collapsed');
 
     // 2) 再移除追加的译文节点
     var targets = document.querySelectorAll('[data-dt-target]');

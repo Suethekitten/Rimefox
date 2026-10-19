@@ -29,6 +29,10 @@
   // 也不能整页一起退避 —— 一批固定出错的段落会把新加载内容的翻译一起拖住。
   // 退避表本身在 core.js 的 DT.RETRY_DELAYS / DT.nextRetry（纯函数，自检可测）
   var failures = new WeakMap(); // el → { text, count, until }
+  // 等译文期间原文又被站点改掉的次数（DT.sourceChanged）。连续 CHURN_MAX 次就不再翻这个元素：
+  // 计时器、实时行情这类一直在变的内容，否则每变一次就重发一次请求
+  var churn = new WeakMap();
+  var CHURN_MAX = 3;
   var retryTimer = 0;
   var retryAt = 0;
   // 用户滚动 / 窗口大小变了：下一次取批前重新按离屏幕的距离排序
@@ -212,6 +216,7 @@
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
         if (unit.style === 'plain' && cfg.skipSameLang !== false && !jaPageToZh && DT.looksLikeTarget(unit.text, target)) return false;
         if (settled.get(unit.el) === unit.text) return false;
+        if ((churn.get(unit.el) || 0) >= CHURN_MAX) return false;
         // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
         // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
         if (lazy && !nearView(unit.el, viewH)) {
@@ -242,6 +247,7 @@
       queue.forEach(function (unit, ui) {
         var parts = DT.splitLong(unit.text, maxUnit);
         unit.slots = new Array(parts.length);
+        unit.seps = parts.seps; // 段与段之间原来的分隔：在换行处切开的，拼回去仍是换行
         unit.done = false;
         parts.forEach(function (part, k) {
           pending.push({ ui: ui, k: k, text: part, style: unit.style || 'plain' });
@@ -305,8 +311,16 @@
         for (var k = 0; k < unit.slots.length; k += 1) {
           if (unit.slots[k] === undefined) return; // 还有段没回来（或失败了，等下次补扫重试）
         }
-        var text = DT.joinSlots(unit.slots);
+        var text = DT.joinSlots(unit.slots, unit.seps);
         unit.done = true;
+        // 等译文期间站点改了这段原文（SPA 重渲染、翻页复用同一个元素）：
+        // 旧译文不能写进新内容，也不记成「已处理」；本轮结束后按新内容重新收集
+        if (DT.sourceChanged(unit)) {
+          churn.set(unit.el, (churn.get(unit.el) || 0) + 1);
+          dirty = true;
+          return;
+        }
+        churn.delete(unit.el);
         if (!text) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
           settled.set(unit.el, unit.text);
@@ -475,6 +489,7 @@
     DT.send({ type: 'resume:set', value: false }).catch(function () {});
     DT.restore();
     settled = new WeakMap();
+    churn = new WeakMap();
     resetFailures();
     applyChrome();
     DT.toast('已还原原文');
@@ -678,6 +693,7 @@
     cancelRun();
     DT.restore();
     settled = new WeakMap();
+    churn = new WeakMap();
     resetFailures();
     DT.state.total = 0;
     DT.state.translated = 0;

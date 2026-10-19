@@ -62,6 +62,14 @@ t('规则编号连续，没有跳号', () => {
   });
 });
 
+t('要求保留段落里的分行（内容脚本按行写回页面）', () => {
+  ['plain', 'classical', 'catgirl'].forEach((style) => {
+    const p = systemPrompt('zh-CN', style);
+    assert.ok(p.includes('换行符 \\n 是原文的分行'), style + ' 缺少分行规则');
+    assert.ok(p.includes('行数与原文一致'));
+  });
+});
+
 t('不认识的风格按普通翻译', () => {
   assert.equal(systemPrompt('zh-CN', 'nope'), systemPrompt('zh-CN'));
   assert.equal(styleById('nope').value, 'plain');
