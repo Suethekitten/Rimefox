@@ -88,6 +88,7 @@ const fields = {
   chromeBilingual: $('chromeBilingual'),
   uiTheme: $('uiTheme'),
   uiLang: $('uiLang'),
+  inputTargetLang: $('inputTargetLang'),
   debug: $('debug'),
   accentColor: $('accentColor'),
   reduceTransparency: $('reduceTransparency'),
@@ -160,11 +161,9 @@ const glossaryEditor = createGlossaryEditor({
 });
 
 // ---------------- 快捷键录制 ----------------
-const hotkeyBtn = $('hotkeyBtn');
-const hotkeyHint = $('hotkeyHint');
-
+// 两条快捷键（整页翻译 / 输入框翻译）共用同一套录制逻辑，同一时刻只允许一条在录
 let hotkeyValue = DEFAULTS.hotkey;
-let recordingHotkey = false;
+let inputHotkeyValue = DEFAULTS.inputHotkey;
 
 const KEY_NAMES = {
   ' ': 'space',
@@ -180,64 +179,110 @@ const KEY_NAMES = {
 const MODIFIERS_HINT = IS_MAC ? 'Option 或 Control' : 'Alt 或 Ctrl';
 const prettyHotkey = hotkeyLabel;
 
-function renderHotkey() {
-  hotkeyBtn.textContent = recordingHotkey ? '按下组合键…' : prettyHotkey(hotkeyValue);
-  hotkeyBtn.classList.toggle('recording', recordingHotkey);
+let activeRecorder = null;
+
+function createHotkeyRecorder(opts) {
+  const button = $(opts.button);
+  const hint = $(opts.hint);
+  let recording = false;
+
+  function render() {
+    button.textContent = recording ? '按下组合键…' : prettyHotkey(opts.get());
+    button.classList.toggle('recording', recording);
+  }
+
+  function stop(message) {
+    recording = false;
+    if (activeRecorder === api) activeRecorder = null;
+    render();
+    if (message) hint.textContent = message;
+  }
+
+  const api = {
+    render,
+    stop,
+    start() {
+      if (activeRecorder && activeRecorder !== api) activeRecorder.stop('已取消，快捷键没变。');
+      recording = true;
+      activeRecorder = api;
+      render();
+      hint.textContent = '现在按下组合键（必须包含 ' + MODIFIERS_HINT + '，Esc 取消）';
+    }
+  };
+
+  button.addEventListener('click', () => api.start());
+
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (!recording) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const key = String(event.key || '').toLowerCase();
+      if (key === 'escape') {
+        stop('已取消，快捷键没变。');
+        return;
+      }
+      // 还在按修饰键，等真正的按键
+      if (key === 'alt' || key === 'control' || key === 'shift' || key === 'meta') return;
+
+      const parts = [];
+      if (event.altKey) parts.push('alt');
+      if (event.ctrlKey) parts.push('ctrl');
+      if (event.shiftKey) parts.push('shift');
+      if (!parts.length) {
+        hint.textContent = '必须包含 ' + MODIFIERS_HINT + '，否则会和页面本身的按键冲突。再试一次。';
+        return;
+      }
+
+      let k = KEY_NAMES[key] || key;
+      // macOS 上 Option+A 按出来的是 "å"（Option+E 是 "Dead"），非拉丁布局是 "ф" 这类：
+      // 录成物理键位上的字母，和内容脚本的匹配规则一致。其它命名键（pageup、f5 等）原样保留
+      const codeMatch = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code || '');
+      if (!/^[a-z0-9]$/.test(k) && codeMatch) {
+        k = (codeMatch[1] || codeMatch[2]).toLowerCase();
+      }
+      parts.push(k);
+
+      opts.set(parts.join('+'));
+      stop();
+      hint.textContent = '已录制：' + prettyHotkey(opts.get()) + '（别忘了点下面的「保存」）';
+    },
+    true
+  );
+
+  render();
+  return api;
 }
+
+const hotkeyRecorder = createHotkeyRecorder({
+  button: 'hotkeyBtn',
+  hint: 'hotkeyHint',
+  get: () => hotkeyValue,
+  set: (next) => {
+    hotkeyValue = next || DEFAULTS.hotkey;
+  }
+});
+
+const inputHotkeyRecorder = createHotkeyRecorder({
+  button: 'inputHotkeyBtn',
+  hint: 'inputHotkeyHint',
+  get: () => inputHotkeyValue,
+  set: (next) => {
+    inputHotkeyValue = next || DEFAULTS.inputHotkey;
+  }
+});
 
 function setHotkeyValue(spec) {
   hotkeyValue = spec || DEFAULTS.hotkey;
-  renderHotkey();
+  hotkeyRecorder.render();
 }
 
-hotkeyBtn.addEventListener('click', () => {
-  recordingHotkey = true;
-  renderHotkey();
-  hotkeyHint.textContent = '现在按下组合键（必须包含 ' + MODIFIERS_HINT + '，Esc 取消）';
-});
-
-document.addEventListener(
-  'keydown',
-  (event) => {
-    if (!recordingHotkey) return;
-    event.preventDefault();
-    event.stopPropagation();
-
-    const key = String(event.key || '').toLowerCase();
-    if (key === 'escape') {
-      recordingHotkey = false;
-      renderHotkey();
-      hotkeyHint.textContent = '已取消，快捷键没变。';
-      return;
-    }
-    // 还在按修饰键，等真正的按键
-    if (key === 'alt' || key === 'control' || key === 'shift' || key === 'meta') return;
-
-    const parts = [];
-    if (event.altKey) parts.push('alt');
-    if (event.ctrlKey) parts.push('ctrl');
-    if (event.shiftKey) parts.push('shift');
-    if (!parts.length) {
-      hotkeyHint.textContent = '必须包含 ' + MODIFIERS_HINT + '，否则会和页面本身的按键冲突。再试一次。';
-      return;
-    }
-
-    let k = KEY_NAMES[key] || key;
-    // macOS 上 Option+A 按出来的是 "å"（Option+E 是 "Dead"），非拉丁布局是 "ф" 这类：
-    // 录成物理键位上的字母，和内容脚本的匹配规则一致。其它命名键（pageup、f5 等）原样保留
-    const codeMatch = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code || '');
-    if (!/^[a-z0-9]$/.test(k) && codeMatch) {
-      k = (codeMatch[1] || codeMatch[2]).toLowerCase();
-    }
-    parts.push(k);
-
-    hotkeyValue = parts.join('+');
-    recordingHotkey = false;
-    renderHotkey();
-    hotkeyHint.textContent = '已录制：' + prettyHotkey(hotkeyValue) + '（别忘了点下面的「保存」）';
-  },
-  true
-);
+function setInputHotkeyValue(spec) {
+  inputHotkeyValue = spec || DEFAULTS.inputHotkey;
+  inputHotkeyRecorder.render();
+}
 
 // 不同协议下地址 / Key / 模型名的说明不一样
 const ENGINE_HINTS = {
@@ -290,6 +335,8 @@ function applyConfig(cfg) {
   fields.maxUnitChars.value = cfg.maxUnitChars;
   fields.concurrency.value = cfg.concurrency;
   setHotkeyValue(cfg.hotkey);
+  setInputHotkeyValue(cfg.inputHotkey);
+  fields.inputTargetLang.value = cfg.inputTargetLang || 'auto';
   fields.skipSameLang.checked = cfg.skipSameLang !== false;
   fields.translateOnLoad.checked = !!cfg.translateOnLoad;
   fields.lazy.checked = cfg.lazy !== false;
@@ -374,6 +421,8 @@ function readForm() {
     maxUnitChars: Number(fields.maxUnitChars.value) || DEFAULTS.maxUnitChars,
     concurrency: Number(fields.concurrency.value) || DEFAULTS.concurrency,
     hotkey: hotkeyValue || DEFAULTS.hotkey,
+    inputHotkey: inputHotkeyValue || DEFAULTS.inputHotkey,
+    inputTargetLang: fields.inputTargetLang.value || 'auto',
     skipSameLang: fields.skipSameLang.checked,
     translateOnLoad: fields.translateOnLoad.checked,
     lazy: fields.lazy.checked,
@@ -754,7 +803,9 @@ async function init() {
   fillSelect(fields.thinkingMode, THINKING_MODES);
   fillSelect(fields.targetLang, LANGUAGES);
   fillSelect(fields.theme, THEMES);
-  renderHotkey();
+  fillSelect(fields.inputTargetLang, [{ value: 'auto', label: '跟随页面语言' }].concat(LANGUAGES));
+  hotkeyRecorder.render();
+  inputHotkeyRecorder.render();
   const cfg = await getConfig();
   currentCfg = cfg;
   applyConfig(cfg);

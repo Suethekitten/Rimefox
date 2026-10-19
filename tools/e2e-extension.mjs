@@ -59,7 +59,7 @@ async function until(fn, ms = 15000, step = 200) {
 // ---------------- 假接口 + 测试页 ----------------
 // 模型：每条译文 = '译:' + 原文（目标是繁體中文时 '繁:'）；单条带 CITE 回纯文本「巴黎是首都[1]。」，带 SPLIT 回拆开的两句。
 // 带 reasoning_effort 的请求回 400（OpenAI 官方非推理模型就是这样），用来看扩展会不会记住、不再发
-const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, sent: [] };
+const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, sent: [], lastSystem: '' };
 const PAGES = {
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
@@ -73,6 +73,26 @@ const PAGES = {
   '/simp.html': `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>简体</title></head><body>
 <p id="s1">这是一个完整的中文句子，用于测试简繁转换的效果。</p>
 <p id="s2">我们发现这个问题以后，马上开始处理相关的工作。</p>
+</body></html>`,
+  '/input.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Inputs</title></head><body>
+<p id="hint">Text box translation fixture.</p>
+<textarea id="ta" rows="3">Hello draft line</textarea>
+<input id="tx" type="text" value="Another draft">
+<input id="rx" type="text" value="Controlled input">
+<div id="ce" contenteditable="true">Editable rich text</div>
+<input id="pw" type="password" value="secret">
+<script>
+  // 模拟 React 受控输入框：state 只认 input 事件（没收到事件就当没改），并写回 data-state 供检查
+  (function () {
+    var rx = document.getElementById('rx');
+    var state = rx.value;
+    rx.addEventListener('input', function () {
+      state = rx.value;
+      rx.setAttribute('data-state', state);
+    });
+    rx.setAttribute('data-state', state);
+  })();
+</script>
 </body></html>`
 };
 
@@ -89,6 +109,7 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       const body = JSON.parse(raw);
       const headers = { 'content-type': 'application/json' };
+      stats.lastSystem = String((body.messages && body.messages[0] && body.messages[0].content) || '');
       if (body.reasoning_effort !== undefined) {
         stats.withEffort += 1;
         // 已经有请求去掉参数重发成功过（后台一定收到过 400）之后还带着参数来：记忆没生效
@@ -316,6 +337,71 @@ async function articleChecks() {
   const split = await bubble('Hello.');
   check('划词：拆成几句时句间有空格', split && split.includes('Hello. How are you?'), split);
 
+  // 划词气泡「加入术语表」：两栏表单 → 后台 glossary:add → 配置；同名原文换了译法先问是否覆盖
+  console.log('\n[加入术语表]');
+  const cfgOf = () => swEval("return (await chrome.storage.local.get('config')).config;");
+  const termOf = async (target) => {
+    const cfg = await cfgOf();
+    const list = cfg && Array.isArray(cfg.glossary) ? cfg.glossary : [];
+    return list.find((one) => one.source === 'Rebranded term' && one.target === target) || null;
+  };
+  const fillTermForm = (target) =>
+    pageEval(
+      a,
+      `const bubble = Array.from(document.querySelectorAll('[data-dt-ui]')).find((n) => n.textContent.includes('Glossary term goes here.'));
+      if (!bubble) return 'no-bubble';
+      const add = bubble.querySelector('span[aria-label="加入术语表"]');
+      if (!add) return 'no-button';
+      add.click();
+      const inputs = Array.from(bubble.querySelectorAll('input'));
+      if (inputs.length < 2) return 'no-form';
+      inputs[0].value = 'Rebranded term';
+      inputs[1].value = ` + JSON.stringify(target) + `;
+      const save = Array.from(bubble.querySelectorAll('button')).find((n) => n.textContent === '保存');
+      if (!save) return 'no-save';
+      save.click();
+      return 'clicked';`
+    );
+
+  await tabMsg(a.tabId, { type: 'dt:translateSelection', text: 'Glossary term goes here.' });
+  await bubble('译:Glossary term goes here.');
+  const firstTry = await fillTermForm('凛狐术语');
+  const stored = await until(() => termOf('凛狐术语'), 8000);
+  check('收录：原文和译法都能改，改完写进配置', firstTry === 'clicked' && !!stored, firstTry + ' / ' + JSON.stringify(stored));
+
+  await tabMsg(a.tabId, { type: 'dt:translateSelection', text: 'Glossary term goes here.' });
+  await bubble('译:Glossary term goes here.');
+  const secondTry = await fillTermForm('另一个译法');
+  const asked = await until(
+    () =>
+      pageEval(
+        a,
+        `const bubble = Array.from(document.querySelectorAll('[data-dt-ui]')).find((n) => n.textContent.includes('已有译法'));
+        if (!bubble) return '';
+        const ow = Array.from(bubble.querySelectorAll('button')).find((n) => n.textContent === '覆盖');
+        return ow && ow.style.display !== 'none' ? 'asked' : '';`
+      ),
+    8000
+  );
+  check('同名原文不同译法：先问一句，没确认就不改', secondTry === 'clicked' && asked === 'asked', secondTry + ' / ' + asked);
+  const notYet = await termOf('另一个译法');
+  check('没点「覆盖」之前旧译法还在', !notYet && !!(await termOf('凛狐术语')), JSON.stringify(notYet));
+
+  const confirmed = await pageEval(
+    a,
+    `const bubble = Array.from(document.querySelectorAll('[data-dt-ui]')).find((n) => n.textContent.includes('已有译法'));
+    if (!bubble) return 'no-bubble';
+    const ow = Array.from(bubble.querySelectorAll('button')).find((n) => n.textContent === '覆盖');
+    if (!ow) return 'no-overwrite';
+    ow.click();
+    return 'clicked';`
+  );
+  const replaced = await until(() => termOf('另一个译法'), 8000);
+  check('点「覆盖」后换成新译法', confirmed === 'clicked' && !!replaced && !(await termOf('凛狐术语')), confirmed + ' / ' + JSON.stringify(replaced));
+
+  // 后面的设置页用例假设术语表是空的（它要验证「导入配置带着术语表一起进来」）：把这段留下的条目清掉
+  await patchConfig({ glossary: [] });
+
   await tabMsg(a.tabId, { type: 'dt:toggle' });
   await sleep(600);
   const restored = await pageEval(a, `return { p1: document.getElementById('p1').textContent, p2: document.getElementById('p2').textContent, left: document.querySelectorAll('[data-dt-target],[data-dt-src],[data-dt-collapsed]').length }`);
@@ -529,11 +615,133 @@ async function youtubeChecks(url) {
   await patchConfig({ subtitleTranslate: false });
 }
 
+// ---------------- 自检页 ----------------
+// AGENTS.md 要求改 dom.js 前后「selftest/index.html 全部通过」。这里顺手跑一遍，
+// 发版前不用再手动打开 chrome-extension://<id>/selftest/index.html
+async function selftestChecks() {
+  console.log('\n[自检页]');
+  const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/selftest/index.html' });
+  const s = await attach(targetId);
+  // Runtime.evaluate 里不能直接写 return：整段包成 IIFE（2026-10 踩过：表达式非法，被 until 吞掉 90 秒）
+  const summary = await until(
+    () =>
+      evaluate(
+        s,
+        "(() => { const n = document.getElementById('summary'); return n && n.textContent.indexOf('运行中') < 0 ? n.textContent.trim() : ''; })()"
+      ),
+    90000
+  );
+  const failed = await evaluate(
+    s,
+    "Array.from(document.querySelectorAll('#list li')).filter((li) => li.querySelector('.no')).map((li) => li.textContent.replace(/\\s+/g, ' ').slice(0, 180))"
+  );
+  check('自检页全部通过', !!summary && summary.indexOf('全部通过') >= 0, summary || '没等到结果');
+  check('自检页没有失败项', Array.isArray(failed) && failed.length === 0, (failed || []).slice(0, 5).join(' | '));
+  try {
+    await send('Target.closeTarget', { targetId });
+  } catch (err) {
+    /* 已经关了 */
+  }
+}
+
 let crashed = null;
+// ---------------- 输入框翻译 ----------------
+// 真实按键（CDP）走一遍：textarea / 只翻选区 / Ctrl+Z / 受控输入框 / contenteditable / 密码框 / 不写缓存
+async function inputChecks() {
+  console.log('\n[输入框翻译]');
+  const tab = await openTab(ORIGIN + '/input.html');
+  const pressAltI = async () => {
+    const base = { modifiers: 1, key: 'i', code: 'KeyI', windowsVirtualKeyCode: 73, nativeVirtualKeyCode: 73 };
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base }, tab.s);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base }, tab.s);
+  };
+  const valueOf = (id) => pageEval(tab, 'return document.getElementById(' + JSON.stringify(id) + ').value');
+  const waitValue = (id, prefix) =>
+    until(
+      () =>
+        pageEval(
+          tab,
+          'const v = document.getElementById(' + JSON.stringify(id) + ').value; return v.indexOf(' + JSON.stringify(prefix) + ') === 0 ? v : "";'
+        ),
+      20000
+    );
+  const setBox = (id, value, start, end) =>
+    pageEval(
+      tab,
+      'const el = document.getElementById(' + JSON.stringify(id) + '); el.value = ' + JSON.stringify(value) +
+        '; el.focus(); el.setSelectionRange(' + start + ', ' + end + '); return true;'
+    );
+
+  // 1) textarea 整个框：Alt+I 翻完原地写回；目标语言跟随页面（<html lang="en"> → 提示词里是 English）
+  await pageEval(tab, "document.getElementById('ta').focus(); return true");
+  await pressAltI();
+  const whole = await waitValue('ta', '译:');
+  check('textarea：按 Alt+I 翻整个框并原地写回', whole === '译:Hello draft line', whole || '没有写回');
+  check(
+    '目标语言跟随页面：<html lang="en"> → 提示词里是 English',
+    /English/.test(stats.lastSystem),
+    (stats.lastSystem.match(/目标语言（[^）]*）/) || [''])[0]
+  );
+
+  // 2) 撤销：写入走 execCommand，Ctrl+Z 能回到原文
+  const undone = await pageEval(tab, "document.getElementById('ta').focus(); document.execCommand('undo'); return document.getElementById('ta').value;");
+  check('撤销：Ctrl+Z 回到原文', undone === 'Hello draft line', undone);
+
+  // 3) 有选区只翻选区
+  await setBox('ta', 'One two three', 4, 7);
+  await pressAltI();
+  const onlySel = await waitValue('ta', 'One 译:');
+  check('有选区只翻选区，别的文字不动', onlySel === 'One 译:two three', onlySel || '没有写回');
+
+  // 4) 不写缓存：同一段重置后再翻，还是要发一次新请求（输入框里是草稿）
+  await setBox('ta', 'Cache me not', 12, 12);
+  await pressAltI();
+  await waitValue('ta', '译:Cache me not');
+  const afterFirst = stats.texts;
+  await setBox('ta', 'Cache me not', 12, 12);
+  await pressAltI();
+  await waitValue('ta', '译:Cache me not');
+  check('输入框翻译不进缓存：同一段再翻仍是一次新请求', stats.texts > afterFirst, '第一次后 ' + afterFirst + ' → 第二次后 ' + stats.texts);
+
+  // 5) 模拟 React 受控输入框：必须收到 input 事件，state 跟着变
+  await pageEval(tab, "document.getElementById('rx').focus(); return true");
+  await pressAltI();
+  const controlled = await until(
+    () =>
+      pageEval(
+        tab,
+        "const el = document.getElementById('rx'); return el.getAttribute('data-state') === '译:Controlled input' ? el.value : '';"
+      ),
+    20000
+  );
+  check('受控输入框：收到 input 事件，state 跟着变', controlled === '译:Controlled input', controlled || '受控输入框没收到改动');
+
+  // 6) contenteditable 富文本：整段选中后按快捷键
+  await pageEval(
+    tab,
+    "const ce = document.getElementById('ce'); ce.focus(); const r = document.createRange(); r.selectNodeContents(ce); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true;"
+  );
+  await pressAltI();
+  const rich = await until(
+    () => pageEval(tab, "const el = document.getElementById('ce'); return el.textContent.indexOf('译:') === 0 ? el.textContent : '';"),
+    20000
+  );
+  check('contenteditable：整段替换成译文', rich === '译:Editable rich text', rich || '富文本没被替换');
+
+  // 7) 密码框一律不碰
+  await pageEval(tab, "document.getElementById('pw').focus(); return true");
+  await pressAltI();
+  await sleep(800);
+  const pw = await valueOf('pw');
+  check('密码框不翻译', pw === 'secret', pw);
+}
+
 try {
   if (!flag('--youtube-only')) {
     await articleChecks();
     await optionsChecks();
+    await selftestChecks();
+    await inputChecks();
   }
   if (YOUTUBE) await youtubeChecks(YOUTUBE);
 } catch (err) {

@@ -26,6 +26,9 @@
   var btnOffset = null;
   // 最近一次划词结果：置顶小窗（pip.js）打开时先显示它，之后每翻一次就推过去
   var resultHooks = [];
+  // 气泡上「加入术语表」用的当前这条：原文 + 刚才的译文（表单里可以改）。
+  // 只在 done 状态可用；气泡一关就清掉，免得把上一条的译法带进下一次
+  var lastPair = null;
   DT.lastSelection = null;
   DT.onSelectionResult = function (fn) {
     resultHooks.push(fn);
@@ -110,7 +113,26 @@
     });
     bubble._pinEl = pin;
 
+    // 「加入术语表」：把这条「原文 → 译法」收进术语表，不必再去设置页手填
+    var addTerm = document.createElement('span');
+    addTerm.setAttribute('role', 'button');
+    addTerm.style.cssText = 'flex:none;display:none;width:14px;height:14px;opacity:.5;cursor:pointer;color:inherit;';
+    addTerm.appendChild(DT.icon('M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 3H20v18H6.5A2.5 2.5 0 0 1 4 18.5v-13A2.5 2.5 0 0 1 6.5 3z', 14));
+    addTerm.addEventListener('mouseenter', function () {
+      addTerm.style.opacity = '1';
+    });
+    addTerm.addEventListener('mouseleave', function () {
+      addTerm.style.opacity = '.5';
+    });
+    addTerm.addEventListener('click', function (event) {
+      event.stopPropagation(); // 别触发气泡的「点击复制」
+      openTermForm();
+    });
+    bubble._addEl = addTerm;
+    bubble._body = body;
+
     body.appendChild(textEl);
+    body.appendChild(addTerm);
     body.appendChild(pin);
     body.appendChild(logo);
     bubble.appendChild(body);
@@ -141,7 +163,12 @@
   function hideBubble() {
     seq += 1; // 作废进行中的请求
     anchorEl = null;
-    if (bubble) bubble.style.display = 'none';
+    lastPair = null;
+    if (bubble) {
+      bubble.style.display = 'none';
+      if (bubble._form) bubble._form.style.display = 'none';
+      if (bubble._body) bubble._body.style.display = 'flex';
+    }
   }
 
   function placeBubble(rect) {
@@ -163,8 +190,17 @@
   function showBubble(rect, text, state) {
     hideButton();
     ensureBubble();
+    // 从收录表单切回译文：表单收起，正文重新露出来
+    if (bubble._form) bubble._form.style.display = 'none';
+    if (bubble._body) bubble._body.style.display = 'flex';
     bubble.dataset.state = state || 'done';
     bubble._textEl.textContent = text;
+    bubble._lastRect = rect;
+    var canAdd = (state || 'done') === 'done' && !!lastPair;
+    bubble._addEl.style.display = canAdd ? 'block' : 'none';
+    var addTitle = DT.uiText('加入术语表', 'Add to glossary');
+    bubble._addEl.title = addTitle;
+    bubble._addEl.setAttribute('aria-label', addTitle);
     var pinTitle = DT.uiText('置顶：放进始终在最上层的小窗', 'Pin to an always-on-top window');
     bubble._pinEl.title = pinTitle;
     bubble._pinEl.setAttribute('aria-label', pinTitle);
@@ -173,6 +209,211 @@
     bubble.style.visibility = 'hidden'; // 先量尺寸再定位
     placeBubble(rect);
     bubble.style.visibility = 'visible';
+  }
+
+  // ---------------- 加入术语表（翻完以后） ----------------
+  // 两栏小表单：原文 = 选中的文字，译法 = 刚才的译文，都可以改。
+  // 写入只能走后台的 glossary:add（内容脚本拿不到 Key，也就不该能写配置）。
+  function ensureTermForm() {
+    if (bubble._form && bubble._form.isConnected) return bubble._form;
+
+    var form = document.createElement('div');
+    form.setAttribute('data-dt-ui', '1');
+    form.style.cssText = 'display:none;min-width:236px;max-width:320px;cursor:default;white-space:normal;';
+
+    function label(text) {
+      var el = document.createElement('div');
+      el.style.cssText = 'font-size:12px;opacity:.7;margin:0 0 2px;';
+      el.textContent = text;
+      return el;
+    }
+
+    function field() {
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 200;
+      input.setAttribute('data-dt-ui', '1');
+      input.style.cssText =
+        'width:100%;box-sizing:border-box;margin:0 0 8px;padding:5px 7px;border:1px solid rgba(0,0,0,.18);' +
+        'border-radius:6px;background:#fff;color:#111;font:13px/1.4 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;';
+      input.addEventListener('keydown', function (event) {
+        event.stopPropagation(); // 别让页面快捷键抢走 Enter / Esc
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          saveTerm(false);
+        }
+      });
+      return input;
+    }
+
+    var src = field();
+    var dst = field();
+
+    var note = document.createElement('div');
+    note.style.cssText = 'display:none;font-size:12px;line-height:1.5;margin:0 0 8px;color:#b91c1c;';
+
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;';
+
+    function button(text, primary) {
+      var el = document.createElement('button');
+      el.type = 'button';
+      el.textContent = text;
+      el.style.cssText =
+        'padding:4px 12px;border-radius:6px;cursor:pointer;font:13px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;' +
+        (primary
+          ? 'border:1px solid #2563eb;background:#2563eb;color:#fff;'
+          : 'border:1px solid rgba(0,0,0,.18);background:#fff;color:#111;');
+      return el;
+    }
+
+    var save = button(DT.uiText('保存', 'Save'), true);
+    var overwrite = button(DT.uiText('覆盖', 'Overwrite'), true);
+    overwrite.style.display = 'none';
+    overwrite.style.background = '#b45309';
+    overwrite.style.borderColor = '#b45309';
+    var cancel = button(DT.uiText('取消', 'Cancel'), false);
+
+    save.addEventListener('click', function (event) {
+      event.stopPropagation();
+      saveTerm(false);
+    });
+    overwrite.addEventListener('click', function (event) {
+      event.stopPropagation();
+      saveTerm(true);
+    });
+    cancel.addEventListener('click', function (event) {
+      event.stopPropagation();
+      closeTermForm();
+    });
+
+    row.appendChild(save);
+    row.appendChild(overwrite);
+    row.appendChild(cancel);
+
+    form.appendChild(label(DT.uiText('原文', 'Source')));
+    form.appendChild(src);
+    form.appendChild(label(DT.uiText('译法', 'Translation')));
+    form.appendChild(dst);
+    form.appendChild(note);
+    form.appendChild(row);
+
+    form._src = src;
+    form._dst = dst;
+    form._note = note;
+    form._save = save;
+    form._overwrite = overwrite;
+    form.addEventListener('mousedown', function (event) {
+      event.stopPropagation();
+    });
+    form.addEventListener('click', function (event) {
+      event.stopPropagation();
+    });
+
+    bubble.appendChild(form);
+    bubble._form = form;
+    return form;
+  }
+
+  function openTermForm() {
+    if (!lastPair) return;
+    var form = ensureTermForm();
+    form._src.value = lastPair.source;
+    form._dst.value = lastPair.target;
+    form._note.style.display = 'none';
+    form._overwrite.style.display = 'none';
+    if (bubble._body) bubble._body.style.display = 'none';
+    form.style.display = 'block';
+    bubble.dataset.state = 'form'; // 表单里点击不再触发「复制译文」
+    bubble.style.visibility = 'hidden';
+    placeBubble(bubble._lastRect || { left: 24, top: 24, right: 264, bottom: 44 });
+    bubble.style.visibility = 'visible';
+    try {
+      form._src.focus();
+      form._src.select();
+    } catch (err) {
+      /* 拿不到焦点就算了 */
+    }
+  }
+
+  function closeTermForm() {
+    if (!bubble || !bubble._form) return;
+    bubble._form.style.display = 'none';
+    if (bubble._body) bubble._body.style.display = 'flex';
+    bubble.dataset.state = 'done';
+    if (bubble._lastRect) placeBubble(bubble._lastRect);
+  }
+
+  function showTermNote(text) {
+    if (!bubble || !bubble._form) return;
+    bubble._form._note.textContent = text;
+    bubble._form._note.style.display = text ? 'block' : 'none';
+  }
+
+  function termErrorOf(res) {
+    var code = (res && res.error) || '';
+    if (code === 'too_long') return DT.uiText('太长：原文和译法最多 200 字', 'Too long: 200 characters max');
+    if (code === 'full') {
+      var max = (res && res.max) || 500;
+      return DT.uiText(
+        '术语表已满（' + max + ' 条），先在设置页删几条',
+        'Glossary is full (' + max + ' terms); remove a few in Options first'
+      );
+    }
+    if (code === 'bad_value') return DT.uiText('原文和译法都要填', 'Both fields are required');
+    return DT.uiText('保存失败：' + (code || '未知错误'), 'Save failed: ' + (code || 'unknown error'));
+  }
+
+  async function saveTerm(overwrite) {
+    var form = bubble && bubble._form;
+    if (!form) return;
+    var source = String(form._src.value || '').trim();
+    var target = String(form._dst.value || '').trim();
+    if (!source || !target) {
+      showTermNote(DT.uiText('原文和译法都要填', 'Both fields are required'));
+      return;
+    }
+    form._save.disabled = true;
+    form._overwrite.disabled = true;
+    showTermNote(DT.uiText('保存中…', 'Saving…'));
+    try {
+      var res = await DT.send(
+        { type: 'glossary:add', source: source, target: target, overwrite: overwrite === true },
+        20000
+      );
+      if (res && res.ok && res.action === 'conflict') {
+        // 同名原文已有别的译法：问一句再覆盖
+        showTermNote(
+          DT.uiText(
+            '已有译法：' + res.current + '。要覆盖吗？',
+            'Already defined as ' + res.current + '. Overwrite?'
+          )
+        );
+        form._overwrite.style.display = 'inline-block';
+        return;
+      }
+      if (res && res.ok) {
+        closeTermForm();
+        if (res.action === 'same') {
+          DT.toast(DT.uiText('术语表里已经有这条：' + source, 'Already in the glossary: ' + source));
+        } else if (res.action === 'updated') {
+          DT.toast(DT.uiText('已更新术语：' + source + ' → ' + target, 'Term updated: ' + source + ' → ' + target));
+        } else {
+          DT.toast(DT.uiText('已加入术语表：' + source + ' → ' + target, 'Added to glossary: ' + source + ' → ' + target));
+        }
+        return;
+      }
+      showTermNote(termErrorOf(res));
+    } catch (err) {
+      showTermNote(
+        DT.uiText('保存失败：' + ((err && err.message) || err), 'Save failed: ' + ((err && err.message) || err))
+      );
+    } finally {
+      if (form && form.isConnected) {
+        form._save.disabled = false;
+        form._overwrite.disabled = false;
+      }
+    }
   }
 
   // ---------------- 选区小按钮（B 方案） ----------------
@@ -294,6 +535,7 @@
 
       var value = res && res.results && res.results[0];
       if (res && res.ok && typeof value === 'string' && value.trim()) {
+        lastPair = { source: info.text, target: value.trim() };
         showBubble(info.rect, value.trim(), 'done');
         emitResult({ source: info.text, result: value.trim(), at: Date.now() });
       } else if (res && res.ok && typeof value === 'string') {

@@ -69,10 +69,12 @@ globalThis.chrome = {
 // 假模型：reply(texts) 返回 content 原文（字符串）；每次请求记一笔
 let reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
 let calls = [];
+let lastSystem = '';
 globalThis.fetch = async function (url, init) {
   const body = JSON.parse(init.body);
   const texts = JSON.parse(body.messages[1].content);
   calls.push(texts.slice());
+  lastSystem = String((body.messages[0] && body.messages[0].content) || '');
   const json = { choices: [{ message: { content: reply(texts) }, finish_reason: 'stop' }] };
   return new Response(JSON.stringify(json), { status: 200, headers: { 'content-type': 'application/json' } });
 };
@@ -298,6 +300,100 @@ await t('加一条不相干的术语：没用到它的段落照常命中缓存�
   assert.deepEqual(calls, [[withTerm]], '只有用到改动那条术语的段落重翻');
   assert.equal(changed.cached, 1);
   await setGlossary([]);
+});
+
+// 划词气泡「加入术语表」：内容脚本只能经这个路由写术语表
+async function storedGlossary() {
+  const { config } = await localArea.get('config');
+  return (config && config.glossary) || [];
+}
+
+await t('glossary:add：新增一条写进配置', async () => {
+  await setGlossary([]);
+  const res = await send({ type: 'glossary:add', source: 'Rimefox', target: '凛狐' });
+  assert.equal(res.ok, true);
+  assert.equal(res.action, 'added');
+  const list = await storedGlossary();
+  assert.deepEqual(list, [{ source: 'Rimefox', target: '凛狐' }]);
+});
+
+await t('glossary:add：同名同译法不重复写', async () => {
+  const again = await send({ type: 'glossary:add', source: 'rimefox', target: '凛狐' });
+  assert.equal(again.action, 'same');
+  assert.equal((await storedGlossary()).length, 1, '不能写成两条');
+});
+
+await t('glossary:add：同名不同译法先回 conflict，不确认就不写', async () => {
+  const res = await send({ type: 'glossary:add', source: 'Rimefox', target: '霜狐' });
+  assert.equal(res.ok, true);
+  assert.equal(res.action, 'conflict');
+  assert.equal(res.current, '凛狐');
+  assert.deepEqual(await storedGlossary(), [{ source: 'Rimefox', target: '凛狐' }]);
+});
+
+await t('glossary:add：带 overwrite 才换译法', async () => {
+  const res = await send({ type: 'glossary:add', source: 'Rimefox', target: '霜狐', overwrite: true });
+  assert.equal(res.action, 'updated');
+  assert.deepEqual(await storedGlossary(), [{ source: 'Rimefox', target: '霜狐' }]);
+});
+
+await t('glossary:add：超长 / 空 / 非字符串一律拒绝，配置不变', async () => {
+  const before = await storedGlossary();
+  const long = 'x'.repeat(201);
+  assert.equal((await send({ type: 'glossary:add', source: long, target: '长' })).error, 'too_long');
+  assert.equal((await send({ type: 'glossary:add', source: 'ok', target: long })).error, 'too_long');
+  assert.equal((await send({ type: 'glossary:add', source: '   ', target: '空原文' })).error, 'bad_value');
+  assert.equal((await send({ type: 'glossary:add', source: 12, target: '数字' })).error, 'bad_value');
+  assert.equal((await send({ type: 'glossary:add' })).error, 'bad_value');
+  assert.deepEqual(await storedGlossary(), before);
+});
+
+await t('glossary:add：满 ' + 500 + ' 条时返回 full，不静默丢掉新条目', async () => {
+  const full = Array.from({ length: 500 }, (_, i) => ({ source: 'term' + i, target: '术语' + i }));
+  await setGlossary(full);
+  const res = await send({ type: 'glossary:add', source: 'brand new', target: '全新' });
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'full');
+  assert.equal(res.max, 500);
+  assert.equal((await storedGlossary()).length, 500);
+  await setGlossary([]);
+});
+
+// 收录进来的术语要真的进提示词，不然「再翻用新译法」只是缓存没命中而已
+await t('命中术语时提示词带上对照行，没命中的批次不带', async () => {
+  await setGlossary([{ source: 'Rimefox', target: '凛狐' }]);
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  await translate(['Rimefox starts this line 〔10〕']);
+  assert.match(lastSystem, /Rimefox → 凛狐/, '命中的批次要注入术语');
+  await translate(['A line without any term 〔10b〕']);
+  assert.doesNotMatch(lastSystem, /Rimefox → 凛狐/, '没命中就不该多出术语段');
+  await setGlossary([]);
+});
+
+// 输入框翻译（0.9.0）：目标语言 'auto' 跟随页面，且不读不写缓存
+await t('noCache：输入框翻译不读也不写缓存', async () => {
+  await setGlossary([]);
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const src = 'Draft line 〔11〕';
+  calls = [];
+  const first = await send({ type: 'translate', texts: [src], target: 'auto', pageLang: 'en', noCache: true });
+  assert.equal(first.ok, true);
+  assert.equal(first.results[0], 'T:' + src);
+  assert.equal(first.cached, 0);
+  assert.equal(calls.length, 1);
+
+  calls = [];
+  const second = await send({ type: 'translate', texts: [src], target: 'auto', pageLang: 'en', noCache: true });
+  assert.equal(calls.length, 1, '不读缓存：第二次照常请求');
+  assert.equal(second.cached, 0);
+
+  // 不写缓存：等落盘（LIMITS.flushMs = 2500）后，存储里不该有这条草稿
+  await new Promise((r) => setTimeout(r, 2700));
+  const index = (await sessionArea.get('dt.cache.v1.s.index'))['dt.cache.v1.s.index'] || [];
+  const parts = await sessionArea.get(index.map((id) => 'dt.cache.v1.s.' + id));
+  const stored = Object.values(parts).flat();
+  const key = makeKey({ ...scope, target: 'en' }, src);
+  assert.equal(stored.find((pair) => pair[0] === key), undefined, '输入框的草稿不该进缓存');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

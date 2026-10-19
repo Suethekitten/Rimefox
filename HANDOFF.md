@@ -72,7 +72,8 @@ edge-bilingual/
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）；站点规则的只翻 / 跳过区域
 │   ├── appearance.js      网页里的外观：强调色、译文排版、自定义 CSS、页面明暗、夜间模式写到 <html> 上
 │   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗；DT.control 给悬浮入口用
-│   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡（翻完可「置顶」）
+│   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡（翻完可「置顶」、可「加入术语表」）
+│   ├── input.js           输入框翻译（0.9.0）：可编辑区域里按快捷键 / 右键菜单，翻完原地写回（可撤销）
 │   ├── subtitles-core.js  YouTube 字幕纯函数（解析 json3、拼句）；自检页与 YouTube 运行时共用
 │   ├── subtitles.js       YouTube 字幕运行时：懒翻译、叠层显示（只在 YouTube 加载）
 │   ├── youtube-hook.js    页面主环境（world: MAIN）：捕获播放器的字幕请求，转给 subtitles.js
@@ -85,7 +86,7 @@ edge-bilingual/
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
 ├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs，见 7.1c）
-└── selftest/              离线自检（139 条用例）
+└── selftest/              离线自检（141 条用例；e2e 脚本会顺带跑一遍，见 7.1c）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -135,10 +136,11 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
-| `translate` | `{texts: string[], target: string, style?: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败 |
+| `translate` | `{texts: string[], target: string, style?: string, noCache?: boolean, pageLang?: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败。`target: 'auto'` = 跟随页面语言（配 `pageLang`，即 `<html lang>`，认不出来用英文）；`noCache: true` = 不读也不写三层缓存，输入框翻译用（草稿 / 私信不落盘）|
 | `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本）。`config.page` 是后台按发送方网址算好的 `{accent, customCss, typo, site, night, provider}`（自定义 CSS 已清洗、站点规则已匹配） |
 | `mode:set` | `{mode}` | `{ok}` | 悬浮入口切显示方式后记进配置；只接受 `dual` / `translation`，内容脚本改不了别的配置项 |
 | `hover:set` | `{value: boolean}` | `{ok, value}` / `{ok:false,error}` | 悬浮入口切悬停对照；只接受严格布尔值，内容脚本不能改其他配置项 |
+| `glossary:add` | `{source, target, overwrite?}` | `{ok, action}` / `{ok:false,error}` | 划词气泡「加入术语表」。两个字符串各 ≤200 字，清洗 / 去重 / 限条数复用 upsertGlossaryEntry。action 是 added / updated / same（已有这条）/ conflict（同名原文另有译法，带 current 回去问用户，确认后带 overwrite: true 再来）。错误：too_long / bad_value / full（满 500 条）|
 | `test` | — | `{ok, ms, model, sample}` / `{ok:false,error}` | 测试连接 |
 | `cache:clear` | — | `{ok}` | 清空三层缓存（storage 里的 `dt.cache.v1.*` 分段和清单一并删掉） |
 | `cache:stats` | — | `{ok, stats: {memory, disk, hits, misses}, bytesInUse: {session, local}}` | 设置页「翻译缓存」卡片用；`bytesInUse` 是浏览器实际记的占用 |
@@ -159,6 +161,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | `dt:setStyle` | `{style}` | 快照 | 趣味翻译：`plain` / `classical` / `catgirl`，当前页按风格重建（没开翻译就顺带打开），不写进配置；还原后回到 `plain` |
 | `dt:retranslate` | — | 快照 | 清空重翻 |
 | `dt:diagnose` | — | 诊断报告对象 | 见第 7 节 |
+| `dt:translateInput` | — | 无 | 右键菜单「凛狐：翻译输入框内容」：翻译当前聚焦的输入框（有选区只翻选区），原地写回 |
 | `dt:configChanged` | — | 无 | 后台在 `storage.onChanged` 时广播；内容脚本重拉配置、清零失败退避并补扫。内容脚本**不要**自己监听 `storage.onChanged`（事件里带完整配置含 Key） |
 
 ### 接口层（协议 / 服务商 / 思考模式）
@@ -371,20 +374,20 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-139 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
+141 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数，以及振假名 `<rt>` / `<rp>` 不混进原文。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
 
 ### 7.1b Node 单测（接口层）
 ```
 node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射 / 模型列表请求（48 条）
-node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（含术语表）/ 删除自定义服务商（39 条）
+node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（含术语表）/ 删除自定义服务商 / 输入框目标语言（45 条）
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
 node test/parse.test.mjs       # 回包解析 parseArray（围栏 / 说明文字 / 裸换行 / 结尾逗号 / 对象元素）/ 换行规范化 normalizeTranslationBreaks / 写入前校验 leaksWrapper / 思考过程兜底 / 输出长度护栏 / 单条拆句拼回（36 条）
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空、分段落盘与旧格式迁移（17 条）
-node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动只让用到它的段落重翻（10 条）
+node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动只让用到它的段落重翻、glossary:add 路由、命中术语才注入提示词、输入框 noCache（18 条）
 node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度、保留分行规则、简繁转写（15 条）
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息、记住服务端不认的思考参数（6 条，假 fetch）
-node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹 / 按命中算的缓存指纹（20 条）
-node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖（13 条）
+node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹 / 按命中算的缓存指纹 / 一键收录 upsert（27 条）
+node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖（16 条）
 node test/appearance.test.mjs  # 强调色、译文排版变量、自定义 CSS 清洗（8 条）
 node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间名单、配置导入（8 条）
 node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎页资源、英文覆盖、权限与后台接线（13 条）
@@ -398,7 +401,7 @@ node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层�
 
 ### 7.1c 真实浏览器端到端检查（发版前）
 ```
-node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 仅译文 / 还原 / 配置广播 / 简繁 / 缓存落盘 / 设置页
+node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
 node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
 ```
 真实 Chrome（`--browser` 或环境变量 `RIMEFOX_BROWSER` 可换成 Edge）+ CDP `Extensions.loadUnpacked` 加载工作树 + 本地假 OpenAI 兼容接口，不需要 API Key，不进 CI（要真实浏览器，YouTube 还要能上网）。
@@ -442,6 +445,8 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 | `theme` | `underline` | 无 / 下划线 / 虚框 / 高亮 / 半透明 |
 | `chromeBilingual` | false | 界面元素也保留原文（可能溢出） |
 | `hotkey` | `alt+a` | **页面级**快捷键，可在设置里录制 |
+| `inputHotkey` | `alt+i` | 输入框翻译快捷键（只在可编辑区域里生效），可在设置里录制 |
+| `inputTargetLang` | `auto` | 输入框翻译的目标语言：`auto` = 跟随页面 `<html lang>`（认不出来用英文），也可固定成某个 `LANGUAGES` 值 |
 | `selectionTranslate` | true | 划词翻译总开关 |
 | `selectionMenu` | true | 划词：右键菜单「翻译所选文字」 |
 | `selectionButton` | true | 划词：选区旁「译」小按钮 |
@@ -472,7 +477,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 | `dockSide` | `right` | 悬浮入口位置：`right` / `left` |
 | `dockAutoHide` | true | 悬浮入口收起时半藏 |
 | `customPrompt` | `''` | 追加到系统提示词末尾，进缓存指纹（改了旧译文失效） |
-| `glossary` | `[]` | 术语表 `[{src, dst, cat?}]`，全局一份，命中才注入提示词；缓存键只带这段原文命中的术语的指纹（没命中是 `none`），加 / 改一条只让用到它的段落重翻 |
+| `glossary` | `[]` | 术语表 `[{source, target, category?}]`，全局一份，命中才注入提示词；缓存键只带这段原文命中的术语的指纹（没命中是 `none`），加 / 改一条只让用到它的段落重翻。设置页可编辑 / CSV 导入导出，网页里划词气泡也能「加入术语表」（走后台 `glossary:add`）|
 | `debug` | false | 输出调试日志 |
 | `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |
 
@@ -490,7 +495,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 8. **不支持 OpenAI Responses 协议**（`/v1/responses`）——目前只有 OpenAI 兼容（chat completions）/ Anthropic / Gemini 三种。遇到只开 responses 的第三方接口会 404，见第 10 节 P3
 9. **网页夜间模式是反色实现**：`filter: invert(1) hue-rotate(180deg)` + 媒体元素反向回正；画布绘制的界面、CSS 背景图、自带深色主题的网站可能显示异常，所以默认关闭、只对名单里的网站生效。
 10. **置顶小窗依赖浏览器能力**：Document Picture-in-Picture 需要 Chrome 116+；退回的 `window.open` 小窗不会置顶，网页设置了 COOP 等隔离或拦截弹窗时打不开（会提示）。
-11. **振假名会混进原文**：`<ruby>漢字<rt>かんじ</rt></ruby>` 的读音 `<rt>` 也被当成正文送翻（`content/dom.js` 的 `tokensOf` 没有跳过 RT / RP）。按代码推断，Pixiv 的 `[[rb:]]` 注音会受影响，尚未在真实页面验证。
+11. ~~振假名会混进原文~~（0.9.0 已修：切分和拼文本时跳过 `<rt>` / `<rp>`，自检页有两条用例；Pixiv 的真实注音页尚未实测）
 
 ---
 
@@ -500,7 +505,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 |---|---|---|---|
 | P0 | **拆 `main.js`**：把纯函数（离屏距离、取批上限、退避时间表）抽到 `core.js`，只动这两个文件 + 自检页；动手前先问协作者有没有并行改动 | 中 | 中 |
 | P0 | **结构保真**：给文本节点打占位记号，要求模型保留 `<b>`/`<a>` 并回填 | 中 | 中（要改注入层） |
-| P1 | **输入框翻译**：`Alt+I` 翻译当前输入框并回填 | 小 | 中（要处理 IME） |
+| ~~P1~~ | ~~**输入框翻译**~~（0.9.0 已做：`Alt+I` + 右键菜单，选区 / 整个框、可撤销、不进缓存） | — | — |
 | P1 | **划词快捷键**：监听在 `main.js`，等 P0 拆完再和整页翻译统一成"自适应快捷键" | 小 | 低 |
 | P2 | **站点规则库扩充**：0.7.0 已有规则机制，按真实站点补内置规则（每条都要在保存的真实页面上验证） | 小 | 低 |
 | P2 | **夜间模式改进**：自带深色主题的网站自动跳过反色；CSS 背景图更准确地回正 | 中 | 中 |

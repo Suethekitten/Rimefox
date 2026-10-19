@@ -1,9 +1,15 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
-import { getConfig, saveConfig, activeConfig, styleById, providerChoices } from './lib/config.js';
+import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseArrayFromReasoning, isRunaway, normalizeTranslationBreaks, leaksWrapper } from './lib/parse.js';
-import { matchGlossary, normalizeGlossary, createHitFingerprint } from './lib/glossary.js';
+import {
+  matchGlossary,
+  normalizeGlossary,
+  createHitFingerprint,
+  upsertGlossaryEntry,
+  GLOSSARY_MAX
+} from './lib/glossary.js';
 import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
 import { resolveSiteRule, hostListed } from './lib/site-rules.js';
@@ -167,7 +173,10 @@ async function handleTranslate(msg, sender) {
   const cfg = await getConfig();
   maxParallel = Math.max(1, Math.min(16, Number(cfg.concurrency) || 6));
 
-  const target = msg.target || cfg.targetLang;
+  // 输入框翻译（0.9.0）：target 传 'auto' = 跟随页面语言（页面把 <html lang> 一起发来，语言表只有这里一份）。
+  // noCache：输入框里多半是草稿或私信，翻完不写三层缓存，也不读（免得把别人/上次的草稿带回来）
+  const noCache = msg.noCache === true;
+  const target = msg.target === 'auto' ? resolveInputTarget(msg.target, msg.pageLang) : msg.target || cfg.targetLang;
   const style = styleById(msg.style).value; // 不认识的风格按普通翻译
   const glossary = normalizeGlossary(cfg.glossary);
   const rawTexts = Array.isArray(msg.texts) ? msg.texts : [];
@@ -208,7 +217,7 @@ async function handleTranslate(msg, sender) {
       groups.get(text).push(index);
       return;
     }
-    let hit = cache.get(keyOf(text));
+    let hit = noCache ? undefined : cache.get(keyOf(text));
     // 旧版本存进去的译文可能带着多转义的字面 \n（Pixiv 中译英）：读出来同样规范化，改了就顺手写回；
     // 残留 JSON 包装的旧译文当作没命中，重新翻（不整体清缓存）
     if (typeof hit === 'string') {
@@ -353,7 +362,7 @@ async function handleTranslate(msg, sender) {
           let result = '';
           if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {
             result = value;
-            cache.set(keyOf(text), value);
+            if (!noCache) cache.set(keyOf(text), value);
           }
           // 否则：模型返回空（"EN"/"×" 这类不需要翻的），或译文长得离谱（见 isRunaway）：给 ''，
           // 和失败的 null 区分开，内容脚本据此记为"与原文相同"而不是失败。不进缓存，免得一次抽风永久生效。
@@ -571,6 +580,26 @@ const ROUTES = {
     await saveConfig({ hoverCompare: msg.value });
     return { ok: true, value: msg.value };
   },
+  // 划词气泡「加入术语表」：内容脚本不能写配置，只能经这里加一条。
+  // 只接受两个不超过 200 字的字符串；同名原文已有不同译法时先回 conflict，用户确认后带 overwrite 再来一次。
+  // 清洗 / 去重 / 限条数都在 upsertGlossaryEntry 里做（和设置页导入、mergeConfig 同一套）。
+  'glossary:add': async (msg) => {
+    const one = msg || {};
+    if (typeof one.source !== 'string' || typeof one.target !== 'string') return { ok: false, error: 'bad_value' };
+    if (one.source.length > 200 || one.target.length > 200) return { ok: false, error: 'too_long' };
+    const cfg = await getConfig();
+    const res = upsertGlossaryEntry(
+      cfg.glossary,
+      { source: one.source, target: one.target },
+      { overwrite: one.overwrite === true }
+    );
+    if (res.action === 'invalid') return { ok: false, error: 'bad_value' };
+    if (res.action === 'full') return { ok: false, error: 'full', max: GLOSSARY_MAX };
+    if (res.action === 'conflict') return { ok: true, action: 'conflict', current: res.current };
+    if (res.action === 'same') return { ok: true, action: 'same' };
+    await saveConfig({ glossary: res.list });
+    return { ok: true, action: res.action };
+  },
   // 开发调试用的用量统计（设置页打开「输出调试日志」后才返回）
   'usage:stats': async () => {
     const cfg = await getConfig();
@@ -692,14 +721,35 @@ chrome.runtime.onStartup.addListener(restrictStorage);
 // ---------------- 划词：右键菜单（A 方案） ----------------
 const SELECTION_MENU_ID = 'rimefox-translate-selection';
 
-// 菜单是否显示跟随设置：总开关或「右键菜单」关掉时移除
+const INPUT_MENU_ID = 'rimefox-translate-input';
+
+function sendToFrame(tab, frameId, payload) {
+  // info.frameId 让请求只发给点中的那个 iframe
+  const options = frameId != null ? { frameId } : {};
+  chrome.tabs.sendMessage(tab.id, payload, options).catch(() => {
+    // 页面在安装扩展之前就打开了：补注入后再试一次
+    ensureInjected(tab.id, frameId ?? 0)
+      .then((ok) => ok && chrome.tabs.sendMessage(tab.id, payload, options))
+      .catch(() => {});
+  });
+}
+
+// 菜单是否显示跟随设置：划词总开关或「右键菜单」关掉时连输入框那条一起重建
 function syncSelectionMenu() {
   getConfig()
     .then((cfg) => {
-      const want = cfg.selectionTranslate !== false && cfg.selectionMenu !== false;
       chrome.contextMenus.removeAll(() => {
         void chrome.runtime.lastError;
-        if (!want) return;
+        // 输入框翻译不单独设开关：只有用户点了菜单才触发，留着不碍事
+        chrome.contextMenus.create(
+          {
+            id: INPUT_MENU_ID,
+            title: '凛狐：翻译输入框内容',
+            contexts: ['editable']
+          },
+          () => void chrome.runtime.lastError
+        );
+        if (cfg.selectionTranslate === false || cfg.selectionMenu === false) return;
         chrome.contextMenus.create(
           {
             id: SELECTION_MENU_ID,
@@ -714,19 +764,14 @@ function syncSelectionMenu() {
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== SELECTION_MENU_ID) return;
   if (!tab || tab.id == null) return;
-
-  const payload = { type: 'dt:translateSelection', text: info.selectionText || '' };
-  // info.frameId 让请求只发给选中的那个 iframe
-  const options = info.frameId != null ? { frameId: info.frameId } : {};
-
-  chrome.tabs.sendMessage(tab.id, payload, options).catch(() => {
-    // 页面在安装扩展之前就打开了：补注入后再试一次
-    ensureInjected(tab.id, info.frameId ?? 0)
-      .then((ok) => ok && chrome.tabs.sendMessage(tab.id, payload, options))
-      .catch(() => {});
-  });
+  if (info.menuItemId === SELECTION_MENU_ID) {
+    sendToFrame(tab, info.frameId, { type: 'dt:translateSelection', text: info.selectionText || '' });
+    return;
+  }
+  if (info.menuItemId === INPUT_MENU_ID) {
+    sendToFrame(tab, info.frameId, { type: 'dt:translateInput' });
+  }
 });
 
 chrome.runtime.onStartup.addListener(syncSelectionMenu);

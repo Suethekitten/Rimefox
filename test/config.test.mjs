@@ -11,7 +11,9 @@ import {
   slotFor,
   pickImportedConfig,
   providerChoices,
-  mergeCustomProviderLists
+  mergeCustomProviderLists,
+  resolveInputTarget,
+  LANGUAGES
 } from '../lib/config.js';
 
 let pass = 0;
@@ -428,6 +430,55 @@ t('mergeCustomProviderLists：补进新的，同 id 用文件里的名字', () =
     { id: 'custom:3', name: '本机' },
     { id: 'custom:4', name: '文件' }
   ]);
+});
+
+// ---------------- 输入框翻译的目标语言 ----------------
+console.log('\n[输入框翻译：目标语言]');
+
+t('auto：跟随页面语言，认得的大小写都能对上', () => {
+  assert.equal(resolveInputTarget('auto', 'zh-CN'), 'zh-CN');
+  assert.equal(resolveInputTarget('auto', 'en-US'), 'en');
+  assert.equal(resolveInputTarget('auto', 'JA'), 'ja');
+  assert.equal(resolveInputTarget('', 'fr'), 'fr');
+  assert.equal(resolveInputTarget(undefined, 'zh-TW'), 'zh-TW');
+});
+
+t('auto：页面只写语言、不写地区时按语言段匹配', () => {
+  assert.equal(resolveInputTarget('auto', 'zh'), 'zh-CN', 'zh 落到简体（LANGUAGES 里第一个中文）');
+  assert.equal(resolveInputTarget('auto', 'pt'), 'pt');
+});
+
+t('auto：认不出来（空 / 不支持 / 乱写）用英文', () => {
+  assert.equal(resolveInputTarget('auto', ''), 'en');
+  assert.equal(resolveInputTarget('auto', null), 'en');
+  assert.equal(resolveInputTarget('auto', 'xx'), 'en');
+  assert.equal(resolveInputTarget('auto', 'klingon-1'), 'en');
+});
+
+t('显式设置优先于页面语言；不认识的设置退回跟随页面', () => {
+  assert.equal(resolveInputTarget('ja', 'zh-CN'), 'ja', '设置里选的语言优先');
+  assert.equal(resolveInputTarget('FR', 'zh-CN'), 'fr', '大小写不敏感，统一成表里的写法');
+  assert.equal(resolveInputTarget('xx', 'ko'), 'ko', '不认识的设置不算数，退回跟随页面');
+});
+
+t('默认值：inputHotkey=alt+i、inputTargetLang=auto，且能通过导入校验', () => {
+  assert.equal(DEFAULTS.inputHotkey, 'alt+i');
+  assert.equal(DEFAULTS.inputTargetLang, 'auto');
+  const ok = pickImportedConfig(envelope({ targetLang: 'zh-CN', theme: 'underline', inputHotkey: 'ctrl+shift+i', inputTargetLang: 'de' }));
+  assert.equal(ok.rejected.indexOf('inputHotkey'), -1);
+  assert.equal(ok.rejected.indexOf('inputTargetLang'), -1);
+  assert.equal(ok.config.inputTargetLang, 'de');
+  // 多带一项合法配置：命中过少会被当作「不是凛狐的文件」直接抛错，测不到这两项
+  const bad = pickImportedConfig(
+    envelope({ targetLang: 'zh-CN', theme: 'underline', batchSize: 8, inputHotkey: 'i', inputTargetLang: 'xx' })
+  );
+  assert.ok(bad.rejected.indexOf('inputHotkey') >= 0);
+  assert.ok(bad.rejected.indexOf('inputTargetLang') >= 0);
+});
+
+t('LANGUAGES 里 zh-CN / zh-TW 都在（简繁区分）', () => {
+  const values = LANGUAGES.map((one) => one.value);
+  assert.ok(values.includes('zh-CN') && values.includes('zh-TW'));
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

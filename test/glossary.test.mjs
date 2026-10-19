@@ -11,7 +11,8 @@ import {
   matchGlossary,
   glossaryPrompt,
   glossaryFingerprint,
-  createHitFingerprint
+  createHitFingerprint,
+  upsertGlossaryEntry
 } from '../lib/glossary.js';
 import { STARTER } from '../lib/glossary-sample.js';
 
@@ -188,6 +189,60 @@ t('createHitFingerprint：和整张表的指纹同一种算法（命中的就是
   const list = [{ source: 'Rimefox', target: '凛狐' }];
   assert.equal(createHitFingerprint(list)('Rimefox'), glossaryFingerprint(list));
   assert.equal(createHitFingerprint(list)('rimefox is lower case'), glossaryFingerprint(list), '匹配不分大小写，和提示词注入一致');
+});
+
+t('upsertGlossaryEntry：新增一条，不改原数组', () => {
+  const before = [{ source: 'Rimefox', target: '凛狐' }];
+  const res = upsertGlossaryEntry(before, { source: 'cache', target: '缓存' });
+  assert.equal(res.action, 'added');
+  assert.equal(res.list.length, 2);
+  assert.equal(before.length, 1, '不能就地改调用方的数组');
+  assert.deepEqual(res.list[1], { source: 'cache', target: '缓存' });
+});
+
+t('upsertGlossaryEntry：原文和译法都已存在时什么都不做', () => {
+  const list = [{ source: 'cache', target: '缓存' }];
+  const res = upsertGlossaryEntry(list, { source: 'Cache', target: '缓存' });
+  assert.equal(res.action, 'same');
+  assert.equal(res.list.length, 1);
+});
+
+t('upsertGlossaryEntry：同名不同译法先报冲突，不覆盖', () => {
+  const list = [{ source: 'cache', target: '缓存' }];
+  const res = upsertGlossaryEntry(list, { source: 'cache', target: '快取' });
+  assert.equal(res.action, 'conflict');
+  assert.equal(res.current, '缓存', '把现有译法带回去给气泡问用户');
+  assert.deepEqual(res.list, list, '没确认就不写');
+});
+
+t('upsertGlossaryEntry：确认覆盖后换译法，分类和位置保留', () => {
+  const list = [{ source: 'cache', target: '缓存', category: '技术' }, { source: 'dock', target: '悬浮入口' }];
+  const res = upsertGlossaryEntry(list, { source: 'Cache', target: '快取' }, { overwrite: true });
+  assert.equal(res.action, 'updated');
+  assert.deepEqual(res.list[0], { source: 'cache', target: '快取', category: '技术' }, '原文用旧的写法，分类不丢');
+  assert.equal(res.list[1].source, 'dock');
+});
+
+t('upsertGlossaryEntry：原文和译法都按术语表规则清洗（空白折成一个、去首尾）', () => {
+  const res = upsertGlossaryEntry([], { source: '  Battle   Pass ', target: ' 战令\n' });
+  assert.equal(res.action, 'added');
+  assert.deepEqual(res.list[0], { source: 'Battle Pass', target: '战令' });
+});
+
+t('upsertGlossaryEntry：空原文 / 空译法 / 非字符串都算无效，一个字都不写', () => {
+  assert.equal(upsertGlossaryEntry([], { source: '', target: '甲' }).action, 'invalid');
+  assert.equal(upsertGlossaryEntry([], { source: '甲', target: '   ' }).action, 'invalid');
+  assert.equal(upsertGlossaryEntry([], null).action, 'invalid');
+  assert.equal(upsertGlossaryEntry([], { source: 12, target: null }).action, 'invalid');
+});
+
+t('upsertGlossaryEntry：到 ' + GLOSSARY_MAX + ' 条后不再新增，改已有条目仍然可以', () => {
+  const full = Array.from({ length: GLOSSARY_MAX }, (_, i) => ({ source: 't' + i, target: 't' + i }));
+  const res = upsertGlossaryEntry(full, { source: 'new', target: '新' });
+  assert.equal(res.action, 'full');
+  assert.equal(res.list.length, GLOSSARY_MAX);
+  const edit = upsertGlossaryEntry(full, { source: 't7', target: '七' }, { overwrite: true });
+  assert.equal(edit.action, 'updated', '满表也该能修已有条目的译法');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

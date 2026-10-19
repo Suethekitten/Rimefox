@@ -17,7 +17,10 @@
     IFRAME: 1, FRAME: 1, CANVAS: 1, SVG: 1, VIDEO: 1, AUDIO: 1, OBJECT: 1, EMBED: 1,
     INPUT: 1, TEXTAREA: 1, SELECT: 1, OPTION: 1, OPTGROUP: 1, DATALIST: 1,
     CODE: 1, PRE: 1, KBD: 1, SAMP: 1, VAR: 1, MATH: 1, IMG: 1, BR: 1, HR: 1,
-    PROGRESS: 1, METER: 1, MAP: 1, AREA: 1
+    PROGRESS: 1, METER: 1, MAP: 1, AREA: 1,
+    // 振假名：<ruby>漢字<rt>かんじ</rt></ruby> 里的 <rt> 是读音、<rp> 是给不支持 ruby 的浏览器的括号，
+    // 都不是正文。以前会被单独收成段落送翻，再叠一行「かんじ」的译文（Pixiv 的注音页最明显）
+    RT: 1, RP: 1
   };
 
   var BLOCK_TAGS = {
@@ -34,7 +37,9 @@
   var NON_TEXT_TAGS = {
     SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, SVG: 1, MATH: 1, CANVAS: 1,
     VIDEO: 1, AUDIO: 1, OBJECT: 1, EMBED: 1, IFRAME: 1, FRAME: 1,
-    TEXTAREA: 1, SELECT: 1, OPTION: 1, OPTGROUP: 1, DATALIST: 1
+    TEXTAREA: 1, SELECT: 1, OPTION: 1, OPTGROUP: 1, DATALIST: 1,
+    // 读音 / 注音括号：拼段落文本时绕开，只剩汉字本体（ruby 的基字仍算正文）
+    RT: 1, RP: 1
   };
 
   // 行内代码：自己不单独翻，但属于句子的一部分，拼段落文本时要带上

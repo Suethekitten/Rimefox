@@ -574,6 +574,25 @@
     );
   }
 
+  // 输入框翻译（0.9.0）：和整页翻译的快捷键分开，只在可编辑区域里有意义。
+  // 不 preventDefault 的话，Alt+I 在不少站点会被浏览器 / 站点自己吃掉
+  function bindInputHotkey() {
+    document.addEventListener(
+      'keydown',
+      function (event) {
+        var spec = (DT.state.config && DT.state.config.inputHotkey) || 'alt+i';
+        if (!DT.matchesHotkey(event, spec)) return;
+        if (event.isComposing || event.keyCode === 229) return; // 输入法拼字中
+        if (!DT.isEditableTarget(event.target)) return;
+        if (!DT.inputTranslate) return;
+        event.preventDefault();
+        event.stopPropagation();
+        DT.inputTranslate();
+      },
+      true
+    );
+  }
+
   // ---------------- 动态内容 ----------------
   function scheduleIncremental() {
     if (!DT.state.enabled) return;
@@ -929,6 +948,7 @@
     startObserver();
     bindHoverRescan();
     bindHotkey();
+    bindInputHotkey();
     bindClickRescan();
     // 滚动 / 改窗口大小后，待翻队列按新的可视区重新排序。
     // 用捕获阶段：很多站点是页面里某个容器在滚，scroll 事件不冒泡

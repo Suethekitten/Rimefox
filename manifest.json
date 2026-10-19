@@ -57,6 +57,7 @@
         "content/appearance.js",
         "content/main.js",
         "content/selection.js",
+        "content/input.js",
         "content/hover.js",
         "content/pip.js",
         "content/dock.js"

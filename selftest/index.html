@@ -232,6 +232,9 @@ A new stanza begins here.</div><p class="nv-source-newline">Hello
          另有一段讲转义字符的正文（译文里的字面 \n 是正文，不能被当成换行） -->
     <template id="tpl-pixiv-zh"><div class="nv-reader" style="white-space: pre-wrap; width: 600px; font: 16px/2 serif"><p class="px-zh"><span class="text-count">「你在做什么？」她问。</span><br><span class="text-count">「我在等人。」</span></p><p class="px-code">换行符在字符串里写作 <code>\n</code>。</p></div></template>
 
+    <!-- 0.9.0 振假名夹具：<rt> 读音 / <rp> 括号不是正文，不能送翻、不能单独成段 -->
+    <template id="tpl-ruby"><p id="fx-ruby" style="width: 600px">漢字<ruby>振り仮名<rp>(</rp><rt>ふりがな</rt><rp>)</rp></ruby>のテスト。</p></template>
+
     <script src="../content/core.js"></script>
     <script src="../content/dom.js"></script>
     <script src="../content/appearance.js"></script>

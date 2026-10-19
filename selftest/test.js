@@ -1269,6 +1269,46 @@
     return el.innerText.replace(/\n+$/, '').split('\n');
   }
 
+  // ---------------- 0.9.0 振假名：<rt> / <rp> 不是正文 ----------------
+  function withRuby(mode, fn) {
+    var box = document.createElement('div');
+    box.appendChild(document.getElementById('tpl-ruby').content.cloneNode(true));
+    document.getElementById('fixture').appendChild(box);
+    var prev = DT.state.mode;
+    DT.state.mode = mode;
+    try {
+      return fn(box, box.querySelector('#fx-ruby'));
+    } finally {
+      DT.state.mode = prev;
+      DT.restore();
+      box.remove();
+    }
+  }
+
+  check('振假名：<rt> 读音 / <rp> 括号不进送翻文本，也不单独成段', function () {
+    return withRuby('dual', function (box) {
+      var units = DT.collect(box);
+      var texts = units.map(function (u) { return u.text; });
+      if (texts.indexOf('ふりがな') >= 0) return '读音被当成独立段落送翻：' + JSON.stringify(texts);
+      if (texts.join('').indexOf('ふりがな') >= 0) return '读音混进了原文：' + JSON.stringify(texts);
+      if (texts.join('').indexOf('(') >= 0) return '<rp> 的括号混进了原文：' + JSON.stringify(texts);
+      return eq(texts, ['漢字振り仮名のテスト。']);
+    });
+  });
+
+  check('振假名：仅译文模式替换基字，<rt> 读音节点原样留着', function () {
+    return withRuby('translation', function (box, p) {
+      var u = unitOfEl(p);
+      if (!u) return '没收集到这个段落';
+      if (!DT.inject(u.el, 'A test with ruby.', 'zh-CN', u.own)) return 'inject 返回 false';
+      var rt = p.querySelector('rt');
+      if (!rt) return '<rt> 被删掉了';
+      if (rt.textContent !== 'ふりがな') return '读音被改写了：' + rt.textContent;
+      if (/漢字|振り仮名|のテスト/.test(p.textContent)) return '原文没被替换：' + p.textContent;
+      return p.textContent.indexOf('A test with ruby.') >= 0 ? true : '没有写入译文：' + p.textContent;
+    });
+  });
+
   check('normalizeLines / splitLines：保留分行，行内照常折叠；没有换行时与 normalizeText 相同', function () {
     var r = eq(DT.normalizeLines('  a \t b \n\n\n  c  \n'), 'a b\n\nc');
     if (r !== true) return r;
