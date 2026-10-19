@@ -74,6 +74,22 @@ t('说明文字里也有方括号：换下一个 [ 起点找到真正的数组',
   assert.deepEqual(parseArray('Here are the [2] results: ["甲","乙"]', 2), ['甲', '乙']);
 });
 
+t('数组后面的说明里有 [1] / [sic]：按括号配对取真正的数组，不拿说明里的 [1] 顶替译文', () => {
+  assert.deepEqual(parseArray('["巴黎是首都。"]\n（注：保留了 [1] 引注）', 1), ['巴黎是首都。']);
+  assert.deepEqual(parseArray('["甲","乙"]\nNote: kept [sic].', 2), ['甲', '乙']);
+  assert.deepEqual(parseArray('["a]b","乙"]\n备注 [x]', 2), ['a]b', '乙'], '字符串里的 ] 不算配对');
+});
+
+t('单条回了纯文本、正文里带引注 [1]：整段就是译文，不是 "1"', () => {
+  assert.deepEqual(parseArray('巴黎是法国的首都[1]，也是最大城市。', 1), ['巴黎是法国的首都[1]，也是最大城市。']);
+  assert.deepEqual(parseArray('见 [1][2] 两处', 1), ['见 [1][2] 两处']);
+  assert.deepEqual(parseArray('[1]', 1), ['1'], '整段就是数组时照旧');
+});
+
+t('前言里先引用一遍原文数组：取最后一个条数对得上的', () => {
+  assert.deepEqual(parseArray('输入 ["Hello","World"]，输出：["你好","世界"]', 2), ['你好', '世界']);
+});
+
 t('元素被包成 {"translation": …}：取出译文；结构认不出来就整批失败，不插 [object Object]', () => {
   assert.deepEqual(parseArray('[{"translation":"甲"},{"translation":"乙"}]', 2), ['甲', '乙']);
   assert.deepEqual(parseArray('[{"text":"甲"}]', 1), ['甲']);

@@ -1820,6 +1820,83 @@
     return document.getElementById('dt-dock') ? '关掉后还在' : true;
   });
 
+  // own 单元（子元素被跳过 / 已翻过，只翻直接文本）原地替换时，只改送去翻译的那些文本节点
+  check('仅译文：own 单元不清空 notranslate / translate="no" / 已翻过的子元素', function () {
+    var box = document.createElement('div');
+    box.innerHTML =
+      '<p id="own-nt">Hello <span class="notranslate">Rimefox</span> world</p>' +
+      '<p id="own-lines">Line one <span translate="no">Brand</span><br>Line two</p>' +
+      '<p id="own-done">Intro text <a href="#x">Read more</a> tail</p>';
+    document.body.appendChild(box);
+    var mode = DT.state.mode;
+    DT.state.mode = 'translation';
+    try {
+      var nt = DT.collect(box.querySelector('#own-nt'));
+      if (nt.length !== 1 || !nt[0].own || nt[0].text !== 'Hello world') return 'own 单元收集不对：' + JSON.stringify(nt.map(function (u) { return [u.text, !!u.own]; }));
+      if (!DT.inject(nt[0].el, '你好 世界', 'zh-CN', true)) return 'inject 返回 false';
+      var p1 = box.querySelector('#own-nt');
+      if (p1.querySelector('.notranslate').textContent !== 'Rimefox') return 'notranslate 被清空：' + p1.textContent;
+
+      var lines = DT.collect(box.querySelector('#own-lines'));
+      if (lines.length !== 1 || lines[0].text !== 'Line one\nLine two') return '分行 own 单元收集不对：' + JSON.stringify(lines.map(function (u) { return u.text; }));
+      if (!DT.inject(lines[0].el, '第一行\n第二行', 'zh-CN', true)) return '分行 inject 返回 false';
+      var p2 = box.querySelector('#own-lines');
+      if (p2.querySelector('[translate="no"]').textContent !== 'Brand') return 'translate="no" 被清空：' + p2.textContent;
+      if (p2.textContent.indexOf('第一行') < 0 || p2.textContent.indexOf('第二行') < 0) return '分行译文没写进去：' + p2.textContent;
+
+      var p3 = box.querySelector('#own-done');
+      if (!DT.inject(p3.querySelector('a'), '阅读更多', 'zh-CN')) return '链接 inject 返回 false';
+      var rest = DT.collect(p3);
+      if (rest.length !== 1 || !rest[0].own) return '父级应是 own 单元：' + rest.length;
+      if (!DT.inject(rest[0].el, '开头 结尾', 'zh-CN', true)) return '父级 inject 返回 false';
+      if (p3.querySelector('a').textContent !== '阅读更多') return '已翻过的链接被覆盖：' + p3.textContent;
+
+      DT.restore();
+      return eq(
+        [p1.textContent, p2.textContent, p3.textContent],
+        ['Hello Rimefox world', 'Line one BrandLine two', 'Intro text Read more tail']
+      );
+    } finally {
+      DT.state.mode = mode;
+      box.remove();
+    }
+  });
+
+  // 后台补注入（ensureInjected）和 manifest 声明的脚本可能在同一页各跑一次：
+  // core.js / dom.js 再跑不能清空状态、订阅和原地替换的记录
+  checkAsync('重复注入：再跑一遍 core.js / dom.js 不清空 DT.state、onConfig 订阅和 DT.replaced', function () {
+    function load(src) {
+      return new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = function () {
+          reject(new Error('加载失败：' + src));
+        };
+        document.body.appendChild(s);
+      });
+    }
+    var state = DT.state;
+    var replaced = DT.replaced;
+    var emit = DT.emitConfig;
+    var fired = 0;
+    DT.onConfig(function () {
+      fired += 1;
+    });
+    var before = fired; // 当时已有配置的话 onConfig 会立刻回调一次
+    return load('../content/core.js')
+      .then(function () {
+        return load('../content/dom.js');
+      })
+      .then(function () {
+        DT.emitConfig({ page: {} });
+        return eq(
+          [DT.state === state, DT.replaced === replaced, DT.emitConfig === emit, fired - before],
+          [true, true, true, 1]
+        );
+      });
+  });
+
   // ---------------- 渲染（等排队的异步用例逐个跑完） ----------------
   asyncChecks
     .reduce(function (chain, next) {

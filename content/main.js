@@ -341,7 +341,7 @@
           return;
         }
 
-        if (DT.inject(unit.el, text, target)) {
+        if (DT.inject(unit.el, text, target, unit.own)) {
           DT.state.translated += 1;
         }
       }
@@ -924,6 +924,13 @@
     window.addEventListener('load', keepChromeState);
     setTimeout(keepChromeState, 1200);
     setTimeout(keepChromeState, 4000);
+
+    // 自动开始翻译只在顶层页面：弹窗按钮和快捷键都只发给主框架（frameId 0），
+    // iframe 自己开起来的话，「还原原文」关不掉它，它还会一直替广告位、嵌入页补翻、计费
+    if (window.top !== window) {
+      DT.log('content script ready (iframe)', DT.VERSION);
+      return;
+    }
 
     // 同一个标签页里"刚才正在翻译"：刷新 / 返回后自动接着翻
     var resume = null;

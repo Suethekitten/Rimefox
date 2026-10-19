@@ -10,7 +10,8 @@ import {
   activeConfig,
   slotFor,
   pickImportedConfig,
-  providerChoices
+  providerChoices,
+  mergeCustomProviderLists
 } from '../lib/config.js';
 
 let pass = 0;
@@ -353,6 +354,64 @@ t('providerChoices：自定义服务商用保存的名字', () => {
   const list = providerChoices(cfg);
   assert.equal(list[0].name, '我的中转');
   assert.equal(list[0].current, true);
+});
+
+// ---------------- 删除自定义服务商 ----------------
+console.log('\n[删除自定义服务商]');
+
+const withCustom = {
+  currentProvider: 'deepseek',
+  providerConfig: {
+    deepseek: { engine: 'openai', apiKey: 'sk-ds', model: 'deepseek-chat' },
+    'custom:2': { engine: 'openai', baseUrl: 'https://relay.example/v1', apiKey: 'sk-secret', model: 'm' }
+  },
+  customProviders: [{ id: 'custom:2', name: '我的中转' }]
+};
+
+t('列表里删掉的自定义服务商：保存后槽位连同 Key 一起删掉', () => {
+  const patch = { providerConfig: { deepseek: { apiKey: 'sk-ds' } }, customProviders: [] };
+  const next = mergeConfig(withCustom, patch);
+  assert.deepEqual(Object.keys(next.providerConfig), ['deepseek']);
+  assert.equal(JSON.stringify(next).includes('sk-secret'), false);
+});
+
+t('patch 不带列表（弹窗 / 后台只改一两项）时不动自定义槽位', () => {
+  const next = mergeConfig(withCustom, { mode: 'translation' });
+  assert.equal(next.providerConfig['custom:2'].apiKey, 'sk-secret');
+});
+
+t('providerChoices：不在列表里的自定义槽位（老版本删除留下的）不再出现', () => {
+  const orphan = { ...withCustom, customProviders: [] };
+  const ids = providerChoices(orphan).map((p) => p.id);
+  assert.deepEqual(ids, ['deepseek']);
+});
+
+t('导入老格式迁移出来的 __custom__ 槽位会补进列表，不会被当成已删除', () => {
+  const { config } = pickImportedConfig(
+    envelope({
+      engine: 'openai',
+      engineConfig: { openai: { baseUrl: 'https://relay.example/v1', apiKey: 'sk-x', model: 'm' } },
+      targetLang: 'zh-CN',
+      theme: 'underline'
+    })
+  );
+  assert.ok(config.providerConfig.__custom__);
+  assert.deepEqual(config.customProviders.map((p) => p.id), ['__custom__']);
+  const next = mergeConfig(withCustom, { ...config, customProviders: mergeCustomProviderLists(withCustom.customProviders, config.customProviders) });
+  assert.equal(next.providerConfig.__custom__.apiKey, 'sk-x');
+  assert.equal(next.providerConfig['custom:2'].apiKey, 'sk-secret', '本机已有的自定义服务商不被导入删掉');
+});
+
+t('mergeCustomProviderLists：补进新的，同 id 用文件里的名字', () => {
+  const out = mergeCustomProviderLists(
+    [{ id: 'custom:2', name: '旧名' }, { id: 'custom:3', name: '本机' }],
+    [{ id: 'custom:2', name: '新名' }, { id: 'custom:4', name: '文件' }]
+  );
+  assert.deepEqual(out, [
+    { id: 'custom:2', name: '新名' },
+    { id: 'custom:3', name: '本机' },
+    { id: 'custom:4', name: '文件' }
+  ]);
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

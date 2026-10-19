@@ -370,14 +370,14 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-135 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
+137 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`selftest/index.html` 的 `tpl-novel` 夹具：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）与悬停三级对应的纯函数。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
 node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射（45 条）
-node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（30 条）
+node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验 / 删除自定义服务商（38 条）
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
-node test/parse.test.mjs       # 回包解析 parseArray（围栏 / 说明文字 / 裸换行 / 结尾逗号 / 对象元素）/ 换行规范化 normalizeTranslationBreaks / 写入前校验 leaksWrapper / 思考过程兜底 / 输出长度护栏（32 条）
+node test/parse.test.mjs       # 回包解析 parseArray（围栏 / 说明文字 / 裸换行 / 结尾逗号 / 对象元素）/ 换行规范化 normalizeTranslationBreaks / 写入前校验 leaksWrapper / 思考过程兜底 / 输出长度护栏（35 条）
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空（14 条）
 node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批（7 条）
 node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、温度、保留分行规则（14 条）
@@ -391,6 +391,7 @@ node test/subtitles-session.test.mjs # 字幕运行时 A–J：语言/视频切�
 node test/usage.test.mjs       # 三协议 usage 提取 + 统计聚合（6 条）
 node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆批、部分成功、usage 汇总（8 条）
 node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络请求（6 条）
+node test/frame-boot.test.mjs  # 内容脚本启动：自动翻译只在顶层页面，iframe 不自己开（3 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 

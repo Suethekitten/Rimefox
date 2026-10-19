@@ -4,6 +4,11 @@
 
   var DT = (window.__DT = window.__DT || {});
   DT.VERSION = '0.8.8';
+  // 允许重复注入：页面还没加载完就打开弹窗 / 按快捷键时，后台补注入（ensureInjected）的这批脚本
+  // 会和 manifest 声明的那批各跑一次。只初始化一次：再跑会清空 DT.state 和 onConfig 的订阅，
+  // 而 main.js、appearance.js、dock.js 这些已经启动过的模块不会重新订阅，站点规则 / 外观就再也不生效
+  if (DT.__coreReady) return;
+  DT.__coreReady = true;
 
   DT.state = {
     enabled: false,

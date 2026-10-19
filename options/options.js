@@ -11,6 +11,7 @@ import {
   IMPORT_APP,
   IMPORT_SCHEMA,
   pickImportedConfig,
+  mergeCustomProviderLists,
   localIso,
   activeConfig,
   slotFor,
@@ -965,6 +966,10 @@ $('importFile').addEventListener('change', async (event) => {
 
     const parsed = pickImportedConfig(raw);
     const patch = parsed.config;
+    // 自定义服务商按列表决定去留：补进本机已有的，不让导入顺带删掉它们
+    if (patch.customProviders) {
+      patch.customProviders = mergeCustomProviderLists((currentCfg && currentCfg.customProviders) || [], patch.customProviders);
+    }
     const next = await saveConfig(patch);
     rememberSaved(next);
     currentCfg = next;

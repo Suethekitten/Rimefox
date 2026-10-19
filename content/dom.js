@@ -8,6 +8,9 @@
 
   var DT = window.__DT;
   if (!DT) return;
+  // 允许重复注入（见 core.js）：再跑一次会清空 DT.replaced，仅译文模式下「还原」就找不回原文了
+  if (DT.__domReady) return;
+  DT.__domReady = true;
 
   var SKIP_TAGS = {
     SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, HEAD: 1, TITLE: 1, META: 1, LINK: 1,
@@ -150,9 +153,32 @@
     );
   };
 
+  // own 单元（子元素都已翻过 / 被跳过，只翻自己的直接文本）在页面上对应的文字：
+  // 只取 ownText 读过的那些 —— 直接文本、<br>、行内代码。
+  // notranslate / translate="no" / 站点规则排除的子元素、已经翻过的子元素都没送去翻译，原地替换时也不能动它们
+  function ownTokens(el) {
+    var out = [];
+    var keep = keepsBreaks(styleOf(el));
+    var kids = el.childNodes;
+    for (var i = 0; i < kids.length; i += 1) {
+      var kid = kids[i];
+      if (kid.nodeType === 3) {
+        if (kid.nodeValue) out.push({ node: kid, keep: keep });
+      } else if (kid.nodeType === 1) {
+        if (tagOf(kid) === 'BR') {
+          if (!kid.hasAttribute('data-dt-collapsed')) out.push({ br: kid });
+        } else if (INLINE_CODE_TAGS[tagOf(kid)]) {
+          out = out.concat(tokensOf(kid));
+        }
+      }
+    }
+    return out;
+  }
+
   // 把元素里的文字按行分组（和 DT.unitText 同一套切法，非空行一一对应）：
   // 每行 { pieces: [{ node, start, end }], filled: 有没有字, keep, br: 行首的 <br>, nl: 行首在文本节点里的 \n }
-  function lineGroups(el) {
+  // tokens 不传时取整个元素（tokensOf）；own 单元传 ownTokens
+  function lineGroups(el, tokens) {
     var groups = [{ pieces: [], filled: false, keep: false, br: null, nl: null }];
     function last() {
       return groups[groups.length - 1];
@@ -163,7 +189,7 @@
       g.pieces.push({ node: node, start: start, end: end });
       if (/\S/.test(node.nodeValue.slice(start, end))) g.filled = true;
     }
-    tokensOf(el).forEach(function (tok) {
+    (tokens || tokensOf(el)).forEach(function (tok) {
       if (tok.br) {
         groups.push({ pieces: [], filled: false, keep: false, br: tok.br, nl: null });
         return;
@@ -576,16 +602,26 @@
   // 仅译文：原地替换文本节点（保留图标等子元素）
   // 每个节点记下原值和我们写入的值：站点之后改了它（SPA 重渲染），
   // 我们就不能再当它是"已翻译"，还原时也不能拿旧原文盖掉站点的新内容。
-  function injectOnly(sourceEl, text, area) {
-    var srcText = DT.unitText(sourceEl);
-    var groups = lineGroups(sourceEl);
+  // own：这是 own 单元（只翻了自己的直接文本，见 walk），只改写送去翻译的那些文本节点
+  function injectOnly(sourceEl, text, area, own) {
+    var tokens = own ? ownTokens(sourceEl) : null;
+    var srcText = own ? ownText(sourceEl) : DT.unitText(sourceEl);
+    var groups = lineGroups(sourceEl, tokens);
     var filledLines = groups.filter(function (g) {
       return g.filled;
     }).length;
     if (filledLines >= 2) return injectLines(sourceEl, text, groups, srcText, area);
 
     // 单行（导航、按钮、普通段落）：整段写进第一个文本节点，其余清空（0.8.3 及以前的做法）
-    var nodes = collectTextNodes(sourceEl);
+    var nodes = own
+      ? tokens
+          .filter(function (tok) {
+            return tok.node && tok.node.nodeValue.trim();
+          })
+          .map(function (tok) {
+            return tok.node;
+          })
+      : collectTextNodes(sourceEl);
     if (!nodes.length) return false;
 
     // 首字下沉：首字放进下沉节点，其余放进后面的正文节点。
@@ -904,8 +940,8 @@
     return 'content';
   };
 
-  // 对外：注入一条译文
-  DT.inject = function (sourceEl, text, lang) {
+  // 对外：注入一条译文。own = 收集时的 unit.own（只翻了元素自己的直接文本）
+  DT.inject = function (sourceEl, text, lang, own) {
     if (!sourceEl || !sourceEl.isConnected) return false;
     if (sourceEl.hasAttribute('data-dt-src')) return false;
     // 防御：站点可能克隆节点并保留属性，这里再确认一次没插过
@@ -923,7 +959,7 @@
       // 3) 控件 / 导航里的界面文字
       (allowChromeReplace && area !== 'content');
 
-    if (replaceMode) return injectOnly(sourceEl, text, area);
+    if (replaceMode) return injectOnly(sourceEl, text, area, !!own);
     return injectDual(sourceEl, text, lang, area);
   };
 
