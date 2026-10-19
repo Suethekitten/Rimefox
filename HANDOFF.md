@@ -506,8 +506,8 @@ node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层�
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **135 / 135**
-4b. 跑 Node 单测：`node --test test/*.test.mjs`（19 个文件、按退出码判定，应全部通过；CI 发版前跑同一条命令）
+4. 跑自检页：必须 **139 / 139**
+4b. 跑 Node 单测：`node --test test/*.test.mjs`（21 个文件、按退出码判定，应全部通过；CI 发版前跑同一条命令）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
    每版 3–6 条、每条一句话且 ≤ 90 字、不许有子项、只写用户会感觉到什么、只写这一版。
@@ -573,13 +573,29 @@ node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层�
 
 ---
 
-## 14. 本版技术记录（0.8.8）
+## 14. 本版技术记录（0.8.9）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 > 翻译引擎的完整说明、外部项目参考（Wenyi / Agent Book Translate）、未完成方向与接手指南在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)，这里只记本版改了什么。
 
-- **根因**（popup/popup.css）：.label 固定列宽（中文 30px / 英文 64px）+ white-space: nowrap；「悬停对照」四个字（英文 Hover compare）宽 50/85px，溢出标签盒 20/21px。该行复用 .night-line 但没有 .night-host 占位，开关贴在标签盒右缘，溢出的文字正好压在开关上（无头 Edge 实测：中文压 10px、英文压 11px）。「夜间」行因有 host 文本把开关顶到行尾，所以没暴露
-- **修复**：#hoverRow .label { width: auto } 让标签按内容取宽；#hoverRow .night-line { justify-content: flex-end } 把开关右对齐到与「夜间」行同一列（实测 [279,311]）。其余行的列宽与控件左缘逐像素不变；设置页用另一套 ow-text 布局，不受影响
-- **验证**：修复前后无头几何对照（溢出 20/21px → 0、重叠 10/11px → 无）；弹窗 / 设置页 / 欢迎页做中+英通用扫描（文本溢出、裁切、同层重叠），0 真实命中，其余命中判定为 svg 图标内部、sticky 保存条、line-height: 1.08 行盒等假阳性；注入式悬停提示确认有视口钳制（max-width: min(420px, 100vw - 24px)、上方翻转 + 二次钳制）；真机 escapefromtartarkov.com 仅译文 63 段验证通过
-- **审计工具**：工作区测量页引用真实 popup.css 读几何；页面副本扫描器内联 lib/i18n.js 的 408 条 EN 映射模拟英文态（ile:// 下 module 脚本不执行，扫描器按 pplyI18n 同款规则替换文本节点与 placeholder/title/aria-label）
-- **回归**：Node 20 个文件 / 302 条、自检 135 / 135 全绿；git diff --check 干净；0.8.7 的记录见 769b018 与 docs/TRANSLATION-ENGINE-HANDOFF.md
+- **来源**：对 0.8.8 做了一次全项目代码审查（15 项），分两个提交修完：`d7cb59f`（排在最前的 5 项正确性问题）、`5b928ce`（其余 10 项）。缓存键 SCHEMA 没变，升级后旧缓存照常命中
+- **解析**（`lib/parse.js`）：`findJsonArrays` 用 `matchBracket` 给每个 `[` 找配对的 `]`（跳过字符串字面量里的括号），不再把终点固定在全文最后一个 `]`；
+  夹在文字中间的数组只有元素全是字符串 / 对象时才算答案（`answerLike`，引注 `[1]` 不算），有多个时取最后一个条数对得上的。单条拆句由 `joinPieces` 拼回：任一边是中日文字符不加字，否则加一个空格
+- **后台**（`background.js`）：`inflight` Map（缓存键 → `Promise<{ value, error }>`）。同一原文已在途就等它的结果，不再请求；发出去之前登记，每条结果定下来就 settle，整批失败在 `finally` 里补 settle，等待方拿到真正的失败原因。
+  去掉了 `todo` 为空时的提前返回，`results` 为空时照样返回 `ok: true`。`content/main.js` 里「与 180s 上限对齐」的注释改成实际行为
+- **缓存**（`lib/cache.js`）：每层一个 `createMirror`，存成 `dt.cache.v1.<s|l>.<段号>` 加 `dt.cache.v1.<s|l>.index`。新写入追加到最新一段（估算字节超过 session 256KB / local 64KB 换下一段），删除和淘汰只让所在段变脏，落盘只写脏段和清单；
+  读取（LRU 提升）不改落盘内容，所以恢复后的顺序是最后写入顺序（近似 LRU）。读到旧格式的整层键 `dt.cache.v1` 会迁移过来并在下次落盘时删掉；`clear` 按存储里的清单删段；设置页的实际占用按缓存自己的键统计
+- **内容脚本**：`core.js` / `dom.js` 加 `__coreReady` / `__domReady` 重复注入保护（ensureInjected 和 manifest 声明的脚本在页面加载完之前可能各跑一次）。`main.js`：只有顶层页面自动开始翻译（iframe 在 boot 里直接返回）；
+  `loadConfig` 记下按配置（含站点规则）算出的 `cfgMode` / `cfgTarget`，变了才改 `DT.state`，翻译中变了就 `startOver`；`dt:setTarget` 同一种语言不再重建。`dom.js` 新增 `ownTokens`：own 单元原地替换只改 `ownText` 读过的节点，`DT.inject` 加第 4 个参数 `own`。
+  `core.js` 新增 `DT.chineseScript`（389 对简繁写法不同的常用字），接进 `looksLikeTarget` 和近似重复闸门；`lib/prompt.js` 目标是中文时规则 5 补一句「另一种写法要转写」（提示词不进缓存键）
+- **配置**（`lib/config.js`）：`mergeConfig` 在 patch 带 `customProviders` 时删掉不在列表里的自定义槽位（`getConfig` 读出时也会清掉老版本删除留下的孤儿槽位），`providerChoices` 不列孤儿；
+  导入时把自定义槽位补进列表，设置页再用 `mergeCustomProviderLists` 和本机列表合并（不顺带删掉本机已有的）；导入带上 `glossary`；`saveConfig` 用 Promise 队列串行（只管同一个页面 / service worker，跨页面仍靠设置页的「在别的页面被修改过」提示）
+- **其它**：`lib/provider.js` 的 `rejectedThinking` 按 协议 + 地址 + 模型 + 模式 + 参数 记住 400 拒绝过的思考参数（service worker 重启后重新试）；新增 `lib/engines/model-list.js`，三个引擎的 `listModels` 共用 `fetchModelList`，各家错误文案不变；
+  `options/options.js` 导入后按表单里的地址和 Key 刷新模型列表（以前读 v5 之前的扁平字段，从没执行过）
+- **测试**：Node 21 个文件全过（新增 `test/content-main.test.mjs` 7 条；translate-pipeline 7 → 9、cache 14 → 17、engines 45 → 48、config 33 → 39、parse 32 → 36、prompt 14 → 15、provider 5 → 6、hover-config 6 → 7），自检 135 → 139。
+  新增的行为用例都先在旧代码上确认失败；listModels 的用例在新旧代码上都通过，用来确认重构没改行为
+- **真实浏览器**：Chrome 155 无头模式，CDP `Extensions.loadUnpacked` 加载工作树，接本地假 OpenAI 接口（带 `reasoning_effort` 就回 400），19 / 19 通过：普通文章页双语 / 仅译文 / 还原逐字一致，notranslate 品牌名在仅译文下保留；
+  刷新后主框架按标签页记忆恢复、同源 iframe 没有自己开始翻译；划词纯文本回复带 `[1]` 显示整段、拆句拼回有空格；session / local 两层都是分段格式、没有旧整层键；
+  另一处把配置改成仅译文后已翻译的标签页整页重建（追加译文 0、替换 4）；简体页面选繁體中文照常送翻；`reasoning_effort` 只在首批并发的 2 个请求里出现，拿到 400 之后 0 次；
+  设置页删除自定义服务商后存储里没有它的槽位和 Key、导入文件带上术语表且本机 Key 还在、缓存统计能读出；页面 / 设置页 / service worker 没有未捕获异常
+- **未验证**：真实模型回包与译文质量（没用 API Key）、YouTube 真实播放器（字幕代码本版没改，但会走新的在途去重和分段缓存）、Edge、旧整层缓存在真实浏览器里的迁移（只有 Node 单测）、商店包与 ../商店/ 目录里的旧 zip 没有更新

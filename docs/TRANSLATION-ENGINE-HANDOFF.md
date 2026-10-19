@@ -2,7 +2,7 @@
 
 > 给接手翻译引擎的 Agent / 协作者。读完 [AGENTS.md](../AGENTS.md)、[HANDOFF.md](../HANDOFF.md) 和本文，就能直接继续，不需要重新调查整条管线。
 > 项目全局交接（架构总览、消息协议、发版流程、踩过的坑）在 HANDOFF.md；本文只管**翻译引擎**：从网页上收集文字到译文写回、还原的整条链路，以及接下来往哪走。
-> 最近更新：0.8.7（2026-10-19 发布，基于 v0.8.6 `3435ec9`）。
+> 最近更新：0.8.9（基于 v0.8.8 `77479ca`；第 2 节仍是 0.8.7 的引擎改动，0.8.9 的改动摘要在第 0 节，细节见 HANDOFF §14）。
 
 ---
 
@@ -11,6 +11,7 @@
 - Rimefox 的定位是**轻量、快速、低成本**的网页翻译：一个翻译单元 = 网页上的一个段落 / 元素，批量发给用户自己的 API，结果按条写回原位。不做全书预扫描、梗概、人物分析、额外的审校调用。
 - 0.8.7 修了 Pixiv 中译英偶发的字面 `\n`：根因在**模型回包**（多转义一层换行），被**解析层**原样放过、被**缓存**固化；DOM 层只是如实显示。修复在解析之后、写缓存之前，以及读缓存之后（旧坏数据当场修好）。
 - 同时做了几项低风险的引擎内部优化（解析容错、写入前校验、长段落无损切分、按目标语言拼接），全部有离线测试；**没有**用真实模型验证译文质量，不能说「翻译质量提升了」。
+- 0.8.9（代码审查修复）：`parseArray` 按括号配对逐个找最外层数组，夹在正文里的纯数字数组（引注 `[1]`）不当答案；单条拆句按文字拼回（中日文不加字、其它加空格）；后台同一缓存键在途去重（`inflight`）；缓存分段落盘（只写脏段）；简繁区分（`DT.chineseScript`）；服务端 400 拒绝过的思考参数按 协议 + 地址 + 模型 记住不再发。都有离线测试，同样没有用真实模型验证质量。
 - 轻量上下文、稳定映射、术语一致性、可恢复翻译只做了调研和设计，**没有实现**，见第 3 节。
 
 ---
@@ -25,7 +26,7 @@ content script（网页里，classic script，ES5）                          se
 dom.js   DT.collectAll(accept)
          walk() 切分：容器下钻 / 段落整体；单元 = { el, text, own? }
          text = DT.unitText(el)：<br> 和 white-space:pre-* 的 \n 记成换行，行内折叠空白
-main.js  accept()：skipText / looksLikeTarget / settled / churn / 懒翻译距离 / 失败退避
+main.js  accept()：skipText / looksLikeTarget（简繁按 DT.chineseScript 区分）/ settled / churn / 懒翻译距离 / 失败退避
          DT.splitLong(text, maxUnitChars=1200) → parts + parts.seps
          （每段都是原文原样子串；seps 记切点原有的分隔：'\n'、'\n\n'、' '、''）
          takeBatch()：按离屏幕距离排序，屏幕内 ≤3 条 / ≤500 字
@@ -34,6 +35,7 @@ main.js  accept()：skipText / looksLikeTarget / settled / churn / 懒翻译距�
                                                                        │   scope = 目标语言 / 风格 / 服务商:模型 / 域名 / 术语指纹 / 自定义提示词指纹
                                                                        │   命中 → normalizeTranslationBreaks + leaksWrapper（旧坏数据修好 / 当作未命中）
                                                                        ├ 同批重复文本合并（groups）
+                                                                       ├ 在途去重：同一缓存键已有请求在翻 → 等它的 { value, error }（0.8.9）
                                                                        ├ 可选：本地脱敏 maskTexts（映射只在内存）
                                                                        ├ 切批（batchSize / maxCharsPerBatch）+ 并发闸门
                                                                        ├ translateBatchWithRetry：systemPrompt + JSON.stringify(texts)
@@ -209,6 +211,7 @@ hover.js 悬停对照：段落 → 行 → 句子三级，只认靠得住的一�
 ## 5. 第三方代码合规
 
 - **参考设计，未移植第三方源码。** 0.8.7 的 `normalizeTranslationBreaks`、`stripTrailingCommas`、`findJsonArray`、`itemText`、`leaksWrapper`、`splitSentences` 都是按 Rimefox 的需求用 JavaScript 新写的；没有复制、翻译或改编两个项目的代码。
+- 0.8.9 的 `findJsonArrays` / `matchBracket` / `joinPieces`、简繁对照字表、`lib/engines/model-list.js` 同样是新写的，没有参考第三方源码。
 - `leaksWrapper` 的拦截模式里有 `{"translation":` 这类通用 JSON 片段，和 ABT 的 `LEAKAGE_PATTERNS` 思路相同；这些是普通字符串，不构成代码移植。
 - 因此本次**不需要**更新 `THIRD-PARTY-NOTICES.md` / `licenses/`。以后如果真的移植了代码（哪怕是改写成 JS 的算法实现），必须：在 `THIRD-PARTY-NOTICES.md` 加条目、把对应项目的 LICENSE 原文放进 `licenses/`（参考已有的 `licenses/oneaifw-MIT.txt`）、并在移植的文件头注明来源与提交号。`tools/package-store.mjs` 会把 `licenses/` 打进安装包。
 
