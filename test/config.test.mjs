@@ -9,7 +9,8 @@ import {
   mergeConfig,
   activeConfig,
   slotFor,
-  pickImportedConfig
+  pickImportedConfig,
+  providerChoices
 } from '../lib/config.js';
 
 let pass = 0;
@@ -314,6 +315,44 @@ t('customPrompt 超过 2000 字被拒绝，正常长度保留', () => {
 
 t('格式不对的外部 JSON 仍被拒绝', () => {
   assert.throws(() => pickImportedConfig({ theme: 'system' }), /rimefox/);
+});
+
+// ---------------- 服务商切换列表 ----------------
+console.log('\n[服务商切换列表]');
+
+t('providerChoices：只列配置过的槽位，标出当前与是否有 Key', () => {
+  const list = providerChoices(twoProviders);
+  assert.equal(list.length, 2);
+  assert.equal(list[0].id, 'deepseek');
+  assert.equal(list[0].current, true);
+  assert.equal(list[0].hasKey, true);
+  assert.equal(list[1].id, 'siliconflow');
+  assert.equal(list[1].current, false);
+});
+
+t('providerChoices：没有 Key 的排在后面，且不泄露 Key 本身', () => {
+  const cfg = {
+    currentProvider: 'siliconflow',
+    providerConfig: {
+      deepseek: { apiKey: '', model: 'deepseek-chat' },
+      siliconflow: { apiKey: 'sk-sf', model: 'qwen' }
+    }
+  };
+  const list = providerChoices(cfg);
+  assert.equal(list[0].id, 'siliconflow');
+  assert.equal(list[1].hasKey, false);
+  assert.equal(JSON.stringify(list).includes('sk-sf'), false);
+});
+
+t('providerChoices：自定义服务商用保存的名字', () => {
+  const cfg = {
+    currentProvider: 'custom:2',
+    customProviders: [{ id: 'custom:2', name: '我的中转' }],
+    providerConfig: { 'custom:2': { apiKey: 'k', model: 'm' } }
+  };
+  const list = providerChoices(cfg);
+  assert.equal(list[0].name, '我的中转');
+  assert.equal(list[0].current, true);
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

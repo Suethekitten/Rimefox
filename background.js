@@ -1,5 +1,5 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
-import { getConfig, saveConfig, activeConfig, styleById } from './lib/config.js';
+import { getConfig, saveConfig, activeConfig, styleById, providerChoices } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseArrayFromReasoning, isRunaway } from './lib/parse.js';
@@ -426,10 +426,31 @@ const ROUTES = {
     const providerConfig = {};
     Object.keys(cfg.providerConfig || {}).forEach((id) => {
       const one = cfg.providerConfig[id] || {};
-      providerConfig[id] = { engine: one.engine, baseUrl: one.baseUrl, model: one.model };
+      providerConfig[id] = { engine: one.engine, baseUrl: one.baseUrl, model: one.model, hasKey: !!one.apiKey };
     });
     const { providerConfig: _omit, ...rest } = cfg;
-    return { ok: true, config: { ...rest, providerConfig, hasKey: !!activeConfig(cfg).apiKey, page: pageAppearance(cfg, sender) } };
+    return {
+      ok: true,
+      config: {
+        ...rest,
+        providerConfig,
+        hasKey: !!activeConfig(cfg).apiKey,
+        page: pageAppearance(cfg, sender),
+        providers: providerChoices(cfg)
+      }
+    };
+  },
+  // 内容脚本里的悬浮入口切服务商：只允许切到「已配置 Key」的槽位
+  'provider:set': async (msg) => {
+    const id = String((msg && msg.provider) || '');
+    if (!id) return { ok: false, error: 'bad_provider' };
+    const cfg = await getConfig();
+    const hit = providerChoices(cfg).filter((p) => p.id === id)[0];
+    if (!hit) return { ok: false, error: 'bad_provider' };
+    if (!hit.hasKey) return { ok: false, error: 'no_key', name: hit.name };
+    if (hit.current) return { ok: true, provider: id, name: hit.name };
+    await saveConfig({ currentProvider: id });
+    return { ok: true, provider: id, name: hit.name };
   },
   // 网页里的悬浮入口切显示方式：和弹窗一样记进配置（只接受两个取值，其它配置项内容脚本改不了）
   'mode:set': async (msg) => {

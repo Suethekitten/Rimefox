@@ -17,6 +17,7 @@
   var host = null;
   var shadow = null;
   var dock = null;
+  var menu = null;
   var tip = null;
   var buttons = {};
   var openTimer = 0;
@@ -68,6 +69,18 @@
       'font-size:12px;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;pointer-events:none;transition:opacity .12s ease}',
     ':host([data-side="left"]) .tip{right:auto;left:calc(100% + 4px)}',
     '.tip[data-show]{opacity:1}',
+    // 服务商切换菜单：从面板左侧弹出，不改变 dock 自身的布局
+    '.menu{position:absolute;top:0;right:calc(100% + 6px);min-width:170px;max-width:260px;padding:6px;border-radius:12px;' +
+      'background:var(--bg);border:1px solid var(--line);box-shadow:0 12px 32px -12px rgba(0,0,0,.35);' +
+      'display:flex;flex-direction:column;gap:2px;pointer-events:auto;z-index:1}',
+    ':host([data-side="left"]) .menu{right:auto;left:calc(100% + 6px)}',
+    '.menu[hidden]{display:none}',
+    '.menu-item{all:unset;box-sizing:border-box;display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:8px;cursor:pointer;text-align:left}',
+    '.menu-item:hover,.menu-item:focus-visible{background:var(--hover)}',
+    '.menu-item[aria-current="true"]{background:var(--hover)}',
+    '.menu-name{font-size:12.5px;font-weight:600;white-space:nowrap}',
+    '.menu-model{font-size:11px;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}',
+    '.menu-empty{padding:6px 8px;font-size:12px;opacity:.78}',
     '@media (prefers-reduced-motion:reduce){.dock,.panel,.tip{transition:none}}'
   ].join('\n');
 
@@ -87,8 +100,13 @@
     if (act === 'selection') return DT.uiText('翻译选中的文字', 'Translate selected text');
     if (act === 'pin') return DT.uiText('置顶小窗：划词译文始终在最上层', 'Pinned window: selection translations stay on top');
     if (act === 'provider') {
-      var page = cfg().page || {};
-      return DT.uiText('当前服务商：', 'Current provider: ') + (page.provider || '—');
+      var list = cfg().providers || [];
+      var cur = null;
+      for (var i = 0; i < list.length; i += 1) {
+        if (list[i].current) cur = list[i];
+      }
+      var name = (cur && cur.name) || (cfg().page || {}).provider || '—';
+      return DT.uiText('切换服务商（当前：', 'Switch provider (current: ') + name + ')';
     }
     return '';
   }
@@ -150,6 +168,11 @@
       panel.appendChild(makeButton(act));
     });
     dock.appendChild(panel);
+    menu = document.createElement('div');
+    menu.className = 'menu';
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+    dock.appendChild(menu);
     dock.appendChild(makeButton('ball', 'ball'));
     tip = document.createElement('div');
     tip.className = 'tip';
@@ -179,6 +202,14 @@
         if (shadow.activeElement) shadow.activeElement.blur();
       }
     });
+    // 点菜单外面收起（服务商按钮自己负责开关，不在这里抢）
+    dock.addEventListener('mousedown', function (event) {
+      if (!menu || menu.hidden) return;
+      if (menu.contains(event.target)) return;
+      var btn = event.target && event.target.closest ? event.target.closest('[data-act="provider"]') : null;
+      if (btn) return;
+      hideMenu();
+    });
 
     // 翻译开关 / 显示方式 / 页面明暗都写在 <html> 的属性上：跟着变
     attrObserver = new MutationObserver(render);
@@ -195,6 +226,7 @@
     else {
       dock.removeAttribute('data-open');
       hideTip();
+      hideMenu();
     }
   }
 
@@ -204,6 +236,8 @@
   function showTip(btn) {
     clearTimeout(tipTimer);
     if (!tip || !btn) return;
+    // 服务商菜单开着时不再弹说明，否则会和菜单叠在一起
+    if (menu && !menu.hidden && btn.dataset.act === 'provider') return;
     tipFor = btn;
     tip.textContent = labelOf(btn.dataset.act);
     tip.setAttribute('data-show', '');
@@ -221,6 +255,83 @@
     clearTimeout(tipTimer);
     tipFor = null;
     if (tip) tip.removeAttribute('data-show');
+  }
+
+  // ---------------- 服务商菜单 ----------------
+  function hideMenu() {
+    if (menu) menu.hidden = true;
+  }
+
+  function renderMenu() {
+    if (!menu) return;
+    menu.textContent = '';
+    var list = (cfg().providers || []).filter(function (p) {
+      return p.hasKey;
+    });
+
+    if (!list.length) {
+      var empty = document.createElement('div');
+      empty.className = 'menu-empty';
+      empty.textContent = DT.uiText('还没有可切换的服务商，先在设置里填 Key', 'No provider yet — add a key in Settings');
+      menu.appendChild(empty);
+      return;
+    }
+
+    list.forEach(function (p) {
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'menu-item';
+      item.setAttribute('role', 'menuitem');
+      item.setAttribute('aria-current', p.current ? 'true' : 'false');
+      item.dataset.provider = p.id;
+
+      var name = document.createElement('span');
+      name.className = 'menu-name';
+      name.textContent = p.name + (p.current ? ' · ' + DT.uiText('当前', 'Current') : '');
+      item.appendChild(name);
+
+      if (p.model) {
+        var model = document.createElement('span');
+        model.className = 'menu-model';
+        model.textContent = p.model;
+        item.appendChild(model);
+      }
+
+      item.addEventListener('click', function (event) {
+        event.stopPropagation();
+        switchProvider(p.id);
+      });
+      menu.appendChild(item);
+    });
+  }
+
+  function toggleMenu() {
+    if (!menu) return;
+    if (!menu.hidden) {
+      hideMenu();
+      return;
+    }
+    // 菜单和说明气泡都在 dock 左侧，同时出现会叠在一起
+    hideTip();
+    renderMenu();
+    menu.hidden = false;
+  }
+
+  function switchProvider(id) {
+    hideMenu();
+    DT.send({ type: 'provider:set', provider: id }, 5000)
+      .then(function (res) {
+        if (res && res.ok) {
+          DT.toast(DT.uiText('已切换到 ', 'Switched to ') + (res.name || id) + DT.uiText('，重新翻译后生效', ' — retranslate to apply'));
+          render();
+          return;
+        }
+        if (res && res.error === 'no_key') DT.toast(DT.uiText('这家服务商还没填 Key', 'No API key for this provider'));
+        else DT.toast(DT.uiText('切换失败', 'Switch failed'));
+      })
+      .catch(function () {
+        DT.toast(DT.uiText('切换失败', 'Switch failed'));
+      });
   }
 
   // ---------------- 动作 ----------------
@@ -252,8 +363,8 @@
       return;
     }
     if (act === 'provider') {
-      // 触屏没有悬停：点一下用提示条显示
-      DT.toast(labelOf('provider'));
+      // 触屏没有悬停：点一下弹出服务商列表
+      toggleMenu();
     }
   }
 
@@ -277,6 +388,8 @@
     dock.setAttribute('aria-label', DT.uiText('凛狐悬浮入口', 'Rimefox quick actions'));
     // 正在显示的说明换成新文案（比如刚点了开关），不收起
     if (tipFor) showTip(tipFor);
+    // 菜单开着时配置变了（比如切换成功）就重画列表
+    if (menu && !menu.hidden) renderMenu();
   }
 
   function mount() {
@@ -305,6 +418,9 @@
     },
     host: function () {
       return host;
+    },
+    menu: function () {
+      return menu;
     },
     run: run,
     setOpen: setOpen

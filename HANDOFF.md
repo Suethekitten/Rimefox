@@ -465,7 +465,7 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **96 / 96**
+4. 跑自检页：必须 **106 / 106**
 4b. 跑 Node 单测：`for f in test/*.test.mjs; do node $f; done`（应全绿）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -531,12 +531,14 @@ node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎�
 
 ---
 
-## 14. 本版技术记录（0.8.2）
+## 14. 本版技术记录（0.8.3）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **问题现场**（Aeon 仅译文模式）：第一段正常，但 `Newton’s inductivist methodology…` 这段的整段中文被塞进首字下沉的 `<span class="ld-dropcap">N</span>`，正文错位/像未翻译。该段原始 H1 区域的第一段带 `::first-letter`，而这段带的是独立 `.ld-dropcap` 文本节点。
-- **根因**：`injectOnly()` 把整段译文写进 `collectTextNodes()` 返回的**第一个文本节点**。Aeon 这段的第一个文本节点是下沉字母 `N`；其父节点是 `float:left`、`71.5px` 的 `.ld-dropcap`，于是 385 字译文全进了这个容器，其余文本节点被清空。
-- **修复**：`content/dom.js` 新增 `isDropcapNode()`：识别 `float:left/right`、字号 ≥ 父级 1.5 倍或类名含 `dropcap` 的小文本节点；`injectOnly()` 把译文首字写进下沉节点，其余写进第一个非下沉文本节点，其他节点保持清空。没有正文节点时回退到原行为，避免吞字。还原仍走原有的 saved nodes，不影响 `DT.restore()` / `releaseReplaced()`。
-- **回归测试**：`selftest` 104 → 105，新增“仅译文 + 首字下沉：整段译文不会被塞进下沉字母”。真实 Chrome 用 CDP `Extensions.loadUnpacked` 加载当前仓库、本地假接口在 Aeon 仅译文模式实测：修复前 `.ld-dropcap` 文本节点 385 字；修复后 `这`（1 字）在下沉节点，其余译文在正文节点。0.8.1 的 CJK 大标题 / 行高 / `data-dt` 修复保持不变。
-- **未验证 / 剩余**：翻译文本来自本地假接口，非真实服务商；未验证 Edge 和真实 API Key。行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制，原文结构本身保留）；仅译文模式的大标题仍沿用站点字号。极长标题翻译仍可能撑高 Aeon 英雄区。
+- **问题现场**：悬浮入口的「服务商」按钮原本只读——点一下弹提示「当前服务商：X」，没有任何切换入口；用户想换一家只能进设置页。
+- **纯函数**（`lib/config.js`）：新增 `providerChoices(cfg)`，返回 `[{ id, name, model, hasKey, current }]`，只列配置过的槽位，**不含 Key**；排序：当前 → 有 Key → 其余。自定义服务商取保存的名字。
+- **后台**（`background.js`）：`config:get` 增加 `providers: providerChoices(cfg)`，并给每个槽位补 `hasKey` 布尔；新增路由 `provider:set`，只接受「已知且已填 Key」的槽位，`saveConfig({ currentProvider })` 后返回 `{ ok, provider, name }`，无 Key 返回 `no_key`。
+- **悬浮入口**（`content/dock.js`）：点服务商按钮弹出菜单（closed shadow 内新增 `.menu`），列出有 Key 的服务商 + 模型名，当前项标 `aria-current`；点选后调 `provider:set`，成功 toast「已切换到 X，重新翻译后生效」；再点收起、点外面收起、Esc / 收起 dock 时一并关闭。按钮说明改为「切换服务商（当前：X）」。
+- **i18n**：所有新文案走 `DT.uiText(zh, en)`（切换服务商、当前、已切换到、重新翻译后生效、没有可切换的服务商、切换失败），没有新增词典键。
+- **回归测试**：`test/config.test.mjs` 30 → 33（列表排序、无 Key 靠后、不泄露 Key、自定义名字）；`selftest` 105 → 106（菜单只列有 Key 的服务商、当前项标记、再点收起）；悬浮入口原有断言同步改成新说明文案。
+- **未验证 / 剩余**：菜单在真实网页里的点击与剪贴板式 toast 需人工过一遍；`provider:set` 只改 `currentProvider`，不会自动重翻当前页（提示里已写明「重新翻译后生效」）。
