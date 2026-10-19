@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>凛狐 · 新手引导</title>
+    <link rel="icon" href="../icons/icon32.png" />
+    <script src="../lib/ui-theme-boot.js"></script>
+    <link rel="stylesheet" href="welcome.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#welcomeMain">跳到主要内容</a>
+
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="../icons/icon128.png" alt="" width="34" height="34" />
+        <span class="brand-text">
+          <span class="brand-name">凛狐 Rimefox</span>
+          <span class="brand-tag">双语对照翻译</span>
+        </span>
+      </div>
+      <div class="top-actions">
+        <span class="version" id="versionLine" hidden><span>版本</span> <span id="version"></span></span>
+        <button
+          type="button"
+          id="langToggle"
+          class="pill-btn"
+          aria-label="切换界面语言为英文"
+        >English</button>
+        <button
+          type="button"
+          id="themeToggle"
+          class="icon-btn"
+          aria-label="切换到深色"
+          data-next="dark"
+        >
+          <svg class="ico-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" /></svg>
+          <svg class="ico-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="shell" id="welcomeMain" tabindex="-1">
+      <aside class="rail" aria-label="引导步骤">
+        <p class="rail-title">引导步骤</p>
+        <ol class="steps">
+          <li>
+            <button type="button" class="step-btn" data-step="0" aria-current="step" aria-controls="step-welcome">
+              <span class="step-num">01</span>
+              <span class="step-copy"><strong>欢迎</strong><small>认识凛狐</small></span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="step-btn" data-step="1" aria-controls="step-features">
+              <span class="step-num">02</span>
+              <span class="step-copy"><strong>功能</strong><small>能做什么</small></span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="step-btn" data-step="2" aria-controls="step-setup">
+              <span class="step-num">03</span>
+              <span class="step-copy"><strong>配置</strong><small>连接翻译服务</small></span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="step-btn" data-step="3" aria-controls="step-start">
+              <span class="step-num">04</span>
+              <span class="step-copy"><strong>开始</strong><small>基本用法</small></span>
+            </button>
+          </li>
+        </ol>
+        <p class="rail-note">大约 2 分钟即可完成。<br />你的 Key 只保存在本机。</p>
+      </aside>
+
+      <div class="stage">
+        <!-- ================= 01 欢迎 ================= -->
+        <section class="panel" id="step-welcome" data-step="0" aria-labelledby="welcomeTitle">
+          <div class="hero-grid">
+            <div class="hero-copy">
+              <span class="eyebrow">首次安装 · 欢迎</span>
+              <h1 id="welcomeTitle" tabindex="-1"><span>让跨语言阅读</span><span class="accent">自然发生。</span></h1>
+              <p class="lead">凛狐把原文和译文放在一起，不打断你的阅读节奏。用你自己的 API Key，选择你信任的翻译模型。</p>
+              <ul class="badges">
+                <li class="badge">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7" /></svg>
+                  整页双语对照
+                </li>
+                <li class="badge">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v6c0 4.4 3.2 8.2 7.5 9 4.3-.8 7.5-4.6 7.5-9V6Z" /><path d="m9 12 2 2 4-4" /></svg>
+                  BYOK
+                </li>
+                <li class="badge">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h18M12 3v18" /><circle cx="12" cy="12" r="9" /></svg>
+                  无遥测
+                </li>
+              </ul>
+              <div class="actions">
+                <button type="button" class="btn primary" data-goto="2">
+                  开始配置
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                </button>
+                <button type="button" class="btn" data-goto="1">先看看功能</button>
+              </div>
+              <ul class="quick-facts">
+                <li>原文与译文同屏</li>
+                <li>页面文字只发给你配置的接口</li>
+                <li>支持中文 / English 界面</li>
+              </ul>
+            </div>
+
+            <div class="hero-art" aria-hidden="true">
+              <div class="browser-mock">
+                <div class="browser-bar"><span></span><span></span><span></span><span class="browser-url">reading.example</span></div>
+                <div class="mock-body">
+                  <div class="mock-label">原文</div>
+                  <p class="mock-original">Reading across languages should feel natural, not like a separate task.</p>
+                  <div class="mock-label tr">译文</div>
+                  <p class="mock-translation"><span data-i18n-skip>跨语言阅读应该自然发生，而不是一项额外的任务。</span></p>
+                  <div class="mock-meta"><span class="mock-chip">DeepSeek · deepseek-chat</span><span class="mock-chip ok">已翻译</span></div>
+                </div>
+              </div>
+              <div class="selection-pill">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7" /></svg>
+                划词翻译
+              </div>
+              <p class="art-caption">示意图 · 实际界面以扩展为准</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= 02 功能 ================= -->
+        <section class="panel" id="step-features" data-step="1" aria-labelledby="featuresTitle" hidden>
+          <span class="eyebrow">主要功能</span>
+          <h2 id="featuresTitle" tabindex="-1">从整页阅读到视频字幕</h2>
+          <p class="lead">五个功能，覆盖日常跨语言阅读的常见场景。</p>
+
+          <div class="feature-grid">
+            <article class="feature wide">
+              <div class="feature-main">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7" /></svg></span>
+                <h3>整页双语翻译</h3>
+                <p>原文与译文分层显示，可切换双语或仅译文；动态加载的内容会继续补翻。</p>
+              </div>
+              <div class="mini-page" aria-hidden="true">
+                <div class="mini-label">原文</div>
+                <span class="mini-line w92"></span>
+                <span class="mini-line w76"></span>
+                <div class="mini-label tr">译文</div>
+                <span class="mini-line tr w84"></span>
+                <span class="mini-line tr w60"></span>
+              </div>
+            </article>
+
+            <article class="feature">
+              <div class="feature-head">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h9l5 5v11H5Z" /><path d="M14 4v5h5M8 13h8M8 17h5" /></svg></span>
+                <h3>划词即时翻译</h3>
+              </div>
+              <p>选中文字后点旁边的「译」或使用右键菜单，气泡里显示译文，可复制或置顶。</p>
+              <div class="mini-selection" aria-hidden="true">
+                <span class="mini-word">Read naturally</span>
+                <span class="mini-select-bubble" data-i18n-skip>译</span>
+              </div>
+            </article>
+
+            <article class="feature">
+              <div class="feature-head">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m9 10 3 3-3 3M13 16h3" /></svg></span>
+                <h3>YouTube 双语字幕</h3>
+              </div>
+              <p>打开 CC 时显示原文和译文。默认关闭，非官方功能，依赖平台接口，可能随平台更新失效。</p>
+              <div class="mini-subs" aria-hidden="true">
+                <span class="sub-line">Reading across languages…</span>
+                <span class="sub-line tr" data-i18n-skip>跨语言阅读……</span>
+              </div>
+            </article>
+
+            <article class="feature">
+              <div class="feature-head">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5Z" /><path d="m3 13 9 5 9-5M3 18l9 5 9-5" /></svg></span>
+                <h3>多模型 API 支持</h3>
+              </div>
+              <p>DeepSeek、智谱 GLM、通义千问、Kimi、硅基流动、OpenRouter、Ollama、Anthropic、Gemini，或任意 OpenAI 兼容网关。</p>
+              <div class="mini-models" aria-hidden="true">
+                <span>DeepSeek</span><span>GLM</span><span>Qwen</span><span>Kimi</span><span>Claude</span><span>Gemini</span><span>Ollama</span><span>+</span>
+              </div>
+            </article>
+
+            <article class="feature">
+              <div class="feature-head">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7" /><path d="m17 14 2 2 3-3" /></svg></span>
+                <h3>术语表与自定义提示词</h3>
+              </div>
+              <p>指定术语的固定译法，追加自己的措辞要求，让译文更贴近你的习惯。</p>
+              <div class="mini-glossary" aria-hidden="true">
+                <span class="gloss-src">Battle Pass</span>
+                <span class="gloss-arrow">→</span>
+                <span class="gloss-dst" data-i18n-skip>战令</span>
+                <span class="gloss-tag">Glossary</span>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ================= 03 配置 ================= -->
+        <section class="panel" id="step-setup" data-step="2" aria-labelledby="setupTitle" hidden>
+          <span class="eyebrow">配置翻译服务</span>
+          <h2 id="setupTitle" tabindex="-1">使用你自己的 API Key</h2>
+          <p class="lead">凛狐采用 BYOK（Bring Your Own Key）模式：扩展不内置翻译额度，也不经过作者服务器。你需要准备一个兼容服务的 API Key，翻译才会工作。</p>
+
+          <div class="setup-grid">
+            <div class="setup-left">
+              <div class="callout">
+                <h3>为什么需要 API Key？</h3>
+                <ul class="why-list">
+                  <li><span class="tick">✓</span><span>翻译由你自己选择的模型完成，请求直接发往你填写的接口。</span></li>
+                  <li><span class="tick">✓</span><span>服务商可能按用量收费，价格和数据处理方式以服务商为准。</span></li>
+                  <li><span class="tick">✓</span><span>没有内置免费额度；换服务商或模型只需在设置里修改。</span></li>
+                </ul>
+              </div>
+
+              <div class="panel-card">
+                <h3>可以选择哪些服务</h3>
+                <ul class="provider-chips">
+                  <li>DeepSeek</li>
+                  <li>智谱 GLM</li>
+                  <li>通义千问</li>
+                  <li>Kimi</li>
+                  <li>硅基流动</li>
+                  <li>OpenRouter</li>
+                  <li>Ollama</li>
+                  <li>Anthropic</li>
+                  <li>Gemini</li>
+                  <li>自定义 / 兼容网关</li>
+                </ul>
+                <p class="small">也可以填写任意 OpenAI 兼容网关，或本机 Ollama 地址。不确定选哪个？先看服务商是否提供兼容接口、是否支持你需要的语言，以及价格是否合适。</p>
+              </div>
+            </div>
+
+            <div class="panel-card setup-card">
+              <h3>三步完成配置</h3>
+              <ol class="setup-steps">
+                <li><span><strong>打开扩展设置</strong><small>点下面的按钮，或从扩展菜单进入设置。</small></span></li>
+                <li><span><strong>选择服务商，填写 API 地址、Key 和模型</strong><small>地址通常以 /v1 结尾；具体以服务商文档为准。</small></span></li>
+                <li><span><strong>点「测试连接」，成功后保存</strong><small>看到连接正常，就可以去翻译网页了。</small></span></li>
+              </ol>
+              <button type="button" class="btn primary block" id="openSettings">
+                打开设置
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              </button>
+              <p class="micro">没有 Key？先到你选择的服务商控制台创建，再回到这里填写。</p>
+            </div>
+          </div>
+
+          <div class="privacy-box">
+            <div class="privacy-head">
+              <span class="privacy-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /><path d="M12 15v2" /></svg></span>
+              <h3>关于隐私</h3>
+            </div>
+            <p>API Key 只保存在本机浏览器的 chrome.storage.local 中，只作为认证头发送给你填写的接口。待翻文本会直接发往该接口，不经过作者服务器，也没有遥测。</p>
+            <p>可选的本地脱敏默认关闭，开启后会在发请求前把可识别的邮箱、电话、身份证号和银行卡号换成占位符。第三方服务商的数据处理以其隐私政策为准。</p>
+            <a class="text-link" href="https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">
+              阅读隐私说明
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M19 14v5H5V5h5" /></svg>
+            </a>
+          </div>
+        </section>
+
+        <!-- ================= 04 开始 ================= -->
+        <section class="panel" id="step-start" data-step="3" aria-labelledby="startTitle" hidden>
+          <span class="eyebrow">开始使用</span>
+          <h2 id="startTitle" tabindex="-1">四步开始第一次翻译</h2>
+          <p class="lead">配置完成后，打开任意普通网页就能试。</p>
+
+          <ol class="usage-list">
+            <li class="usage-item">
+              <span class="usage-num">01</span>
+              <div>
+                <h3>打开任意普通网页</h3>
+                <p>支持 http / https 页面。浏览器内置页和扩展商店页不能翻译。</p>
+              </div>
+            </li>
+            <li class="usage-item">
+              <span class="usage-num">02</span>
+              <div>
+                <h3>点击工具栏里的凛狐图标</h3>
+                <p>也可以在页面上按 Alt + A（Mac：Option + A）翻译或还原。</p>
+              </div>
+            </li>
+            <li class="usage-item">
+              <span class="usage-num">03</span>
+              <div>
+                <h3>选择整页翻译或划词翻译</h3>
+                <p>整页翻译在弹窗里点「翻译此页」；划词时选中文字再点「译」。</p>
+              </div>
+            </li>
+            <li class="usage-item">
+              <span class="usage-num">04</span>
+              <div>
+                <h3>想试字幕就打开 CC</h3>
+                <p>先在设置里开启「YouTube 字幕双语」，再打开有 CC 轨道的视频。</p>
+              </div>
+            </li>
+          </ol>
+
+          <div class="pin-tip">
+            <span class="pin-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 6 6-2 2 4 4-2 2-4-4-2 2-6-6 2-2 4 4 2-2Z" /><path d="m13 15 5 5" /></svg></span>
+            <div>
+              <h3>把凛狐固定到工具栏</h3>
+              <p>Chrome 和 Edge 会把新扩展收进拼图（扩展）菜单。点旁边的图钉就能固定；扩展无法替你自动固定。</p>
+            </div>
+          </div>
+
+          <div class="finish-card">
+            <div class="finish-copy">
+              <h3>准备好了</h3>
+              <p>需要重新查看时，可以在设置页或弹窗里打开「使用指南」。</p>
+            </div>
+            <div class="actions tight">
+              <button type="button" class="btn primary" id="finishSettings">
+                完成引导
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              </button>
+              <a class="btn" href="https://github.com/Suethekitten/Rimefox/blob/main/README.md" target="_blank" rel="noopener noreferrer">查看详细文档</a>
+            </div>
+          </div>
+        </section>
+
+        <div class="pager">
+          <button type="button" class="btn" id="prevBtn" disabled>上一步</button>
+          <div class="progress-dots" aria-hidden="true">
+            <span class="dot is-on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          </div>
+          <button type="button" class="btn primary" id="nextBtn">
+            <span id="nextLabel">下一步</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <footer class="foot">
+      <span class="foot-brand">凛狐 Rimefox</span>
+      <span class="foot-note">用你自己的 Key，不经过作者服务器。</span>
+      <nav class="foot-links" aria-label="相关链接">
+        <a href="https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">隐私说明</a>
+        <a href="https://github.com/Suethekitten/Rimefox" target="_blank" rel="noopener noreferrer">源码</a>
+        <a href="https://github.com/Suethekitten/Rimefox/blob/main/README.md" target="_blank" rel="noopener noreferrer">文档</a>
+      </nav>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="welcome.js"></script>
+  </body>
+</html>

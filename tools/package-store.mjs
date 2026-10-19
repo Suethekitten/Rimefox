@@ -28,7 +28,7 @@ async function collect(name) {
   else throw Error(`Unsupported file: ${name}`);
 }
 for (const name of [
-  'manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'icons',
+  'manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'welcome', 'icons',
   'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses'
 ]) await collect(name);
 for (const size of [16, 32, 48, 128]) {
@@ -41,6 +41,11 @@ const refs = [manifest.background.service_worker, manifest.action.default_popup,
   ...manifest.content_scripts.flatMap(s => [...(s.js || []), ...(s.css || [])]),
   ...manifest.web_accessible_resources.flatMap(r => r.resources)];
 for (const ref of refs) if (!entries.some(e => e.name === ref)) throw Error(`Missing runtime reference: ${ref}`);
+// 欢迎页由 background 用 runtime.getURL 打开，不在 manifest 引用里；单独校验三个入口文件，
+// 避免以后改名 / 漏收目录时商店包缺页。
+for (const name of ['welcome/index.html', 'welcome/welcome.css', 'welcome/welcome.js']) {
+  if (!entries.some((e) => e.name === name)) throw Error(`Missing welcome asset: ${name}`);
+}
 // MIT 等许可证要求版权与许可声明随副本分发：商店 ZIP 也是一次分发，缺一个就拒绝出包。
 for (const name of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt']) {
   if (!entries.some((e) => e.name === name)) throw Error(`Missing legal file: ${name}`);

@@ -61,7 +61,8 @@ edge-bilingual/
 │   ├── appearance.js      强调色预设、译文排版变量、译文自定义 CSS 清洗（纯函数，后台按网址算 page 对象用）
 │   ├── site-rules.js      站点规则：内置规则、校验、按网址匹配；夜间模式网站名单
 │   ├── ui-appearance.js   设置页/弹窗共用：强调色等写到 <html>、深浅色圆形过渡、跨页面配置同步、空闲执行
-│   └── ui-theme-boot.js   设置页/弹窗的首帧主题与外观预判（<head> 同步执行，避免闪一帧白底）
+│   ├── ui-theme-boot.js   设置页/弹窗的首帧主题与外观预判（<head> 同步执行，避免闪一帧白底）
+│   └── welcome.js         首次安装判断 / 欢迎页语言默认值 / getURL 打开（纯函数，可单测）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）；站点规则的只翻 / 跳过区域
@@ -75,10 +76,11 @@ edge-bilingual/
 │   ├── pip.js             置顶翻译窗：Document Picture-in-Picture，不支持时退回 window.open 小窗
 │   ├── dock.js            悬浮入口：Shadow DOM（closed）里的小球 + 按钮列，默认关闭
 │   └── styles/inject.css  译文样式与主题、页面明暗适配、夜间模式反色
+├── welcome/               首次安装欢迎页 / 新手引导（index.html + welcome.css + welcome.js，无构建）
 ├── popup/                 工具栏面板（含随手翻译）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
-├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏）
-└── selftest/              离线自检（96 条用例）
+├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页）
+└── selftest/              离线自检（98 条用例）
 ```
 
 **为什么内容脚本是 3 个 classic script 而不是 ESM？**
@@ -333,7 +335,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-96 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口。**改 `dom.js` 前后必跑。**
+98 条纯前端用例，覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口。**改 `dom.js` 前后必跑。**
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -348,6 +350,7 @@ node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提�
 node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖（13 条）
 node test/appearance.test.mjs  # 强调色、译文排版变量、自定义 CSS 清洗（8 条）
 node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间名单、配置导入（8 条）
+node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎页资源、英文覆盖、权限与后台接线（13 条）
 ```
 需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
@@ -527,15 +530,15 @@ node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间�
 
 ---
 
-## 14. 本版技术记录（0.7.2）
+## 14. 本版技术记录（0.8.0）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **问题现场**（GitHub 仓库设置页）：`<form>`、`<action-menu>` 被当成一个翻译单元，`textOf` 把按钮文字和隐藏的确认对话框 / 菜单项拼成一段；仅译文模式下 `injectOnly` 又把这段写进第一个文本节点，按钮被撑成竖排，对话框标题变成整段文字。
-- **修复一：`textOf` 跳过隐藏子树**（`content/dom.js`）：遇到 `hidden` 或计算样式 `display:none` 的子元素直接跳过。以前隐藏对话框的文案会拼进父级单元的文本。
-- **修复二：`shouldDescend` 对交互容器强制下钻**：非正文块里如果含 `button / input / select / textarea / summary / [role=button] / [role=menuitem] / [role=menu] / [role=dialog] / [role=alertdialog] / [role=toolbar]`，或标签名带 `-`（自定义元素，如 `action-menu`）且可见子元素 ≥ 2，一律返回 true，按钮 / 标签 / 说明各自成单元。
-- **修复三：`collectTextNodes` 跳过隐藏子树**：替换型注入不会再把译文写进看不见的对话框。
-- **取舍**：正文块（`CONTENT_TAGS`）不受新规则影响，0.6.1 的「段落整段对照」保持不变；`<a>` 也不触发下钻，正文里的行内链接仍留在段落里。
-- **回归测试**：`selftest` 96 → 98，新增「表单里的按钮单独成单元，不整块替换」「隐藏子树不产出单元」两条；Node 222 条不变。
-- 已知剩余：页面里**已经译错的旧文本**需要刷新重翻才能修复（译文替换后原文已不在 DOM 里）。
-- **文档重组**：README 136 → 85 行；旧版升级 → `docs/UPGRADING.md`，YouTube 字幕 → `docs/YOUTUBE.md`，已知限制并入 `docs/DESIGN.md` §7，长文本拆分补 §2.4；目录结构与关键设计由 HANDOFF / DESIGN 承载；README 与 docs 链接检查 33 个，0 失效。
+- **新增欢迎页** `welcome/`：四步引导（欢迎 / 功能 / 配置 / 开始），单页 + 左侧步骤导航；零构建、无第三方依赖、无远程字体 / 脚本 / 图片；功能插图用 HTML/CSS 画「原文 + 译文」「划词气泡」「字幕」「模型芯片」「术语行」，页面上明确标注「示意图 · 实际界面以扩展为准」，不伪装真实截图。
+- **首次安装判断** `lib/welcome.js`：`shouldOpenWelcome(details)` 只在 `reason === 'install'` 返回 true；`background.js` 的 `onInstalled` 用它决定是否 `chrome.tabs.create({url: chrome.runtime.getURL('welcome/index.html')})`，更新 / 浏览器重启都不打开；`welcomeOpened` 防止同一 worker 生命周期重复打开。移除了原先「安装且没有 Key 就打开设置页」的行为，改由欢迎页的「打开设置」按钮进入设置。
+- **手动重开**：设置页侧栏新增「使用指南」，弹窗底部新增「指南」，都通过 `lib/welcome.js` 的 `openWelcomePage()` 打开；只创建标签页，不写配置、不触发安装逻辑、不清空任何设置。
+- **语言与主题**：复用 `lib/i18n.js`，新增欢迎页中→英映射，`test/welcome.test.mjs` 会扫描欢迎页 HTML，检查每条中文文案和 `aria-label / title / placeholder` 都有英文（示意图里的示例译文用 `data-i18n-skip` 跳过）。语言优先级为已保存 `uiLang` > 浏览器语言；新安装若浏览器非中文，会把初始 `uiLang` 写进配置，避免「欢迎页英文、设置页中文」。主题复用 `lib/ui-theme-boot.js` + `applyUiAppearance`，语言 / 主题按钮的改动保存到配置。
+- **无障碍与响应式**：步骤按钮支持 Tab、方向键、Home / End；切换步骤后焦点落到标题；步骤按钮有 `aria-current` / `aria-controls`；外链带 `noopener noreferrer`；`prefers-reduced-motion` 关闭动画；980px 以下步骤条横向滚动、卡片单列，390px 下完成按钮与分页不重叠；首帧等语言应用后再显示，避免英文用户先看到中文。
+- **商店包**：`tools/package-store.mjs` 白名单加入 `welcome/`，并显式校验 `welcome/index.html`、`welcome/welcome.css`、`welcome/welcome.js` 三个入口文件；`test/package-store.test.mjs` 覆盖欢迎页资源入包、缺失资源拒绝出包、manifest 仍在 ZIP 根目录。
+- **测试**：新增 `test/welcome.test.mjs`（13 条：安装判断、语言默认值、getURL、手动打开、远程资源 / 内联事件、四步结构、英文覆盖、权限不新增、后台接线、入口存在、配置写入边界）；Node 测试 15 个文件全部通过；无头 Chrome 检查了中英文、深浅色、1440px 桌面与 390px 窄屏。
+- **未实机验证**：本机 Chrome 155 headless 不加载 `--load-extension`（用最小扩展复现同样不加载），所以「Chrome / Edge 首次安装自动打开」「商店包安装后资源加载」没有在真实扩展进程里跑；改用 CDP 注入 chrome API 模拟验证了语言 / 主题持久化、设置按钮和版本号显示。首次安装 / 更新 / 重启的判定由纯函数单测覆盖。

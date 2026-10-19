@@ -35,3 +35,13 @@
 - 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
 - 结果：`dist/Rimefox-v0.7.2-store.zip` 53 个文件、248,692 B；manifest.json 在根目录；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；14 个 Node 测试文件全部通过；自检 98 / 98；Chrome 打包校验成功（CRX3）
 - 未上传、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+
+## 0.8.0 首次安装欢迎页验证
+
+- 审计对象：`main`（Rimefox 0.8.0）
+- 构建命令：`node tools/package-store.mjs`
+- 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
+- 结果：`dist/Rimefox-v0.8.0-store.zip` 57 个文件、270,824 B；manifest.json 在根目录；`welcome/index.html`、`welcome/welcome.css`、`welcome/welcome.js`、`lib/welcome.js` 均在包内；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 98 / 98（本次实际运行；未改内容脚本）；Chrome 打包校验成功（CRX3）
+- 欢迎页检查：无头 Chrome 在 1440px 桌面与 390px 窄屏、中文 / English、浅色 / 深色下截图检查；CDP 注入 chrome API 模拟验证语言 / 主题持久化、设置按钮和版本号显示；页面无远程 JS/CSS/字体，无内联事件，未新增权限
+- 未实机验证：本机 Chrome 155 headless 不加载 `--load-extension`（最小扩展同样不加载），因此 Chrome / Edge 首次安装自动打开、更新 / 重启不打开、商店包安装后的真实扩展进程未实机验证；安装判定由 `test/welcome.test.mjs` 的纯函数测试覆盖
+- 未上传、未提交审核、未注册账号、未付款、未推送；详见 [../STORE-READINESS.md](../STORE-READINESS.md)

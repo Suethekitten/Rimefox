@@ -1,13 +1,13 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-10-18，对应 `main` @ `5eaa5c1`（Rimefox 0.7.2）。
+最后更新：2026-10-18，对应 `main`（Rimefox 0.8.0）。
 
 ## 当前状态
 
 - 仓库已公开：<https://github.com/Suethekitten/Rimefox>
-- 商店包：`dist/Rimefox-v0.7.2-store.zip`（53 个文件，248,692 B），manifest.json 在 ZIP 根目录
+- 商店包：`dist/Rimefox-v0.8.0-store.zip`（57 个文件，270,824 B），manifest.json 在 ZIP 根目录
 - 本文件只用于准备提交；**没有上传、没有提交审核、没有注册开发者账号、没有付款**
-- GitHub Release 的 `Rimefox-v0.7.2.zip` 是整仓发布包，**不能**当作商店包上传
+- GitHub Release 的 `Rimefox-v0.8.0.zip` 是整仓发布包，**不能**当作商店包上传
 
 ## 商店包
 
@@ -19,20 +19,20 @@ node tools/package-store.mjs
 
 脚本输出 `dist/Rimefox-v<manifest版本>-store.zip`，并打印每个文件。收录范围：
 
-- 运行时：`manifest.json`、`background.js`、`lib/`、`content/`、`options/`、`popup/`、`icons/`
+- 运行时：`manifest.json`、`background.js`、`lib/`、`content/`、`options/`、`popup/`、`welcome/`、`icons/`
 - 许可：`LICENSE`、`THIRD-PARTY-NOTICES.md`、`licenses/`
 
-校验：DT.VERSION 与 manifest 一致、四种 PNG 图标尺寸、manifest 运行时引用、三份许可文件必须在包内；拒绝符号链接；排除开发文件；固定 ZIP 时间戳。`dist` 不进入运行包。
+校验：DT.VERSION 与 manifest 一致、四种 PNG 图标尺寸、manifest 运行时引用、欢迎页三个入口文件（`welcome/index.html`、`welcome/welcome.css`、`welcome/welcome.js`）、三份许可文件必须在包内；拒绝符号链接；排除开发文件；固定 ZIP 时间戳。`dist` 不进入运行包。
 
 验证命令：
 
 ```bash
-unzip -l dist/Rimefox-v0.7.2-store.zip
-unzip -t dist/Rimefox-v0.7.2-store.zip
+unzip -l dist/Rimefox-v0.8.0-store.zip
+unzip -t dist/Rimefox-v0.8.0-store.zip
 node test/package-store.test.mjs
 ```
 
-2026-10-18 实测：`unzip -t` 无错误；`node test/package-store.test.mjs` 通过；用 Chrome `--pack-extension` 解包校验成功（CRX3）。详见 [STORE-VALIDATION.md](STORE-VALIDATION.md) 与 [../STORE-READINESS.md](../STORE-READINESS.md)。
+2026-10-18 实测：`unzip -t` 无错误；`node test/package-store.test.mjs` 通过；ZIP 根目录直接包含 `manifest.json`，`welcome/index.html` / `welcome.css` / `welcome.js` 与 `lib/welcome.js` 均在包内。详见 [STORE-VALIDATION.md](STORE-VALIDATION.md) 与 [../STORE-READINESS.md](../STORE-READINESS.md)。
 
 ## 商店 listing 草稿
 
@@ -121,7 +121,7 @@ Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: 
 
 ## Test instructions（给审核员的英文草稿）
 
-Install the submitted extension in Chrome. For local reproduction, unzip the store ZIP and use chrome://extensions → Developer mode → Load unpacked, selecting the folder directly containing manifest.json. Pin Rimefox and open Settings.
+Install the submitted extension in Chrome. A four-step welcome page opens on first install; click Open settings (or use the Settings entry). For local reproduction, unzip the store ZIP and use chrome://extensions → Developer mode → Load unpacked, selecting the folder directly containing manifest.json. Pin Rimefox and open Settings.
 
 Select a provider/protocol, enter an endpoint, an authorized API key and a supported model, save, then run Test connection. This is BYOK software: a valid key and provider access are required, and charges may apply. Reviewer credential/access details: `REVIEWER_ACCESS_PENDING` — provide a limited, revocable key only through the Developer Dashboard private review notes; never commit it or put it in the package. Without credentials, settings can be inspected, but live translation cannot be verified; there is currently no Demo mode.
 
@@ -151,7 +151,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 事项 | 说明 |
 |---|---|
 | 开发者账号 | 注册 Chrome Web Store 开发者并支付一次性费用（以官方结算页为准）；完成身份验证与 2FA |
-| 商店包上传 | 使用 `dist/Rimefox-v0.7.2-store.zip`，不要上传 GitHub Release 的整仓包 |
+| 商店包上传 | 使用 `dist/Rimefox-v0.8.0-store.zip`，不要上传 GitHub Release 的整仓包 |
 | 截图 / 宣传图 | 至少 1 张真实截图；按控制台要求补 440×280 |
 | 审核专用 API Key | 在控制台私密审核说明里提供限额、可撤销的 Key；不放入仓库、包或公开 Issue |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
@@ -166,8 +166,8 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 广泛网站权限 `<all_urls>` | 提交上述最小权限理由；不为降权限破坏任意网页 / 任意 API 支持。后续可单独设计 `optional_host_permissions` |
 | BYOK 无法直接测试 | 最高优先级：准备审核专用、限额、可撤销 Key，通过控制台私密说明交付 |
 | YouTube 非官方接口 | 明示非官方、默认关闭、仅 CC；验证当前可用性，避免品牌背书与「保证全部字幕可用」的承诺 |
-| 隐私政策与实际行为不一致 | 本次已按 0.7.2 代码核对；后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
-| 版本与仓库差异 | 以 `main` 实际版本为准；本轮审计不改版本号、不触发 Release |
+| 隐私政策与实际行为不一致 | 本次已按 0.8.0 代码核对；欢迎页只读取本地配置、不新增网络请求，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
+| 版本与仓库差异 | 以 `main` 实际版本为准；0.8.0 新增欢迎页，未改权限、API Key 存储或服务商协议；未推送、未触发 Release |
 
 ## 官方依据（2026-10-18 查询）
 

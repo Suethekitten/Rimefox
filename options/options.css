@@ -278,6 +278,27 @@ a:focus-visible {
   box-shadow: 0 4px 12px -4px var(--accent-glow);
 }
 
+.sidebar-guide {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  color: var(--text-2);
+  font-size: 13px;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-guide:hover {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text);
+}
+
 .sidebar-note {
   margin: auto 8px 0;
   font-size: 12px;
@@ -768,6 +789,16 @@ input.switch:focus-visible {
 
   .nav-item {
     white-space: nowrap;
+  }
+
+  .sidebar-guide {
+    flex: none;
+    margin: 0;
+    padding: 6px 8px;
+  }
+
+  .sidebar-guide .guide-label {
+    display: none;
   }
 
   .content {

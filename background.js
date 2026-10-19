@@ -9,6 +9,7 @@ import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } fr
 import { resolveSiteRule, hostListed } from './lib/site-rules.js';
 import { providerById } from './lib/providers.js';
 import { maskTexts, restoreText, optionsFromConfig } from './lib/privacy.js';
+import { openWelcomePage, shouldOpenWelcome } from './lib/welcome.js';
 
 // ---------------- 并发闸门 ----------------
 let running = 0;
@@ -601,11 +602,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
   );
 });
 
-// 首次安装且没有 key 时，直接拉开设置页
-chrome.runtime.onInstalled.addListener(async () => {
+// 首次安装：打开欢迎页 / 新手引导。更新扩展、浏览器重启都不打开。
+// welcomeOpened 防止同一次 worker 生命周期里重复打开（onInstalled 本身只触发一次）。
+let welcomeOpened = false;
+chrome.runtime.onInstalled.addListener((details) => {
   syncSelectionMenu();
-  const cfg = await getConfig();
-  if (!activeConfig(cfg).apiKey) {
-    chrome.runtime.openOptionsPage();
-  }
+  if (!shouldOpenWelcome(details) || welcomeOpened) return;
+  welcomeOpened = true;
+  openWelcomePage().catch(() => {
+    // 打开失败时不影响安装完成；用户仍可从设置页 / 弹窗手动打开使用指南
+  });
 });

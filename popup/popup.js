@@ -15,6 +15,7 @@ import { providerById } from '../lib/providers.js';
 import { applyI18n, t } from '../lib/i18n.js';
 import { normalizeHosts, hostListed } from '../lib/site-rules.js';
 import { applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig } from '../lib/ui-appearance.js';
+import { openWelcomePage } from '../lib/welcome.js';
 
 const el = {
   ver: document.getElementById('ver'),
@@ -30,6 +31,7 @@ const el = {
   retranslate: document.getElementById('retranslate'),
   clearCache: document.getElementById('clearCache'),
   diagnose: document.getElementById('diagnose'),
+  openGuide: document.getElementById('openGuide'),
   openOptions: document.getElementById('openOptions'),
   quickInput: document.getElementById('quickInput'),
   quickGo: document.getElementById('quickGo'),
@@ -581,6 +583,11 @@ el.quickClear.addEventListener('click', () => {
 
 el.openOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
+});
+
+// 使用指南：重新打开首次安装时的欢迎页，不改配置、不触发安装逻辑
+el.openGuide.addEventListener('click', () => {
+  openWelcomePage().catch(() => {});
 });
 
 init();

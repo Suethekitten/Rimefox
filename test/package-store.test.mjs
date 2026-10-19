@@ -8,7 +8,7 @@ import { inflateRawSync } from 'node:zlib';
 const source = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const temp = await mkdtemp(resolve(tmpdir(), 'rimefox-store-test-'));
 try {
-  for (const name of ['manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'icons', 'tools', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses']) await cp(resolve(source,name), resolve(temp,name), {recursive:true});
+  for (const name of ['manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'welcome', 'icons', 'tools', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses']) await cp(resolve(source,name), resolve(temp,name), {recursive:true});
   await writeFile(resolve(temp,'lib/.DS_Store'),'exclude me');
   for (const name of ['Thumbs.db', 'desktop.ini', '.env', 'debug.log', 'private.key', 'bundle.js.map']) await writeFile(resolve(temp,'lib',name),'exclude me');
   await mkdir(resolve(temp,'lib/test')); await writeFile(resolve(temp,'lib/test/private.txt'),'exclude me');
@@ -26,6 +26,7 @@ try {
     p+=30+n+x+size;
   }
   assert(names.includes('manifest.json')); assert(names.includes('lib/privacy.js'), 'privacy module must be packaged');
+  for (const name of ['welcome/index.html', 'welcome/welcome.css', 'welcome/welcome.js', 'lib/welcome.js']) assert(names.includes(name), name + ' must be packaged');
   assert(names.includes('LICENSE')); assert(names.includes('THIRD-PARTY-NOTICES.md')); assert(names.includes('licenses/oneaifw-MIT.txt'));
   assert(!names.some(n=>/DS_Store|Thumbs|desktop.ini|\.env|debug.log|private.key|\.map$|\/test\/|^tools\/|icons\/(source|preview-|icon512)/.test(n)));
   assert.equal(zip.readUInt32LE(p),0x02014b50);
@@ -34,7 +35,9 @@ try {
   await writeFile(resolve(temp,'content/core.js'),core.replace(/DT.VERSION\s*=\s*['"][^'"]+['"]/,"DT.VERSION = '99.0.0'"));
   result=run(); assert.notEqual(result.status,0); assert.match(result.stderr,/mismatch/);
   await writeFile(resolve(temp,'content/core.js'),core);
+  await rm(resolve(temp,'welcome/welcome.js')); result=run(); assert.notEqual(result.status,0); assert.match(result.stderr,/welcome asset/i);
+  await cp(resolve(source,'welcome/welcome.js'), resolve(temp,'welcome/welcome.js'));
   await rm(resolve(temp,m.icons['16'])); result=run(); assert.notEqual(result.status,0); assert.match(result.stderr,/16px/);
   assert.deepEqual(await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`)),zip,'failed checks must preserve previous output');
-  console.log('Store packaging: contents, exclusions, independent cwd, reproducibility, version/icon failure guards PASS');
+  console.log('Store packaging: contents, welcome assets, exclusions, independent cwd, reproducibility, version/icon failure guards PASS');
 } finally {await rm(temp,{recursive:true,force:true});}

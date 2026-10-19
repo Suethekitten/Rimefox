@@ -1,6 +1,6 @@
 # 隐私说明
 
-最后更新：2026-10-18（对应 Rimefox 0.7.2）。
+最后更新：2026-10-18（对应 Rimefox 0.8.0）。
 
 > **English summary**: Rimefox has no author-operated server or telemetry. See the [full English privacy policy](docs/privacy.en.md). Page text you choose to translate is sent only to the API endpoint **you** configure (DeepSeek, OpenAI-compatible, Anthropic, Gemini…), under that provider's privacy policy. An optional, off-by-default local masking feature replaces reliably detectable sensitive values with placeholders before sending and restores them locally; the mapping never leaves the request. Your API key, settings and translation cache are stored locally; the key is also sent to your configured provider for authentication. No analytics, no telemetry, no third-party SDKs.
 
