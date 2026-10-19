@@ -88,6 +88,24 @@
     return ownWrites.has(node) || ownNodes.has(node);
   };
 
+  // 段落单元的屏幕矩形：用第一段原文文本节点算，不能用整个容器（多段落共用容器时
+  // 容器有多高，整页段落就会被算成"离屏幕一样近"，懒翻译失效）。
+  DT.rectOfUnit = function (unit) {
+    if (!unit) return null;
+    var node = unit.firstNode;
+    if (node && node.isConnected) {
+      try {
+        var range = document.createRange();
+        range.selectNodeContents(node);
+        var box = range.getBoundingClientRect();
+        if (box && (box.width || box.height)) return box;
+      } catch (err) {
+        /* 节点被移走 / 老浏览器：退回元素矩形 */
+      }
+    }
+    return unit.el && unit.el.getBoundingClientRect ? unit.el.getBoundingClientRect() : null;
+  };
+
   // 鼠标下的节点属于哪个单元（悬停用）：原文文本节点、<br>、译文节点都在 nodeUnit 里
   DT.unitOfNode = function (node) {
     for (var cur = node; cur; cur = cur.parentNode) {
@@ -363,8 +381,9 @@
     return usable >= 3;
   }
 
-  // ---------------- 0.9.1 段落单元收集 ----------------
-  // 一个元素里的文本先摊成带 DOM 映射的规范化文本（DT.units.textMap），再按空行切段。
+  // ---------------- 0.9.2 段落单元收集 ----------------
+  // 一个元素里的文本先摊成带 DOM 映射的规范化文本（DT.units.textMap），
+  // 再按排版语义（空行 / 单 <br>+源码换行+全角缩进）切段。
   // 只有「空行来自 <br>」时才真正拆成多个单元：分处不同文本节点，插入锚点就是分隔 <br>，
   // 不需要 splitText，也不会打乱后续段落的偏移。
   // pre-wrap 文本节点内部的空行仍然是一个单元（行级结构保留），悬停退回行级对应。
@@ -385,6 +404,35 @@
       }
       out.push({ start: p.start, end: p.end, sepStart: p.sepStart, sepEnd: p.sepEnd, splittable: split });
     });
+    // 兜底：整篇文章被识别成一个巨大单元（没有任何全角缩进 / 空行 / 块级边界），
+    // 但里面有 8 个以上真实 <br> 行、超过 800 字。宁可按行拆成可诊断的单元，
+    // 也不静默把整篇文章 append 成一个单元、在页尾堆一大块译文。
+    // 只在分隔都是 <br>（可以安全插入锚点）时启用；pre-* 的 nl 分隔仍交给上层合并。
+    if (out.length === 1 && map.text.length > 800) {
+      var hard = DT.units.linesOf(map.text);
+      if (hard.length >= 8) {
+        var lineRanges = [];
+        var canSplit = true;
+        for (var hi = 0; hi < hard.length; hi += 1) {
+          var edge = map.chars[hard[hi][1]];
+          if (hi < hard.length - 1 && (!edge || !edge.br)) {
+            canSplit = false;
+            break;
+          }
+          lineRanges.push({
+            start: hard[hi][0],
+            end: hard[hi][1],
+            sepStart: hard[hi][1],
+            sepEnd: hi < hard.length - 1 ? hard[hi + 1][0] : map.text.length,
+            splittable: true
+          });
+        }
+        if (canSplit) {
+          lineRanges.fallback = 'line';
+          return lineRanges;
+        }
+      }
+    }
     return out;
   }
 
@@ -397,7 +445,7 @@
 
   // 段落里关联的振假名节点：<ruby> 基字落在本段内 → 它的 <rt>/<rp> 属于本段。
   // 仅译文模式只隐藏这些，不全局隐藏页面上的所有 <rt>（未翻译的 Ruby 要原样保留）。
-  function rubyAnnotationsFor(el, chars) {
+  function rubyAnnotationsFor(el, chars, bounds, own) {
     var out = [];
     function add(node) {
       if (out.indexOf(node) < 0) out.push(node);
@@ -414,6 +462,26 @@
         }
       }
     });
+    // 基字是图片（青空文库的 gaiji）的 Ruby 没有任何正文文本字符，字符映射找不到它。
+    // 按段落的 DOM 范围再扫一遍 <ruby>，把落在本段里的注音都收进来，
+    // 否则仅译文模式会留下这些孤立的假名（真实《罗生门》里就有 3 个）。
+    if (bounds && !own) {
+      try {
+        var range = document.createRange();
+        if (bounds.startAfter && bounds.startAfter.parentNode) range.setStartAfter(bounds.startAfter);
+        else range.setStart(el, 0);
+        if (bounds.endBefore && bounds.endBefore.parentNode) range.setEndBefore(bounds.endBefore);
+        else range.setEnd(el, el.childNodes.length);
+        var rubies = el.querySelectorAll('ruby');
+        for (var r = 0; r < rubies.length; r += 1) {
+          if (!range.intersectsNode(rubies[r])) continue;
+          var inner = rubies[r].querySelectorAll('rt, rp');
+          for (var k = 0; k < inner.length; k += 1) add(inner[k]);
+        }
+      } catch (err) {
+        /* DOM 范围不可用（节点被移走 / 老浏览器）：退回字符映射，不阻断翻译 */
+      }
+    }
     return out;
   }
 
@@ -459,6 +527,9 @@
       if (ranges.length > 1 && range.splittable) {
         var meta = map.chars[range.sepStart];
         if (meta && meta.br && meta.br.parentNode) anchor = { parent: meta.br.parentNode, before: meta.br };
+      } else if (ranges.length > 1 && index === ranges.length - 1 && map.trailingBreak && map.trailingBreak.br) {
+        // 最后一段：插在尾部空行之前，不能 append 到容器最末尾
+        anchor = { parent: map.trailingBreak.br.parentNode, before: map.trailingBreak.br };
       }
       var picked = picks[index] || [];
       var lastFilled = picked.length ? picked[picked.length - 1] : -1;
@@ -466,9 +537,26 @@
       if (ranges.length === 1) {
         for (var gi = lastFilled + 1; gi < groups.length; gi += 1) tail.push(groups[gi]);
       }
+      // Ruby 的 DOM 范围：从上一段分隔 <br> 之后到本段分隔 <br> 之前，
+      // 这样基字是 <img> 的 ruby 也能归到本段。
+      var rubyBounds = null;
+      if (ranges.length > 1) {
+        var prevSep = index > 0 ? map.chars[ranges[index - 1].sepStart] : null;
+        var endSep = range.splittable ? map.chars[range.sepStart] : null;
+        rubyBounds = {
+          startAfter: prevSep && prevSep.br ? prevSep.br : null,
+          endBefore: endSep && endSep.br ? endSep.br : null
+        };
+      }
+      var firstNode = null;
+      for (var ci = 0; ci < map.chars.length; ci += 1) {
+        var cm = map.chars[ci];
+        if (cm && cm.node) { firstNode = cm.node; break; }
+      }
       var unit = {
         id: 'u' + (unitSeq += 1),
         el: el,
+        firstNode: firstNode,
         text: text,
         own: !!own,
         whole: ranges.length === 1,
@@ -487,7 +575,8 @@
         sig: DT.units.signature(text),
         gen: DT.generation,
         area: '',
-        ruby: rubyAnnotationsFor(el, map.chars.slice(range.start, range.end))
+        fallback: ranges.fallback || '',
+        ruby: rubyAnnotationsFor(el, map.chars.slice(range.start, range.end), rubyBounds, own)
       };
       fillSnapshot(unit);
       // 已经翻过这个段落：原文没变就跳过；站点改过就先撤销旧记录再按新内容收集。
@@ -839,11 +928,18 @@
   // 双语的锚点在 DOM 里，段落重排后译文仍跟着原文走 → 按源文本签名匹配，不只看 index；
   // 替换型按「我们写过的文本节点」匹配，站点重排 / 插入段落也不会认错。
   function findRenderedFor(el, unit) {
-    var byIndex = null;
+    var sameIndex = null;
     var list = renderedByEl.get(el) || [];
     for (var i = 0; i < list.length; i += 1) {
       var rec = list[i];
-      if (rec.mode === 'dual' && rec.unit.sig === unit.sig) return rec;
+      if (rec.unit.el !== el) continue;
+      // 同一个容器里可能有两段完全相同的文字（诗歌叠句、重复对白），
+      // 不能只按文本签名认定「已经翻过」；先认 index，再认锚点 / 文本节点身份。
+      if (rec.unit.index === unit.index) sameIndex = rec;
+      if (rec.mode === 'dual' && rec.unit.sig === unit.sig) {
+        if (rec.unit.index === unit.index) return rec;
+        if (unit.anchor && rec.unit.anchor && unit.anchor.before === rec.unit.anchor.before) return rec;
+      }
       if (rec.mode === 'replace' || rec.mode === 'ruby') {
         var saved = rec.saved || [];
         for (var k = 0; k < saved.length; k += 1) {
@@ -852,9 +948,8 @@
           }
         }
       }
-      if (rec.unit.index === unit.index && !byIndex) byIndex = rec;
     }
-    return byIndex;
+    return sameIndex;
   }
 
   function sourceChangedSnapshot(unit) {
@@ -1337,9 +1432,14 @@
     });
     var from = filled.length ? filled[filled.length - 1] + 1 : 0;
     for (var gi = from; gi < groups.length; gi += 1) tail.push(groups[gi]);
+    var legacyFirst = null;
+    for (var li = 0; li < map.chars.length; li += 1) {
+      if (map.chars[li] && map.chars[li].node) { legacyFirst = map.chars[li].node; break; }
+    }
     var unit = {
       id: 'u' + (unitSeq += 1),
       el: el,
+      firstNode: legacyFirst,
       text: map.text,
       own: !!own,
       whole: true,
@@ -1474,7 +1574,8 @@
         u.paragraph = {
           index: index,
           total: ranges.length,
-          anchor: ranges.length > 1 && range.splittable ? 'before-br' : 'inside'
+          anchor: ranges.length > 1 && range.splittable ? 'before-br' : 'inside',
+          fallback: ranges.fallback || ''
         };
         u.skipByLength = DT.skipText(text);
         u.alreadyTarget = DT.looksLikeTarget(text, DT.state.target);

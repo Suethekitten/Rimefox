@@ -238,6 +238,17 @@ A new stanza begins here.</div><p class="nv-source-newline">Hello
     <!-- 0.9.1 青空文库式小说：一个容器里用连续 <br> 分段，必须形成 3 个独立段落单元与 3 个插入锚点 -->
     <template id="tpl-aozora"><div class="main_text" style="width:600px;font:16px/2 serif">ある日の暮方の事である。一人の下人が、羅生門の下で雨やみを待っていた。<br><br>広い門の下には、この男のほかに誰もいない。ただ、所々丹塗りの剥げた、大きな円柱に、蟋蟀が一匹とまっている。<br><br>羅生門が、朱雀大路にある以上は、この男のほかにも、雨やみをする市女笠や揉烏帽子が、もう二三人はありそうなものである。</div></template>
 
+    <!-- 0.9.2 真实《罗生门》DOM 夹具（从 aozora.gr.jp 127_15260.html 抽取）：
+         单个 <br> + 全角缩进分段、rb/rp/rt 注音、段内无缩进续行、对白续行 -->
+    <template id="tpl-aozora-real"><div class="main_text"><br>
+　ある日の暮方の事である。一人の<ruby><rb>下人</rb><rp>（</rp><rt>げにん</rt><rp>）</rp></ruby>が、<ruby><rb>羅生門</rb><rp>（</rp><rt>らしょうもん</rt><rp>）</rp></ruby>の下で雨やみを待っていた。<br>
+　広い門の下には、この男のほかに誰もいない。ただ、所々<ruby><rb>丹塗</rb><rp>（</rp><rt>にぬり</rt><rp>）</rp></ruby>の<ruby><rb>剥</rb><rp>（</rp><rt>は</rt><rp>）</rp></ruby>げた、大きな<ruby><rb>円柱</rb><rp>（</rp><rt>まるばしら</rt><rp>）</rp></ruby>に、<ruby><rb>蟋蟀</rb><rp>（</rp><rt>きりぎりす</rt><rp>）</rp></ruby>が一匹とまっている。羅生門が、<ruby><rb>朱雀大路</rb><rp>（</rp><rt>すざくおおじ</rt><rp>）</rp></ruby>にある以上は、この男のほかにも、雨やみをする<ruby><rb>市女笠</rb><rp>（</rp><rt>いちめがさ</rt><rp>）</rp></ruby>や<ruby><rb>揉烏帽子</rb><rp>（</rp><rt>もみえぼし</rt><rp>）</rp></ruby>が、もう二三人はありそうなものである。それが、この男のほかには誰もいない。<br>
+　何故かと云うと、この二三年、京都には、地震とか<ruby><rb>辻風</rb><rp>（</rp><rt>つじかぜ</rt><rp>）</rp></ruby>とか火事とか饑饉とか云う<ruby><rb>災</rb><rp>（</rp><rt>わざわい</rt><rp>）</rp></ruby>がつづいて起った。そこで<ruby><rb>洛中</rb><rp>（</rp><rt>らくちゅう</rt><rp>）</rp></ruby>のさびれ方は一通りではない。旧記によると、仏像や仏具を打砕いて、その<ruby><rb>丹</rb><rp>（</rp><rt>に</rt><rp>）</rp></ruby>がついたり、金銀の<ruby><rb>箔</rb><rp>（</rp><rt>はく</rt><rp>）</rp></ruby>がついたりした木を、路ばたにつみ重ねて、<ruby><rb>薪</rb><rp>（</rp><rt>たきぎ</rt><rp>）</rp></ruby>の<ruby><rb>料</rb><rp>（</rp><rt>しろ</rt><rp>）</rp></ruby>に売っていたと云う事である。洛中がその始末であるから、羅生門の修理などは、元より誰も捨てて顧る者がなかった。するとその荒れ果てたのをよい事にして、<ruby><rb>狐狸</rb><rp>（</rp><rt>こり</rt><rp>）</rp></ruby>が<ruby><rb>棲</rb><rp>（</rp><rt>す</rt><rp>）</rp></ruby>む。<ruby><rb>盗人</rb><rp>（</rp><rt>ぬすびと</rt><rp>）</rp></ruby>が棲む。とうとうしまいには、引取り手のない死人を、この門へ持って来て、棄てて行くと云う習慣さえ出来た。そこで、日の目が見えなくなると、誰でも気味を悪るがって、この門の近所へは足ぶみをしない事になってしまったのである。<br>
+　その代りまた<ruby><rb>鴉</rb><rp>（</rp><rt>からす</rt><rp>）</rp></ruby>がどこからか、たくさん集って来た。昼間見ると、その鴉が何羽となく輪を描いて、高い<ruby><rb>鴟尾</rb><rp>（</rp><rt>しび</rt><rp>）</rp></ruby>のまわりを啼きながら、飛びまわっている。ことに門の上の空が、夕焼けであかくなる時には、それが<ruby><rb>胡麻</rb><rp>（</rp><rt>ごま</rt><rp>）</rp></ruby>をまいたようにはっきり見えた。鴉は、勿論、門の上にある死人の肉を、<ruby><rb>啄</rb><rp>（</rp><rt>ついば</rt><rp>）</rp></ruby>みに来るのである。——もっとも今日は、<ruby><rb>刻限</rb><rp>（</rp><rt>こくげん</rt><rp>）</rp></ruby>が遅いせいか、一羽も見えない。ただ、所々、崩れかかった、そうしてその崩れ目に長い草のはえた石段の上に、鴉の<ruby><rb>糞</rb><rp>（</rp><rt>ふん</rt><rp>）</rp></ruby>が、点々と白くこびりついているのが見える。下人は七段ある石段の一番上の段に、洗いざらした紺の<ruby><rb>襖</rb><rp>（</rp><rt>あお</rt><rp>）</rp></ruby>の尻を据えて、右の頬に出来た、大きな<ruby><rb>面皰</rb><rp>（</rp><rt>にきび</rt><rp>）</rp></ruby>を気にしながら、ぼんやり、雨のふるのを眺めていた。<br>
+「おのれ、どこへ行く。」<br>
+　「では、また。」<br>
+　最後の段落である。<br>インデントのない続きの行。</div></body></template>
+
     <!-- 0.9.1 Ruby：普通 rt / rp 组合 / rb / 嵌套行内标签 / 多个 Ruby 混合普通文字 / 无注音汉字 -->
     <template id="tpl-ruby-mix"><p id="fx-ruby-mix" style="width:600px">彼は<ruby>羅生門<rt>らしょうもん</rt></ruby>の下で、<ruby>雨<rp>(</rp><rt>あめ</rt><rp>)</rp></ruby>やみを<strong>待って</strong>いた。</p><p id="fx-ruby-rb" style="width:600px">漢<ruby><rb>字</rb><rt>じ</rt></ruby>のテスト。</p><p id="fx-ruby-other" style="width:600px"><ruby>東京<rt>とうきょう</rt></ruby>は晴れ。</p><p id="fx-ruby-plain" style="width:600px">ここには注音のない漢字だけがある。</p></template>
 

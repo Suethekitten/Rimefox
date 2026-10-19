@@ -13,8 +13,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
+const ROOT = argv.includes('--root')
+  ? path.resolve(argv[argv.indexOf('--root') + 1])
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flag = (name) => argv.includes(name);
 const option = (name) => {
   const i = argv.indexOf(name);
@@ -27,6 +29,12 @@ const DEFAULT_BROWSER = {
 }[process.platform];
 const BROWSER = option('--browser') || process.env.RIMEFOX_BROWSER || DEFAULT_BROWSER;
 const YOUTUBE = option('--youtube');
+const LIVE_AOZORA = flag('--aozora-live')
+  ? (() => {
+      const arg = option('--aozora-live');
+      return arg && !arg.startsWith('--') ? arg : 'https://www.aozora.gr.jp/cards/000879/files/127_15260.html';
+    })()
+  : '';
 const VERBOSE = flag('--verbose');
 const t0 = Date.now();
 const verbose = (...args) => VERBOSE && console.log('    · ' + ((Date.now() - t0) / 1000).toFixed(1) + 's', ...args);
@@ -59,7 +67,7 @@ async function until(fn, ms = 15000, step = 200) {
 // ---------------- 假接口 + 测试页 ----------------
 // 模型：每条译文 = '译:' + 原文（目标是繁體中文时 '繁:'）；单条带 CITE 回纯文本「巴黎是首都[1]。」，带 SPLIT 回拆开的两句。
 // 带 reasoning_effort 的请求回 400（OpenAI 官方非推理模型就是这样），用来看扩展会不会记住、不再发
-const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, aligned: 0, sent: [], lastSystem: '', lastAlignedSystem: '' };
+const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, aligned: 0, aozoraLive: false, sent: [], lastSystem: '', lastAlignedSystem: '' };
 const PAGES = {
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
@@ -141,14 +149,25 @@ const server = http.createServer((req, res) => {
           .split(/(?<=[。！？…])|(?<=[.!?])\s+/)
           .map((one) => one.trim())
           .filter(Boolean);
-        return { parts: (sents.length ? sents : [String(text)]).map((one) => ({ n: 1, t: prefix + one })) };
+        const list = sents.length ? sents : [String(text)];
+        // 真实青空文库验收：译文用纯中文填充（同长度），这样「页面上是否残留假名」才是有效断言
+        if (stats.aozoraLive && /[\u3040-\u30ff]/.test(String(text))) {
+          return { parts: list.map((one) => ({ n: 1, t: '汉'.repeat(Math.max(4, one.length)) })) };
+        }
+        return { parts: list.map((one) => ({ n: 1, t: prefix + one })) };
       };
       if (texts.length === 1 && texts[0].includes('CITE')) content = '巴黎是首都[1]。';
       else if (texts.length === 1 && texts[0].includes('SPLIT')) content = '["Hello.","How are you?"]';
       else {
         const hant = body.messages[0].content.includes('目标语言（繁體中文）');
         const prefix = hant ? '繁:' : '译:';
-        content = JSON.stringify(texts.map((t) => (wantsAlign ? aligned(t, prefix) : prefix + t)));
+        content = JSON.stringify(
+          texts.map((t) => {
+            if (wantsAlign) return aligned(t, prefix);
+            if (stats.aozoraLive && /[\u3040-\u30ff]/.test(String(t))) return '汉'.repeat(Math.max(4, String(t).length));
+            return prefix + t;
+          })
+        );
       }
       res.writeHead(200, headers);
       res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
@@ -513,6 +532,74 @@ async function paragraphChecks() {
   check('Pixiv：关闭翻译后 Ruby / 结构逐字恢复', pixivAfter === pixivBefore, pixivAfter === pixivBefore ? '' : (pixivAfter || '').slice(0, 160));
 }
 
+
+// ---------------- 真实青空文库《罗生门》验收（--aozora-live [url]） ----------------
+async function captureScreenshot(tab, file) {
+  const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true }, tab.s);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, Buffer.from(shot.data, 'base64'));
+}
+
+async function liveAozoraChecks(url) {
+  console.log('\n[真实青空文库] ' + url);
+  stats.aozoraLive = true;
+  const tag = path.basename(ROOT);
+  const outDir = path.join(process.cwd(), 'docs', 'verification', '2026-10-19-aozora-roshomon');
+  const tab = await openTab(url);
+  const ready = await until(() => pageEval(tab, "return !!document.querySelector('.main_text')"), 30000);
+  check('真实页面：找到 .main_text', !!ready);
+  const before = await pageEval(tab, "return (function(){var mt=document.querySelector('.main_text');return {html:mt.innerHTML,height:Math.round(mt.getBoundingClientRect().height),brs:mt.querySelectorAll('br').length,rubies:mt.querySelectorAll('ruby').length,rts:mt.querySelectorAll('rt').length};})()");
+  const collect = await contentEval(tab, "(function(){var mt=document.querySelector('.main_text');var us=window.__DT.collect(mt);return {count:us.length,brs:mt.querySelectorAll('br').length,units:us.map(function(u){return {len:u.text.length,index:u.index,total:u.total,anchor:u.anchor?'before-br':'inside',ruby:u.ruby?u.ruby.length:0,lines:u.map.text.split('\\n').length,fallback:u.fallback||''};})};})()");
+  check('真实页面：段落识别不是整篇一个单元', collect.count >= 10, JSON.stringify({ count: collect.count, first: collect.units.slice(0, 4) }));
+  check('真实页面：单 <br> + 全角缩进被识别为段落', collect.units.filter((u) => u.lines === 1).length >= 10, JSON.stringify(collect.units.slice(0, 6)));
+  await captureScreenshot(tab, path.join(outDir, tag + '-before.png'));
+
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const dualReady = await until(() => pageEval(tab, "return document.querySelectorAll('.main_text [data-dt-target]').length >= 10"), 60000);
+  await settled(tab);
+  const dual = await pageEval(tab, "return (function(){var mt=document.querySelector('.main_text');var mtTop=mt.getBoundingClientRect().top;var ts=Array.prototype.slice.call(mt.querySelectorAll('[data-dt-target]'));var seq=[];Array.prototype.forEach.call(mt.childNodes,function(n){if(n.nodeType===3&&n.nodeValue.trim())seq.push('T');else if(n.tagName==='BR')seq.push('BR');else if(n.getAttribute&&n.getAttribute('data-dt-target'))seq.push('TGT');});var good=0;ts.forEach(function(t){var p=t.previousSibling;while(p){if(p.nodeType===3&&p.nodeValue.trim()){var r=document.createRange();r.selectNodeContents(p);if(r.getBoundingClientRect().top<=t.getBoundingClientRect().top+2)good++;break;}if(p.nodeType===1&&p.tagName!=='BR'&&!p.hasAttribute('data-dt-target')){var b=p.getBoundingClientRect();if(b.height>0){if(b.top<=t.getBoundingClientRect().top+2)good++;break;}}p=p.previousSibling;}});var tops=ts.map(function(t){return Math.round(t.getBoundingClientRect().top-mtTop);});return {targets:ts.length,tops:tops.slice(0,8),height:Math.round(mt.getBoundingClientRect().height),seq:seq.slice(0,24).join(','),good:good,firstText:ts[0]?String(ts[0].textContent).slice(0,24):''};})()");
+  check('真实双语：每个实际段落都有译文（不是 1 个）', !!dualReady && dual.targets >= 10, JSON.stringify({ targets: dual.targets }));
+  check('真实双语：译文紧跟在所属原文后面', dual.good >= Math.min(5, dual.targets), JSON.stringify({ good: dual.good, targets: dual.targets, seq: dual.seq }));
+  check('真实双语：首段译文在第一段附近，不是页尾', dual.tops.length > 0 && dual.tops[0] < Math.max(160, before.height * 0.25), JSON.stringify(dual.tops));
+  await captureScreenshot(tab, path.join(outDir, tag + '-dual.png'));
+
+  const hover = await contentEval(tab, "(function(){var t=document.querySelectorAll('.main_text [data-dt-target]')[0];if(!t||!t.firstChild)return {error:'no-target'};var r=document.createRange();r.setStart(t.firstChild,0);r.setEnd(t.firstChild,1);var rect=r.getBoundingClientRect();window.__DT.hover.updateAt(rect.left+1,rect.top+1,t.firstChild);var tip=document.querySelector('.dt-hover-tip');return {tip:tip&&!tip.hidden?tip.innerText:'',tgt:!!CSS.highlights.get('dt-hover-target'),src:!!CSS.highlights.get('dt-hover-src')};})()");
+  check('真实双语：悬停能找到原文并高亮', !!hover && hover.src && hover.tgt, JSON.stringify(hover));
+
+  await tabMsg(tab.tabId, { type: 'dt:setMode', mode: 'translation' });
+  const onlyReady = await until(() => pageEval(tab, "return document.querySelector('.main_text').hasAttribute('data-dt-replaced') || document.querySelectorAll('.main_text [data-dt-replaced]').length > 0"), 60000);
+  await settled(tab);
+  const only = await pageEval(tab, "return (function(){var mt=document.querySelector('.main_text');var mtRect=mt.getBoundingClientRect();var mtTop=mtRect.top;var ts=Array.prototype.slice.call(mt.querySelectorAll('[data-dt-target]'));var pieces=[];Array.prototype.forEach.call(mt.childNodes,function(n){if(n.nodeType===3){if(n.nodeValue.trim()){var r=document.createRange();r.selectNodeContents(n);var b=r.getBoundingClientRect();if(b.height>0)pieces.push({top:b.top,height:b.height,kind:'T'});}}else if(n.nodeType===1&&n.tagName!=='BR'){var b=n.getBoundingClientRect();if(b.height>0)pieces.push({top:b.top,height:b.height,kind:n.getAttribute&&n.getAttribute('data-dt-target')?'TGT':n.tagName});}});pieces.sort(function(a,b){return a.top-b.top;});var maxGap=0;for(var i=1;i<pieces.length;i++){var g=pieces[i].top-(pieces[i-1].top+pieces[i-1].height);if(g>maxGap)maxGap=g;}var rt=Array.prototype.slice.call(mt.querySelectorAll('rt'));var vr=rt.filter(function(x){return getComputedStyle(x).display!=='none';});return {height:Math.round(mtRect.height),targets:ts.length,firstTop:ts.length?Math.round(ts[0].getBoundingClientRect().top-mtTop):null,maxGap:Math.round(maxGap),visibleRt:vr.length,visible:vr.map(function(x){var ru=x.closest('ruby');return {rt:x.textContent,ruby:ru?ru.outerHTML.slice(0,140):'',parent:ru&&ru.parentElement?ru.parentElement.tagName:'',pText:ru&&ru.parentElement?String(ru.parentElement.textContent).slice(0,40):''};}),replaced:mt.hasAttribute('data-dt-replaced')||mt.querySelectorAll('[data-dt-replaced]').length,text:mt.innerText.slice(0,100),kana:/[\u3040-\u30ff]/.test(mt.innerText)};})()");
+  check('真实仅译文：首段译文在原位置附近，没有巨大空白', !!onlyReady && only.firstTop !== null && only.firstTop < 160 && only.maxGap < 200, JSON.stringify({ firstTop: only.firstTop, maxGap: only.maxGap, height: only.height, text: only.text }));
+  check('真实仅译文：没有可见假名 / 残留注音', only.visibleRt === 0 && !only.kana, JSON.stringify({ visibleRt: only.visibleRt, kana: only.kana, text: only.text }));
+  await captureScreenshot(tab, path.join(outDir, tag + '-only.png'));
+
+  await tabMsg(tab.tabId, { type: 'dt:setMode', mode: 'dual' });
+  await settled(tab);
+  const again = await pageEval(tab, "return document.querySelectorAll('.main_text [data-dt-target]').length");
+  check('真实页面：模式切回双语没有重复译文', again === dual.targets, again + ' / ' + dual.targets);
+
+  // 动态新增一个真实结构的段落（单个 <br> + 全角缩进），补翻后不能重复
+  const dynamic = await pageEval(tab, "var mt=document.querySelector('.main_text');var b=document.createElement('br');b.id='rf-dyn-br';mt.appendChild(b);var t=document.createTextNode('\\n\u3000動的に追加した段落である。');b.parentNode.insertBefore(t,b.nextSibling);return mt.innerText.indexOf('動的に追加した段落')>=0");
+  const dynOk = await until(() => pageEval(tab, "return document.querySelectorAll('.main_text [data-dt-target]').length > " + dual.targets), 30000);
+  check('真实页面：动态新增段落会被补翻', !!dynamic && !!dynOk, JSON.stringify({ dynamic, dynOk }));
+  if (dynOk) {
+    await pageEval(tab, "var mt=document.querySelector('.main_text');var b=document.getElementById('rf-dyn-br');if(b){if(b.nextSibling&&b.nextSibling.nodeType===3)b.parentNode.removeChild(b.nextSibling);b.parentNode.removeChild(b);}return true");
+  }
+
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const restored = await pageEval(tab, "return (function(){var mt=document.querySelector('.main_text');return {html:mt.innerHTML,height:Math.round(mt.getBoundingClientRect().height)};})()");
+  check('真实页面：关闭翻译后 DOM 逐字恢复', restored.html === before.html, restored.html === before.html ? '' : '长度 ' + restored.html.length + ' vs ' + before.html.length);
+  await captureScreenshot(tab, path.join(outDir, tag + '-restored.png'));
+
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(outDir, tag + '-diagnostics.json'),
+    JSON.stringify({ url, tag, before, collect, dual, hover, only, restored: { height: restored.height, htmlEqual: restored.html === before.html }, stats: { requests: stats.requests, texts: stats.texts, aligned: stats.aligned } }, null, 2)
+  );
+  console.log('  诊断与截图已保存：' + outDir);
+}
+
 async function optionsChecks() {
   console.log('\n[设置页]');
   const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
@@ -806,7 +893,9 @@ async function inputChecks() {
 }
 
 try {
-  if (!flag('--youtube-only')) {
+  if (LIVE_AOZORA) {
+    await liveAozoraChecks(LIVE_AOZORA);
+  } else if (!flag('--youtube-only')) {
     await articleChecks();
     await paragraphChecks();
     await optionsChecks();

@@ -240,5 +240,41 @@ await t('整页翻译：后台的 alignments 经 alignmentOf 校验后交给 DT.
   assert.equal(JSON.stringify(seen[0].align.parts.map((p) => [p.srcFrom, p.srcTo])), JSON.stringify([[0, 1], [1, 2]]));
 });
 
+
+await t('多段落共用容器：一段失败不会被另一段的成功清掉退避状态', async () => {
+  const env = await boot({ config: { hoverCompare: true, lazy: false, skipSameLang: false } });
+  const DT = env.DT;
+  const el = {
+    ...fakeElement(),
+    isConnected: true,
+    getBoundingClientRect: () => ({ width: 600, height: 120, top: 0, bottom: 120 })
+  };
+  const units = [
+    { el, text: 'First paragraph fails.', index: 0, sig: 'a', sentences: [{ index: 0, start: 0, end: 22 }], style: 'plain', own: false },
+    { el, text: 'Second paragraph succeeds.', index: 1, sig: 'b', sentences: [{ index: 0, start: 0, end: 25 }], style: 'plain', own: false }
+  ];
+  const injected = [];
+  DT.collectAll = () => units;
+  DT.inject = (u, text) => {
+    injected.push({ index: u.index, text });
+    return true;
+  };
+  DT.sourceChanged = () => false;
+  DT.send = async (msg) => {
+    if (msg.type === 'config:get') {
+      return { ok: true, config: { hasKey: true, targetLang: 'zh-CN', mode: 'dual', hoverCompare: true, lazy: false, skipSameLang: false } };
+    }
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') return { ok: true, results: [null, '第二段译文'], alignments: [null, null] };
+    return { ok: true };
+  };
+
+  await env.message({ type: 'dt:toggle' });
+  for (let i = 0; i < 6; i += 1) await flush();
+  assert.equal(injected.length, 1, '只有成功的那段被注入');
+  assert.equal(injected[0].index, 1);
+  assert.equal(DT.state.failed, 1, '失败段的退避不能被成功段清掉');
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

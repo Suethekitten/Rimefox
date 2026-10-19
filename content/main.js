@@ -21,17 +21,17 @@
   // 否则长页面正常翻到 90 秒就会被误杀。
   var lastBeat = 0;
   var dirty = false; // 翻译过程中页面又变了
-  // 译文与原文相同 / 模型返回空的单元：记下当时的源文本，内容没变就不再重复送翻和计数
+  // 译文与原文相同 / 模型返回空的单元：按「元素 → 段落键 → 当时的源文本」记，内容没变就不再重复送翻和计数
   var settled = new WeakMap();
   // 翻译失败的单元按段落各自退避：失败后等 5s / 15s / 45s 再试，第 4 次失败就放弃，
   // 直到内容变了、用户手动重翻或改了设置。
   // 以前失败段在每次点击、悬停、页面变动时都整页重发，遇到限流（429）只会越试越被限；
   // 也不能整页一起退避 —— 一批固定出错的段落会把新加载内容的翻译一起拖住。
   // 退避表本身在 core.js 的 DT.RETRY_DELAYS / DT.nextRetry（纯函数，自检可测）
-  var failures = new WeakMap(); // el → { text, count, until }
+  var failures = new WeakMap(); // el → Map(段键 → { text, count, until })
   // 等译文期间原文又被站点改掉的次数（DT.sourceChanged）。连续 CHURN_MAX 次就不再翻这个元素：
   // 计时器、实时行情这类一直在变的内容，否则每变一次就重发一次请求
-  var churn = new WeakMap();
+  var churn = new WeakMap(); // el → Map(段键 → 连续被站点改写次数)
   var CHURN_MAX = 3;
   var retryTimer = 0;
   var retryAt = 0;
@@ -42,8 +42,35 @@
   var lazyTimer = 0;
 
   // 懒翻译的范围（屏幕上方 1 屏到下方 2 屏）在 core.js：DT.LAZY_ABOVE / DT.LAZY_BELOW
-  function nearView(el, viewH) {
-    return DT.nearView(el.getBoundingClientRect(), viewH);
+  function rectOfUnit(unit) {
+    return DT.rectOfUnit ? DT.rectOfUnit(unit) : unit.el.getBoundingClientRect();
+  }
+  function nearViewUnit(unit, viewH) {
+    return DT.nearView(rectOfUnit(unit), viewH);
+  }
+
+  // 0.9.2：一个 HTMLElement 可以有多个 ParagraphUnit（同一容器里的多段小说）。
+  // settled / failures / churn 不能只按元素记，否则 A 段的退避 / 抖动会误伤 B 段。
+  // 键 = 源文本签名 + 段序号：同一段内容稳定、同容器里的重复文字也能分开。
+  function unitKey(unit) {
+    if (!unit) return '';
+    return (unit.sig || unit.text || '') + '|' + (unit.index == null ? 0 : unit.index);
+  }
+  function unitState(map, unit) {
+    var bucket = map.get(unit.el);
+    return bucket ? bucket.get(unitKey(unit)) : undefined;
+  }
+  function setUnitState(map, unit, value) {
+    var bucket = map.get(unit.el);
+    if (!bucket) {
+      bucket = new Map();
+      map.set(unit.el, bucket);
+    }
+    bucket.set(unitKey(unit), value);
+  }
+  function dropUnitState(map, unit) {
+    var bucket = map.get(unit.el);
+    if (bucket) bucket.delete(unitKey(unit));
   }
 
   // 滚动 / 改窗口大小：待翻队列按新位置重排；懒翻译时还要补翻新进入范围的内容。
@@ -146,16 +173,17 @@
   // ---------------- 失败退避 ----------------
   // DT.state.failed = 当前处于失败状态的段落数（有退避记录的单元），不是累计失败次数
   function noteFailure(unit) {
-    var prev = failures.get(unit.el);
+    var prev = unitState(failures, unit);
     if (!prev) DT.state.failed += 1;
     var plan = DT.nextRetry(prev, unit.text, Date.now());
-    failures.set(unit.el, { text: unit.text, count: plan.count, until: plan.until });
+    setUnitState(failures, unit, { text: unit.text, count: plan.count, until: plan.until });
     return plan.delay;
   }
 
-  function clearFailure(el) {
-    if (!failures.has(el)) return;
-    failures.delete(el);
+  function clearFailure(unit) {
+    var had = unitState(failures, unit);
+    if (!had) return;
+    dropUnitState(failures, unit);
     DT.state.failed = Math.max(0, DT.state.failed - 1);
   }
 
@@ -238,15 +266,15 @@
         // 趣味翻译：正文里够长的段落按风格改写；中文页面也要改写，所以风格单元不跳过「已是目标语言」
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
         if (unit.style === 'plain' && cfg.skipSameLang !== false && !jaPageToZh && DT.looksLikeTarget(unit.text, target)) return false;
-        if (settled.get(unit.el) === unit.text) return false;
-        if ((churn.get(unit.el) || 0) >= CHURN_MAX) return false;
+        if (unitState(settled, unit) === unit.text) return false;
+        if ((unitState(churn, unit) || 0) >= CHURN_MAX) return false;
         // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
         // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
-        if (lazy && !nearView(unit.el, viewH)) {
+        if (lazy && !nearViewUnit(unit, viewH)) {
           deferred += 1;
           return false;
         }
-        var fail = failures.get(unit.el);
+        var fail = unitState(failures, unit);
         if (fail && fail.text === unit.text) {
           if (fail.count > DT.RETRY_DELAYS.length) return false; // 已放弃
           if (now < fail.until) {
@@ -300,7 +328,7 @@
         pending.forEach(function (seg) {
           if (seen[seg.ui]) return;
           seen[seg.ui] = true;
-          queue[seg.ui].prio = DT.distanceOf(queue[seg.ui].el.getBoundingClientRect(), viewHeight());
+          queue[seg.ui].prio = DT.distanceOf(rectOfUnit(queue[seg.ui]), viewHeight());
         });
         pending.sort(function (a, b) {
           return queue[a.ui].prio - queue[b.ui].prio || a.ui - b.ui || a.k - b.k;
@@ -360,14 +388,14 @@
         // 等译文期间站点改了这段原文（SPA 重渲染、翻页复用同一个元素）：
         // 旧译文不能写进新内容，也不记成「已处理」；本轮结束后按新内容重新收集
         if (DT.sourceChanged(unit)) {
-          churn.set(unit.el, (churn.get(unit.el) || 0) + 1);
+          setUnitState(churn, unit, (unitState(churn, unit) || 0) + 1);
           dirty = true;
           return;
         }
-        churn.delete(unit.el);
+        dropUnitState(churn, unit);
         if (!text) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
-          settled.set(unit.el, unit.text);
+          setUnitState(settled, unit, unit.text);
           return;
         }
 
@@ -381,7 +409,7 @@
             : DT.isNearDuplicate(unit.text, text, target);
         if (dup) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
-          settled.set(unit.el, unit.text);
+          setUnitState(settled, unit, unit.text);
           return;
         }
 
@@ -472,7 +500,7 @@
             wantRetry(noteFailure(unit));
             progressed = true;
           } else if (unit.done) {
-            clearFailure(unit.el);
+            clearFailure(unit);
             progressed = true;
           }
         });

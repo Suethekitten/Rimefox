@@ -87,7 +87,7 @@ edge-bilingual/
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
 ├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs，见 7.1c）
-└── selftest/              离线自检（151 条用例；e2e 脚本会顺带跑一遍，见 7.1c）
+└── selftest/              离线自检（157 条用例；e2e 脚本会顺带跑一遍，见 7.1c）
 ```
 
 **为什么内容脚本是 classic script 而不是 ESM？**
@@ -261,7 +261,9 @@ lib/
 1. `tokensOf(el)`（或 own 单元的 `ownTokens`）按阅读顺序给出文本节点 / `<br>`；
 2. `DT.units.textMap(tokens)` 生成规范化文本 + 每个字符的 DOM 映射；
 3. `DT.units.paragraphsOf()` 按空行（`\n\n`）切段；**单个 `<br>` / `\n` 只是同一段里的行**；
-4. 只有分隔空行来自 `<br>` 时才拆成多个单元；`pre-*` 单文本节点里的空行仍是一个单元（行级结构保留）；
+4. 段落边界：空行（连续 `<br>` / `pre-*` 连续换行）；或单个 `<br>` 后的新行同时有**源码换行 + 行首全角缩进**（青空文库）；或块级元素。
+   其它单个 `<br>` 只是段内换行；**不能**把每个 `<br>` 都当段落。`pre-*` 单文本节点里的空行 / 缩进仍是一个单元（行级结构保留）；
+   如果整棵子树只切出一个单元、却有 8+ 个 `<br>` 行且超过 800 字，按行拆成可诊断单元（`fallback='line'`），不静默变成巨型单元；
 5. 每个单元记录 `anchor`（分隔空行的第一个 `<br>`；最后一段 / 独占元素为 null → append 到元素末尾）。
 
 `shouldDescend(el)` 决定"容器"还是"段落"（与 0.9.0 相同）：
@@ -300,7 +302,7 @@ lib/
 > 0.3.1 试过"短文本 + 父级是 flex-row 就替换"，结果在 Tarkov 这种整页 flex 布局的站点上，
 > 标题和正文全被替换，用户看到的是"原文被译文顶掉了"。现在的判据必须同时满足上面表格。
 
-### 5.2.1 分行、段落与 Ruby（0.9.1）
+### 5.2.1 分行、段落与 Ruby（0.9.2）
 
 - **送翻文本**：`DT.units.textMap` 与 `DT.normalizeLines` 同一套规则——`<br>` 和
   `white-space: pre / pre-wrap / pre-line` 里的 `\n` 是硬换行；普通元素里源码的折行算空格；
@@ -313,8 +315,8 @@ lib/
   `<br>`、空行、各行所在的元素都不动。模型改了行数时按顺序填，多出的并进最后一行，
   不够的把**本段自己的**空行 / 换行收起（`data-dt-collapsed`），**不折叠段落之间的空行**。
   单行段落仍走「整段写进第一个文本节点」。
-- **Ruby（仅译文）**：`tokensOf` / `ownTokens` 排除 `rt` / `rp`；`rubyAnnotationsFor` 找出基字在本段内的
-  `<ruby>`；`injectRuby` 清空本段正文文本、只隐藏这些 `rt/rp`（`style.display=none` + `data-dt-rt-hidden`）、
+- **Ruby（仅译文）**：`tokensOf` / `ownTokens` 排除 `rt` / `rp`；`rubyAnnotationsFor` 先按字符映射找基字在本段的
+  `<ruby>`，再按**本段 DOM 范围**扫所有 `<ruby>`（基字是 `<img class="gaiji">` 的图片 Ruby 没有文本字符，字符映射会漏）；`injectRuby` 清空本段正文文本、只隐藏这些 `rt/rp`（`style.display=none` + `data-dt-rt-hidden`）、
   在段落锚点插入独立译文节点。**绝不把整句译文写进 `ruby/rb/rt/rp`**，也不全局隐藏所有 `<rt>`。
 - **双语**：译文里有换行时给节点加 `dt-lines`（`white-space: pre-line`），只作用在这种节点上。
 - **过期译文**：注入前 `DT.sourceChanged(unit)` 用采集时的文本节点快照复核；等译文期间站点改了这段
@@ -391,6 +393,9 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 | 28 | 同一容器多段落仍 append 到元素末尾 | 青空文库式「段1<br><br>段2」全部原文在前、译文堆在页尾 | 0.9.1 ParagraphUnit + 分隔 `<br>` 锚点；只有独占元素才 append |
 | 29 | 多个段落译文共享一个容器就按「同父级只留一个」清理 | 克隆清理把兄弟段落的译文节点删掉（E2E 抓到） | `cleanupDuplicateTargets` 只删 `data-dt-unit` 相同的克隆副本 |
 | 30 | 仅译文把整句中文写进 `<ruby>` / 全局隐藏 `<rt>` | 中文被 Ruby 排版规则撑开；未翻译段落的假名也没了 | 关联 Ruby 段落走 `injectRuby`：清空正文 + 只隐藏本段 `rt/rp` + 独立译文节点 |
+| 31 | `paragraphsOf` 只认规范化文本里的 `\n\n` | 真实 Aozora 用「单 `<br>` + 全角缩进」，整篇被当成一个单元：双语 1 个译文节点堆页尾、仅译文清空正文后留下一串 `<br>` 巨大空白 | 0.9.2 `textMap` 在 trim 前记录源码换行 + 全角缩进，按排版语义分段；保留 `<br><br>` 规则；无法识别时按行兜底 |
+| 32 | Ruby 只按字符映射关联 | 基字是 `<img class="gaiji">` 的外字 Ruby 没有文本字符，仅译文残留 3 个 `rt` 假名（真实《罗生门》） | `rubyAnnotationsFor` 再用本段 DOM Range 扫一遍所有 `<ruby>` |
+| 33 | 多段落共用容器时仍按 HTMLElement 记状态 | 一段失败 / 抖动会清掉或拖住同容器其它段；懒翻译把整个容器当一个矩形 | 0.9.2 `settled` / `failures` / `churn` 改为「元素 → Map(签名+段序号)」；`DT.rectOfUnit` 用段首文本节点算矩形 |
 
 ---
 
@@ -400,7 +405,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-151 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、悬停句级 / 行级 / 段落级、代际隔离与段落级 SPA 更新。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
+157 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、悬停句级 / 行级 / 段落级、代际隔离与段落级 SPA 更新、真实《罗生门》夹具（单 `<br>`+全角缩进 / rb/rp/rt / 图片基字 Ruby / 只有 fixture 时也要跑）。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
 
 ### 7.1b Node 单测（接口层）
 ```
@@ -429,6 +434,7 @@ node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层�
 ```
 node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
 node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
+node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
 ```
 真实 Chrome（`--browser` 或环境变量 `RIMEFOX_BROWSER` 可换成 Edge）+ CDP `Extensions.loadUnpacked` 加载工作树 + 本地假 OpenAI 兼容接口，不需要 API Key，不进 CI（要真实浏览器，YouTube 还要能上网）。
 `--verbose` 打印扩展调试日志、YouTube 字幕请求 / 响应、钩子消息和广告开始 / 结束；`--youtube-only` 跳过文章页和设置页；`--headed` 显示窗口。
@@ -521,8 +527,9 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 8. **不支持 OpenAI Responses 协议**（`/v1/responses`）——目前只有 OpenAI 兼容（chat completions）/ Anthropic / Gemini 三种。遇到只开 responses 的第三方接口会 404，见第 10 节 P3
 9. **网页夜间模式是反色实现**：`filter: invert(1) hue-rotate(180deg)` + 媒体元素反向回正；画布绘制的界面、CSS 背景图、自带深色主题的网站可能显示异常，所以默认关闭、只对名单里的网站生效。
 10. **置顶小窗依赖浏览器能力**：Document Picture-in-Picture 需要 Chrome 116+；退回的 `window.open` 小窗不会置顶，网页设置了 COOP 等隔离或拦截弹窗时打不开（会提示）。
-11. ~~振假名会混进原文~~（0.9.0 修了「混进送翻文本」；0.9.1 修了仅译文模式的显示：不残留假名、不把译文写进 ruby、可完整恢复。Pixiv 真实注音页仍只有 fixture，未实测）
+11. ~~振假名会混进原文 / 仅译文残留假名~~（0.9.2 已在真实青空文库《罗生门》验证：29 段、双语逐段、仅译文 0 个可见 `rt`、关闭后逐字恢复；Pixiv 真实注音页仍只有 fixture）
 12. **Ruby 段落仅译文用独立译文容器**：为了不把整句中文写进 `<ruby>`，含注音的段落不再按基字逐词替换，局部排版可能与原页略有差异；竖排（縦書き）/ `writing-mode: vertical-*` 未验证
+13. **真实网站覆盖**：0.9.2 只对青空文库《罗生门》做了真实页面验收；Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，不能当成已验证
 13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
 
 ---
@@ -550,7 +557,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
    取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **151 / 151**
+4. 跑自检页：必须 **157 / 157**
 4b. 跑 Node 单测：`node --test test/*.test.mjs`（21 个文件、按退出码判定，应全部通过；CI 发版前跑同一条命令）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
 6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
@@ -617,18 +624,16 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.9.1）
+## 14. 本版技术记录（0.9.2）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 翻译引擎的完整说明、外部项目参考、未完成方向与接手指南在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)，这里只记本版改了什么。
+> 翻译引擎的完整说明、真实页面验收、外部项目参考与接手指南在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)。
 
-- **来源**：任务书要求把 DOM 翻译从「元素识别 + 文本节点替换」升级为结构化单元系统；按阶段 A–F 在分支 `feat/0.9.1-dom-translation-units` 实施。配置结构没变（`_v` 仍是 6），缓存 `SCHEMA` 没变。
-- **结构层**：新增 `content/units.js`（纯函数）：`textMap`（规范化文本 + 每字符 DOM 映射）、`paragraphsOf`（空行分段）、`linesOf`、`sentencesOf` / `sentencesIn`（句子切分从 hover.js 搬来，只有一份实现）、`alignmentOf`（校验 `sum(n) === 源句数` 且片段按序出现在译文里）、`partAt` / `partAtTargetOffset`、`signature`（FNV-1a + 长度）。manifest 与 selftest 按 core → units → dom 的顺序加载，仍是零构建。
-- **采集**：`dom.js` 的 `walk` 改为 `addParagraphs`：一个元素里的规范化文本按空行切段；只有分隔空行来自 `<br>` 才拆成多个 ParagraphUnit，每段记录 `index/total/anchor/map/sentences/groups/snapshot/sig/gen/ruby`。共用容器不再写 `data-dt-src`（会误伤兄弟段落），改用 `rendered` 记录 + `findRenderedFor`（双语按签名、替换按文本节点身份）去重；独占元素继续保留 `data-dt-src` / `data-dt-sig`。
-- **渲染事务**：`DT.tx` 记录 `insert/text/attr/style`，`undoOps` 逆序回放，只撤销仍是自己写入的值；`DT.restore` 清空记录、代际 +1、兜底扫属性。`releaseReplaced`（替换 / Ruby）与 `refreshStale`（双语）改为按段落撤销。`DT.inject` 新增单元对象签名与代际检查；旧元素签名保留。
-- **Ruby**：`rubyAnnotationsFor` 只收集基字在本段内的 `rt/rp`；`injectRuby` 清空本段正文文本、隐藏这些 `rt/rp`、在段落锚点插入独立译文节点，绝不把整句中文写进 `ruby/rb/rt/rp`。还原走事务，未翻译段落的注音不受影响。
-- **句子对齐（不增加请求）**：整页翻译可发 `align: true`；`lib/prompt.js` 在 align 时把输出格式改成 `{"parts":[{"n":1,"t":"…"}]}`，其余规则逐字不变；`lib/parse.js` 新增 `parseAlignedArray`（非法结构退回普通数组）；`background.js` 新增 `alignments` 返回字段与内存旁路表（不进缓存 / 不升 SCHEMA / SW 重启丢失即降级）；`main.js` 只对多句段落请求对齐，校验后 `DT.units.alignmentOf` 才交给注入。划词 / 输入框 / 字幕不传 align，提示词与 0.9.0 一致。
-- **悬停**：`hover.js` 重写为消费 `unit.map` / `unit.sentences` / `unit.align`；双语在原文上显示译文气泡、在译文上显示原文；没有可靠对齐时按真实行 / 段落降级并标明。删除 `sentencesAgree` / `alignSentence` 的句界比例猜测。高亮仍用 CSS Custom Highlight API，开关复用 `hoverCompare`。
-- **观察器 / 动态**：`DT.isOwnNode` 只认真正写过的文本节点（原文节点不算），`cleanupDuplicateTargets` 只删 `data-dt-unit` 相同的克隆副本——同一容器多段落译文节点不再被误删（E2E 首次运行抓到该回归）。
-- **测试**：Node 21 个文件全过（parse 36 → 42、prompt 15 → 17、translate-pipeline 18 → 22）；自检 141 → 151（青空文库 3 段 / Ruby / 对齐 / 生命周期）；真实 Chrome E2E 31 → 42，新增段落单元 / Ruby 两节与两个 fixture。`tools/e2e-extension.mjs` 的假接口在 align 请求下返回结构化 parts。
-- **未验证**：真实 API 下模型对 `parts` 格式的遵守率与译文质量；Pixiv / 青空文库真实页面（只有 fixture）；竖排 / 縦書き；Edge 本版未跑。
+- **来源**：0.9.1 已在真实青空文库《罗生门》复现两处严重回归（双语全部译文堆页尾；仅译文巨大空白 + 3 个图片基字 Ruby 的假名残留）。按「真实 DOM 诊断 → 修结构 → 补真实夹具 → 真实 Chrome 验收」顺序修复，版本按补丁位升到 0.9.2。
+- **段落识别**：`content/units.js` 的 `textMap` 在规范化（trim）**之前**记录每行的「源码换行」和「行首全角缩进 U+3000」；`paragraphsOf` 之外的换行只在满足「源码换行 + 全角缩进」或空行时升级为段落。真实 Aozora 的 `<br>\n　段落` 因此形成 29 个单元；Pixiv 的 `span` 连续行（有 `　`、无源码换行）仍保持同一段。保留 `<br><br>` 旧规则；新增「单单元 8+ `<br>` 行 / >800 字」按行兜底（`fallback='line'`），防止静默巨型单元。
+- **锚点**：最后一段插在尾部空行的第一个 `<br>` 之前（`map.trailingBreak`），不再 append 到容器最末尾；其它段落仍插在本段分隔 `<br>` 前。真实页面双语 29 个译文节点，首段译文 y≈60，29/29 紧跟所属原文。
+- **Ruby**：`rubyAnnotationsFor(el, chars, bounds, own)` 除字符映射外，再按本段 DOM Range（上一段分隔 `<br>` 之后 → 本段分隔 `<br>` 之前）扫所有 `<ruby>`。青空文库的外字图片基字（`<img class="gaiji">`）没有文本字符，旧逻辑漏掉 3 个 `rt`；现在仅译文可见 `rt` = 0。
+- **仅译文空白**：根因不是 CSS，而是「整篇一个单元 + `injectRuby` 清空全部正文后 40 个 `<br>` 留在原位、唯一译文节点 append 到末尾」。段落单元正确后，每段译文回到本段位置；真实页面首段译文 y≈30、最大段间空白 30px、高度与原文同量级。
+- **多段落状态**：`main.js` 的 settled / failures / churn 从「元素」改为「元素 → Map(源文本签名 + 段序号)」；同一容器里一段失败不会被另一段的成功清掉，一段连续被站点改写不会让兄弟段落一起停止。懒翻译 / 批次优先级用 `DT.rectOfUnit(unit)`（段首文本节点的矩形），不再用整个正文容器的高度。
+- **测试**：新增 `test/fixtures/aozora-roshomon.html`（从真实页面抽取的 4 段 + 对白续行 + 无缩进续行 + rb/rp/rt）；自检 151 → **157**（真实夹具的分段 / 双语句 / 仅译文字面空白 / Ruby 显隐与恢复 / 模式切换 / 动态新增 / 对齐）；E2E 新增 `--aozora-live`，在真实页面跑段落、双语句、仅译文位置 / 空白 / 注音、悬停、动态补翻、关闭恢复，并保存截图与 `*-diagnostics.json`。旧 0.9.1 用同一工具跑真实页面：1 个单元、1 个译文节点、仅译文 y=210、3 个可见 `rt`——证明测试能抓到回归。
+- **未验证**：Pixiv / GitHub / Aeon / OWID / YouTube 真实页面仍未跑；竖排；Edge；真实模型下 `align` 遵守率与译文质量。
