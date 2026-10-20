@@ -121,6 +121,7 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 
 - `whole = true` 的单元继续用 `data-dt-src` / `data-dt-sig` 标记元素；多段落共用容器**不能**标 `data-dt-src`
   （会把兄弟段落一起跳过），改由 `rendered` 记录 + `findRenderedFor` 去重。
+  0.9.7 的容器局部段落（`addParagraphs(..., partial)`：只覆盖容器自己的行内文字）同理，即使只有一段也不是 whole。
 - 单元不会直接等于元素；一个元素可以产生多个单元。一个句子也可能跨多个行内文本节点。
 
 ### 2.2 文本映射（`DT.units.textMap`）
@@ -297,7 +298,7 @@ node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》
 # 自检页（本机 headless Chrome 需要 --no-sandbox）
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \
   --user-data-dir=/tmp/chrome-selftest --allow-file-access-from-files \
-  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 171 / 171
+  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 179 / 179
 node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 ```
 
@@ -318,7 +319,7 @@ node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 
 **先读**：`AGENTS.md` → `HANDOFF.md` §5–§6 → 本文 §1–§5。
 
-**先跑**：`git status -sb && node --test test/*.test.mjs`，再跑自检页（171 / 171），再跑 E2E；能上网时加 `--aozora-live` 跑真实《罗生门》。
+**先跑**：`git status -sb && node --test test/*.test.mjs`，再跑自检页（179 / 179），再跑 E2E；能上网时加 `--aozora-live` 跑真实《罗生门》。
 
 **不要重复实现**（已经有了）：
 

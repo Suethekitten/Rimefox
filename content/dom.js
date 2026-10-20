@@ -1,6 +1,7 @@
 // 内容脚本：DOM 引擎
 // 切分策略：容器（无直接文本、有多个子元素）→ 逐个下钻；
-//          段落（有直接文本，或是叶子元素）→ 整体作为一个单元。
+//          段落（有直接文本，或是叶子元素）→ 整体作为一个单元；
+//          有直接文本但夹着块级 / 控件子元素 → 只收自己的行内文字，那些子元素再下钻。
 // 注入策略：双语模式把译文追加到【源元素内部末尾】（跟随原布局盒子，
 //          不会跑到别的布局上下文里）；仅译文模式原地替换文本节点。
 (function () {
@@ -321,7 +322,8 @@
     }
     (tokens || tokensOf(el)).forEach(function (tok) {
       if (tok.br) {
-        groups.push({ pieces: [], filled: false, keep: false, br: tok.br, nl: null });
+        // 块级子元素当的段落边界（flowTokens）不是 <br>：仅译文模式不能「收起」它
+        groups.push({ pieces: [], filled: false, keep: false, br: tok.boundary ? null : tok.br, nl: null });
         return;
       }
       var value = tok.node.nodeValue;
@@ -396,6 +398,77 @@
     return !!cs && /flex|grid/.test(cs.display);
   }
 
+  // 交互控件：容器里有这些就不能整块替换（0.7.2，GitHub 设置页按钮被挤成竖排）
+  var CONTROL_SELECTOR =
+    'button, input, select, textarea, summary, [role="button"], [role="menuitem"], [role="menu"], [role="dialog"], [role="alertdialog"], [role="toolbar"]';
+
+  // 打断父级行内文字流的子元素：可见的块级 / 弹性布局盒子；非正文块里，带交互控件的子元素也算。
+  // 已翻过（data-dt-src）/ notranslate 的块级子元素照样算：它们不属于父级这一段，不能被拼进来再翻一遍。
+  // 图片、视频这类跳过的标签不算（不影响父级的文字）；<pre> 算，代码块不该被拼进句子。
+  function breaksFlow(parent, kid) {
+    if (kid.hasAttribute('data-dt-target') || kid.hasAttribute('data-dt-ui')) return false;
+    var tag = tagOf(kid);
+    if (tag === 'BR' || (SKIP_TAGS[tag] && tag !== 'PRE')) return false;
+    if (kid.hidden) return false;
+    var cs = styleOf(kid);
+    if (cs && cs.display === 'none') return false;
+    if (isStructural(kid)) return true;
+    if (CONTENT_TAGS[tagOf(parent)]) return false;
+    return !!(kid.matches(CONTROL_SELECTOR) || kid.querySelector(CONTROL_SELECTOR));
+  }
+
+  // node 所在的、el 的直接子节点（node 不在 el 里时返回 null）
+  function topChild(el, node) {
+    for (var top = node; top && top.parentNode; top = top.parentNode) {
+      if (top.parentNode === el) return top;
+    }
+    return null;
+  }
+
+  // node 落在 el 自己的行内文字里，而不是某个打断文字流的子元素里
+  function inFlow(el, node) {
+    var top = topChild(el, node);
+    return !!top && (top.nodeType !== 1 || !breaksFlow(el, top));
+  }
+
+  function flowBreaks(el) {
+    var out = [];
+    var kids = el.children;
+    for (var i = 0; i < kids.length; i += 1) {
+      if (breaksFlow(el, kids[i])) out.push(kids[i]);
+    }
+    return out;
+  }
+
+  // 夹着块级子元素的容器自己那段文字：直接文本、<br>、行内代码、没被跳过的行内子元素（链接 / 强调 / ruby）。
+  // 块级子元素记成一个空行（段落边界），块前块后各成一段；锚点就是这个子元素，双语译文插在它前面。
+  // 0.9.6 实例：Partner Center 的 .container 只有一点直接文本，整个 Dashboard 被当成一段压平，页面白屏
+  function flowTokens(el, breaks) {
+    var out = [];
+    var skip = new Set(breaks);
+    var keep = keepsBreaks(styleOf(el));
+    var kids = el.childNodes;
+    for (var i = 0; i < kids.length; i += 1) {
+      var kid = kids[i];
+      if (kid.nodeType === 3) {
+        if (kid.nodeValue) out.push({ node: kid, keep: keep });
+        continue;
+      }
+      if (kid.nodeType !== 1) continue;
+      var tag = tagOf(kid);
+      if (skip.has(kid)) {
+        out.push({ br: kid, boundary: true }, { br: kid, boundary: true });
+      } else if (tag === 'BR') {
+        if (!kid.hasAttribute('data-dt-collapsed')) out.push({ br: kid });
+      } else if (INLINE_CODE_TAGS[tag]) {
+        out = out.concat(tokensOf(kid));
+      } else if (!isSkipped(kid)) {
+        out = out.concat(tokensOf(kid));
+      }
+    }
+    return out;
+  }
+
   // 该不该继续往下拆：
   // 1) flex/grid 容器 = 一排并列的条目，逐个当单元（导航项、头像+昵称行）
   // 2) 有真正的块级子元素 = 结构容器，继续拆
@@ -423,14 +496,7 @@
     var tagName = tagOf(el);
     if (!CONTENT_TAGS[tagName]) {
       if (tagName.indexOf('-') >= 0 && usable >= 2) return true;
-      if (
-        el.querySelector &&
-        el.querySelector(
-          'button, input, select, textarea, summary, [role="button"], [role="menuitem"], [role="menu"], [role="dialog"], [role="alertdialog"], [role="toolbar"]'
-        )
-      ) {
-        return true;
-      }
+      if (el.querySelector && el.querySelector(CONTROL_SELECTOR)) return true;
     }
     // 正文块里的 3+ 个行内子元素（OWID 的 <p> 有 8 个：句子 span、脚注、行内链接）
     // 以前会逐个子元素拆，译文插在句子中间；整段翻、追加到段末可读性更好。
@@ -635,7 +701,10 @@
     return all;
   }
 
-  function addParagraphs(out, el, tokens, own) {
+  // partial：这些段落只是容器自己的行内文字（flowTokens），不覆盖整个元素 ——
+  // 单元不算 whole（不打 data-dt-src，否则 isSkipped 会让整棵子树以后都不再扫描，
+  // 懒翻译到不了屏幕外的子段落），译文跟在这段文字后面而不是追加到容器末尾。
+  function addParagraphs(out, el, tokens, own, partial) {
     // 全部段落已渲染、源文本签名没变：整块直接跳过，不重跑 textMap / 行分组。
     if (elementFullyRendered(el)) return;
     var map = DT.units.textMap(tokens);
@@ -659,6 +728,8 @@
       var rp = 0;
       for (var ri = 0; ri < allRubies.length; ri += 1) {
         var ruby = allRubies[ri];
+        // 局部段落：块级子元素（标题等）里的 ruby 属于那个子元素自己的单元，不能被这里隐藏注音
+        if (partial && !inFlow(el, ruby)) continue;
         while (rp < ranges.length - 1) {
           var endMeta = map.chars[ranges[rp].sepStart];
           var endNode = endMeta && endMeta.br;
@@ -690,6 +761,7 @@
     }
 
     el.__dtRanges = ranges.length;
+    el.__dtPartial = !!partial;
     ranges.forEach(function (range, index) {
       // MAX_UNITS 必须在单元生成循环里也生效：一个容器可以切出上万个段落，
       // 不能只靠 walk() 入口的检查。
@@ -722,6 +794,15 @@
         // 最后一段：插在尾部空行之前，不能 append 到容器最末尾
         anchor = { parent: map.trailingBreak.br.parentNode, before: map.trailingBreak.br };
       }
+      if (partial && !anchor) {
+        // 局部段落的最后一段：插在这段文字之后（下一个子块之前），不追加到容器末尾
+        var lastNode = null;
+        for (var li = range.end - 1; li >= range.start && !lastNode; li -= 1) {
+          if (map.chars[li] && map.chars[li].node) lastNode = map.chars[li].node;
+        }
+        var lastTop = lastNode ? topChild(el, lastNode) : null;
+        if (lastTop) anchor = { parent: el, before: lastTop.nextSibling };
+      }
       var picked = picks[index] || [];
       var lastFilled = picked.length ? picked[picked.length - 1] : -1;
       var tail = [];
@@ -744,6 +825,9 @@
         areaComputed = true;
       }
       if (!rubyGroups) ensureRubyGroups();
+      var assignedRuby = rubyGroups ? rubyGroups[index] : null;
+      // 局部段落不走「按 DOM 范围扫 ruby」的兜底：两段之间夹着标题等块级子元素，会把它们的注音也算进来
+      if (partial && !assignedRuby) assignedRuby = [];
       var firstNode = null;
       for (var ci = 0; ci < map.chars.length; ci += 1) {
         var cm = map.chars[ci];
@@ -755,7 +839,7 @@
         firstNode: firstNode,
         text: text,
         own: !!own,
-        whole: ranges.length === 1,
+        whole: ranges.length === 1 && !partial,
         index: index,
         total: ranges.length,
         anchor: anchor,
@@ -772,7 +856,7 @@
         gen: DT.generation,
         area: sharedArea,
         fallback: ranges.fallback || '',
-        ruby: rubyAnnotationsFor(el, map.chars.slice(range.start, range.end), rubyBounds, own, rubyGroups ? rubyGroups[index] : null)
+        ruby: rubyAnnotationsFor(el, map.chars.slice(range.start, range.end), rubyBounds, own, assignedRuby)
       };
       fillSnapshot(unit);
       // 已经翻过这个段落：原文没变就跳过；站点改过就先撤销旧记录再按新内容收集。
@@ -794,7 +878,8 @@
     if (!el || el.nodeType !== 1) return;
     // 整块已翻译且源文本没变：在 isSkipped 的 getComputedStyle 之前返回。
     // 站点插入译文后，容器首次取样式会强制整块重排，长文增量重扫会因此卡住。
-    if (elementFullyRendered(el)) return;
+    // 局部段落（夹着块级子元素的容器）例外：自己那段翻完了，子元素还得接着下钻。
+    if (!el.__dtPartial && elementFullyRendered(el)) return;
     if (isSkipped(el)) return;
 
     var own = directText(el);
@@ -820,6 +905,16 @@
         for (var k = 0; k < inner.length; k += 1) {
           walk(inner[k], out);
         }
+        return;
+      }
+      // 有直接文本、但夹着块级 / 控件子元素：这是容器（SPA 外壳、嵌套列表的 <li>、
+      // 正文里夹标题的青空文库），不是段落。只收自己的行内文字，打断文字流的子元素再下钻；
+      // 行内子元素已经拼进这段，不再单独收。判据只看结构，不看文字多少：
+      // 「See <a>很长的链接</a>.」、「<span>Hello</span> <span>World</span>」仍是一句
+      var breaks = own ? flowBreaks(el) : [];
+      if (breaks.length) {
+        addParagraphs(out, el, flowTokens(el, breaks), false, true);
+        for (var bi = 0; bi < breaks.length; bi += 1) walk(breaks[bi], out);
         return;
       }
       addParagraphs(out, el, tokensOf(el), false);
@@ -1920,6 +2015,13 @@
       }
 
       if (own || !shouldDescend(el)) {
+        // 和 walk() 第 3 步同一判据，诊断里的单元才和真实收集一致
+        var breaks = own ? flowBreaks(el) : [];
+        if (breaks.length) {
+          reportRanges(el, flowTokens(el, breaks), false);
+          for (var bi = 0; bi < breaks.length; bi += 1) walkDiag(breaks[bi]);
+          return;
+        }
         reportRanges(el, tokensOf(el), false);
         return;
       }

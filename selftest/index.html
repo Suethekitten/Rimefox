@@ -252,6 +252,21 @@ A new stanza begins here.</div><p class="nv-source-newline">Hello
     <!-- 0.9.1 Ruby：普通 rt / rp 组合 / rb / 嵌套行内标签 / 多个 Ruby 混合普通文字 / 无注音汉字 -->
     <template id="tpl-ruby-mix"><p id="fx-ruby-mix" style="width:600px">彼は<ruby>羅生門<rt>らしょうもん</rt></ruby>の下で、<ruby>雨<rp>(</rp><rt>あめ</rt><rp>)</rp></ruby>やみを<strong>待って</strong>いた。</p><p id="fx-ruby-rb" style="width:600px">漢<ruby><rb>字</rb><rt>じ</rt></ruby>のテスト。</p><p id="fx-ruby-other" style="width:600px"><ruby>東京<rt>とうきょう</rt></ruby>は晴れ。</p><p id="fx-ruby-plain" style="width:600px">ここには注音のない漢字だけがある。</p></template>
 
+    <!-- 0.9.7 回归：容器只有一点直接文本（栏目名 / 零宽字符 / 加载提示），子结构不能被当成一段整块替换 -->
+    <template id="tpl-container-own"><div id="fx-container-own-box" style="width:600px">
+      Overview
+      <div><p>First child paragraph with enough words to translate.</p></div>
+      <div><p>Second child paragraph with enough words to translate.</p></div>
+    </div></template>
+    <!-- 0.9.6 Partner Center 实例的简化版：零宽字符 + 标签页 + 标题 + 按钮行 -->
+    <template id="tpl-container-spa"><div class="container" style="width:600px">&#8203;<nav><a href="#">Extension overview</a> <a href="#">Packages</a> <a href="#">Availability</a></nav><h2>Extension overview</h2><div>Version 0.9.6 <span>In the store</span> <button type="button">Update</button> <button type="button">Unpublish</button></div><div>Category Productivity Visibility Public</div></div></template>
+    <!-- 容器保护不能拆句子：短文字 + 长链接 / 两个 span / 标题 + 徽标 -->
+    <template id="tpl-container-sentence"><div id="fx-sent-link" style="width:600px">See <a href="#">the complete documentation for this feature</a>.</div><div id="fx-sent-spans" style="width:600px"><span>Hello there</span> <span>my good friend</span></div><h2 id="fx-sent-badge" style="width:600px">Getting started <span class="badge">New</span></h2></template>
+    <!-- 嵌套列表的 <li> / <main> 容器：父级文字与子块分开 -->
+    <template id="tpl-container-nested"><ul style="width:600px"><li id="fx-nested-li">Item text here<ul><li>Sub item number one</li><li>Sub item number two</li></ul></li></ul><main id="fx-main" style="width:600px">Overview<div><p>Child paragraph inside main element.</p></div></main></template>
+    <!-- 青空文库正文里夹章节标题（标题也有注音）；论坛帖子里夹引用块 -->
+    <template id="tpl-container-mixed"><div class="main_text" style="width:600px;font:16px/2 serif">　ある日の<ruby><rb>暮方</rb><rp>（</rp><rt>くれがた</rt><rp>）</rp></ruby>の事である。一人の下人が、<ruby>羅生門<rt>らしょうもん</rt></ruby>の下で雨やみを待っていた。<br><br><h4 class="naka-midashi"><ruby>第二<rt>だいに</rt></ruby></h4>　広い門の下には、この男のほかに誰もいない。<br><br>　ただ、所々<ruby>丹塗<rt>にぬ</rt></ruby>りの剥げた、大きな円柱に、蟋蟀が一匹とまっている。<br></div><div id="fx-post" style="width:600px">I agree with <a href="#">this answer</a> completely.<blockquote>Quoted text from someone else here.</blockquote>Thanks for sharing it with <b>everyone</b>.</div></template>
+
     <script src="../content/core.js"></script>
     <script src="../content/units.js"></script>
     <script src="../content/dom.js"></script>

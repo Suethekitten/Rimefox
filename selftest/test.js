@@ -2038,6 +2038,167 @@
     return eq(DT.joinSlots(['一', '', '二', '三'], ['\n', ' ', '\n\n']), '一\n二\n\n三');
   });
 
+  // ---------------- 0.9.7 容器保护：有一点直接文本的容器不能整块替换 ----------------
+  function texts(units) {
+    return units.map(function (u) {
+      return u.text;
+    });
+  }
+
+  function shownRt(rt) {
+    return getComputedStyle(rt).display !== 'none';
+  }
+
+  check('容器保护：只有一点直接文本的容器不整块替换，直接文本和子段落分开收', function () {
+    return withTemplate('tpl-container-own', 'dual', function (box) {
+      var el = box.querySelector('#fx-container-own-box');
+      var units = DT.collect(box);
+      var joined = texts(units).join(' | ');
+      if (units.some(function (u) { return u.text.indexOf('Overview') >= 0 && u.text.indexOf('First child') >= 0; })) {
+        return '容器被整块当成一个单元：' + joined;
+      }
+      var own = units.filter(function (u) { return u.el === el; });
+      if (own.length !== 1 || own[0].text !== 'Overview') return '直接文本没有单独成段：' + joined;
+      if (own[0].whole) return '容器自己的那段不该标成 whole（会打 data-dt-src，整棵子树以后不再扫描）';
+      return eq(texts(units).slice(1), [
+        'First child paragraph with enough words to translate.',
+        'Second child paragraph with enough words to translate.'
+      ]);
+    });
+  });
+
+  check('容器保护：零宽字符 + 标签页 / 按钮的 SPA 容器逐项收集，仅译文不清空子结构，还原逐字一致', function () {
+    return withTemplate('tpl-container-spa', 'translation', function (box) {
+      var before = box.innerHTML;
+      var units = DT.collect(box);
+      var joined = texts(units).join(' | ');
+      if (units.some(function (u) { return u.text.indexOf('Packages') >= 0 && u.text.indexOf('Unpublish') >= 0; })) {
+        return '标签页和按钮被拼成一段：' + joined;
+      }
+      var buttons = units.filter(function (u) { return u.el.tagName === 'BUTTON'; });
+      if (buttons.length !== 2) return '按钮应各自成单元：' + joined;
+      units.forEach(function (u) {
+        if (!DT.skipText(u.text) && !DT.inject(u, '译·' + u.text, 'zh-CN')) throw new Error('注入失败：' + u.text);
+      });
+      var empty = Array.prototype.filter.call(box.querySelectorAll('nav a, h2, button'), function (n) {
+        return !n.textContent.trim();
+      });
+      if (empty.length) return '有 ' + empty.length + ' 个标签页 / 标题 / 按钮被清空：' + box.textContent;
+      var again = DT.collect(box);
+      if (again.some(function (u) { return !DT.skipText(u.text); })) return '第二轮又收到了单元：' + texts(again).join(' | ');
+      DT.restore();
+      return box.innerHTML === before ? true : '还原后结构不一致';
+    });
+  });
+
+  check('容器保护：句子不被拆开（短文字 + 长链接 / 两个 span / 标题 + 徽标）', function () {
+    return withTemplate('tpl-container-sentence', 'dual', function (box) {
+      var got = ['#fx-sent-link', '#fx-sent-spans', '#fx-sent-badge'].map(function (sel) {
+        var units = DT.collect(box.querySelector(sel));
+        return units.length === 1 && units[0].whole ? units[0].text : '拆成了：' + texts(units).join(' | ');
+      });
+      return eq(got, ['See the complete documentation for this feature.', 'Hello there my good friend', 'Getting started New']);
+    });
+  });
+
+  check('容器保护：嵌套列表的 <li>、<main> 容器——父级文字与子项分开，双语译文插在子块之前', function () {
+    return withTemplate('tpl-container-nested', 'dual', function (box) {
+      var units = DT.collect(box);
+      var r = eq(texts(units), [
+        'Item text here',
+        'Sub item number one',
+        'Sub item number two',
+        'Overview',
+        'Child paragraph inside main element.'
+      ]);
+      if (r !== true) return '收集：' + r;
+      units.forEach(function (u) {
+        if (!DT.inject(u, '译·' + u.text, 'zh-CN')) throw new Error('注入失败：' + u.text);
+      });
+      var place = ['#fx-nested-li', '#fx-main'].map(function (sel) {
+        var target = box.querySelector(sel + ' > [data-dt-target]');
+        return target && target.nextElementSibling ? target.nextElementSibling.tagName : '没插在子块之前';
+      });
+      if (box.querySelectorAll('#fx-nested-li > ul > li > [data-dt-target]').length !== 2) return '子项没有各自的译文';
+      return eq(place, ['UL', 'DIV']);
+    });
+  });
+
+  check('容器保护：青空文库正文夹标题——标题单独成段，ruby 基字不丢，标题注音不被段落隐藏', function () {
+    return withTemplate('tpl-container-mixed', 'translation', function (box) {
+      var main = box.querySelector('.main_text');
+      var heading = main.querySelector('h4');
+      var before = box.innerHTML;
+      var units = DT.collect(main);
+      var paras = units.filter(function (u) { return u.el === main; });
+      var r = eq(texts(paras), [
+        'ある日の暮方の事である。一人の下人が、羅生門の下で雨やみを待っていた。',
+        '広い門の下には、この男のほかに誰もいない。',
+        'ただ、所々丹塗りの剥げた、大きな円柱に、蟋蟀が一匹とまっている。'
+      ]);
+      if (r !== true) return '段落：' + r;
+      if (!units.some(function (u) { return u.el === heading && u.text === '第二'; })) return '标题没有单独成段：' + texts(units).join(' | ');
+      // 只翻正文段落：标题的注音是标题自己的，不能被正文段落隐藏
+      paras.forEach(function (u, k) {
+        if (!DT.inject(u, '译文' + (k + 1), 'zh-CN')) throw new Error('第 ' + (k + 1) + ' 段注入失败');
+      });
+      if (!shownRt(heading.querySelector('rt'))) return '标题的注音被正文段落隐藏了';
+      if (heading.textContent.indexOf('第二') < 0) return '标题文字被正文译文覆盖：' + heading.textContent;
+      if (main.querySelectorAll(':scope > ruby rt').length !== 3) return '正文注音数量不对';
+      var stillShown = Array.prototype.filter.call(main.querySelectorAll(':scope > ruby rt'), shownRt).length;
+      if (stillShown) return '正文段落的注音没有隐藏：' + stillShown;
+      DT.restore();
+      return box.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('容器保护：引用块前后的文字各成一段，双语译文插在引用块之前', function () {
+    return withTemplate('tpl-container-mixed', 'dual', function (box) {
+      var post = box.querySelector('#fx-post');
+      var units = DT.collect(post);
+      var r = eq(texts(units), [
+        'I agree with this answer completely.',
+        'Thanks for sharing it with everyone.',
+        'Quoted text from someone else here.'
+      ]);
+      if (r !== true) return '收集：' + r;
+      units.forEach(function (u) {
+        if (!DT.inject(u, '译·' + u.text, 'zh-CN')) throw new Error('注入失败：' + u.text);
+      });
+      var first = post.querySelector(':scope > [data-dt-target]');
+      if (!first || !first.nextElementSibling || first.nextElementSibling.tagName !== 'BLOCKQUOTE') return '第一段译文没插在引用块之前';
+      return post.lastElementChild.getAttribute('data-dt-target') ? true : '最后一段译文应在帖子末尾';
+    });
+  });
+
+  check('容器保护：懒翻译下一轮仍能收到容器里的子段落，容器不打 data-dt-src', function () {
+    return withTemplate('tpl-container-own', 'dual', function (box) {
+      var el = box.querySelector('#fx-container-own-box');
+      // 第一轮只翻容器自己那段（模拟子段落在屏幕外、被懒翻译推迟）
+      var first = DT.collect(box, function (u) { return u.el === el; });
+      if (first.length !== 1 || !DT.inject(first[0], '概览', 'zh-CN')) return '第一轮没翻到容器自己那段';
+      if (el.hasAttribute('data-dt-src')) return '容器被标成已翻译，子树以后不会再扫描';
+      var target = el.querySelector(':scope > [data-dt-target]');
+      if (!target || !target.nextElementSibling || target.nextElementSibling.tagName !== 'DIV') return '容器的译文应插在第一个子块之前';
+      var next = DT.collect(box);
+      return eq(texts(next), [
+        'First child paragraph with enough words to translate.',
+        'Second child paragraph with enough words to translate.'
+      ]);
+    });
+  });
+
+  check('诊断：容器保护后诊断里的单元和真实收集一致', function () {
+    return withTemplate('tpl-container-own', 'dual', function () {
+      var units = DT.diagnose(5000).units;
+      if (units.some(function (u) { return u.text.indexOf('Overview') >= 0 && u.text.indexOf('First child') >= 0; })) {
+        return '诊断仍把容器显示成一个单元';
+      }
+      if (!units.some(function (u) { return u.text === 'Overview'; })) return '诊断里没有容器自己那段';
+      return units.some(function (u) { return u.text.indexOf('First child paragraph') === 0; }) ? true : '诊断里没有子段落';
+    });
+  });
+
   // ---------------- 0.8.7 Pixiv 中译英换行 / 长段落切分 ----------------
   function withPixivZh(mode, fn) {
     var box = document.createElement('div');
