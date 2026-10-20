@@ -656,17 +656,17 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.9.6）
+## 14. 本版技术记录（0.9.7）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.9.5 的悬停本地对齐与 UI 重构、0.9.4 的拖拽模型、0.9.2 的段落 / 注音修复见对应提交与 `docs/STABILITY-AUDIT-0.9.2.md`。
+> 0.9.6 的目标语言约束 / 悬浮球半隐藏、0.9.5 的悬停本地对齐与 UI 重构、0.9.2 的段落 / 注音修复见对应提交与 `docs/STABILITY-AUDIT-0.9.2.md`。
 
-- **目标语言约束（普通 / align 共用）**：`lib/prompt.js` 开头统一写 `唯一目标语言：{name} ({code})`，普通输出行与 align 的结构化说明都引用同一个 `language` 字符串；align 不再只写「第 i 段的译文对象」，`parts[].t` 明确要求目标语言，输出协议示例改成占位文字（`<这一组句子用English写的译文>`），不再用固定中文译文。混排规则从「把其中的英文句子翻译成目标语言」改成「把需要翻译、且尚未用目标语言表达的部分转换成目标语言」（目标语言是英文时旧写法自相矛盾）。`scriptRule` / 术语表 / 隐私占位符 / 风格 / 自定义提示词全部保留，规则编号仍连续。字符数（没有 tokenizer，不估算 token）：en 普通 717 → 896，en align 884 → 1217；zh-CN 普通 730 → 906，zh-CN align 900 → 1224。align 的增量主要是两条显式目标语言约束；没有增加任何请求。
-- **语言 Bug 根因与验证**：0.9.5 的 align 输出指令没有点名目标语言、示例译文固定中文；开启悬停对照后多句段落走 `align`，目标语言 en 时模型跟着示例回中文。用受控假模型验证：提示词没有 `唯一目标语言：English (en)` 就回中文、有就回英文（能区分修复前后）。`test/prompt.test.mjs` 钉住两种模式的目标语言行、align 示例不成中文；`test/translate-pipeline.test.mjs` 用同一个假模型跑普通 / align / 回退 / 目标语言隔离；E2E 用《罗生门》片段分别验证悬停开 / 关都是英文、句级高亮可用、切回中文后旧英文不残留。
-- **语言校验（保守）**：新增 `lib/lang-guard.js` 纯函数 `looksForeignForTarget(text, target)`，只抓「目标语言是拉丁字母语系（en/fr/de/es/pt）、整段译文却是中日韩正文且带句末句读」这一种高置信度异常；短文本、专名 / 术语清单、混有足够拉丁字母、中文 / 日文目标一律放行（不按「有没有汉字」判断）。缓存命中异常时只删这一条 + 对齐旁路并重翻一次；新回包异常时照常显示但不写缓存 / 对齐旁路，下次再翻，不追加请求、不无限重试。诊断计数 `languageMismatch` 进 `usage:stats`。
-- **悬浮球半隐藏**：`.dock[data-auto][data-snapped]:not([data-open]):not([data-drag])` 用 `translateX(±50%)`：小球在 `.dock` 里水平居中，整块挪半个 dock 宽度 = 小球圆心贴在视口边 = 正好露出半球（球 36px，左右各露 18px），与球径、dock 宽度、页面缩放、滚动条无关。起拖时 `hideShiftX()` 读计算样式里的 translateX，先把这段位移折算进 `host.style.left` / `drag.dx`，再开 `data-drag` 撤掉 transform；拖拽中无过渡，松手后自由悬浮不跳位，吸附时再平滑滑入半隐藏。
-- **拖拽捕获（0.9.5 `d9189c1`，本版保留并回归）**：小球 `pointerdown` 立刻 `setPointerCapture`，面板其他按钮不提前捕获（否则 click 被改投到捕获元素，0.9.3 的服务商菜单 / 翻译按钮点不动）；「是否拖动」仍看 5px 阈值，拖动后吞掉余波 click，单纯点小球照常切换翻译。E2E 新增服务商菜单真实点击用例。
-- **测试**：自检 165 → **171**（右侧 / 左侧半隐藏真实矩形、展开 / 收起、关闭自动隐藏、自由悬浮、测完收起，共 6 条）；Node 23 → **24** 个文件（新增 `test/lang-guard.test.mjs`；prompt 17 → 23、translate-pipeline 22 → 28）；E2E 53 → **70**：新增「目标语言：日文 → 英文」（悬停开 / 关、提示词断言、句级高亮、切回中文替换旧译文）、「悬浮入口·半隐藏」（左右半球、真实鼠标移入展开 / 移开收起、从半隐藏起拖不跳位、窄视口）和 `_locales` 的 manifest 本地化检查；E2E 假接口按系统提示词里的目标语言回包。
-- **`_locales` / 商店双语 listing**：manifest 的 name / description 改为 `__MSG_extensionName__` / `__MSG_extensionDescription__` + `default_locale: "zh_CN"`，新增 `_locales/zh_CN|en/messages.json`（名称 / 简介与商店现有文案一致）。`tools/package-store.mjs` 白名单补收 `_locales`，并校验默认语言 messages.json 存在、manifest 引用的每个 `__MSG_*__` 在每种语言的 messages.json 里都有；`test/package-store.test.mjs` 覆盖缺默认语言文件 / 坏 JSON / 缺 key；E2E 用 `chrome.runtime.getManifest()` 断言名称 / 简介已从 `__MSG_*__` 解析成本地化文案。Edge 按 `_locales/*/messages.json` 识别语言，商店会出现中文（简体）与 English (United States) 两行 listing；Chrome / Edge / Firefox 的扩展页名称与简介也跟随界面语言。
-- **缓存兼容**：不改 `makeKey` / `SCHEMA`，不清用户缓存；只对高置信度异常条目定向失效并重翻。旧缓存里的短标题 / 专名清单不做自动失效。
-- **已知 / 未验证**：真实模型下的中文目标 / 日文目标语言校验未启用（没有证据，保守不做）；语言校验的正例阈值只在本地夹具与《罗生门》日文正文上验证过，真实模型的专名混排仍可能有少量误判（放行优先）；Edge、触摸屏、真实付费模型未验证；用户从展开面板空白处起拖跨越 iframe 的限制仍在（`.ball` 是正式拖拽手柄）。
+- **问题**：0.9.6 在 Partner Center 的扩展 Dashboard 上（页面加载中翻译、仅译文）主内容区白屏。诊断 `placements[0]` 是 `DIV.container` 的 `replace`：`walk()` 第 3 步只要有直接文本就 `addParagraphs(tokensOf(el))`，`shouldDescend` 里 0.7.2 的控件 / 块级判据被短路，整个 Dashboard 成了一个单元，`injectReplace` 把全部译文写进第一个文本节点、其余清空。最小复现只要一个零宽字符当直接文本（`directText` 不认它是空白）。同一路径还会伤到嵌套列表的 `<li>`（子项清空）、`<main>` / `<section>` 容器、正文里夹章节标题的青空文库（标题文字拼进下一段、下一段译文写进 `<h4>`）。
+- **还原**：静态 DOM 上实测压平后 `DT.restore()` 逐字还原（元素没删，只清了文本节点），「还原无法重建子结构」不成立；真实页面还原后仍空白更可能是站点在压平期间接管 / 重建了节点。修复点是不再压平，还原逻辑没改。
+- **容器保护**（`content/dom.js`，见 §5.1 的说明）：`breaksFlow(parent, kid)` = 可见的块级 / flex 子项，或非正文块里带控件的子元素（`CONTROL_SELECTOR`，与 `shouldDescend` 共用）；跳过类标签（图片 / 视频等）不算，`<pre>` 算。有直接文本且有这样的子元素时，`flowTokens` 拼父级自己的行内文字（直接文本、`<br>`、行内代码、未跳过的行内子元素），打断文字流的子元素记成空行边界 `{ br: kid, boundary: true }` ×2（块前块后各成一段，锚点就是该子元素；`lineGroups` 不把 boundary 当 `<br>` 收起），再只对这些子元素 `walk`。
+- **局部段落**：`addParagraphs(out, el, tokens, own, partial)`。partial 单元不是 whole（不打 `data-dt-src` / `data-dt-sig`，否则 `isSkipped` 让整棵子树以后不再扫描，懒翻译第二轮收不到屏幕外的子段落）；`el.__dtPartial` 让 `walk` 入口不做「已全部渲染」早退（`addParagraphs` 自己的早退保留）；最后一段的双语锚点是「这段文字所在的直接子节点之后」；ruby 只认文字流里的（`inFlow`），且不走按 DOM 范围扫 ruby 的兜底，标题里的注音归标题自己的单元。`walkDiag` 用同一判据，诊断与真实收集一致。
+- **没采用的方案**：BUG 文档建议的「直接文本 × 2 < 整块文字就当容器」+ 复用 `ownTokens` / `addParagraphs(..., true)`。实测：「See `<a>`长链接`</a>`.」和「`<span>`Hello`</span> <span>`World`</span>`」被拆碎；own 单元 whole=true 打 `data-dt-src`，懒翻译第二轮收到 0 个子段落；双语译文落在容器末尾；`CONTENT_TAGS` 含 MAIN / SECTION / ARTICLE / TABLE，这些仍整块；`ownTokens` 丢 ruby 基字和链接文字（青空文库「暮方」「羅生門」从句子里消失、注音照常显示）。文档里的回归用例按它自己的修法也会失败（own 单元的 el 就是那个容器），已改写。
+- **行为变化**：flex 容器的子项被计算样式块化，所以「直接文本 + flex 子项」现在分开收（如 `<a style="display:flex">Settings<span>3</span></a>` 收成「Settings」，徽标数字照旧跳过）；混排容器里的 `<pre>` 不再拼进句子；正文块（p / li / td…）里的按钮仍算句子的一部分（同 0.7.2）。没有块级 / 控件子元素的元素切分完全不变。
+- **测试**：自检 171 → **179**（容器只有一点直接文本 / 零宽字符 + 标签页 + 按钮的 SPA 容器（仅译文不清空、第二轮 0 单元、还原逐字一致）/ 句子不被拆 / 嵌套列表与 `<main>` / 正文夹标题（ruby 基字、标题注音不被隐藏）/ 引用块前后分段 / 懒翻译第二轮仍收子段落且不打 `data-dt-src` / 诊断一致；旧代码上 7 条失败，「句子不被拆」用来防住比例判据那类回归）；Node 24 个文件全绿（未改 `lib/`）；E2E 70 / 70（含自检页 179 / 179），`--aozora-live` 真实《罗生门》13 / 13。
+- **缓存 / 配置**：不改 `SCHEMA` / `makeKey` / 配置结构 / `DT.tx` 事务语义。受影响页面的单元切分变了，送翻文本不同会按新文本翻译，旧缓存不清。
+- **已知 / 未验证**：真实 Partner Center 页面（要登录合作伙伴中心）和 Edge 未验证；局部段落的「已全部渲染」早退仍按整棵子树签名，仅译文模式下子元素被替换后父级每轮会重建一次文字流（只影响性能，超长混排页未测）。代码审查时另外发现、本版没改：打过 `data-dt-src` 的元素整棵子树不再扫描（双语模式站点改了已翻段落的字、父级翻过后才显示的 `display:none` 下拉菜单都不会再翻）；混排段落里的 `notranslate` / `translate="no"` 会被一起送翻、仅译文模式被清空。
