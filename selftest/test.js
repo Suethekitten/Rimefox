@@ -3038,9 +3038,11 @@
     if (JSON.stringify(bare.segs) !== JSON.stringify(['今天从商店安装 ', '。'])) return '逐字定位：' + JSON.stringify(bare);
     // 没留标记、词也被翻了：切不开
     if (U.keepParse('今天从商店安装凛狐。', one).segs !== null) return '找不到保留词时 segs 应为 null';
-    // 不是我们发出去的编号：当普通文字
-    var foreign = U.keepParse('<k7>x</k7> 安装 <k1>Rimefox</k1>', one);
-    if (foreign.text !== '<k7>x</k7> 安装 Rimefox') return '外来编号：' + foreign.text;
+    // 不是我们发出去的编号（模型编的）：只去掉标记，不能原样写进页面；原文里本来就有这串字才当普通文字
+    var foreign = U.keepParse('<k7>x</k7> 安装 <k1>Rimefox</k1>', one, 'Install Rimefox x');
+    if (foreign.text !== 'x 安装 Rimefox' || JSON.stringify(foreign.segs) !== JSON.stringify(['x 安装 ', ''])) return '外来编号：' + JSON.stringify(foreign);
+    var literal = U.keepParse('用 <k7>x</k7> 安装 <k1>Rimefox</k1>', one, 'Use <k7>x</k7> to install Rimefox');
+    if (literal.text !== '用 <k7>x</k7> 安装 Rimefox') return '原文里就有的 <k7>：' + literal.text;
     var two = [{ start: 0, end: 5, text: 'Alpha' }, { start: 17, end: 21, text: 'Beta' }];
     // 换了顺序：位置对不上原文的 DOM 顺序，交给兜底
     var swapped = U.keepParse('<k2>Beta</k2> 与 <k1>Alpha</k1> 配合', two);
@@ -3355,7 +3357,8 @@
     var box = keepFixture(
       '<p id="n9-a">Install <span class="notranslate" style="display:none">Rimefox</span> today.</p>' +
         '<p id="n9-b">Install <span class="notranslate" hidden>Rimefox</span> today.</p>' +
-        '<p id="n9-c">Install <span class="notranslate" style="display:block">Rimefox</span> today.</p>' +
+        // 真正的块级保留元素（行内语义的 <span style="display:block"> 仍是句子的一部分，见「行内语义子元素」）
+        '<div id="n9-c">Install today.<p class="notranslate">Rimefox</p></div>' +
         '<div id="n9-box">Install <span translate="no" style="display:none">Rimefox</span> today.<div>Block child text here.</div></div>'
     );
     var before = box.innerHTML;
@@ -3379,7 +3382,7 @@
           if (spans[k].textContent !== 'Rimefox' || spans[k].hasAttribute('data-dt-keep-hidden')) return '保留元素被改：' + spans[k].outerHTML;
         }
         if (visibleText(box.querySelector('#n9-a')) !== '今天就安装。') return '看得见的字：' + visibleText(box.querySelector('#n9-a'));
-        if (box.querySelector('#n9-b span').style.display !== '' || box.querySelector('#n9-c span').style.display !== 'block') return '保留元素的显隐被改';
+        if (box.querySelector('#n9-b span').style.display !== '' || box.querySelector('#n9-c p').style.display !== '') return '保留元素的显隐被改';
         DT.restore();
         return box.innerHTML === before ? true : '还原不一致：' + box.innerHTML;
       });
@@ -3415,6 +3418,267 @@
       DT.restore();
       box.remove();
     }
+  });
+
+  // ---------------- 0.9.8 容器形态 / 保留区边界 ----------------
+  // 按 main.js 的节奏反复「收集 → 全部注入」，直到收不到单元；返回每轮收到的单元数，任何一次注入失败直接报错
+  function settleRounds(box, max, accept) {
+    var counts = [];
+    for (var r = 0; r < max; r += 1) {
+      var units = DT.collect(box, accept);
+      counts.push(units.length);
+      if (!units.length) return counts;
+      units.forEach(function (u) {
+        if (!DT.inject(u, '译·' + u.text, 'zh-CN')) throw new Error('第 ' + (r + 1) + ' 轮注入失败：' + u.text);
+      });
+    }
+    return counts;
+  }
+  function notTooShort(u) {
+    return !DT.skipText(u.text);
+  }
+
+  check('行内语义子元素：flex / grid 把链接、span 块化了也仍是一句；里面套着块级元素的才分开', function () {
+    var box = keepFixture(
+      '<div id="ph-a" style="display:flex">See <a href="#">documentation</a>.</div>' +
+        '<div id="ph-b" style="display:grid">Total <span>$42</span> items</div>' +
+        '<p id="ph-c">Read <span style="display:flex">the whole story</span> today.</p>' +
+        '<p id="ph-d">Install <span class="notranslate" style="display:block">Rimefox</span> today.</p>' +
+        '<div id="ph-e" style="display:flex">Intro words <a href="#"><div>Card title here</div></a></div>'
+    );
+    try {
+      var got = ['#ph-a', '#ph-b', '#ph-c', '#ph-d', '#ph-e'].map(function (sel) {
+        return DT.collect(box.querySelector(sel)).map(function (u) {
+          return u.text + (u.whole ? '' : '（局部）');
+        });
+      });
+      var r = eq(got, [
+        ['See documentation.'],
+        ['Total $42 items'],
+        ['Read the whole story today.'],
+        ['Install Rimefox today.'],
+        ['Intro words（局部）', 'Card title here']
+      ]);
+      if (r !== true) return r;
+      var keep = DT.collect(box.querySelector('#ph-d'))[0];
+      return DT.wireText(keep) === 'Install <k1>Rimefox</k1> today.' ? true : '块化的 notranslate span 应是保留区：' + DT.wireText(keep);
+    } finally {
+      box.remove();
+    }
+  });
+
+  check('局部段落：子块翻完（按钮 / 链接里的子块按控件原地替换）后下一轮仍是局部段落，不撤第一段译文、不每轮重收', function () {
+    // 子块自己被原地替换（按钮 = 控件）后带上 data-dt-src：0.9.7 下一轮就把容器当成 own 单元，
+    // 撤掉「Published」的译文，新单元又被「by the author」的旧译文节点挡住，每轮重收、重发同一段
+    var fixtures = [
+      '<div id="pf-box" style="display:flex">Published <button type="button">two days ago</button> by the author</div>',
+      '<div id="pf-box" style="display:flex">Published <a href="#"><div>two days ago</div></a> by the author</div>'
+    ];
+    var modes = ['dual', 'translation'];
+    for (var i = 0; i < modes.length * fixtures.length; i += 1) {
+      var html = fixtures[i % fixtures.length];
+      var box = keepFixture(html);
+      var before = box.innerHTML;
+      try {
+        var out = withMode(modes[Math.floor(i / fixtures.length)], function () {
+          var counts = settleRounds(box, 4);
+          if (JSON.stringify(counts) !== '[3,0]') return '每轮收到的单元数：' + JSON.stringify(counts);
+          var text = box.textContent;
+          var miss = ['译·Published', '译·by the author', '译·two days ago'].filter(function (t) {
+            return text.indexOf(t) < 0;
+          });
+          if (miss.length) return '译文丢了：' + JSON.stringify(miss) + ' 页面：' + text;
+          DT.restore();
+          return box.innerHTML === before ? true : '还原不一致：' + box.innerHTML;
+        });
+        if (out !== true) return modes[Math.floor(i / fixtures.length)] + ' / ' + html + '：' + out;
+      } finally {
+        DT.restore();
+        box.remove();
+      }
+    }
+    return true;
+  });
+
+  check('局部段落：子块藏起来 / 再显示（形态变了）→ 撤掉旧双语译文按新结构重收，每次都收敛', function () {
+    var box = keepFixture('<div id="pf2-box">Published <p id="pf2-blk">two days ago here</p> by the author</div>');
+    var el = box.querySelector('#pf2-box');
+    var blk = box.querySelector('#pf2-blk');
+    var before = box.innerHTML;
+    try {
+      return withMode('dual', function () {
+        var counts = settleRounds(box, 4);
+        if (JSON.stringify(counts) !== '[3,0]') return '首次：' + JSON.stringify(counts);
+        blk.style.display = 'none';
+        var own = DT.collect(box);
+        if (JSON.stringify(texts(own)) !== '["Published by the author"]') return '藏起子块后：' + JSON.stringify(texts(own));
+        if (directTargets(el).length) return '局部段落的旧译文没撤掉：' + directTargets(el).length + ' 条';
+        if (!DT.inject(own[0], '译·合并', 'zh-CN')) return '并成一段后注入失败（旧译文节点挡住了）';
+        if (DT.collect(box).length) return '藏起子块后没收敛';
+        blk.removeAttribute('style');
+        counts = settleRounds(box, 4);
+        if (JSON.stringify(counts) !== '[2,0]') return '再显示后：' + JSON.stringify(counts);
+        if (directTargets(el).length !== 2) return '容器自己的译文应有 2 条，实际 ' + directTargets(el).length;
+        DT.restore();
+        return box.innerHTML === before ? true : '还原不一致：' + box.innerHTML;
+      });
+    } finally {
+      DT.restore();
+      box.remove();
+    }
+  });
+
+  check('局部段落：被过滤的碎片（「.」太短）不让容器变形，第二轮收不到单元', function () {
+    var box = keepFixture('<div id="pf3-box">See <p>documentation here</p>.</div>');
+    try {
+      return withMode('dual', function () {
+        var counts = settleRounds(box, 4, notTooShort);
+        return JSON.stringify(counts) === '[2,0]' ? true : '每轮收到的单元数：' + JSON.stringify(counts);
+      });
+    } finally {
+      DT.restore();
+      box.remove();
+    }
+  });
+
+  check('局部段落：每段的 firstNode 是本段自己的文字（懒翻译按它量位置）', function () {
+    var box = keepFixture('<div id="pf4-box">First part text <p>Block paragraph</p> second part text</div>');
+    try {
+      var units = DT.collect(box).filter(function (u) {
+        return u.el.id === 'pf4-box';
+      });
+      var got = units.map(function (u) {
+        return u.firstNode && u.firstNode.nodeValue.trim();
+      });
+      return eq(got, ['First part text', 'second part text']);
+    } finally {
+      box.remove();
+    }
+  });
+
+  check('保留区：长段落切片不会切在 <k1>…</k1> 里面（两半都没有成对标记，模型就不照抄）', function () {
+    var filler = '';
+    for (var i = 0; i < 22; i += 1) filler += 'This is sentence number ' + i + ' in a long paragraph. ';
+    var kept = '';
+    for (var j = 0; j < 8; j += 1) kept += 'Kept line ' + j + ' stays. ';
+    var box = keepFixture('<p>' + filler + '<span class="notranslate">' + kept.trim() + '</span> and then ' + filler + '</p>');
+    try {
+      var u = DT.collect(box)[0];
+      var wire = DT.wireText(u);
+      var limits = [1200, 400, 200];
+      for (var k = 0; k < limits.length; k += 1) {
+        var parts = DT.splitLong(wire, limits[k]);
+        if (parts.length < 2) return limits[k] + '：应切成多段';
+        if (DT.joinSlots(parts, parts.seps) !== wire) return limits[k] + '：拼回去和原文不一致';
+        var whole = 0;
+        for (var p = 0; p < parts.length; p += 1) {
+          var open = (parts[p].match(/<k1>/g) || []).length;
+          if (open !== (parts[p].match(/<\/k1>/g) || []).length) return limits[k] + '：第 ' + (p + 1) + ' 段标记不成对';
+          whole += open;
+        }
+        if (whole !== 1) return limits[k] + '：保留区应完整落在某一段里';
+      }
+      return true;
+    } finally {
+      box.remove();
+    }
+  });
+
+  check('保留区·兜底：页面给保留元素写了 display:… !important 也藏得住，还原逐字一致', function () {
+    var style = document.createElement('style');
+    style.textContent = '.dt-imp-keep { display: inline !important; }';
+    document.head.appendChild(style);
+    var box = keepFixture('<p id="ki-p">Press <code class="notranslate dt-imp-keep">Ctrl+S</code> to save your work now.</p>');
+    var p = box.querySelector('#ki-p');
+    var before = p.innerHTML;
+    try {
+      return withMode('translation', function () {
+        var u = DT.collect(box)[0];
+        if (!DT.inject(u, '现在按快捷键保存你的工作。', 'zh-CN')) return 'inject 返回 false';
+        var code = p.querySelector('code');
+        if (getComputedStyle(code).display !== 'none') return '保留元素仍然显示：页面上同一句出现两遍';
+        if (!code.hasAttribute('data-dt-keep-hidden')) return '藏住了却没打标记';
+        DT.restore();
+        return p.innerHTML === before ? true : '还原不一致：' + p.innerHTML;
+      });
+    } finally {
+      DT.restore();
+      box.remove();
+      style.remove();
+    }
+  });
+
+  check('保留区·兜底：保留元素自己的行内样式（含 !important）还原后逐字一致', function () {
+    var box = keepFixture(
+      '<p id="ks-p">Install <span class="notranslate" style="display:inline-block;color:red !important">Rimefox</span> from the store today.</p>'
+    );
+    var p = box.querySelector('#ks-p');
+    var before = p.innerHTML;
+    try {
+      return withMode('translation', function () {
+        var u = DT.collect(box)[0];
+        if (!DT.inject(u, '今天从商店安装凛狐。', 'zh-CN')) return 'inject 返回 false';
+        if (getComputedStyle(p.querySelector('span')).display !== 'none') return '兜底没有隐藏保留元素';
+        DT.restore();
+        return p.innerHTML === before ? true : '还原不一致：' + p.innerHTML;
+      });
+    } finally {
+      DT.restore();
+      box.remove();
+    }
+  });
+
+  check('保留区·兜底：带图标 / 本身是链接的保留元素不藏（宁可文字重复，不让页面少东西）', function () {
+    var box = keepFixture(
+      '<p id="kl-a">Open <a class="notranslate" href="#r">Rimefox</a> settings to continue.</p>' +
+        '<p id="kl-b">Click <span class="notranslate"><svg width="10" height="10"></svg>Star</span> on this page now.</p>'
+    );
+    try {
+      return withMode('translation', function () {
+        var units = DT.collect(box);
+        if (units.length !== 2) return '收集：' + JSON.stringify(texts(units));
+        if (!DT.inject(units[0], '打开凛狐设置以继续。', 'zh-CN') || !DT.inject(units[1], '现在点一下本页的星标。', 'zh-CN')) return 'inject 返回 false';
+        var keeps = box.querySelectorAll('.notranslate');
+        for (var i = 0; i < keeps.length; i += 1) {
+          if (keeps[i].style.display === 'none' || keeps[i].hasAttribute('data-dt-keep-hidden')) return '被藏起来了：' + keeps[i].outerHTML;
+        }
+        return box.querySelector('#kl-a').firstChild.nodeValue === '打开凛狐设置以继续。' ? true : '译文没写进去：' + box.innerHTML;
+      });
+    } finally {
+      DT.restore();
+      box.remove();
+    }
+  });
+
+  check('保留区·分行：模型少回一行 → 只有保留内容的那一行不跟着藏；保留内容已在译文里时才藏', function () {
+    var html = '<p id="kf-p">Call us now.<br><span class="notranslate">ACME-SUPPORT</span><br>Thanks for your patience.</p>';
+    var cases = [
+      ['请现在打电话。', false],
+      ['请现在拨打 ACME-SUPPORT，感谢耐心等待。', true]
+    ];
+    for (var i = 0; i < cases.length; i += 1) {
+      var box = keepFixture(html);
+      var p = box.querySelector('#kf-p');
+      var before = p.innerHTML;
+      try {
+        var out = withMode('translation', function () {
+          var u = DT.collect(box)[0];
+          if (!u || u.text !== 'Call us now.\nACME-SUPPORT\nThanks for your patience.') return '收集：' + JSON.stringify(u && u.text);
+          if (!DT.inject(u, cases[i][0], 'zh-CN')) return 'inject 返回 false';
+          var span = p.querySelector('.notranslate');
+          if (span.textContent !== 'ACME-SUPPORT') return '保留元素被改：' + p.innerHTML;
+          if ((span.style.display === 'none') !== cases[i][1]) return '隐藏状态不对：' + p.innerHTML;
+          if (visibleText(p).indexOf('ACME-SUPPORT') < 0) return '保留内容从页面上消失了：' + visibleText(p);
+          DT.restore();
+          return p.innerHTML === before ? true : '还原不一致：' + p.innerHTML;
+        });
+        if (out !== true) return '第 ' + (i + 1) + ' 种：' + out;
+      } finally {
+        DT.restore();
+        box.remove();
+      }
+    }
+    return true;
   });
 
   // 后台补注入（ensureInjected）和 manifest 声明的脚本可能在同一页各跑一次：

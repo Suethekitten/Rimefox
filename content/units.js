@@ -819,7 +819,9 @@
   //   text：去掉标记，标记里的内容一律换回原文（模型改了也不算）；双语 / 悬停 / 去重都用它
   //   segs：保留区之间的 keep.length + 1 段译文，仅译文原地写回用。标记按原顺序各出现一次时取标记位置，
   //         否则按原文逐字找；都对不上（漏了、换了顺序、重复）是 null，调用方走兜底
-  U.keepParse = function (text, keep) {
+  // source（可选）：这段原文。不是发出去的编号（模型编出来的 <k7>）只去掉标记本身、留下中间的字，
+  //   不然会原样写进页面；原文里本来就有这串字的（讲 HTML 的文章）才当普通文字
+  U.keepParse = function (text, keep, source) {
     var s = String(text == null ? '' : text);
     var count = keep ? keep.length : 0;
     if (!count) return { text: s, segs: null };
@@ -830,8 +832,11 @@
     KEEP_MARK.lastIndex = 0;
     while ((m = KEEP_MARK.exec(s))) {
       var id = Number(m[2]);
-      if (!(id >= 1 && id <= count)) continue; // 不是发出去的编号：当普通文字
       var tok = { id: id, start: m.index, end: m.index + m[0].length };
+      if (!(id >= 1 && id <= count)) {
+        if (!source || String(source).indexOf(m[0]) < 0) cuts.push(tok);
+        continue;
+      }
       if (m[3]) {
         if (open) cuts.push(tok);
         else pairs.push(tok); // <k1/>：空保留区，只标位置

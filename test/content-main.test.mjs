@@ -36,7 +36,8 @@ function flush() {
 }
 
 // 返回 { sent: 发给后台的消息, config: 后台给的配置（可改）, page: 页面上的 DT, message(): 模拟后台 / 弹窗发来的消息, rebuilds }
-async function boot({ iframe = false, resume = false, translateOnLoad = false, config = {} } = {}) {
+// hooks（可选）：{ timers: [], listeners: {} } 收下计时器回调和 document 上的事件监听，测试自己决定何时触发
+async function boot({ iframe = false, resume = false, translateOnLoad = false, config = {}, hooks = null } = {}) {
   const sent = [];
   const page = { rebuilds: 0, listener: null };
   const cfg = { hasKey: true, targetLang: 'zh-CN', mode: 'dual', translateOnLoad, ...config };
@@ -45,7 +46,12 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
     Promise,
     URL,
     // 计时器不真跑：只看消息和状态，也不让进程挂着
-    setTimeout: () => 0,
+    setTimeout: hooks
+      ? (fn) => {
+          hooks.timers.push(fn);
+          return hooks.timers.length;
+        }
+      : () => 0,
     clearTimeout: () => {},
     setInterval: () => 0,
     requestAnimationFrame: () => 0,
@@ -59,7 +65,9 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
     document: {
       documentElement: fakeElement(),
       body: fakeElement(),
-      addEventListener() {},
+      addEventListener(type, fn) {
+        if (hooks) hooks.listeners[type] = fn;
+      },
       getElementById: () => null,
       querySelector: () => null,
       createElement: fakeElement
@@ -319,6 +327,109 @@ await t('多段落共用容器：一段失败不会被另一段的成功清掉�
   assert.equal(injected.length, 1, '只有成功的那段被注入');
   assert.equal(injected[0].index, 1);
   assert.equal(DT.state.failed, 1, '失败段的退避不能被成功段清掉');
+});
+
+// 补扫一轮：模拟滚动 → 懒翻译的节流计时器到点（只跑新排上的计时器）
+async function rescan(hooks) {
+  const from = hooks.timers.length;
+  hooks.listeners.scroll();
+  hooks.timers.slice(from).forEach((fn) => fn());
+  for (let i = 0; i < 4; i += 1) await flush();
+}
+
+await t('注入被拒（结构对不上 / 已有译文）：记成已处理，下一轮不再原样送翻', async () => {
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ config: { lazy: true, skipSameLang: false }, hooks });
+  const DT = env.DT;
+  DT.generation = 1;
+  const el = {
+    ...fakeElement(),
+    isConnected: true,
+    getBoundingClientRect: () => ({ width: 600, height: 20, top: 0, bottom: 20 })
+  };
+  const unit = () => ({ el, text: 'Published by the author', index: 0, gen: 1, sentences: [], style: 'plain', own: true });
+  let injects = 0;
+  const asked = [];
+  // 真正的 DT.collect 用 accept 过滤（已处理 / 退避 / 太短的不收）
+  DT.collectAll = (accept) => [unit()].filter((u) => !accept || accept(u));
+  DT.inject = () => {
+    injects += 1;
+    return false;
+  };
+  DT.sourceChanged = () => false;
+  DT.send = async (msg) => {
+    if (msg.type === 'config:get') {
+      return { ok: true, config: { hasKey: true, targetLang: 'zh-CN', mode: 'dual', lazy: true, skipSameLang: false } };
+    }
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') {
+      asked.push(...msg.texts);
+      return { ok: true, results: msg.texts.map((x) => '译：' + x), alignments: msg.texts.map(() => null) };
+    }
+    return { ok: true };
+  };
+
+  await env.message({ type: 'dt:toggle' });
+  for (let i = 0; i < 4; i += 1) await flush();
+  assert.equal(injects, 1);
+  assert.equal(asked.length, 1);
+  await rescan(hooks);
+  await rescan(hooks);
+  assert.equal(asked.length, 1, '同一段不该每轮都发去后台：' + JSON.stringify(asked));
+  assert.equal(injects, 1);
+  assert.equal(DT.state.skipped, 1, '算进「跳过」，进度条才能走完');
+});
+
+await t('保留区：超长段落切片后，带标记的每一片都是成对的 <kN>（后台才会加「原样照抄」的说明）', async () => {
+  const { hasKeepMarks } = await import(new URL('lib/prompt.js', root));
+  const env = await boot({ config: { lazy: false, skipSameLang: false } });
+  const DT = env.DT;
+  let filler = '';
+  for (let i = 0; i < 22; i += 1) filler += 'This is sentence number ' + i + ' in a long paragraph. ';
+  let kept = '';
+  for (let j = 0; j < 8; j += 1) kept += 'Kept line ' + j + ' stays. ';
+  kept = kept.trim();
+  const text = filler + kept + ' and then ' + filler.trim();
+  const start = filler.length;
+  const keep = [{ start, end: start + kept.length, text: kept }];
+  const unit = {
+    el: { ...fakeElement(), isConnected: true, getBoundingClientRect: () => ({ width: 600, height: 400, top: 0, bottom: 400 }) },
+    text,
+    keep,
+    wire: DT.units.keepWrap(text, keep),
+    index: 0,
+    sentences: [],
+    style: 'plain',
+    own: false
+  };
+  const asked = [];
+  const seen = [];
+  DT.collectAll = () => [unit];
+  DT.inject = (u, raw) => {
+    seen.push(raw);
+    return true;
+  };
+  DT.sourceChanged = () => false;
+  DT.send = async (msg) => {
+    if (msg.type === 'config:get') {
+      return { ok: true, config: { hasKey: true, targetLang: 'zh-CN', mode: 'translation', lazy: false, skipSameLang: false } };
+    }
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') {
+      asked.push(...msg.texts);
+      return { ok: true, results: msg.texts.slice(), alignments: msg.texts.map(() => null) };
+    }
+    return { ok: true };
+  };
+
+  await env.message({ type: 'dt:toggle' });
+  for (let i = 0; i < 6; i += 1) await flush();
+  assert.ok(asked.length >= 2, '应切成多片：' + asked.length);
+  const marked = asked.filter((x) => /<\/?k1>/.test(x));
+  assert.equal(marked.length, 1, '保留区应完整落在一片里');
+  assert.equal(hasKeepMarks(marked), true, '这一片要能让后台认出成对标记');
+  assert.equal(seen.length, 1);
+  assert.ok(DT.units.keepParse(seen[0], keep, text).segs, '拼回来的译文要能按标记切开');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

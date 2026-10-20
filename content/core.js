@@ -376,7 +376,7 @@
   };
   // 模型回来的译文去掉保留标记（标记里的内容换回原文）：去重、对齐校验都按页面上实际显示的文字算
   DT.keepText = function (unit, text) {
-    return unit && unit.keep && unit.keep.length ? DT.units.keepParse(text, unit.keep).text : text;
+    return unit && unit.keep && unit.keep.length ? DT.units.keepParse(text, unit.keep, unit.text).text : text;
   };
 
   // 长段落按句切开，避免单条请求过大。
@@ -442,32 +442,60 @@
   // （3.5、example.com、10:30 不切）。紧跟的引号 / 括号算在前一句里（「……。」）
   var SENT_END = /[.!?…;:]+["'”’)\]]*(?=\s|$)|[。！？；：]+["'”’」』）)\]]*/g;
 
+  // 送翻文本里的保留区（dom.js 的 keepWrap：<k1>…</k1>）：[[开始, 结束]]。切点不能落在里面 ——
+  // 拆开以后两半都不是成对标记，后台不加「标记原样照抄」的说明，模型也就不会把标记带回来，
+  // 仅译文会走兜底，把 notranslate 的内容藏起来换成译文
+  var KEEP_SPAN = /<k(\d{1,3})>[\s\S]*?<\/k\1>/g;
+  function keepSpans(text) {
+    var out = [];
+    var m;
+    KEEP_SPAN.lastIndex = 0;
+    while ((m = KEEP_SPAN.exec(text))) out.push([m.index, m.index + m[0].length]);
+    return out;
+  }
+  function spanAt(spans, at) {
+    for (var i = 0; i < spans.length; i += 1) {
+      if (at > spans[i][0] && at < spans[i][1]) return spans[i];
+    }
+    return null;
+  }
+
   // 一行之内按句切（参考 Wenyi 的 split_long_segments：在句末之后切，不增删任何字）。
   // 返回 { parts, seps }：parts 是原文的原样子串（只去掉切点两边的空白），seps[i] 是切点处原来有没有空白（' ' / ''）。
   // 以前先吃掉标点后的空白、再用空格拼回去：发给模型的原文里 3.5 变成 "3. 5"、example.com 变成 "example. com"，
   // 中文「你好。」里也被塞进空格（只影响超过 maxUnitChars 的长段落）
   function splitSentences(text, limit) {
+    var spans = keepSpans(text);
     var pieces = [];
     var last = 0;
     var m;
     SENT_END.lastIndex = 0;
     while ((m = SENT_END.exec(text))) {
       var end = m.index + m[0].length;
+      if (spanAt(spans, end)) continue; // 保留区里的句号不是切点
       if (end > last) pieces.push(text.slice(last, end));
       last = end;
     }
     if (last < text.length) pieces.push(text.slice(last));
 
-    // 单句本身超长：按 limit 的 1.6 倍硬切，尽量切在空白处
+    // 单句本身超长：按 limit 的 1.6 倍硬切，尽量切在空白处；落在保留区里就挪到它前面（它在开头就挪到后面），
+    // 整段只剩一个超长保留区就不切
     var max = Math.floor(limit * 1.6);
     var units = [];
+    var pos = 0;
     pieces.forEach(function (piece) {
       var rest = piece;
+      var base = pos;
+      pos += piece.length;
       while (rest.length > max) {
         var at = rest.lastIndexOf(' ', max);
         if (at < max / 2) at = max;
+        var span = spanAt(spans, base + at);
+        if (span) at = span[0] > base ? span[0] - base : span[1] - base;
+        if (at <= 0 || at >= rest.length) break;
         units.push(rest.slice(0, at));
         rest = rest.slice(at);
+        base += at;
       }
       if (rest) units.push(rest);
     });

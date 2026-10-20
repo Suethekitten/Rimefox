@@ -440,6 +440,11 @@
 
         if (DT.inject(unit, raw, target, align)) {
           DT.state.translated += 1;
+        } else if (unit.gen === DT.generation) {
+          // 写不进页面（已经有译文、结构对不上）：记成已处理，内容没变就不再每轮重收、重发同一段
+          // （命中缓存也要走一次后台；缓存没了就是重复计费）。旧代际的结果另当别论，那一轮已经作废
+          DT.state.skipped = (DT.state.skipped || 0) + 1;
+          setUnitState(settled, unit, unit.text);
         }
       }
 

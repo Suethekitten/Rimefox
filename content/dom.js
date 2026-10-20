@@ -404,13 +404,30 @@
     return true;
   }
 
-  // 隐藏保留元素（兜底：它的原文已经随整句译文写进别的节点）。except：这些不隐藏
+  // 藏起来会让页面少东西的保留元素：图标、图片、链接、按钮。兜底时宁可留着（文字重复一次）
+  var KEEP_SOLID =
+    'a[href],button,input,select,textarea,img,svg,picture,video,audio,canvas,iframe,object,embed,[role="button"],[role="link"]';
+
+  // 隐藏保留元素（兜底：它的原文已经随整句译文写进别的节点）。except：这些不隐藏。
+  // 写完再量一次：页面更强的规则（动画、用户样式）还是让它显示着，就撤回这一条、不打「已隐藏」标记
+  // （悬停映射信这个标记，标错了会把看得见的字从对照里拿掉）
   function hideKept(unit, ops, except) {
     var seen = new Set();
     (unit.keep || []).forEach(function (k) {
       if (seen.has(k.el) || (except && except.has(k.el))) return;
       seen.add(k.el);
-      setStyle(k.el, 'display', 'none', ops);
+      if (k.el.matches(KEEP_SOLID) || k.el.querySelector(KEEP_SOLID)) return;
+      var op = setStyle(k.el, 'display', 'none', ops);
+      var cs = null;
+      try {
+        cs = getComputedStyle(k.el);
+      } catch (err) {
+        cs = null;
+      }
+      if (cs && cs.display !== 'none') {
+        if (op) undoOps([op]);
+        return;
+      }
       setAttr(k.el, 'data-dt-keep-hidden', '1', ops);
     });
   }
@@ -512,7 +529,18 @@
   var CONTROL_SELECTOR =
     'button, input, select, textarea, summary, [role="button"], [role="menuitem"], [role="menu"], [role="dialog"], [role="alertdialog"], [role="toolbar"]';
 
+  // 行内语义的标签：flex / grid 父级会把子项「块化」（computed display 一律变成 block），
+  // 正文里给 <span> 写 display:flex 也多半只是为了对齐图标。它们仍是句子的一部分：
+  // 「See <a>documentation</a>.」在 flex 行里以前被拆成 "See" / "." / "documentation" 三段
+  var PHRASING_TAGS = {
+    A: 1, ABBR: 1, B: 1, BDI: 1, BDO: 1, BIG: 1, CITE: 1, DATA: 1, DEL: 1, DFN: 1, EM: 1, FONT: 1,
+    I: 1, INS: 1, LABEL: 1, MARK: 1, NOBR: 1, Q: 1, S: 1, SMALL: 1, SPAN: 1, STRIKE: 1, STRONG: 1,
+    SUB: 1, SUP: 1, TIME: 1, TT: 1, U: 1
+  };
+  var BLOCK_SELECTOR = Object.keys(BLOCK_TAGS).join(',').toLowerCase();
+
   // 打断父级行内文字流的子元素：可见的块级 / 弹性布局盒子；非正文块里，带交互控件的子元素也算。
+  // 行内语义标签（链接、span、强调）就算算出来是块级，也只有里面套着真正的块级元素时才算打断。
   // 已翻过（data-dt-src）/ notranslate 的块级子元素照样算：它们不属于父级这一段，不能被拼进来再翻一遍。
   // 图片、视频这类跳过的标签不算（不影响父级的文字）；<pre> 算，代码块不该被拼进句子。
   function breaksFlow(parent, kid) {
@@ -522,7 +550,7 @@
     if (kid.hidden) return false;
     var cs = styleOf(kid);
     if (cs && cs.display === 'none') return false;
-    if (isStructural(kid)) return true;
+    if (isStructural(kid) && (!PHRASING_TAGS[tag] || kid.querySelector(BLOCK_SELECTOR))) return true;
     if (CONTENT_TAGS[tagOf(parent)]) return false;
     return !!(kid.matches(CONTROL_SELECTOR) || kid.querySelector(CONTROL_SELECTOR));
   }
@@ -745,10 +773,12 @@
 
   // 一个元素的「源文本签名」：正文文本 / <br> / 可见性相关属性，跳过译文节点、RT/RP、UI。
   // 全部段落已渲染且签名没变时，addParagraphs 可以直接返回，不必重跑 textMap / 行分组。
+  // el.__dtScope（settleForm）里的直接子元素只混入属性、不往里看
   function sourceSignature(el) {
     var h = 2166136261;
     var chars = 0;
     var brs = 0;
+    var scope = el.__dtScope || null;
     function mix(code) {
       h ^= code;
       h = (h * 16777619) >>> 0;
@@ -789,6 +819,10 @@
         for (var a2 = 0; a2 < aria.length; a2 += 1) mix(aria.charCodeAt(a2));
         mix(kid.hidden ? 1 : 0);
         if (kid.hidden) continue;
+        if (scope && node === el && scope.has(kid)) {
+          mix(30);
+          continue;
+        }
         visit(kid);
       }
     })(el);
@@ -845,6 +879,28 @@
 
   function isDual(rec) {
     return rec.mode === 'dual';
+  }
+
+  // 元素这一轮按哪种形态成段：whole（整段 tokensOf）/ own（只翻直接文本）/ partial（局部段落 flowTokens）。
+  // 形态变了（子块藏起来 / 显示出来、子元素被删）：旧双语段落的锚点和 whole 标记都对不上新结构，先撤掉再按新结构收；
+  // 留着的话新单元会因为旧译文节点注入失败，每轮重收、重发同一段。替换型按文本节点身份认领，留着不闪。
+  // scope：签名不往里看的子元素（局部段落的子块、own 单元跳过的子元素），它们各自 walk、各自有签名，
+  // 子元素被翻译 / 改字不该让父级以为自己那段变了；只混入它们的属性（显示 / 隐藏仍能察觉）
+  function settleForm(el, form, scope) {
+    if (el.__dtForm && el.__dtForm !== form && hasRendered(el)) releaseRecords(el, isDual);
+    el.__dtForm = form;
+    el.__dtScope = scope;
+  }
+
+  // own 单元没拼进句子的子元素（ownTokens 之外的）
+  function ownExcluded(el) {
+    var out = new Set();
+    var kids = el.children;
+    for (var i = 0; i < kids.length; i += 1) {
+      var tag = tagOf(kids[i]);
+      if (tag !== 'BR' && !INLINE_CODE_TAGS[tag] && !keptChild(el, kids[i])) out.add(kids[i]);
+    }
+    return out;
   }
 
   // 双语段落的原文变了（站点改字 / 换掉文本节点），或译文节点被站点删了
@@ -981,8 +1037,9 @@
       var assignedRuby = rubyGroups ? rubyGroups[index] : null;
       // 局部段落不走「按 DOM 范围扫 ruby」的兜底：两段之间夹着标题等块级子元素，会把它们的注音也算进来
       if (partial && !assignedRuby) assignedRuby = [];
+      // 本段的第一个文本节点（懒翻译量位置用）：从本段开头找，不能取整个容器的第一个
       var firstNode = null;
-      for (var ci = 0; ci < map.chars.length; ci += 1) {
+      for (var ci = range.start; ci < range.end; ci += 1) {
         var cm = map.chars[ci];
         if (cm && cm.node) { firstNode = cm.node; break; }
       }
@@ -1053,27 +1110,49 @@
     }
 
     var own = directText(el);
+    // 有直接文本、但夹着块级 / 控件子元素：这是容器（SPA 外壳、嵌套列表的 <li>、
+    // 正文里夹标题的青空文库），不是段落。判据只看结构，不看文字多少：
+    // 「See <a>很长的链接</a>.」、「<span>Hello</span> <span>World</span>」仍是一句
+    var breaks = own && el.children.length ? flowBreaks(el) : [];
 
     // 只翻了直接文本的元素，子元素露出来了（子菜单 display:none → block、行内子元素显示出来）：按现在的结构重新收集。
-    // 露出来的是块级子元素：第 3 步把自己那段收成局部段落、子块各自下钻。双语译文原来追加在元素末尾，
+    // 露出来的是块级子元素：自己那段收成局部段落、子块各自下钻。双语译文原来追加在元素末尾，
     // 现在会掉到子菜单下面，撤掉重插到子块前面；替换型是原地写的，位置不变，留着不闪。
     // 露出来的是行内子元素（句子的一部分）：全部撤掉，并成整段重收
     if (ownDone && el.children.length && usableChildren(el)) {
-      releaseRecords(el, own && flowBreaks(el).length ? isDual : null);
+      releaseRecords(el, breaks.length ? isDual : null);
     }
 
     // 1) 真叶子：直接作为（一个或多个）段落单元
     if (!el.children.length) {
+      settleForm(el, 'whole', null);
       addParagraphs(out, el, tokensOf(el), false);
       return;
     }
 
-    // 2) 子元素全被跳过（已翻译 / 不可见 / notranslate）：父级只翻自己的直接文本，
+    // 2) 局部段落：只收自己的行内文字（flowTokens），打断文字流的子元素再下钻；
+    //    行内子元素已经拼进这段，不再单独收。
+    //    放在「子元素全被跳过」之前：块级子元素翻完（打了 data-dt-src）以后照样是打断文字流的子块，
+    //    不能下一轮变成 own 单元 —— 那样会撤掉第一段译文、新单元又因为旧译文节点注入失败，每轮重发同一段
+    if (breaks.length) {
+      settleForm(el, 'partial', new Set(breaks));
+      addParagraphs(out, el, flowTokens(el, breaks), false, true);
+      var kids2 = el.children;
+      for (var bi = 0; bi < kids2.length; bi += 1) {
+        // 打断文字流的子块各自下钻；已翻过的行内子元素（以前单独成段）由它自己重新检查
+        if (breaks.indexOf(kids2[bi]) >= 0 || kids2[bi].hasAttribute('data-dt-src')) walk(kids2[bi], out);
+      }
+      return;
+    }
+
+    // 3) 子元素全被跳过（已翻译 / 不可见 / notranslate）：父级只翻自己的直接文本，
     //    看得见的行内保留子元素当保留区拼进句子（ownTokens）。
     //    已翻译的子元素照样交给 walk()：改了字 / 子菜单显示出来时，由它自己重新检查
     if (!usableChildren(el)) {
-      if (own) addParagraphs(out, el, ownTokens(el), true);
-      else if (known) releaseRecords(el, isDual); // 自己的字没了（站点删了 / 子元素藏起来了）
+      if (own) {
+        settleForm(el, 'own', ownExcluded(el));
+        addParagraphs(out, el, ownTokens(el), true);
+      } else if (known) releaseRecords(el, isDual); // 自己的字没了（站点删了 / 子元素藏起来了）
       var done = el.children;
       for (var d = 0; d < done.length; d += 1) {
         if (done[d].hasAttribute('data-dt-src')) walk(done[d], out);
@@ -1081,7 +1160,7 @@
       return;
     }
 
-    // 3) 有直接文本（段落），或不该继续拆分 → 按段落切分
+    // 4) 有直接文本（段落），或不该继续拆分 → 整段按段落切分
     if (own || !shouldDescend(el)) {
       // 兜底防线：如果这棵子树里已经有我们注入的译文，说明这里被翻过，
       // 再整块翻一次就会把内容翻第二遍。这时只往下处理"还没翻"的子节点。
@@ -1092,23 +1171,16 @@
         }
         return;
       }
-      // 有直接文本、但夹着块级 / 控件子元素：这是容器（SPA 外壳、嵌套列表的 <li>、
-      // 正文里夹标题的青空文库），不是段落。只收自己的行内文字，打断文字流的子元素再下钻；
-      // 行内子元素已经拼进这段，不再单独收。判据只看结构，不看文字多少：
-      // 「See <a>很长的链接</a>.」、「<span>Hello</span> <span>World</span>」仍是一句
-      var breaks = own ? flowBreaks(el) : [];
-      if (breaks.length) {
-        addParagraphs(out, el, flowTokens(el, breaks), false, true);
-        for (var bi = 0; bi < breaks.length; bi += 1) walk(breaks[bi], out);
-        return;
-      }
+      settleForm(el, 'whole', null);
       addParagraphs(out, el, tokensOf(el), false);
       return;
     }
 
-    // 4) 容器 → 逐个下钻。以前整块翻过、现在要拆开的元素（子菜单显示出来了）：
+    // 5) 容器 → 逐个下钻。以前整块翻过、现在要拆开的元素（子菜单显示出来了）：
     //    先撤掉整块的旧译文，否则子元素再各翻一遍就重复了
     if (known) releaseRecords(el);
+    el.__dtForm = '';
+    el.__dtScope = null;
     var kids = el.children;
     for (var i = 0; i < kids.length; i += 1) {
       walk(kids[i], out);
@@ -1353,12 +1425,22 @@
     return true;
   }
 
+  // 行内样式按 !important 写：页面样式表里的 display: … !important 压不过它（保留元素 / 注音照样藏得住）。
+  // 记下原来的 style 属性原文：还原时没人动过就逐字放回（CSSOM 回放会把 "display:inline-block" 改写成
+  // "display: inline-block;"、丢掉行内 !important）；站点改过别的样式就只按属性撤销我们这一条
   function setStyle(el, prop, value, ops) {
-    var before = el.style[prop] || '';
-    if (before === value) return false;
-    txPush({ op: 'style', el: el, prop: prop, before: before, after: value }, ops);
-    el.style[prop] = value;
-    return true;
+    var css = prop.replace(/[A-Z]/g, function (c) {
+      return '-' + c.toLowerCase();
+    });
+    var before = el.style.getPropertyValue(css);
+    var priority = el.style.getPropertyPriority(css);
+    if (before === value && priority === 'important') return null;
+    var attr = el.getAttribute('style');
+    el.style.setProperty(css, value, 'important');
+    return txPush(
+      { op: 'style', el: el, prop: css, before: before, priority: priority, after: value, attr: attr, attrAfter: el.getAttribute('style') },
+      ops
+    );
   }
 
   function insertNode(node, parent, before, ops) {
@@ -1386,10 +1468,16 @@
           if (op.before == null) op.el.removeAttribute(op.name);
           else op.el.setAttribute(op.name, op.before);
         } else if (op.op === 'style') {
-          if (op.el && (op.el.style[op.prop] || '') === op.after) {
-            op.el.style[op.prop] = op.before || '';
-            // 原本没有 style 属性时，赋空值会留下 style=""，还原后 innerHTML 对不上
-            if (!op.before && op.el.getAttribute('style') === '') op.el.removeAttribute('style');
+          if (!op.el) continue;
+          if (op.el.getAttribute('style') === op.attrAfter) {
+            // 写完之后没人动过：style 属性逐字放回
+            if (op.attr == null) op.el.removeAttribute('style');
+            else op.el.setAttribute('style', op.attr);
+          } else if (op.el.style.getPropertyValue(op.prop) === op.after) {
+            if (op.before) op.el.style.setProperty(op.prop, op.before, op.priority || '');
+            else op.el.style.removeProperty(op.prop);
+            // 原本没有 style 属性时，删完会留下 style=""，还原后 innerHTML 对不上
+            if (op.attr == null && op.el.getAttribute('style') === '') op.el.removeAttribute('style');
           }
         }
       } catch (err) {
@@ -1731,17 +1819,22 @@
         }
       : null;
     var shown = new Set();
+    var written = assign.join('\n');
+    // 这一行上的保留元素留着不藏。written：保留内容已经原样出现在写进去的译文里的，照样藏（免得重复）
+    function showKept(group, written) {
+      group.pieces.forEach(function (p) {
+        var ki = keepIndexOf(unit, p.node);
+        if (ki >= 0 && !(written && written.indexOf(unit.keep[ki].text) >= 0)) shown.add(unit.keep[ki].el);
+      });
+    }
     for (var k = 0; k < n; k += 1) {
       if (k >= assign.length) {
         clearGroup(sel[k], edits, collapsed, kept);
+        // 模型少回了几行：这一行没有译文，上面的保留元素再藏起来，这段内容就从页面上消失了
+        if (kept) showKept(sel[k], written);
         continue;
       }
-      if (!writeLine(sel[k], assign[k], edits, k === 0, kept) && kept) {
-        sel[k].pieces.forEach(function (p) {
-          var ki = keepIndexOf(unit, p.node);
-          if (ki >= 0) shown.add(unit.keep[ki].el);
-        });
-      }
+      if (!writeLine(sel[k], assign[k], edits, k === 0, kept) && kept) showKept(sel[k], null);
     }
     (unit.groups.tail || []).forEach(function (g) {
       clearGroup(g, edits, collapsed, kept);
@@ -2144,7 +2237,7 @@
     // 保留区：text 可以带 <kN> 标记（模型原样回来的），也可以不带（按原文逐字找位置）
     var segs = null;
     if (text && unit.keep && unit.keep.length) {
-      var kept = DT.units.keepParse(text, unit.keep);
+      var kept = DT.units.keepParse(text, unit.keep, unit.text);
       text = kept.text;
       segs = kept.segs;
     }
@@ -2152,10 +2245,20 @@
     unit.align = align;
     if (unit.gen !== DT.generation) return false; // 旧代际（还原 / 模式切换后晚到的结果）
     var rec = findRenderedFor(unit.el, unit);
-    if (rec && stillOurs(rec)) return false; // 防重复注入
-    if (unit.whole && unit.el.hasAttribute('data-dt-src')) return false;
-    // 防御：站点可能克隆节点并保留属性，这里再确认一次没插过
-    if (unit.whole && unit.el.querySelector && unit.el.querySelector(':scope > [data-dt-target]')) return false;
+    var refused =
+      rec && stillOurs(rec)
+        ? 'already-rendered' // 防重复注入
+        : unit.whole && unit.el.hasAttribute('data-dt-src')
+          ? 'marked-translated'
+          : // 防御：站点可能克隆节点并保留属性，这里再确认一次没插过
+            unit.whole && unit.el.querySelector && unit.el.querySelector(':scope > [data-dt-target]')
+            ? 'target-exists'
+            : '';
+    if (refused) {
+      // 收集和注入对这一段的看法不一致：调用方会把它记成已处理，这里留下原因方便查
+      DT.log('inject refused:', refused, previewText(unit.text));
+      return false;
+    }
 
     var area = unit.area || (unit.area = DT.areaOf(unit.el));
     // 用户可以选择"界面也保留原文"：那样连导航/按钮都不替换，全都追加
@@ -2279,19 +2382,20 @@
         return;
       }
 
+      // 和 walk() 第 2 步同一判据，诊断里的单元才和真实收集一致
+      var breaks = own ? flowBreaks(el) : [];
+      if (breaks.length) {
+        reportRanges(el, flowTokens(el, breaks), false);
+        for (var bi = 0; bi < breaks.length; bi += 1) walkDiag(breaks[bi]);
+        return;
+      }
+
       if (!usableChildren(el)) {
         if (own) reportRanges(el, ownTokens(el), true);
         return;
       }
 
       if (own || !shouldDescend(el)) {
-        // 和 walk() 第 3 步同一判据，诊断里的单元才和真实收集一致
-        var breaks = own ? flowBreaks(el) : [];
-        if (breaks.length) {
-          reportRanges(el, flowTokens(el, breaks), false);
-          for (var bi = 0; bi < breaks.length; bi += 1) walkDiag(breaks[bi]);
-          return;
-        }
         reportRanges(el, tokensOf(el), false);
         return;
       }
@@ -2393,8 +2497,8 @@
       targets[t].remove();
     }
 
-    // 清掉标记
-    var sources = document.querySelectorAll('[data-dt-src]');
+    // 清掉标记（局部段落 / own 单元的容器只有 data-dt-replaced，没有 data-dt-src）
+    var sources = document.querySelectorAll('[data-dt-src],[data-dt-replaced]');
     for (var j = 0; j < sources.length; j += 1) {
       sources[j].removeAttribute('data-dt-src');
       sources[j].removeAttribute('data-dt-sig');
