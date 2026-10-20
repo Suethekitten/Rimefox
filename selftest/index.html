@@ -267,6 +267,15 @@ A new stanza begins here.</div><p class="nv-source-newline">Hello
     <!-- 青空文库正文里夹章节标题（标题也有注音）；论坛帖子里夹引用块 -->
     <template id="tpl-container-mixed"><div class="main_text" style="width:600px;font:16px/2 serif">　ある日の<ruby><rb>暮方</rb><rp>（</rp><rt>くれがた</rt><rp>）</rp></ruby>の事である。一人の下人が、<ruby>羅生門<rt>らしょうもん</rt></ruby>の下で雨やみを待っていた。<br><br><h4 class="naka-midashi"><ruby>第二<rt>だいに</rt></ruby></h4>　広い門の下には、この男のほかに誰もいない。<br><br>　ただ、所々<ruby>丹塗<rt>にぬ</rt></ruby>りの剥げた、大きな円柱に、蟋蟀が一匹とまっている。<br></div><div id="fx-post" style="width:600px">I agree with <a href="#">this answer</a> completely.<blockquote>Quoted text from someone else here.</blockquote>Thanks for sharing it with <b>everyone</b>.</div></template>
 
+    <!-- 0.9.7 已翻译元素重新检查：改了字 / 子菜单显示出来 / 只改了样式（data-dt-src 不再让整棵子树永远跳过） -->
+    <template id="tpl-resig-text"><div style="width:600px"><p id="fx-resig-p">Original paragraph text here.</p><p id="fx-resig-q">Another paragraph stays the same.</p></div></template>
+    <template id="tpl-resig-style"><p id="fx-resig-style" style="width:600px">Some <b>bold words</b> inside this paragraph.</p></template>
+    <template id="tpl-resig-menu"><ul style="width:600px"><li id="fx-resig-li">Products<ul id="fx-resig-sub" style="display:none"><li>Laptops for work</li><li>Desktop computers</li></ul></li></ul></template>
+    <template id="tpl-resig-menu-css"><style>.fx-resig-closed .fx-resig-sub { display: none; }</style><div class="fx-resig-closed" style="width:600px"><ul><li id="fx-resig-css-li">Products<ul class="fx-resig-sub"><li>Laptops for work</li><li>Desktop computers</li></ul></li></ul></div></template>
+    <template id="tpl-resig-menu-link"><ul style="width:600px"><li id="fx-resig-link-li"><a href="#products">Products</a><ul id="fx-resig-link-sub" style="display:none"><li>Laptops for work</li><li>Desktop computers</li></ul></li></ul></template>
+    <template id="tpl-resig-inline"><p id="fx-resig-inline" style="width:600px">Hello there <b style="display:none">wonderful world</b> again.</p></template>
+    <template id="tpl-resig-gone"><ul style="width:600px"><li id="fx-resig-gone-li"><a href="#products">Our products</a></li></ul></template>
+
     <script src="../content/core.js"></script>
     <script src="../content/units.js"></script>
     <script src="../content/dom.js"></script>

@@ -1610,6 +1610,161 @@
     });
   });
 
+  // ---------------- 0.9.7 已翻译元素重新检查（data-dt-src 不再让整棵子树永远跳过） ----------------
+  function directTargets(el) {
+    return Array.prototype.filter.call(el.children, function (n) {
+      return n.hasAttribute('data-dt-target');
+    });
+  }
+
+  check('生命周期：双语段落被站点改了字 → 下一次收集就撤掉旧译文、按新内容重收（不等网址变化）', function () {
+    return withTemplate('tpl-resig-text', 'dual', function (box) {
+      var p = box.querySelector('#fx-resig-p');
+      var q = box.querySelector('#fx-resig-q');
+      var units = DT.collect(box);
+      if (units.length !== 2) return '应收集到 2 段，实际 ' + units.length;
+      units.forEach(function (u) {
+        if (!DT.inject(u, '旧译文：' + u.text, 'zh-CN')) throw new Error('注入失败');
+      });
+      p.firstChild.nodeValue = 'Edited paragraph text now.';
+      var again = DT.collect(box);
+      if (again.length !== 1) return '应只重新收集被改的那一段，实际 ' + JSON.stringify(texts(again));
+      if (again[0].el !== p || again[0].text !== 'Edited paragraph text now.') return '收集到的不是新内容：' + again[0].text;
+      if (again[0].own) return '叶子段落不该因为旧译文节点变成 own 单元';
+      if (p.querySelector('[data-dt-target]')) return '旧译文还挂在段落里';
+      if (directTargets(q).length !== 1) return '没改的段落译文不该被撤掉';
+      if (!DT.inject(again[0], '新译文', 'zh-CN')) return '新译文注入失败';
+      var nodes = directTargets(p);
+      if (nodes.length !== 1 || nodes[0].textContent !== '新译文') return '段落里的译文不对：' + nodes.length + ' 条';
+      return DT.collect(box).length === 0 ? true : '注入后不该再收集';
+    });
+  });
+
+  check('生命周期：已翻译段落只改了子元素的 class / style（悬停样式）→ 不重翻、译文不动', function () {
+    return withTemplate('tpl-resig-style', 'dual', function (box) {
+      var p = box.querySelector('#fx-resig-style');
+      var units = DT.collect(box);
+      if (units.length !== 1 || !DT.inject(units[0], '这段里有粗体字。', 'zh-CN')) return '首次收集 / 注入失败';
+      var b = p.querySelector('b');
+      b.className = 'is-hovered';
+      b.style.color = 'rgb(200, 30, 30)';
+      var again = DT.collect(box);
+      if (again.length) return '只改了样式不该重新收集：' + JSON.stringify(texts(again));
+      if (DT.collect(box).length) return '第二次收集也不该有单元';
+      var nodes = directTargets(p);
+      return nodes.length === 1 && nodes[0].textContent === '这段里有粗体字。' ? true : '译文被撤掉或重复了：' + nodes.length + ' 条';
+    });
+  });
+
+  check('生命周期：<li> 只翻了直接文本 → 子菜单显示出来后补收子项，「Products」的译文挪到子菜单前面', function () {
+    return withTemplate('tpl-resig-menu', 'dual', function (box) {
+      var li = box.querySelector('#fx-resig-li');
+      var sub = box.querySelector('#fx-resig-sub');
+      var units = DT.collect(box);
+      var r = eq(texts(units), ['Products']);
+      if (r !== true) return '子菜单隐藏时：' + r;
+      if (!DT.inject(units[0], '产品', 'zh-CN')) return '注入失败';
+      sub.style.display = 'block';
+      var again = DT.collect(box);
+      r = eq(texts(again).sort(), ['Desktop computers', 'Laptops for work', 'Products']);
+      if (r !== true) return '子菜单显示后：' + r;
+      // 原来追加在 <li> 末尾的译文会掉到子菜单下面：撤掉，按局部段落重插到子菜单前面
+      if (li.querySelector('[data-dt-target]')) return '追加在末尾的旧译文没撤掉';
+      again.forEach(function (u) {
+        if (!DT.inject(u, u.text === 'Products' ? '产品' : '译：' + u.text, 'zh-CN')) throw new Error('注入失败：' + u.text);
+      });
+      var all = li.querySelectorAll('[data-dt-target]');
+      if (all.length !== 3) return '应有 3 条译文，实际 ' + all.length;
+      var label = directTargets(li);
+      if (label.length !== 1 || label[0].textContent !== '产品') return '「Products」的译文应只有 1 条';
+      if (label[0].nextElementSibling !== sub) return '「Products」的译文应紧挨在子菜单前面';
+      return DT.collect(box).length === 0 ? true : '全部翻完后不该再收集';
+    });
+  });
+
+  check('生命周期：子菜单靠祖先 class 显示（<li> 自己的签名没变）→ 照样补收子项', function () {
+    return withTemplate('tpl-resig-menu-css', 'dual', function (box) {
+      var units = DT.collect(box);
+      var r = eq(texts(units), ['Products']);
+      if (r !== true) return '子菜单隐藏时：' + r;
+      if (!DT.inject(units[0], '产品', 'zh-CN')) return '注入失败';
+      box.querySelector('.fx-resig-closed').classList.remove('fx-resig-closed');
+      r = eq(texts(DT.collect(box)).sort(), ['Desktop computers', 'Laptops for work', 'Products']);
+      return r === true ? true : '展开后：' + r;
+    });
+  });
+
+  check('生命周期：仅译文下子菜单显示出来也补收，自己那段不先变回原文，「还原」恢复全部原文', function () {
+    return withTemplate('tpl-resig-menu', 'translation', function (box) {
+      var li = box.querySelector('#fx-resig-li');
+      var units = DT.collect(box);
+      if (units.length !== 1 || !DT.inject(units[0], '产品', 'zh-CN')) return '首次收集 / 注入失败';
+      box.querySelector('#fx-resig-sub').style.display = 'block';
+      var again = DT.collect(box);
+      var r = eq(texts(again).sort(), ['Desktop computers', 'Laptops for work']);
+      if (r !== true) return '子菜单显示后：' + r;
+      if (li.firstChild.nodeValue !== '产品') return '原地替换的那段被还原成原文（菜单会闪一下）：' + li.firstChild.nodeValue;
+      again.forEach(function (u) {
+        DT.inject(u, '译：' + u.text, 'zh-CN');
+      });
+      r = eq(li.textContent, '产品译：Laptops for work译：Desktop computers');
+      if (r !== true) return '替换后：' + r;
+      if (DT.collect(box).length) return '全部翻完后不该再收集';
+      DT.restore();
+      return eq(li.textContent, 'ProductsLaptops for workDesktop computers');
+    });
+  });
+
+  check('生命周期：整块翻过的 <li> 露出子菜单 → 改成下钻，撤掉整块旧译文，不重复翻', function () {
+    return withTemplate('tpl-resig-menu-link', 'dual', function (box) {
+      var li = box.querySelector('#fx-resig-link-li');
+      var units = DT.collect(box);
+      if (units.length !== 1 || units[0].el !== li) return '首次应把 <li> 整块收成一个单元';
+      if (!DT.inject(units[0], '产品', 'zh-CN')) return '注入失败';
+      box.querySelector('#fx-resig-link-sub').style.display = 'block';
+      var again = DT.collect(box);
+      var r = eq(texts(again).sort(), ['Desktop computers', 'Laptops for work', 'Products']);
+      if (r !== true) return '子菜单显示后：' + r;
+      if (directTargets(li).length) return '<li> 整块的旧译文没撤掉，链接再翻一次就重复了';
+      again.forEach(function (u) {
+        DT.inject(u, u.text === 'Products' ? '产品' : '译：' + u.text, 'zh-CN');
+      });
+      var hits = li.textContent.split('产品').length - 1;
+      return hits === 1 ? true : '「产品」出现了 ' + hits + ' 次';
+    });
+  });
+
+  check('生命周期：只翻了直接文本的段落露出行内子元素 → 并成整段重收', function () {
+    return withTemplate('tpl-resig-inline', 'dual', function (box) {
+      var p = box.querySelector('#fx-resig-inline');
+      var units = DT.collect(box);
+      var r = eq(texts(units), ['Hello there again.']);
+      if (r !== true) return '行内子元素隐藏时：' + r;
+      if (!DT.inject(units[0], '又见面了。', 'zh-CN')) return '注入失败';
+      p.querySelector('b').style.display = '';
+      var again = DT.collect(box);
+      r = eq(texts(again), ['Hello there wonderful world again.']);
+      if (r !== true) return '露出来以后：' + r;
+      if (p.querySelector('[data-dt-target]')) return '只含直接文本的旧译文没撤掉';
+      if (!DT.inject(again[0], '你好，美好的世界，又见面了。', 'zh-CN')) return '整段注入失败';
+      return directTargets(p).length === 1 ? true : '整段译文应只有 1 条';
+    });
+  });
+
+  check('生命周期：已翻译元素的原文没了（子元素藏起来）→ 双语旧译文撤掉', function () {
+    return withTemplate('tpl-resig-gone', 'dual', function (box) {
+      var li = box.querySelector('#fx-resig-gone-li');
+      var units = DT.collect(box);
+      if (units.length !== 1 || units[0].el !== li) return '首次应把 <li> 整块收成一个单元';
+      if (!DT.inject(units[0], '我们的产品', 'zh-CN')) return '注入失败';
+      li.querySelector('a').style.display = 'none';
+      var again = DT.collect(box);
+      if (again.length) return '原文藏起来了，不该再收集：' + JSON.stringify(texts(again));
+      if (li.querySelector('[data-dt-target]')) return '旧译文还挂着';
+      return li.hasAttribute('data-dt-src') ? '仍标记为已翻译' : true;
+    });
+  });
+
 
   // ---------------- 0.9.2 真实《罗生门》DOM 夹具回归 ----------------
   function rectOfNode(node) {

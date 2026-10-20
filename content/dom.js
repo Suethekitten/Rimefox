@@ -188,11 +188,13 @@
     return snap;
   }
 
-  function isSkipped(el) {
+  // recheck：walk() 自己要重新检查的已翻译元素（有渲染记录、但源文本变了 / 只翻了直接文本），
+  // 这时 data-dt-src 不算跳过理由。父级判断子元素时不传：已翻译的子元素仍不能被拼进父级再翻一遍。
+  function isSkipped(el, recheck) {
     if (!el || el.nodeType !== 1) return true;
     if (SKIP_TAGS[tagOf(el)]) return true;
     if (el.hasAttribute('data-dt-target')) return true;
-    if (el.hasAttribute('data-dt-src')) return true; // 已翻译过
+    if (!recheck && el.hasAttribute('data-dt-src')) return true; // 已翻译过
     if (el.closest && el.closest('[data-dt-ui]')) return true;
     if (el.getAttribute('translate') === 'no') return true;
     if (siteExclude && el.matches(siteExclude)) return true; // 站点规则：这些区域不翻
@@ -701,6 +703,46 @@
     return all;
   }
 
+  // 这个元素自己有没有渲染过的段落（双语 / 替换 / Ruby）
+  function hasRendered(el) {
+    var list = renderedByEl.get(el);
+    return !!(list && list.length);
+  }
+
+  // 渲染过的段落全是 own 单元：只翻了直接文本（子元素当时都被跳过），不覆盖子元素。
+  // 隐藏的子菜单以后显示出来还得下钻，所以 walk() 不能因为它「整块已翻译」就早退。
+  function ownOnly(el) {
+    var list = renderedByEl.get(el);
+    if (!list || !list.length) return false;
+    for (var i = 0; i < list.length; i += 1) {
+      if (!list[i].unit.own) return false;
+    }
+    return true;
+  }
+
+  // 撤掉这个元素自己的段落记录（which 可选：只撤满足条件的），返回撤掉了几条。
+  // 不带 which：它不再按原来的样子成段（变成了容器要下钻，或要并成整段重新收集）
+  function releaseRecords(el, which) {
+    var list = renderedByEl.get(el);
+    if (!list || !list.length) return 0;
+    var dropped = 0;
+    list.slice().forEach(function (rec) {
+      if (which && !which(rec)) return;
+      dropRendered(rec);
+      dropped += 1;
+    });
+    return dropped;
+  }
+
+  function isDual(rec) {
+    return rec.mode === 'dual';
+  }
+
+  // 双语段落的原文变了（站点改字 / 换掉文本节点），或译文节点被站点删了
+  function isStaleDual(rec) {
+    return rec.mode === 'dual' && (!stillOurs(rec) || sourceChangedSnapshot(rec.unit));
+  }
+
   // partial：这些段落只是容器自己的行内文字（flowTokens），不覆盖整个元素 ——
   // 单元不算 whole（不打 data-dt-src，否则 isSkipped 会让整棵子树以后都不再扫描，
   // 懒翻译到不了屏幕外的子段落），译文跟在这段文字后面而不是追加到容器末尾。
@@ -714,6 +756,7 @@
     // 但它是布局读取：全部段落都已渲染时不能白量一次（增量重扫在长文上会强制整页重排）。
     var sharedArea = null;
     var areaComputed = false;
+    var changed = false; // 有没有段落要重新收集（新段落 / 撤掉了旧译文）
     var groups = lineGroups(el, tokens);
     // Ruby 一次分配：按文档顺序扫一遍所有 <ruby>，用段落分隔 <br> 当边界。
     // 以前每个段落都 querySelectorAll('ruby') + Range.intersectsNode，长文 + 多 ruby 是 O(n²)。
@@ -869,8 +912,12 @@
         if (!sourceMoved && stillOurs(rec) && sameSource) return;
         dropRendered(rec);
       }
+      changed = true;
       if (!collectAccept || collectAccept(unit)) out.push(unit);
     });
+    // 签名变了、但每一段都还是原样（只是子元素的 class / style 变了）：记下新签名，
+    // 下一轮 walk() 又能整块早退，不用每次都重建 textMap
+    if (!changed) refreshElementSignature(el);
   }
 
   function walk(el, out) {
@@ -878,11 +925,30 @@
     if (!el || el.nodeType !== 1) return;
     // 整块已翻译且源文本没变：在 isSkipped 的 getComputedStyle 之前返回。
     // 站点插入译文后，容器首次取样式会强制整块重排，长文增量重扫会因此卡住。
-    // 局部段落（夹着块级子元素的容器）例外：自己那段翻完了，子元素还得接着下钻。
-    if (!el.__dtPartial && elementFullyRendered(el)) return;
-    if (isSkipped(el)) return;
+    // 局部段落（夹着块级子元素的容器）、只翻了直接文本的元素（own 单元）例外：
+    // 自己那段翻完了，子元素还得接着下钻（隐藏的子菜单显示出来也要补收）。
+    var ownDone = ownOnly(el);
+    if (!el.__dtPartial && !ownDone && elementFullyRendered(el)) return;
+    // 走到这里还带着渲染记录的元素：源文本签名变了、译文被站点删了，或只翻了直接文本。
+    // 重新检查，不按 data-dt-src 整棵跳过（0.9.6：双语改字后旧译文一直挂着，子菜单显示出来也不翻）。
+    // 没有渲染记录的 data-dt-src（站点克隆出来的节点）照旧跳过。
+    var known = hasRendered(el);
+    if (isSkipped(el, known)) return;
+    // 先撤掉原文已经变了的双语译文，再按现在的结构判断：旧译文节点不能被当成子元素
+    if (known && releaseRecords(el, isStaleDual)) {
+      ownDone = ownOnly(el);
+      known = hasRendered(el);
+    }
 
     var own = directText(el);
+
+    // 只翻了直接文本的元素，子元素露出来了（子菜单 display:none → block、行内子元素显示出来）：按现在的结构重新收集。
+    // 露出来的是块级子元素：第 3 步把自己那段收成局部段落、子块各自下钻。双语译文原来追加在元素末尾，
+    // 现在会掉到子菜单下面，撤掉重插到子块前面；替换型是原地写的，位置不变，留着不闪。
+    // 露出来的是行内子元素（句子的一部分）：全部撤掉，并成整段重收
+    if (ownDone && el.children.length && usableChildren(el)) {
+      releaseRecords(el, own && flowBreaks(el).length ? isDual : null);
+    }
 
     // 1) 真叶子：直接作为（一个或多个）段落单元
     if (!el.children.length) {
@@ -890,9 +956,15 @@
       return;
     }
 
-    // 2) 子元素全被跳过（已翻译 / 不可见）：父级只翻自己的直接文本
+    // 2) 子元素全被跳过（已翻译 / 不可见）：父级只翻自己的直接文本。
+    //    已翻译的子元素照样交给 walk()：改了字 / 子菜单显示出来时，由它自己重新检查
     if (!usableChildren(el)) {
       if (own) addParagraphs(out, el, ownTokens(el), true);
+      else if (known) releaseRecords(el, isDual); // 自己的字没了（站点删了 / 子元素藏起来了）
+      var done = el.children;
+      for (var d = 0; d < done.length; d += 1) {
+        if (done[d].hasAttribute('data-dt-src')) walk(done[d], out);
+      }
       return;
     }
 
@@ -921,7 +993,9 @@
       return;
     }
 
-    // 4) 容器 → 逐个下钻
+    // 4) 容器 → 逐个下钻。以前整块翻过、现在要拆开的元素（子菜单显示出来了）：
+    //    先撤掉整块的旧译文，否则子元素再各翻一遍就重复了
+    if (known) releaseRecords(el);
     var kids = el.children;
     for (var i = 0; i < kids.length; i += 1) {
       walk(kids[i], out);
