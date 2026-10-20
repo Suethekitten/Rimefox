@@ -26,7 +26,7 @@ Off by default. When enabled in Settings → Privacy, the extension masks sensit
 
 ## Limited Use
 
-Rimefox's use of user data complies with the user data policy of the Microsoft Edge Add-ons website, including the Limited Use requirements. Data is used only to provide the translation features described in this policy and to maintain, secure and measure those features. It is not sold, not used for personalized advertising or creditworthiness decisions, and is not read by humans except as required for security or legal compliance.
+Rimefox's use of user data complies with the user data policy of the Microsoft Edge Add-ons website, including the Limited Use requirements. Data is used only to provide the translation features described in this policy and to maintain, secure and measure those features. It is not sold, not used for personalized advertising or creditworthiness decisions, and is not read by humans except as required for security or legal compliance. The same limited-use commitments apply wherever the extension is distributed.
 
 ## YouTube captions
 
