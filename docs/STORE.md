@@ -1,15 +1,27 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-10-19，对应 `main`（Rimefox 0.8.5）。
+最后更新：2026-10-20，对应 `main`（Rimefox 0.9.8）。
+
+> 本文只写**通用材料 + Chrome**；Edge 的差异与专属填写内容见 [STORE-EDGE.md](STORE-EDGE.md)。
+> 历史审计（0.8.5 的「差哪 5 项」）已归档到 [archive/STORE-READINESS.md](archive/STORE-READINESS.md)，不再是现状。
 
 ## 当前状态
 
-- 仓库已公开：<https://github.com/Suethekitten/Rimefox>
-- 商店包：`dist/Rimefox-v0.8.5-store.zip`（58 个文件，290,557 B），manifest.json 在 ZIP 根目录
-- GitHub Release：`v0.8.5`（整仓发布包，见下），商店包是单独的精简运行时包
-- 本文件只用于准备提交；**没有上传、没有提交审核、没有注册开发者账号、没有付款**
-- GitHub Release 的 zip：0.8.5 及以前是整仓发布包；0.8.6 起与商店包用同一份运行时白名单（`node tools/package-store.mjs --release`），
-  文件相同但多一层 `Rimefox/` 文件夹，manifest.json 不在 ZIP 根目录，所以仍然**不能**当作商店包上传
+| 事项 | 现状 |
+|---|---|
+| 仓库 | 已公开：<https://github.com/Suethekitten/Rimefox>（最新 Release 见 Releases 页） |
+| 商店包 | `node tools/package-store.mjs` 产出 `dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录 |
+| 提交状态 | **没有上传、没有提交审核、没有注册开发者账号、没有付款**（Chrome 与 Edge 都是） |
+
+**提交审核前还差这 5 项**（都不需要改代码，明细见文末「仍需人工完成」）：
+
+1. 确认截图样张（0.9.6 界面，中英两套，见 [screenshots/](screenshots/)）
+2. 开发者账号（Chrome 一次性费用；Edge 免费）
+3. 审核专用、限额、可撤销的 API Key
+4. 控制台 listing、单一用途、权限理由、Privacy practices
+5. 上传商店包并提交
+
+> GitHub Release 的 zip 从 0.8.6 起与商店包用同一份白名单，但多一层 `Rimefox/` 文件夹、manifest.json 不在根目录，**不能**当商店包上传。
 
 ## 商店包
 
@@ -34,7 +46,7 @@ unzip -t dist/Rimefox-v0.8.5-store.zip
 node test/package-store.test.mjs
 ```
 
-2026-10-19 实测：`unzip -t` 无错误；`node test/package-store.test.mjs` PASS；58 个文件、290,557 B；ZIP 根目录直接包含 `manifest.json`，`welcome/index.html` / `welcome.css` / `welcome.js` 与 `lib/welcome.js` 均在包内；19 个 Node 测试文件、离线自检 129 / 129 通过。详见 [STORE-VALIDATION.md](STORE-VALIDATION.md) 与 [../STORE-READINESS.md](../STORE-READINESS.md)。
+最近一次实测记录在 [archive/STORE-VALIDATION.md](archive/STORE-VALIDATION.md)（数字属于当时版本，不再更新）。出包后自己跑上面三条命令，以当前输出为准。
 
 ## 商店 listing 草稿
 
@@ -155,7 +167,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 事项 | 说明 |
 |---|---|
 | 开发者账号 | 注册 Chrome Web Store 开发者并支付一次性费用（以官方结算页为准）；完成身份验证与 2FA |
-| 商店包上传 | 使用 `dist/Rimefox-v0.8.5-store.zip`，不要上传 GitHub Release 的整仓包 |
+| 商店包上传 | 使用 `dist/Rimefox-v<当前版本>-store.zip`，不要上传 GitHub Release 的整仓包 |
 | 截图 / 宣传图 | 5 张 1280×800 截图已生成，需人工确认采用或重拍；按控制台要求补 440×280 |
 | 审核专用 API Key | 在控制台私密审核说明里提供限额、可撤销的 Key；不放入仓库、包或公开 Issue |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |

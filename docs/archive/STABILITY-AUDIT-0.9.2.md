@@ -1,3 +1,6 @@
+> **已归档** —— 这是一次性记录（0.9.2 稳定性 / 性能 / 恶性 Bug 审计），不是「现在怎么做」。
+> 内容反映归档当时的状态，可能已经过期。现状见 [STORE](../STORE.md)、[ROADMAP](../ROADMAP.md)、[HANDOFF](../../HANDOFF.md)。
+
 # Rimefox 0.9.2 稳定性 / 性能 / 恶性 Bug 审计
 
 - 审计基线 commit：`1081411`（0.9.1 已发布，0.9.2 修复分支 `fix/0.9.2-aozora-regression`）

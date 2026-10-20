@@ -1,3 +1,6 @@
+> **已归档** —— 这是一次性记录（OneAIFW 隐私保护能力评估（结论已落进 `lib/privacy.js`）），不是「现在怎么做」。
+> 内容反映归档当时的状态，可能已经过期。现状见 [STORE](../STORE.md)、[ROADMAP](../ROADMAP.md)、[HANDOFF](../../HANDOFF.md)。
+
 # OneAIFW 隐私保护能力评估报告
 
 > 评估对象：[funstory-ai/aifw](https://github.com/funstory-ai/aifw)（OneAIFW）

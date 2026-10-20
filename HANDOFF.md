@@ -61,7 +61,7 @@ edge-bilingual/
 │   ├── parse.js           模型返回值解析（JSON 数组容错）+ 换行规范化 + 写入前校验 + 输出长度护栏
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格 / 结构化对齐共用目标语言约束），纯函数
 │   ├── lang-guard.js      目标语言保守校验：英文等拉丁字母目标却整段回中日韩正文（缓存定向失效用），纯函数
-│   ├── cache.js           三层翻译缓存：内存 + storage.session（8000 条）+ storage.local（短文本，512 KB）
+│   ├── cache.js           三层翻译缓存：内存 + storage.session+ storage.local（短文本，512 KB）
 │   ├── privacy.js         可选的本地脱敏 / 恢复（纯 JS，无依赖）：识别、占位符、fail-closed 恢复
 │   ├── usage.js           仅调试用的用量计数：HTTP、usage token、缓存、重试、拆批、失败、finish_reason
 │   ├── appearance.js      强调色预设、译文排版变量、译文自定义 CSS 清洗（纯函数，后台按网址算 page 对象用）
@@ -90,7 +90,7 @@ edge-bilingual/
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 目标语言校验 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
 ├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs，见 7.1c）
-└── selftest/              离线自检（201 条用例；e2e 脚本会顺带跑一遍，见 7.1c）
+└── selftest/              离线自检（e2e 脚本会顺带跑一遍，见 7.1c）
 ```
 
 **为什么内容脚本是 classic script 而不是 ESM？**
@@ -134,7 +134,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 - 恢复要求「该段出现过的占位符至少出现一次」；缺失、改写后认不出、出现映射表外的占位符，都返回失败，该段结果为 `null`（内容脚本按失败退避重试），不会输出半截译文。
 - 只做固定格式：邮箱 / 电话 / 身份证（校验位）/ 银行卡（Luhn）/ 带标签的银行账号；中文姓名需要显式开启。地址、机构、密码、助记词不处理。
 - 开启时 `lib/prompt.js` 会追加一段「`__PII_<类型>_<数字>__` 是占位符，原样保留」；关闭时提示词与改动前逐字一致。
-- 评估与体积 / 许可证说明见 [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md)、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+- 评估与体积 / 许可证说明见 [docs/archive/AIFW-PRIVACY-EVAL.md](docs/archive/AIFW-PRIVACY-EVAL.md)、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 ### 消息协议（content → background）
 
@@ -464,32 +464,36 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-211 条纯前端用例（需要真实计时器的用例用 `checkAsync` 排在最后逐个跑），覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口（含半隐藏：左右贴边露半球 / 展开收起 / 关闭自动隐藏 / 中间不缩进）、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、断句（缩写 / 首字母 / 脚注号 / 小写续接）、本地句子对齐（一对多 / 多对一 / 数字锚点 / 调换语序整段合并）、悬停句级 / 行级 / 段落级（双语不弹气泡、没有模型对齐也逐句）、代际隔离与段落级 SPA 更新、真实《罗生门》夹具（单 `<br>`+全角缩进 / rb/rp/rt / 图片基字 Ruby / 只有 fixture 时也要跑）、0.9.7 容器保护（直接文本 + 块级 / 控件子元素不整块替换、句子不被拆、嵌套列表 / `<main>`、正文夹标题的注音归属、引用块前后分段、懒翻译第二轮仍收子段落、诊断一致）、已翻译元素重新检查（双语改字重收、只改样式不重翻、子菜单露出补收 / 译文挪到子菜单前、祖先 class 展开、仅译文不闪、整块改下钻不重复、行内子元素并成整段、原文藏起来撤译文）、段落里的保留区（notranslate / translate="no" / 站点规则排除：送翻标记、双语、仅译文原地分段写回、换序 / 漏标记兜底、GitHub 式行内 code、分行段落、0.9.7 局部段落、own 单元和局部段落直接子级的保留元素（隐藏 / 块级的不收、旁边已翻过的子元素不动）、还原逐字一致）、0.9.8 容器形态与保留区边界（flex / grid 块化的链接 / span 仍是一句、子块翻完后仍是局部段落并收敛、形态变化撤旧译文、碎片过滤不变形、局部段落 firstNode、长段落切片不切开标记、`!important` 下兜底藏得住、行内样式逐字还原、带链接 / 图标的保留元素不藏、少回一行时保留行不藏）。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
+纯前端用例覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口（含半隐藏：左右贴边露半球 / 展开收起 / 关闭自动隐藏 / 中间不缩进）、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、断句（缩写 / 首字母 / 脚注号 / 小写续接）、本地句子对齐（一对多 / 多对一 / 数字锚点 / 调换语序整段合并）、悬停句级 / 行级 / 段落级（双语不弹气泡、没有模型对齐也逐句）、代际隔离与段落级 SPA 更新、真实《罗生门》夹具（单 `<br>`+全角缩进 / rb/rp/rt / 图片基字 Ruby / 只有 fixture 时也要跑）、0.9.7 容器保护（直接文本 + 块级 / 控件子元素不整块替换、句子不被拆、嵌套列表 / `<main>`、正文夹标题的注音归属、引用块前后分段、懒翻译第二轮仍收子段落、诊断一致）、已翻译元素重新检查（双语改字重收、只改样式不重翻、子菜单露出补收 / 译文挪到子菜单前、祖先 class 展开、仅译文不闪、整块改下钻不重复、行内子元素并成整段、原文藏起来撤译文）、段落里的保留区（notranslate / translate="no" / 站点规则排除：送翻标记、双语、仅译文原地分段写回、换序 / 漏标记兜底、GitHub 式行内 code、分行段落、0.9.7 局部段落、own 单元和局部段落直接子级的保留元素（隐藏 / 块级的不收、旁边已翻过的子元素不动）、还原逐字一致）、0.9.8 容器形态与保留区边界（flex / grid 块化的链接 / span 仍是一句、子块翻完后仍是局部段落并收敛、形态变化撤旧译文、碎片过滤不变形、局部段落 firstNode、长段落切片不切开标记、`!important` 下兜底藏得住、行内样式逐字还原、带链接 / 图标的保留元素不藏、少回一行时保留行不藏）。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
+
+> 用例条数以自检页输出的 `通过 / 总数` 为准，本文不记数字：上次记数字，三个地方记成了 163 / 201 / 211。
 
 ### 7.1b Node 单测（接口层）
 ```
-node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射 / 模型列表请求（48 条）
-node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（含术语表）/ 删除自定义服务商 / 输入框目标语言（45 条）
-node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数（13 条）
-node test/parse.test.mjs       # 回包解析 parseArray / parseAlignedArray（结构化句子对齐）/ 换行规范化 / 写入前校验 / 思考过程兜底 / 输出长度护栏 / 单条拆句拼回（42 条）
-node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空、分段落盘与旧格式迁移（17 条）
-node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动、glossary:add、命中术语才注入提示词、输入框 noCache、align 对齐 / 旧缓存降级、目标语言（align / 普通 / 坏缓存定向失效 / 不写坏缓存）（28 条）
-node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、align 结构化输出、温度、保留分行规则、简繁转写、两种模式共用的唯一目标语言（23 条）
-node test/lang-guard.test.mjs  # 目标语言保守校验：英文目标回中文 / 正常英文 / 专名清单 / 短文本 / 中文目标不判（9 条）
-node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息、记住服务端不认的思考参数（6 条，假 fetch）
-node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹 / 按命中算的缓存指纹 / 一键收录 upsert（27 条）
-node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖（16 条）
-node test/appearance.test.mjs  # 强调色、译文排版变量、自定义 CSS 清洗（8 条）
-node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间名单、配置导入（8 条）
-node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎页资源、英文覆盖、权限与后台接线（13 条）
-node test/subtitles-session.test.mjs # 字幕运行时 A–Q：语言/视频切换、异步轨道、播放器重建、CC/开关、广告（17 条）
-node test/usage.test.mjs       # 三协议 usage 提取 + 统计聚合（6 条）
-node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆批、部分成功、usage 汇总（8 条）
-node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络请求、并发保存不丢项（7 条）
-node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层页面、配置广播改模式 / 语言时整页重建、保留区送翻、注入被拒不再重发、长段落切片不切开保留区（12 条）
-node test/sentence-align.test.mjs # 悬停对照的断句（缩写 / 脚注号 / 小写续接）与本地句子对齐：38 段人工语料每个句界都对（6 条）
+node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射 / 模型列表请求
+node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（含术语表）/ 删除自定义服务商 / 输入框目标语言
+node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数
+node test/parse.test.mjs       # 回包解析 parseArray / parseAlignedArray（结构化句子对齐）/ 换行规范化 / 写入前校验 / 思考过程兜底 / 输出长度护栏 / 单条拆句拼回
+node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空、分段落盘与旧格式迁移
+node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动、glossary:add、命中术语才注入提示词、输入框 noCache、align 对齐 / 旧缓存降级、目标语言（align / 普通 / 坏缓存定向失效 / 不写坏缓存）
+node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、align 结构化输出、温度、保留分行规则、简繁转写、两种模式共用的唯一目标语言
+node test/lang-guard.test.mjs  # 目标语言保守校验：英文目标回中文 / 正常英文 / 专名清单 / 短文本 / 中文目标不判
+node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息、记住服务端不认的思考参数
+node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹 / 按命中算的缓存指纹 / 一键收录 upsert
+node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖
+node test/appearance.test.mjs  # 强调色、译文排版变量、自定义 CSS 清洗
+node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间名单、配置导入
+node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎页资源、英文覆盖、权限与后台接线
+node test/subtitles-session.test.mjs # 字幕运行时 A–Q：语言/视频切换、异步轨道、播放器重建、CC/开关、广告
+node test/usage.test.mjs       # 三协议 usage 提取 + 统计聚合
+node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆批、部分成功、usage 汇总
+node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络请求、并发保存不丢项
+node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层页面、配置广播改模式 / 语言时整页重建、保留区送翻、注入被拒不再重发、长段落切片不切开保留区
+node test/sentence-align.test.mjs # 悬停对照的断句（缩写 / 脚注号 / 小写续接）与本地句子对齐：38 段人工语料每个句界都对
 ```
-需要 Node 18+。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
+> 每个文件的条数以 `node --test` 的输出为准，本文不维护数字。
+
+需要 Node 18+（`tools/e2e-extension.mjs` 用内置 WebSocket，要 Node 22+）。仓库根的 `package.json` 只为了让 Node 把 `.js` 当 ESM（`type: module`），扩展本身仍然零构建。
 
 ### 7.1c 真实浏览器端到端检查（发版前）
 ```
@@ -518,7 +522,10 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 8. 配置项（`lib/config.js`）
+## 8. 配置项（以 `lib/config.js` 为准）
+
+> 本表是**参考快照**，权威来源永远是 `lib/config.js` 的 `DEFAULTS` 与 `mergeConfig`。
+> 改了配置项就顺手改表；对不上时以代码为准，不要反过来改代码迁就文档。
 
 | 键 | 默认 | 作用 |
 |---|---|---|
@@ -577,7 +584,9 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 9. 已知问题（诚实清单）
+## 9. 已知问题（技术清单）
+
+> 这里只记**技术上的硬限制与坑**。用户能感觉到的「不支持什么」在 [docs/ROADMAP.md](docs/ROADMAP.md) §7 与 README「支持范围」。
 
 1. **仅译文模式下短中文会留下空白** —— 站点给容器写了固定高度，中文比英文短 40%，填不满。无通用解，只能按站点写规则或改用双语。
 2. **行内标签不在译文里保留** —— 段落里的 `<b>` / `<a>` 会被整段重写，译文是纯文本，不带原格式。
@@ -597,20 +606,10 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 10. 下一步路线（按性价比排序）
+## 10. 下一步路线
 
-| 优先级 | 任务 | 预估 | 风险 |
-|---|---|---|---|
-| P0 | **拆 `main.js`**：把纯函数（离屏距离、取批上限、退避时间表）抽到 `core.js`，只动这两个文件 + 自检页；动手前先问协作者有没有并行改动 | 中 | 中 |
-| P0 | **结构保真**：给文本节点打占位记号，要求模型保留 `<b>`/`<a>` 并回填 | 中 | 中（要改注入层） |
-| ~~P1~~ | ~~**输入框翻译**~~（0.9.0 已做：`Alt+I` + 右键菜单，选区 / 整个框、可撤销、不进缓存） | — | — |
-| P1 | **划词快捷键**：监听在 `main.js`，等 P0 拆完再和整页翻译统一成"自适应快捷键" | 小 | 低 |
-| P2 | **站点规则库扩充**：0.7.0 已有规则机制，按真实站点补内置规则（每条都要在保存的真实页面上验证） | 小 | 低 |
-| P2 | **夜间模式改进**：自带深色主题的网站自动跳过反色；CSS 背景图更准确地回正 | 中 | 中 |
-| ~~P2~~ | ~~**按 `<br>` 拆行**~~（0.9.1 已做：连续 `<br>` 拆段 + 段落锚点 + 结构化句子对齐） | — | — |
-| P1 | **对齐实测**：用真实模型统计 `align` 遵守率、悬停命中率、请求 / Token 变化；弱模型降级率 | 中 | 中 |
-| P3 | **OpenAI Responses 协议**（`/v1/responses`）：只有遇到"只开 responses 的第三方接口"时才需要 | 小 | 中（离线无法验证） |
-| P3 | PDF / 其它站点的视频字幕 / 图片 OCR | 大 | 高（单独立项，别混进这个仓库）；YouTube 字幕已做（见 5.4） |
+> **唯一主人在 [docs/ROADMAP.md](docs/ROADMAP.md)** —— 待办、优先级、版本安排、明确不做，全在那里维护。
+> 本文不再重复列表（以前这里有第二份，已经和 ROADMAP 吵过架）。技术债与坑单独记在 §6 和 §9。
 
 ---
 
@@ -618,13 +617,12 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 1. 改 `manifest.json` 的 `version`
 2. 改 `content/core.js` 的 `DT.VERSION`（保持两者一致，不一致时 Actions 会直接报错），`package.json` 的 `version` 也一起改。
-   取号按 [AGENTS.md](AGENTS.md)「版本号规则」：1.0 之前一律 `0.x.y`，`0.9.x` 之后是 `0.10.0`，用户提出才发 `1.0.0`
+   取号规则见 [AGENTS.md](AGENTS.md)「版本号规则」（唯一主人，本文不复述）
 3. 扩展管理页 → 点重新加载 → 刷新页面（`F5` / Mac `⌘R`）
-4. 跑自检页：必须 **201 / 201**
-4b. 跑 Node 单测：`node --test test/*.test.mjs`（24 个文件、按退出码判定，应全部通过；CI 发版前跑同一条命令）
+4. 跑自检页：全部通过（条数以页面输出的 `通过 / 总数` 为准）
+4b. 跑 Node 单测：`node --test test/*.test.mjs`（按退出码判定，应全部通过；CI 发版前跑同一条命令）
 5. 手动过一遍三个站点：普通文章页、纯俄语页、SPA 帖子流
-6. 更新 `CHANGELOG.md`：标题必须是 `## <版本号> — <标题>`，这一节会原样成为 Release 说明。规则见 [AGENTS.md](AGENTS.md)「发版说明」：
-   每版 3–6 条、每条一句话且 ≤ 90 字、不许有子项、只写用户会感觉到什么、只写这一版。
+6. 更新 `CHANGELOG.md`（标题、条数、写法规则见 [AGENTS.md](AGENTS.md)「发版说明」——唯一主人，本文不复述）。
    发版前跑 `python3 tools/check-release-notes.py <版本号>`，CI 也会跑，不合规就不发布
 6b. 实现细节、取舍、内部重构、测试变化写进本文件末尾的「本版技术记录」（整节替换成这一版），以及 commit message
 7. 推送到 `main`：`.github/workflows/release.yml` 依次校验三处版本号、发版说明格式、跑全部 Node 单测（`node --test`）和离线自检，

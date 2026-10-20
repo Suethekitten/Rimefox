@@ -1,8 +1,10 @@
 # 凛狐 Rimefox：Microsoft Edge 加载项商店上架材料
 
-最后更新：2026-10-20，对应 `main`（Rimefox 0.9.6）。
+最后更新：2026-10-20，对应 `main`（Rimefox 0.9.6 复核）。
 
-本文只写 **Edge 与 Chrome 的差异** 和 Edge 专属的填写内容。listing 正文、权限审计、数据类别的大头在 [STORE.md](STORE.md)，那份可以直接复用 80%。
+> **分工**：提交状态、差哪几项、待办清单在 [STORE.md](STORE.md)（唯一主人）。
+> 本文只写 **Edge 与 Chrome 的差异**、Partner Center 的提交流程，以及只给 Edge 控制台用的粘贴文案（≥250 字符描述、search terms、notes for certification）。
+> 两份文档里的「粘贴文案」不是重复知识：它们要分别贴进两个不同商店的表单，谁也不能代替谁。
 
 ## 结论
 
@@ -262,14 +264,14 @@ Notes:
 | 只声明一种语言却宣传中英双语界面（政策 1.7） | 0.9.6 起 `_locales` 带 `zh_CN` + `en`，两种语言各一份 listing，已解决 |
 | 审核环境版本差异 | `documentPictureInPicture` 有特性检测并回退，不阻塞 |
 
-## 七、人工待办
+## 七、人工待办（只列 Edge 专属）
+
+提交状态与通用待办（账号、审核 Key、截图确认）见 [STORE.md](STORE.md)「当前状态」与「仍需人工完成」；Edge 这边只多这几步：
 
 1. 注册 / 验证 Partner Center 账号（免费，Individual 更快）。
-2. 生成限额、可撤销的审核临时 Key，只贴进 Notes for certification。
-3. 确认两套截图可直接用（中文 `store-0*`、英文 `en-0*`，均为 0.9.6 界面）。
-4. 等 0.9.6（带 `_locales`）的包：`node tools/package-store.mjs` 出包后确认 zip 里有 `_locales/`，再用 Packages → Replace 上传。
-5. 两个语言行都填完（中文行填中文描述 + 中文截图），提交 Publish。
-6. 可选：补 440×280 小宣传图、1400×560 大宣传图。
+2. 出包后确认 zip 里有 `_locales/`（0.9.6 起），再用 **Packages → Replace** 上传。
+3. 两个语言行都填完（中文行填中文描述 + 中文截图），提交 Publish。
+4. 可选：补 440×280 小宣传图、1400×560 大宣传图。
 
 ## 八、官方依据（2026-10-20 查询）
 

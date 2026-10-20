@@ -1,3 +1,6 @@
+> **已归档** —— 这是一次性记录（Chrome Web Store 上架审计（0.8.5）），不是「现在怎么做」。
+> 内容反映归档当时的状态，可能已经过期。现状见 [STORE](../STORE.md)、[ROADMAP](../ROADMAP.md)、[HANDOFF](../../HANDOFF.md)。
+
 # Chrome Web Store 上架前审计（Rimefox 0.8.5）
 
 审计日期：2026-10-19
@@ -28,10 +31,10 @@
 | API Key | 仅存 `chrome.storage.local`；`setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'})`；`config:get` 剥离 Key，内容脚本只拿 `hasKey`；诊断信息不含 Key |
 | 数据流 | 待翻文本 / 选中文字 / 弹窗输入 / 字幕 / 提示词 / 命中术语只发往用户配置的接口；作者无服务器、无分析、无遥测、无第三方 SDK。0.8.5 的悬停开关、字幕修复与用量计数没有新增接收方或网络请求 |
 | 缓存 | 会话缓存 `chrome.storage.session`；磁盘缓存仅短文本（≤160 字符，512 KB）并按域名 / 模型隔离；设置页可清空 |
-| 隐私政策 | 已把版本号（0.8.5）、更新日期、接收方、HTTP 明文风险、Limited Use 声明、公开 Issues 联系方式写入 [PRIVACY.md](PRIVACY.md) 与 [docs/privacy.en.md](docs/privacy.en.md) |
-| README | 未改「不含任何第三方产品代码」相关声明；MIT 复用内容见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) |
-| 商店文档 | [docs/STORE.md](docs/STORE.md) 已按 0.8.5 更新：真实链接、listing 文案、隐私问卷建议、权限说明、审核员步骤、素材与人工待办 |
-| 历史记录 | [docs/STORE-VALIDATION.md](docs/STORE-VALIDATION.md) 追加 0.8.5 验证结果，旧记录未改 |
+| 隐私政策 | 已把版本号（0.8.5）、更新日期、接收方、HTTP 明文风险、Limited Use 声明、公开 Issues 联系方式写入 [PRIVACY.md](../../PRIVACY.md) 与 [docs/privacy.en.md](../privacy.en.md) |
+| README | 未改「不含任何第三方产品代码」相关声明；MIT 复用内容见 [THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md) |
+| 商店文档 | [docs/STORE.md](../STORE.md) 已按 0.8.5 更新：真实链接、listing 文案、隐私问卷建议、权限说明、审核员步骤、素材与人工待办 |
+| 历史记录 | [docs/STORE-VALIDATION.md](STORE-VALIDATION.md) 追加 0.8.5 验证结果，旧记录未改 |
 | 商店包 | `dist/Rimefox-v0.8.5-store.zip`，58 个文件，290,557 B；manifest.json 在 ZIP 根目录；含欢迎页、LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt |
 | 欢迎页 | `welcome/index.html` + `welcome.css` + `welcome.js` 与 `lib/welcome.js` 已入包；无远程 JS / CSS / 字体 / 图片，无内联事件，无新增权限；首次安装自动打开，更新 / 重启不打开 |
 | 悬停气泡 | 0.8.5：长段落 / 行级 / 段落级原文气泡有宽度 420px、高度 40vh / 340px 上限；默认 180 字符节选，支持展开 / 收起 / 关闭 / Escape，鼠标可移入滚动；短句仍是轻量提示 |
@@ -68,10 +71,10 @@
 
 这些不是代码缺陷，但不完成就不能提交：
 
-1. **截图确认**：5 张 1280×800 样张仍在 [docs/screenshots/](docs/screenshots/)（真实扩展界面 + 本地测试接口的示例译文，0.8.3 时生成）；需维护者确认采用，或用真实 API Key 按 [说明](docs/screenshots/README.md) 重拍；0.8.5 的悬停气泡未新增截图。
+1. **截图确认**：5 张 1280×800 样张仍在 [docs/screenshots/](../screenshots/)（真实扩展界面 + 本地测试接口的示例译文，0.8.3 时生成）；需维护者确认采用，或用真实 API Key 按 [说明](../screenshots/README.md) 重拍；0.8.5 的悬停气泡未新增截图。
 2. **开发者账号**：注册 Chrome Web Store 开发者、完成身份验证与 2FA、支付一次性费用；没有账号无法上传。
 3. **审核专用 API Key**：扩展是 BYOK，没有 Key 审核员无法验证真实翻译。需准备限额、可撤销的测试 Key，只通过控制台私密审核说明提供，不能写进仓库、包或公开 Issue。
-4. **控制台字段**：单一用途、权限理由、listing 文案、Privacy practices 数据类别与认证、隐私政策 URL、支持 URL 必须按 [docs/STORE.md](docs/STORE.md) 的建议填写。
+4. **控制台字段**：单一用途、权限理由、listing 文案、Privacy practices 数据类别与认证、隐私政策 URL、支持 URL 必须按 [docs/STORE.md](../STORE.md) 的建议填写。
 5. **上传商店包**：使用 `dist/Rimefox-v0.8.5-store.zip`，不要上传 GitHub Release 的 `Rimefox-v0.8.5.zip`。
 
 ---

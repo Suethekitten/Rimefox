@@ -60,14 +60,14 @@
 | 文档 | 内容 |
 |---|---|
 | [HANDOFF.md](HANDOFF.md) | 开发交接：架构、消息协议、踩坑清单、调试与发版流程 |
-| [docs/DESIGN.md](docs/DESIGN.md) | 切分模型、注入策略、生命周期、已知取舍 |
+| [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md) | 翻译引擎：单元模型、渲染事务、句子对齐、接手指南 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 优先级、已完成 / 待办、明确不做的清单 |
 | [docs/UPGRADING.md](docs/UPGRADING.md) | 从旧版 DualTrans 升级与配置迁移 |
 | [docs/YOUTUBE.md](docs/YOUTUBE.md) | YouTube 字幕双语的限制、风险与隐私说明 |
-| [docs/AIFW-PRIVACY-EVAL.md](docs/AIFW-PRIVACY-EVAL.md) | 隐私保护的来源、取舍、体积与性能评估 |
+| [docs/archive/](docs/archive/README.md) | 归档：审计报告、评估、历史验证记录（不是现状） |
 | [PRIVACY.md](PRIVACY.md) · [English](docs/privacy.en.md) | 隐私说明：会发送什么、保存在哪里 |
 | [SECURITY.md](SECURITY.md) | 安全问题如何私下报告 |
-| [docs/STORE.md](docs/STORE.md) | Chrome Web Store 上架材料与权限审计草稿 |
+| [docs/STORE.md](docs/STORE.md) · [STORE-EDGE.md](docs/STORE-EDGE.md) | 上架材料：Chrome 与 Edge |
 | [CHANGELOG.md](CHANGELOG.md) | 每个版本的变更 |
 
 ## 支持范围
@@ -76,7 +76,7 @@
 - 视频字幕只支持 YouTube 的 CC 字幕轨道；画面硬字幕、PDF / EPUB、图片 OCR 不做
 - 行内标签（`<b>`、`<a>`）不保证保留；个别重前端站点需要在设置页写站点规则
 
-完整清单见 [docs/DESIGN.md 的「已知取舍」](docs/DESIGN.md#7-已知取舍) 与 [docs/ROADMAP.md](docs/ROADMAP.md)。
+完整清单见 [ROADMAP.md 的「已知限制」](docs/ROADMAP.md) 与 [HANDOFF.md 的「已知问题」](HANDOFF.md)。
 
 ## 声明
 

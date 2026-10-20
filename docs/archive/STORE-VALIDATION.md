@@ -1,3 +1,6 @@
+> **已归档** —— 这是一次性记录（上架材料验证流水（0.7.1–0.8.5）），不是「现在怎么做」。
+> 内容反映归档当时的状态，可能已经过期。现状见 [STORE](../STORE.md)、[ROADMAP](../ROADMAP.md)、[HANDOFF](../../HANDOFF.md)。
+
 # 上架材料验证记录
 
 日期：2026-10-18。输入为用户提供的 Rimefox-v0.6.2.zip。
@@ -34,7 +37,7 @@
 - 构建命令：`node tools/package-store.mjs`
 - 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
 - 结果：`dist/Rimefox-v0.7.2-store.zip` 53 个文件、248,692 B；manifest.json 在根目录；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；14 个 Node 测试文件全部通过；自检 98 / 98；Chrome 打包校验成功（CRX3）
-- 未上传、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+- 未上传、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](STORE-READINESS.md)
 
 ## 0.8.0 首次安装欢迎页验证
 
@@ -44,7 +47,7 @@
 - 结果：`dist/Rimefox-v0.8.0-store.zip` 57 个文件、270,824 B；manifest.json 在根目录；`welcome/index.html`、`welcome/welcome.css`、`welcome/welcome.js`、`lib/welcome.js` 均在包内；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 98 / 98（本次实际运行；未改内容脚本）；Chrome 打包校验成功（CRX3）
 - 欢迎页检查：无头 Chrome 在 1440px 桌面与 390px 窄屏、中文 / English、浅色 / 深色下截图检查；CDP 注入 chrome API 模拟验证语言 / 主题持久化、设置按钮和版本号显示；页面无远程 JS/CSS/字体，无内联事件，未新增权限
 - 未实机验证：本机 Chrome 155 headless 不加载 `--load-extension`（最小扩展同样不加载），因此 Chrome / Edge 首次安装自动打开、更新 / 重启不打开、商店包安装后的真实扩展进程未实机验证；安装判定由 `test/welcome.test.mjs` 的纯函数测试覆盖
-- 未上传、未提交审核、未注册账号、未付款、未推送；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+- 未上传、未提交审核、未注册账号、未付款、未推送；详见 [../STORE-READINESS.md](STORE-READINESS.md)
 
 ## 0.8.1 Aeon 中文排版修复验证
 
@@ -54,7 +57,7 @@
 - 结果：`dist/Rimefox-v0.8.1-store.zip` 57 个文件、272,900 B；manifest.json 在根目录；`welcome/`、`lib/welcome.js`、`content/core.js`、`content/dom.js`、`content/main.js`、`content/styles/inject.css` 均在包内；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 104 / 104（新增 Aeon 大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 6 条）；Chrome 打包校验成功（CRX3）
 - 真实浏览器检查：本机 Chrome 通过 CDP `Extensions.loadUnpacked` 加载当前仓库，配合本地 OpenAI 兼容假接口打开 Aeon 文章。修复前 `data-dt=null`、H1 `72/72`；修复后 `data-dt=on`、H1 `57.6/72`、正文 `22/30.8`，不刷新缩到 390px 时 H1 `33.6/42`、正文 `18/25.2`，回到 1440px 恢复；原站 dropcap 71.5px 保留，译文首字 22px。普通文章 1440/390 回归无重叠。
 - 未验证 / 限制：翻译内容来自本地假接口，不是真实服务商；未验证 Edge 和真实 API Key；行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制）；仅译文模式的大标题仍沿用站点字号。极长标题翻译仍可能撑高 Aeon 英雄区。
-- 0.8.1 已推送并发布为 GitHub Release `v0.8.1`；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+- 0.8.1 已推送并发布为 GitHub Release `v0.8.1`；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](STORE-READINESS.md)
 
 ## 0.8.2 仅译文首字下沉修复验证
 
@@ -64,7 +67,7 @@
 - 结果：`dist/Rimefox-v0.8.2-store.zip` 57 个文件、273,626 B；manifest.json 在根目录；`welcome/`、`lib/welcome.js`、`content/core.js`、`content/dom.js`、`content/main.js`、`content/styles/inject.css` 均在包内；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 105 / 105（新增“仅译文 + 首字下沉”回归）；Chrome 打包校验成功（CRX3）
 - 仅译文模式真实浏览器检查：Aeon 的 `.ld-dropcap` 段落修复前整个段落译文（385 字）被写进下沉字母 `<span>`；修复后下沉节点只保留译文首字（1 字），其余进入正文文本节点，正文恢复正常段落。0.8.1 的大标题缩放、`data-dt` hydration 补回、首字下沉归一化均保持。
 - 未验证 / 限制：翻译内容来自本地假接口，不是真实服务商；未验证 Edge 和真实 API Key；行内链接 / 粗体 / 斜体的译文仍是纯文本（原有已知限制）；仅译文模式的大标题仍沿用站点字号。
-- 本验证在推送前完成；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+- 本验证在推送前完成；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](STORE-READINESS.md)
 
 ## 0.8.3 悬浮入口切换服务商验证
 
@@ -72,8 +75,8 @@
 - 构建命令：`node tools/package-store.mjs`
 - 验证命令：`unzip -l`、`unzip -t`、`node test/package-store.test.mjs`、Chrome `--pack-extension`
 - 结果：`dist/Rimefox-v0.8.3-store.zip` 57 个文件、275,405 B；manifest.json 在根目录；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；15 个 Node 测试文件全部通过；自检 106 / 106；Chrome 打包校验成功（CRX3）
-- 商店截图：新增 5 张 1280×800（整页双语浅/深、划词、隐私设置、术语表），见 [screenshots/](screenshots/)；使用真实扩展界面 + 本地演示页与本地测试接口的示例译文，未使用真实 API Key
-- 未验证 / 限制：没有用真实 API Key 跑端到端；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+- 商店截图：新增 5 张 1280×800（整页双语浅/深、划词、隐私设置、术语表），见 [screenshots/](../screenshots/)；使用真实扩展界面 + 本地演示页与本地测试接口的示例译文，未使用真实 API Key
+- 未验证 / 限制：没有用真实 API Key 跑端到端；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](STORE-READINESS.md)
 
 ## 0.8.5 悬停对照与字幕稳定性验证
 
@@ -83,4 +86,4 @@
 - 结果：`dist/Rimefox-v0.8.5-store.zip` 58 个文件、290,557 B；manifest.json 在根目录；LICENSE、THIRD-PARTY-NOTICES.md、licenses/oneaifw-MIT.txt 齐全；`unzip -t` 无错误；打包测试 PASS；19 个 Node 测试文件全部通过；自检 129 / 129；Chrome 打包校验成功（CRX3）；相对链接 56 个、0 失效；商店包密钥扫描未发现明显密钥
 - 0.8.5 变更检查：长段落悬停气泡改为 420px / 40vh 上限、180 字符节选、展开 / 收起 / 关闭 / Escape，段落级与行级有明确标签；Dock / Popup / Options 复用 `hoverCompare` 双向同步；内容脚本只能通过 `hover:set` 修改严格布尔值；关闭不删除译文、不清缓存、不触发 API
 - 真实浏览器检查：Chrome for Testing 155 + 本地页面驱动 Dock → Popup → Options 双向切换，`aria-pressed`、switch 与 storage 一致，页面未发起翻译请求；悬停气泡的尺寸、层级、展开 / 关闭由 `selftest` 在无头 Chrome 中覆盖
-- 未验证 / 限制：没有用真实 API Key 跑端到端；没有在真实 GitHub / Pixiv / Aeon / OWID 重跑悬停回归；未测试 Edge；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](../STORE-READINESS.md)
+- 未验证 / 限制：没有用真实 API Key 跑端到端；没有在真实 GitHub / Pixiv / Aeon / OWID 重跑悬停回归；未测试 Edge；未上传商店、未提交审核、未注册账号、未付款；详见 [../STORE-READINESS.md](STORE-READINESS.md)

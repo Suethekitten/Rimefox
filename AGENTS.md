@@ -7,6 +7,7 @@
 - 改 `content/dom.js` 前后都要跑离线自检 `selftest/index.html`（必须全部通过）；改 `lib/` 跑 `test/*.test.mjs`
 - 版本号三处同步：`manifest.json` 的 `version`、`content/core.js` 的 `DT.VERSION`（这两处 CI 会校验）、`package.json` 的 `version`；怎么取号见下面「版本号规则」
 - 内容脚本用 ES5 风格；译文只用 `textContent` 写入，不用 `innerHTML`；其余约定见 HANDOFF「代码约定」
+- 跨 `content/`（ES5 全局脚本）和 `lib/`（ESM）都要用的纯函数**允许存在两份**，但必须在 `test/` 里加一条**差分测试**（同一组输入喂两个实现、断言输出一致）；没有差分测试就不许新增第二份
 - 提交用 GitHub 的 noreply 邮箱（`<ID>+<用户名>@users.noreply.github.com`），不要把个人邮箱写进提交记录
 
 ## 提交与推送
@@ -32,6 +33,25 @@
 推 main 且改了 `manifest.json` 会触发 Release，推送前确认版本号和 CHANGELOG 是最终版。
 不要用 `git push --mirror`（本地有 `refs/stash`），也不要在没有明确要求时 force push。
 
+## 文档
+
+一个事实只写一遍，其它地方只放链接。改文档前先看这张表：
+
+| 事实 | 唯一主人 |
+|---|---|
+| 版本号规则、发版说明、提交与推送 | 本文件 |
+| 接下来做什么、优先级、版本安排、用户向已有限制 | [docs/ROADMAP.md](docs/ROADMAP.md) |
+| 架构、消息协议、踩坑、调试、配置项、技术向已知问题、发版技术命令 | [HANDOFF.md](HANDOFF.md) |
+| 翻译引擎实现（单元模型 / 渲染 / 句子对齐） | [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md) |
+| 上架材料 | [docs/STORE.md](docs/STORE.md)（通用 + Chrome）、[docs/STORE-EDGE.md](docs/STORE-EDGE.md)（Edge 差异） |
+| 隐私 | [PRIVACY.md](PRIVACY.md)、[docs/privacy.en.md](docs/privacy.en.md) |
+| 每个版本的用户可见变更 | [CHANGELOG.md](CHANGELOG.md) |
+
+- **不要在文档里写会过期的数字**（用例条数、文件个数、行数）：写命令，让读者看输出
+- 一次性记录（审计、评估、验证流水、已完成的实施计划）放 [docs/archive/](docs/archive/README.md)，并在该目录 README 登记一行；仓库其余文档只写现状
+- 合并完就删掉第二份，不要留「以防万一」的副本：历史在 git 里
+
+---
 ## 版本号规则
 
 在用户明确提出发布 **1.0 正式版**之前，一律用 `0.x.y`，不要自己升到 `1.0.0`。
