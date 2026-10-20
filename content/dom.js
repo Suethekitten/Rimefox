@@ -287,8 +287,9 @@
   };
 
   // own 单元（子元素都已翻过 / 被跳过，只翻自己的直接文本）在页面上对应的文字：
-  // 只取 ownText 读过的那些 —— 直接文本、<br>、行内代码。
-  // notranslate / translate="no" / 站点规则排除的子元素、已经翻过的子元素都没送去翻译，原地替换时也不能动它们
+  // 只取 ownText 读过的那些 —— 直接文本、<br>、行内代码、看得见的行内保留子元素（keptChild）。
+  // 保留子元素的文字拼进句子当上下文，由 attachKeep 认成保留区，原地替换时不动它；
+  // 已经翻过的子元素没送去翻译，原地替换时也不能动它们
   function ownTokens(el) {
     var out = [];
     var keep = keepsBreaks(styleOf(el));
@@ -300,7 +301,7 @@
       } else if (kid.nodeType === 1) {
         if (tagOf(kid) === 'BR') {
           if (!kid.hasAttribute('data-dt-collapsed')) out.push({ br: kid });
-        } else if (INLINE_CODE_TAGS[tagOf(kid)]) {
+        } else if (INLINE_CODE_TAGS[tagOf(kid)] || keptChild(el, kid)) {
           out = out.concat(tokensOf(kid));
         }
       }
@@ -333,6 +334,21 @@
 
   function hasKeepInside(el) {
     return !!(el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR));
+  }
+
+  // own 单元 / 局部段落（ownTokens / flowTokens）里，只因「保留」才被 isSkipped 跳过的直接子元素：
+  // 「Install <span class="notranslate">Rimefox</span> today.」以前只送「Install today.」，仅译文时整句写在 span 前面。
+  // 看得见的行内保留元素照样拼进句子（attachKeep 把它认成保留区）；因为别的原因跳过的不算 ——
+  // 已翻过、译文 / 界面节点、跳过类标签（PRE / IMG…）、可编辑、隐藏、块级或打断文字流的
+  function keptChild(parent, kid) {
+    if (!isProtectedEl(kid)) return false;
+    if (SKIP_TAGS[tagOf(kid)]) return false;
+    if (kid.hasAttribute('data-dt-src') || kid.hasAttribute('data-dt-target') || kid.hasAttribute('data-dt-ui')) return false;
+    if (kid.getAttribute('contenteditable') === '' || kid.getAttribute('contenteditable') === 'true') return false;
+    if (kid.isContentEditable || kid.hidden) return false;
+    var cs = styleOf(kid);
+    if (cs && cs.display === 'none') return false;
+    return !breaksFlow(parent, kid);
   }
 
   // 段落文本里属于保留元素的字符范围：[{ start, end, text, el }]，按出现顺序；换行处断开
@@ -457,7 +473,8 @@
   // 子元素全被跳过时，父级要翻的文本。不能只拼直接文本节点：
   // "First<br>Second" 会粘成 "FirstSecond"，"Run <code>npm i</code> first" 会变成 "Run first"。
   // <br> 记成换行（和 DT.unitText 一样；「第一段<br><br>第二段」这种只有 <br> 子元素的段落就走这里），
-  // 行内代码照样拼进句子；已翻译 / 隐藏 / 非正文的子元素只留一个分隔空格，免得把子级已翻过的内容再翻一遍。
+  // 行内代码、看得见的行内保留子元素照样拼进句子（与 ownTokens 一致）；
+  // 已翻译 / 隐藏 / 非正文的子元素只留一个分隔空格，免得把子级已翻过的内容再翻一遍。
   function ownText(el) {
     var parts = [];
     var keep = keepsBreaks(styleOf(el));
@@ -468,7 +485,7 @@
         parts.push(keep ? kid.nodeValue : kid.nodeValue.replace(/[\r\n]/g, ' '));
       } else if (kid.nodeType === 1) {
         if (tagOf(kid) === 'BR') parts.push(kid.hasAttribute('data-dt-collapsed') ? '' : '\n');
-        else parts.push(INLINE_CODE_TAGS[tagOf(kid)] ? textOf(kid) : ' ');
+        else parts.push(INLINE_CODE_TAGS[tagOf(kid)] || keptChild(el, kid) ? textOf(kid) : ' ');
       }
     }
     return DT.normalizeLines(parts.join(''));
@@ -533,7 +550,8 @@
     return out;
   }
 
-  // 夹着块级子元素的容器自己那段文字：直接文本、<br>、行内代码、没被跳过的行内子元素（链接 / 强调 / ruby）。
+  // 夹着块级子元素的容器自己那段文字：直接文本、<br>、行内代码、没被跳过的行内子元素（链接 / 强调 / ruby），
+  // 以及看得见的行内保留子元素（keptChild，当保留区送翻、原地不动）。
   // 块级子元素记成一个空行（段落边界），块前块后各成一段；锚点就是这个子元素，双语译文插在它前面。
   // 0.9.6 实例：Partner Center 的 .container 只有一点直接文本，整个 Dashboard 被当成一段压平，页面白屏
   function flowTokens(el, breaks) {
@@ -555,7 +573,7 @@
         if (!kid.hasAttribute('data-dt-collapsed')) out.push({ br: kid });
       } else if (INLINE_CODE_TAGS[tag]) {
         out = out.concat(tokensOf(kid));
-      } else if (!isSkipped(kid)) {
+      } else if (!isSkipped(kid) || keptChild(el, kid)) {
         out = out.concat(tokensOf(kid));
       }
     }
@@ -1050,7 +1068,8 @@
       return;
     }
 
-    // 2) 子元素全被跳过（已翻译 / 不可见）：父级只翻自己的直接文本。
+    // 2) 子元素全被跳过（已翻译 / 不可见 / notranslate）：父级只翻自己的直接文本，
+    //    看得见的行内保留子元素当保留区拼进句子（ownTokens）。
     //    已翻译的子元素照样交给 walk()：改了字 / 子菜单显示出来时，由它自己重新检查
     if (!usableChildren(el)) {
       if (own) addParagraphs(out, el, ownTokens(el), true);

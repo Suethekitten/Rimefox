@@ -2943,7 +2943,8 @@
   });
 
 
-  // own 单元（子元素被跳过 / 已翻过，只翻直接文本）原地替换时，只改送去翻译的那些文本节点
+  // own 单元（子元素被跳过 / 已翻过，只翻直接文本）原地替换时，只改送去翻译的那些文本节点。
+  // 看得见的行内 notranslate 子元素拼进句子当保留区（<k1> 标记），原地不动
   check('仅译文：own 单元不清空 notranslate / translate="no" / 已翻过的子元素', function () {
     var box = document.createElement('div');
     box.innerHTML =
@@ -2955,14 +2956,17 @@
     DT.state.mode = 'translation';
     try {
       var nt = DT.collect(box.querySelector('#own-nt'));
-      if (nt.length !== 1 || !nt[0].own || nt[0].text !== 'Hello world') return 'own 单元收集不对：' + JSON.stringify(nt.map(function (u) { return [u.text, !!u.own]; }));
-      if (!DT.inject(nt[0].el, '你好 世界', 'zh-CN', true)) return 'inject 返回 false';
+      if (nt.length !== 1 || !nt[0].own || nt[0].text !== 'Hello Rimefox world') return 'own 单元收集不对：' + JSON.stringify(nt.map(function (u) { return [u.text, !!u.own]; }));
+      if (DT.wireText(nt[0]) !== 'Hello <k1>Rimefox</k1> world') return '送翻文本：' + DT.wireText(nt[0]);
+      if (!DT.inject(nt[0], '你好 <k1>Rimefox</k1> 世界', 'zh-CN')) return 'inject 返回 false';
       var p1 = box.querySelector('#own-nt');
-      if (p1.querySelector('.notranslate').textContent !== 'Rimefox') return 'notranslate 被清空：' + p1.textContent;
+      var span1 = p1.querySelector('.notranslate');
+      if (span1.textContent !== 'Rimefox' || span1.style.display === 'none') return 'notranslate 被清空或隐藏：' + p1.innerHTML;
+      if (p1.textContent !== '你好 Rimefox 世界') return '页面文字：' + p1.textContent;
 
       var lines = DT.collect(box.querySelector('#own-lines'));
-      if (lines.length !== 1 || lines[0].text !== 'Line one\nLine two') return '分行 own 单元收集不对：' + JSON.stringify(lines.map(function (u) { return u.text; }));
-      if (!DT.inject(lines[0].el, '第一行\n第二行', 'zh-CN', true)) return '分行 inject 返回 false';
+      if (lines.length !== 1 || lines[0].text !== 'Line one Brand\nLine two') return '分行 own 单元收集不对：' + JSON.stringify(lines.map(function (u) { return u.text; }));
+      if (!DT.inject(lines[0].el, '第一行 <k1>Brand</k1>\n第二行', 'zh-CN', true)) return '分行 inject 返回 false';
       var p2 = box.querySelector('#own-lines');
       if (p2.querySelector('[translate="no"]').textContent !== 'Brand') return 'translate="no" 被清空：' + p2.textContent;
       if (p2.textContent.indexOf('第一行') < 0 || p2.textContent.indexOf('第二行') < 0) return '分行译文没写进去：' + p2.textContent;
@@ -3265,6 +3269,152 @@
       }
     }
     return true;
+  });
+
+  // own 单元（子元素全被跳过）以前只收直接文本：模型只看到「Install today.」，仅译文时整句译文写在 span 前面
+  check('保留区·own 单元：直接子级的 notranslate 随句送翻，双语 / 仅译文都原地不动，还原逐字一致', function () {
+    var html = '<p id="n7-p">Install <span class="notranslate">Rimefox</span> today.</p>';
+    var reply = '今天就安装 <k1>Rimefox</k1>。';
+    var modes = ['dual', 'translation'];
+    for (var i = 0; i < modes.length; i += 1) {
+      var box = keepFixture(html);
+      var p = box.querySelector('#n7-p');
+      var before = p.innerHTML;
+      try {
+        var out = withMode(modes[i], function () {
+          var units = DT.collect(box);
+          if (units.length !== 1 || !units[0].own) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, !!u.own]; }));
+          var u = units[0];
+          if (u.text !== 'Install Rimefox today.') return '单元文本：' + u.text;
+          if (DT.wireText(u) !== 'Install <k1>Rimefox</k1> today.') return '送翻文本：' + DT.wireText(u);
+          if (!DT.inject(u, reply, 'zh-CN')) return 'inject 返回 false';
+          var span = p.querySelector('.notranslate');
+          if (span.textContent !== 'Rimefox' || span.style.display === 'none' || span.hasAttribute('data-dt-keep-hidden')) return 'notranslate 被改或隐藏：' + p.innerHTML;
+          if (modes[i] === 'translation') {
+            if (p.textContent !== '今天就安装 Rimefox。') return '页面文字：' + p.textContent;
+            if (p.firstChild.nodeValue !== '今天就安装 ' || p.firstChild.nextSibling !== span) return '前半句没写在 notranslate 之前：' + p.innerHTML;
+          } else {
+            var target = p.querySelector('[data-dt-target]');
+            if (!target || target.textContent !== '今天就安装 Rimefox。') return '译文节点：' + (target && target.textContent);
+            if (p.firstChild.nodeValue !== 'Install ' || span.nextSibling.nodeValue !== ' today.') return '原文被改：' + p.innerHTML;
+          }
+          if (DT.collect(box).length) return '注入后重扫又收到了单元';
+          DT.restore();
+          return p.innerHTML === before ? true : '还原不一致：' + p.innerHTML;
+        });
+        if (out !== true) return modes[i] + '：' + out;
+      } finally {
+        DT.restore();
+        box.remove();
+      }
+    }
+    return true;
+  });
+
+  check('保留区·局部段落（flowTokens）：容器直接子级的 notranslate 拼进文字流，原地不动，还原逐字一致', function () {
+    var html = '<div id="n8-box">Install <span class="notranslate">Rimefox</span> today.<div>Block child text here.</div></div>';
+    var reply = '今天就安装 <k1>Rimefox</k1>。';
+    var modes = ['translation', 'dual'];
+    for (var i = 0; i < modes.length; i += 1) {
+      var box = keepFixture(html);
+      var outer = box.querySelector('#n8-box');
+      var block = outer.querySelector('div');
+      var before = outer.innerHTML;
+      try {
+        var out = withMode(modes[i], function () {
+          var units = DT.collect(box);
+          var flow = units[0];
+          if (units.length !== 2 || !flow || flow.whole || flow.own) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, u.whole, !!u.own]; }));
+          if (flow.text !== 'Install Rimefox today.' || units[1].text !== 'Block child text here.') return '单元文本：' + JSON.stringify([flow.text, units[1].text]);
+          if (DT.wireText(flow) !== 'Install <k1>Rimefox</k1> today.') return '送翻文本：' + DT.wireText(flow);
+          if (!DT.inject(flow, reply, 'zh-CN')) return 'inject 返回 false';
+          var span = outer.querySelector('.notranslate');
+          if (span.textContent !== 'Rimefox' || span.style.display === 'none') return 'notranslate 被改或隐藏：' + outer.innerHTML;
+          if (modes[i] === 'translation') {
+            if (outer.textContent !== '今天就安装 Rimefox。Block child text here.') return '页面文字：' + outer.textContent;
+            if (span.previousSibling.nodeValue !== '今天就安装 ') return '前半句没写在 notranslate 之前：' + outer.innerHTML;
+          } else {
+            var target = outer.querySelector('[data-dt-target]');
+            if (!target || target.textContent !== '今天就安装 Rimefox。') return '译文节点：' + (target && target.textContent);
+            if (target.nextSibling !== block) return '双语译文没插在块级子元素前';
+          }
+          DT.restore();
+          return outer.innerHTML === before ? true : '还原不一致：' + outer.innerHTML;
+        });
+        if (out !== true) return modes[i] + '：' + out;
+      } finally {
+        DT.restore();
+        box.remove();
+      }
+    }
+    return true;
+  });
+
+  // 看不见的保留元素不是这句话的一部分：照旧不拼进句子，也不被写、不被显示出来
+  check('保留区：隐藏 / 块级的 notranslate 子元素仍不拼进 own 单元和局部段落', function () {
+    var box = keepFixture(
+      '<p id="n9-a">Install <span class="notranslate" style="display:none">Rimefox</span> today.</p>' +
+        '<p id="n9-b">Install <span class="notranslate" hidden>Rimefox</span> today.</p>' +
+        '<p id="n9-c">Install <span class="notranslate" style="display:block">Rimefox</span> today.</p>' +
+        '<div id="n9-box">Install <span translate="no" style="display:none">Rimefox</span> today.<div>Block child text here.</div></div>'
+    );
+    var before = box.innerHTML;
+    try {
+      return withMode('translation', function () {
+        var units = DT.collect(box);
+        var got = units.map(function (u) { return [u.text, DT.wireText(u), u.keep.length]; });
+        var want = [
+          ['Install today.', 'Install today.', 0],
+          ['Install today.', 'Install today.', 0],
+          ['Install today.', 'Install today.', 0],
+          ['Install today.', 'Install today.', 0],
+          ['Block child text here.', 'Block child text here.', 0]
+        ];
+        if (JSON.stringify(got) !== JSON.stringify(want)) return '收集：' + JSON.stringify(got);
+        for (var i = 0; i < 4; i += 1) {
+          if (!DT.inject(units[i], '今天就安装。', 'zh-CN')) return '第 ' + (i + 1) + ' 段 inject 返回 false';
+        }
+        var spans = box.querySelectorAll('.notranslate, [translate="no"]');
+        for (var k = 0; k < spans.length; k += 1) {
+          if (spans[k].textContent !== 'Rimefox' || spans[k].hasAttribute('data-dt-keep-hidden')) return '保留元素被改：' + spans[k].outerHTML;
+        }
+        if (visibleText(box.querySelector('#n9-a')) !== '今天就安装。') return '看得见的字：' + visibleText(box.querySelector('#n9-a'));
+        if (box.querySelector('#n9-b span').style.display !== '' || box.querySelector('#n9-c span').style.display !== 'block') return '保留元素的显隐被改';
+        DT.restore();
+        return box.innerHTML === before ? true : '还原不一致：' + box.innerHTML;
+      });
+    } finally {
+      DT.restore();
+      box.remove();
+    }
+  });
+
+  check('保留区·own 单元：已翻过的子元素不再送翻，旁边的 notranslate 照样当保留区', function () {
+    var box = keepFixture('<p id="n10-p">Read <a href="#g">the guide</a> before installing <span class="notranslate">Rimefox</span> today.</p>');
+    var p = box.querySelector('#n10-p');
+    var before = p.innerHTML;
+    try {
+      return withMode('translation', function () {
+        var link = p.querySelector('a');
+        if (!DT.inject(link, '指南', 'zh-CN')) return '链接 inject 返回 false';
+        var units = DT.collect(box);
+        if (units.length !== 1 || !units[0].own) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, !!u.own]; }));
+        var u = units[0];
+        if (u.text !== 'Read before installing Rimefox today.') return '单元文本：' + u.text;
+        if (DT.wireText(u) !== 'Read before installing <k1>Rimefox</k1> today.') return '送翻文本：' + DT.wireText(u);
+        if (!DT.inject(u, '先读完再安装 <k1>Rimefox</k1>。', 'zh-CN')) return 'inject 返回 false';
+        var span = p.querySelector('.notranslate');
+        if (link.textContent !== '指南') return '已翻过的链接被覆盖：' + p.innerHTML;
+        if (span.textContent !== 'Rimefox' || span.style.display === 'none') return 'notranslate 被改或隐藏：' + p.innerHTML;
+        if (p.firstChild.nodeValue !== '先读完再安装 ' || span.nextSibling.nodeValue !== '。') return '没按保留区原地分段写回：' + p.innerHTML;
+        if (DT.collect(box).length) return '注入后重扫又收到了单元';
+        DT.restore();
+        return p.innerHTML === before ? true : '还原不一致：' + p.innerHTML;
+      });
+    } finally {
+      DT.restore();
+      box.remove();
+    }
   });
 
   // 后台补注入（ensureInjected）和 manifest 声明的脚本可能在同一页各跑一次：
