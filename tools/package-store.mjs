@@ -36,6 +36,37 @@ for (const name of [
   'manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'welcome', 'icons',
   'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses'
 ]) await collect(name);
+// _locales 是按浏览器界面语言分开的 manifest 文案；没有就不收（0.9.5 及以前没有）。
+if (await lstat(resolve(root, '_locales')).then(() => true, () => false)) await collect('_locales');
+// 商店按 _locales/*/messages.json 识别“包支持哪些语言”；漏收这个目录，Edge 就只会看到一种语言。
+// manifest 用 __MSG_xxx__ 引用的文案必须在每种语言的 messages.json 里都有（缺 key 时浏览器会把
+// 占位符原样显示出来），默认语言的 messages.json 也必须在包里。
+const localeMessages = entries.filter((e) => /^_locales\/[^/]+\/messages\.json$/.test(e.name));
+const messageKeys = [manifest.name, manifest.short_name, manifest.description]
+  .map((value) => {
+    const hit = /^__MSG_(.+)__$/.exec(String(value == null ? '' : value));
+    return hit ? hit[1] : null;
+  })
+  .filter(Boolean);
+if (localeMessages.length && !manifest.default_locale) throw Error('_locales exists but manifest.default_locale is missing');
+if (messageKeys.length && !manifest.default_locale) throw Error('manifest uses __MSG_*__ but default_locale is missing');
+if (manifest.default_locale) {
+  const defaultMessages = `_locales/${manifest.default_locale}/messages.json`;
+  if (!entries.some((e) => e.name === defaultMessages)) throw Error(`Missing default locale messages: ${defaultMessages}`);
+}
+for (const e of localeMessages) {
+  let messages;
+  try {
+    messages = JSON.parse(e.data.toString('utf8'));
+  } catch (err) {
+    throw Error(`Invalid locale messages JSON: ${e.name}`);
+  }
+  for (const key of messageKeys) {
+    if (!messages[key] || typeof messages[key].message !== 'string' || !messages[key].message.trim()) {
+      throw Error(`Missing "${key}" message: ${e.name}`);
+    }
+  }
+}
 for (const size of [16, 32, 48, 128]) {
   const icon = entries.find(e => e.name === manifest.icons?.[size]);
   if (!icon || icon.data.length < 24 || icon.data.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || icon.data.readUInt32BE(16) !== size || icon.data.readUInt32BE(20) !== size) throw Error(`Missing or invalid ${size}px PNG icon`);

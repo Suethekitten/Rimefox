@@ -50,7 +50,8 @@ chrome-extension://<扩展ID>/selftest/index.html
 
 ```
 edge-bilingual/
-├── manifest.json          MV3 清单（权限、注入点、快捷键、入口页）
+├── manifest.json          MV3 清单（权限、注入点、快捷键、入口页；名称 / 简介用 __MSG_*__）
+├── _locales/              manifest 文案（zh_CN / en）：名称、简介按浏览器界面语言显示
 ├── background.js          service worker：消息中枢、并发闸门、批处理、缓存、重试
 ├── lib/
 │   ├── config.js          配置默认值 + 存储读写 + 版本迁移（v6）
@@ -653,6 +654,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 - **语言校验（保守）**：新增 `lib/lang-guard.js` 纯函数 `looksForeignForTarget(text, target)`，只抓「目标语言是拉丁字母语系（en/fr/de/es/pt）、整段译文却是中日韩正文且带句末句读」这一种高置信度异常；短文本、专名 / 术语清单、混有足够拉丁字母、中文 / 日文目标一律放行（不按「有没有汉字」判断）。缓存命中异常时只删这一条 + 对齐旁路并重翻一次；新回包异常时照常显示但不写缓存 / 对齐旁路，下次再翻，不追加请求、不无限重试。诊断计数 `languageMismatch` 进 `usage:stats`。
 - **悬浮球半隐藏**：`.dock[data-auto][data-snapped]:not([data-open]):not([data-drag])` 用 `translateX(±50%)`：小球在 `.dock` 里水平居中，整块挪半个 dock 宽度 = 小球圆心贴在视口边 = 正好露出半球（球 36px，左右各露 18px），与球径、dock 宽度、页面缩放、滚动条无关。起拖时 `hideShiftX()` 读计算样式里的 translateX，先把这段位移折算进 `host.style.left` / `drag.dx`，再开 `data-drag` 撤掉 transform；拖拽中无过渡，松手后自由悬浮不跳位，吸附时再平滑滑入半隐藏。
 - **拖拽捕获（0.9.5 `d9189c1`，本版保留并回归）**：小球 `pointerdown` 立刻 `setPointerCapture`，面板其他按钮不提前捕获（否则 click 被改投到捕获元素，0.9.3 的服务商菜单 / 翻译按钮点不动）；「是否拖动」仍看 5px 阈值，拖动后吞掉余波 click，单纯点小球照常切换翻译。E2E 新增服务商菜单真实点击用例。
-- **测试**：自检 165 → **171**（右侧 / 左侧半隐藏真实矩形、展开 / 收起、关闭自动隐藏、自由悬浮、测完收起，共 6 条）；Node 23 → **24** 个文件（新增 `test/lang-guard.test.mjs`；prompt 17 → 23、translate-pipeline 22 → 28）；E2E 53 → **68**：新增「目标语言：日文 → 英文」（悬停开 / 关、提示词断言、句级高亮、切回中文替换旧译文）与「悬浮入口·半隐藏」（左右半球、真实鼠标移入展开 / 移开收起、从半隐藏起拖不跳位、窄视口），E2E 假接口按系统提示词里的目标语言回包。
+- **测试**：自检 165 → **171**（右侧 / 左侧半隐藏真实矩形、展开 / 收起、关闭自动隐藏、自由悬浮、测完收起，共 6 条）；Node 23 → **24** 个文件（新增 `test/lang-guard.test.mjs`；prompt 17 → 23、translate-pipeline 22 → 28）；E2E 53 → **70**：新增「目标语言：日文 → 英文」（悬停开 / 关、提示词断言、句级高亮、切回中文替换旧译文）、「悬浮入口·半隐藏」（左右半球、真实鼠标移入展开 / 移开收起、从半隐藏起拖不跳位、窄视口）和 `_locales` 的 manifest 本地化检查；E2E 假接口按系统提示词里的目标语言回包。
+- **`_locales` / 商店双语 listing**：manifest 的 name / description 改为 `__MSG_extensionName__` / `__MSG_extensionDescription__` + `default_locale: "zh_CN"`，新增 `_locales/zh_CN|en/messages.json`（名称 / 简介与商店现有文案一致）。`tools/package-store.mjs` 白名单补收 `_locales`，并校验默认语言 messages.json 存在、manifest 引用的每个 `__MSG_*__` 在每种语言的 messages.json 里都有；`test/package-store.test.mjs` 覆盖缺默认语言文件 / 坏 JSON / 缺 key；E2E 用 `chrome.runtime.getManifest()` 断言名称 / 简介已从 `__MSG_*__` 解析成本地化文案。Edge 按 `_locales/*/messages.json` 识别语言，商店会出现中文（简体）与 English (United States) 两行 listing；Chrome / Edge / Firefox 的扩展页名称与简介也跟随界面语言。
 - **缓存兼容**：不改 `makeKey` / `SCHEMA`，不清用户缓存；只对高置信度异常条目定向失效并重翻。旧缓存里的短标题 / 专名清单不做自动失效。
 - **已知 / 未验证**：真实模型下的中文目标 / 日文目标语言校验未启用（没有证据，保守不做）；语言校验的正例阈值只在本地夹具与《罗生门》日文正文上验证过，真实模型的专名混排仍可能有少量误判（放行优先）；Edge、触摸屏、真实付费模型未验证；用户从展开面板空白处起拖跨越 iframe 的限制仍在（`.ball` 是正式拖拽手柄）。

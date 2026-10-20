@@ -942,6 +942,20 @@ async function languageChecks() {
   await sleep(300);
 }
 
+// ---------------- 0.9.6 _locales：manifest 的 __MSG_*__ 在浏览器里解析成本地化文案 ----------------
+async function localeChecks() {
+  console.log('\n[_locales]');
+  const manifest = JSON.parse(await swEval('return JSON.stringify(chrome.runtime.getManifest());'));
+  const names = ['凛狐 · 双语对照翻译', 'Rimefox - Bilingual Translation'];
+  const descriptions = [
+    '用自己的 API 做整页双语对照翻译，动态内容自动补翻。',
+    'Translate pages and selections with your own API key.'
+  ];
+  // UI 语言决定取 zh_CN 还是 en；两种文案都算通过，但绝不能是 __MSG_ 占位符
+  check('manifest 名称按界面语言本地化（不是 __MSG_ 占位符）', names.includes(manifest.name), manifest.name);
+  check('manifest 简介按界面语言本地化', descriptions.includes(manifest.description), manifest.description);
+}
+
 // ---------------- 0.9.6 悬浮球半隐藏：真实矩形 + 真实鼠标 ----------------
 async function dockHideChecks() {
   console.log('\n[悬浮入口·半隐藏]');
@@ -1219,6 +1233,7 @@ try {
     await articleChecks();
     await paragraphChecks();
     await languageChecks();
+    await localeChecks();
     await dockChecks();
     await dockHideChecks();
     await hoverLocalChecks();

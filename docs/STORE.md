@@ -40,16 +40,18 @@ node test/package-store.test.mjs
 
 | 字段 | 内容 |
 |---|---|
-| 中文名称（≤45 字符） | 凛狐 Rimefox · 双语对照翻译 |
+| 中文名称（≤45 字符） | 凛狐 · 双语对照翻译（来自 `_locales/zh_CN`） |
 | English name（≤45 characters） | Rimefox - Bilingual Translation |
 | 中文简介（≤132 字符） | 使用自己的 API Key 翻译网页、选中文字和 YouTube 字幕，支持术语表、自定义提示词、中英文界面与可选本地隐私脱敏。 |
 | English summary（≤132 characters） | Translate pages, selections and YouTube captions with your own API key; glossary, prompts, bilingual UI, optional local masking. |
 | 分类建议 | Productivity；按控制台当前可选项选择最接近的生产力 / 工具分类 |
-| 界面与 listing 语言 | 简体中文、English；界面语言支持不等于已实现 manifest 的 `_locales` 本地化 |
+| 界面与 listing 语言 | 简体中文、English；0.9.6 起 manifest 用 `_locales`（`zh_CN` / `en`）本地化名称和简介，商店会出现中文（简体）+ English (United States) 两行 |
 | 支持入口 | <https://github.com/Suethekitten/Rimefox/issues> |
 | 仓库 | <https://github.com/Suethekitten/Rimefox> |
 | 隐私政策（中文） | <https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> |
 | Privacy policy (English) | <https://github.com/Suethekitten/Rimefox/blob/main/docs/privacy.en.md> |
+
+> 0.9.6 起名称 / 简介来自 `_locales/<语言>/messages.json`（`zh_CN` / `en`）；`tools/package-store.mjs` 会校验默认语言文件与 manifest 引用的文案 key，缺一个就拒绝出包。
 
 中文详细说明：
 

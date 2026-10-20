@@ -8,7 +8,7 @@ import { inflateRawSync } from 'node:zlib';
 const source = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const temp = await mkdtemp(resolve(tmpdir(), 'rimefox-store-test-'));
 try {
-  for (const name of ['manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'welcome', 'icons', 'tools', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses']) await cp(resolve(source,name), resolve(temp,name), {recursive:true});
+  for (const name of ['manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'welcome', 'icons', 'tools', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses', '_locales']) await cp(resolve(source,name), resolve(temp,name), {recursive:true});
   await writeFile(resolve(temp,'lib/.DS_Store'),'exclude me');
   for (const name of ['Thumbs.db', 'desktop.ini', '.env', 'debug.log', 'private.key', 'bundle.js.map']) await writeFile(resolve(temp,'lib',name),'exclude me');
   await mkdir(resolve(temp,'lib/test')); await writeFile(resolve(temp,'lib/test/private.txt'),'exclude me');
@@ -28,6 +28,7 @@ try {
   assert(names.includes('manifest.json')); assert(names.includes('lib/privacy.js'), 'privacy module must be packaged');
   for (const name of ['welcome/index.html', 'welcome/welcome.css', 'welcome/welcome.js', 'lib/welcome.js']) assert(names.includes(name), name + ' must be packaged');
   assert(names.includes('LICENSE')); assert(names.includes('THIRD-PARTY-NOTICES.md')); assert(names.includes('licenses/oneaifw-MIT.txt'));
+  for (const name of ['_locales/zh_CN/messages.json', '_locales/en/messages.json']) assert(names.includes(name), name + ' must be packaged');
   assert(!names.some(n=>/DS_Store|Thumbs|desktop.ini|\.env|debug.log|private.key|\.map$|\/test\/|^tools\/|icons\/(source|preview-|icon512)/.test(n)));
   assert.equal(zip.readUInt32LE(p),0x02014b50);
   assert.equal(run().status,0); assert.deepEqual(await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`)),zip);
@@ -39,6 +40,17 @@ try {
   await cp(resolve(source,'welcome/welcome.js'), resolve(temp,'welcome/welcome.js'));
   await rm(resolve(temp,m.icons['16'])); result=run(); assert.notEqual(result.status,0); assert.match(result.stderr,/16px/);
   assert.deepEqual(await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`)),zip,'failed checks must preserve previous output');
+  // _locales：默认语言文件缺失 / JSON 坏了 / 缺 manifest 引用的文案 key 都要拒绝出包
+  const zhMessages = resolve(temp,'_locales/zh_CN/messages.json');
+  const enMessages = resolve(temp,'_locales/en/messages.json');
+  await rm(zhMessages); result=run(); assert.notEqual(result.status,0); assert.match(result.stderr,/default locale messages/i);
+  await cp(resolve(source,'_locales/zh_CN/messages.json'), zhMessages);
+  await writeFile(enMessages,'{bad json'); result=run(); assert.notEqual(result.status,0); assert.match(result.stderr,/Invalid locale messages/i);
+  await cp(resolve(source,'_locales/en/messages.json'), enMessages);
+  const enJson=JSON.parse(await readFile(enMessages,'utf8')); delete enJson.extensionName; await writeFile(enMessages,JSON.stringify(enJson));
+  result=run(); assert.notEqual(result.status,0); assert.match(result.stderr,/Missing "extensionName"/);
+  await cp(resolve(source,'_locales/en/messages.json'), enMessages);
+  assert.deepEqual(await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`)),zip,'locale failures must preserve previous output');
   // GitHub Release 包：同一份白名单，文件集合与商店包一致，只是多一层 Rimefox/ 文件夹
   await cp(resolve(source,m.icons['16']), resolve(temp,m.icons['16'])); // 上一步故意删掉的图标放回去
   const zipNames = (buf) => { const out=[]; let q=0; while(buf.readUInt32LE(q)===0x04034b50){ const sz=buf.readUInt32LE(q+18), n=buf.readUInt16LE(q+26), x=buf.readUInt16LE(q+28); out.push(buf.subarray(q+30,q+30+n).toString()); q+=30+n+x+sz; } return out; };
