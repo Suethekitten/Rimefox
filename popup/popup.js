@@ -14,7 +14,7 @@ import {
 import { providerById } from '../lib/providers.js';
 import { applyI18n, t } from '../lib/i18n.js';
 import { normalizeHosts, hostListed } from '../lib/site-rules.js';
-import { applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig } from '../lib/ui-appearance.js';
+import { applyUiTheme, applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig } from '../lib/ui-appearance.js';
 import { openWelcomePage } from '../lib/welcome.js';
 
 const el = {
@@ -299,23 +299,6 @@ async function refresh() {
   }
 }
 
-function applyUiTheme(value) {
-  const root = document.documentElement;
-  if (value === 'light' || value === 'dark') {
-    root.dataset.theme = value;
-    root.style.colorScheme = value;
-  } else {
-    delete root.dataset.theme;
-    root.style.colorScheme = '';
-  }
-  // 首帧预判用（lib/ui-theme-boot.js）：读配置之前先按上次的取值上色，避免闪一帧白底
-  try {
-    if (value === 'light' || value === 'dark') localStorage.setItem('dt.uiTheme', value);
-    else localStorage.removeItem('dt.uiTheme');
-  } catch (err) {
-    /* 存储不可用就退化为 prefers-color-scheme */
-  }
-}
 
 // ---------------- 深色 / 浅色一键切换 ----------------
 // 图标显示"点下去会变成哪边"：浅色时显示月亮（切深色），深色时显示太阳。

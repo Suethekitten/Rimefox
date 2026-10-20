@@ -3,6 +3,8 @@
 // 运行：node test/translate-pipeline.test.mjs
 import assert from 'node:assert/strict';
 
+import { makeArea } from './_fake-storage.mjs';
+
 let pass = 0;
 let fail = 0;
 async function t(name, fn) {
@@ -16,39 +18,11 @@ async function t(name, fn) {
   }
 }
 
-function makeArea() {
-  const data = new Map();
-  return {
-    data,
-    async get(keys) {
-      if (keys == null) return Object.fromEntries(data);
-      if (typeof keys === 'string') return data.has(keys) ? { [keys]: JSON.parse(JSON.stringify(data.get(keys))) } : {};
-      if (Array.isArray(keys)) {
-        const out = {};
-        keys.forEach((k) => {
-          if (data.has(k)) out[k] = data.get(k);
-        });
-        return out;
-      }
-      return {};
-    },
-    async set(obj) {
-      Object.keys(obj || {}).forEach((k) => data.set(k, JSON.parse(JSON.stringify(obj[k]))));
-    },
-    async remove(keys) {
-      (Array.isArray(keys) ? keys : [keys]).forEach((k) => data.delete(k));
-    },
-    async setAccessLevel() {},
-    async getBytesInUse() {
-      return 0;
-    }
-  };
-}
 
 const BS = '\\';
 const HOST = 'www.pixiv.net';
-const localArea = makeArea();
-const sessionArea = makeArea();
+const localArea = makeArea({ clone: true });
+const sessionArea = makeArea({ clone: true });
 let listener = null;
 globalThis.chrome = {
   storage: { local: localArea, session: sessionArea, onChanged: { addListener() {} } },

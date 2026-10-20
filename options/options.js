@@ -21,7 +21,7 @@ import { listModels, engineList } from '../lib/provider.js';
 import { providerById } from '../lib/providers.js';
 import { $, fillSelect, setResult } from './ui.js';
 import { applyI18n } from '../lib/i18n.js';
-import { applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig, runWhenIdle } from '../lib/ui-appearance.js';
+import { applyUiTheme, applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig, runWhenIdle } from '../lib/ui-appearance.js';
 import { normalizeHosts } from '../lib/site-rules.js';
 import {
   createAccentPicker,
@@ -111,24 +111,6 @@ const fields = {
   dockPosReset: $('dockPosReset')
 };
 
-// 设置页 / 弹窗的界面主题；auto 交给 CSS 的 prefers-color-scheme
-function applyUiTheme(value) {
-  const root = document.documentElement;
-  if (value === 'light' || value === 'dark') {
-    root.dataset.theme = value;
-    root.style.colorScheme = value;
-  } else {
-    delete root.dataset.theme;
-    root.style.colorScheme = '';
-  }
-  // 首帧预判用（lib/ui-theme-boot.js）：读配置之前先按上次的取值上色，避免闪一帧白底
-  try {
-    if (value === 'light' || value === 'dark') localStorage.setItem('dt.uiTheme', value);
-    else localStorage.removeItem('dt.uiTheme');
-  } catch (err) {
-    /* 存储不可用就退化为 prefers-color-scheme */
-  }
-}
 
 fields.uiTheme.addEventListener('change', () => switchThemeAnimated(() => applyUiTheme(fields.uiTheme.value), fields.uiTheme));
 fields.uiLang.addEventListener('change', () => applyI18n(document, fields.uiLang.value));
