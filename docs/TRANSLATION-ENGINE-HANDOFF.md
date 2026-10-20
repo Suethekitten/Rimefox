@@ -2,7 +2,7 @@
 
 > 给接手翻译引擎的 Agent / 协作者。先读 [AGENTS.md](../AGENTS.md)、[HANDOFF.md](../HANDOFF.md) 和本文。
 > 本文只讲**翻译引擎**：从网页收集文字 → 段落 / 句子 → API 请求分片 → 渲染写回 → 悬停 → 还原的整条链路。
-> 最近更新：0.9.2（2026-10-19）。0.9.2 修了真实青空文库《罗生门》的分段与仅译文空白 / 注音残留；0.9.1 把「一个元素 = 一个翻译单元」的松散模型换成了
+> 最近更新：0.9.6（2026-10-20）。0.9.6 统一了普通 / 结构化对齐的目标语言约束（修掉日译英变中文），新增保守的目标语言缓存校验；0.9.2 修了真实青空文库《罗生门》的分段与仅译文空白 / 注音残留；0.9.1 把「一个元素 = 一个翻译单元」的松散模型换成了
 > **ParagraphUnit + SentenceUnit + Alignment + RenderTransaction**；旧文档里「所有译文 append 到元素末尾」的说法只适用于独占元素的段落。
 
 ---
@@ -22,8 +22,14 @@
   `DT.restore()` 逆序回放，只撤销「仍是我们写入的值」；站点改过的节点保持站点的新内容。
 - 仅译文模式遇到 Ruby：**不把中文写进 `ruby/rb/rt/rp`**。保留原始 Ruby DOM，清空本段正文文本、
   只隐藏本段落关联的 `rt/rp`、在段落锚点插入独立译文节点；还原时文本 / 注音显隐 / 锚点一起恢复。
+- **目标语言是硬约束（0.9.6）**：普通翻译和 `align` 共用同一条「唯一目标语言：Name (code)」；`align` 的
+  `parts[].t` 也必须是目标语言，输出协议用占位文字而不是固定中文示例。开 / 关悬停对照只改变原文与译文的对应方式，
+  不改变译文语言。
 - 结构化对齐**不增加请求次数**：缓存键与三层缓存格式不变；对齐信息放在 service worker 内存旁路表。
   旧缓存命中没有模型对齐 → 悬停用本地对齐，不重翻；模型不遵守格式 → 解析层退回普通字符串数组，页面照常显示。
+- **目标语言缓存校验是保守的定向失效（0.9.6）**：命中缓存或拿到新回包时，只有「目标语言是拉丁字母语系、内容却几乎
+  全是中日韩正文且带句末句读、长度足够」才判异常；缓存里的异常条目只删这一条（+ 对齐旁路）重翻，新回包的异常结果
+  照常显示但不写缓存，不追加请求。短文本、专名 / 术语清单、混有足够拉丁字母的内容一律放行。
 
 ---
 
@@ -87,6 +93,8 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 - `DT.inject(unit, text, lang, align)`：unit 必须是 `collect` 返回的段落单元；旧签名 `DT.inject(el, text, lang, own)` 仍兼容（内部临时造独占单元）。
 - RenderTransaction 的真相在 `DT.tx` / `rendered`；`DT.replaced` 保留为 0.9.0 兼容视图（`DT.replacedOf` 用），不要把它当唯一真相。
 - 送翻文本里的 `\n` 只代表「原文分行」：来自 `<br>` 或 `white-space: pre-*`。不要塞别的标记。
+- 目标语言不变量：`translate` 消息的 `target`、`systemPrompt` 的目标语言行、结构化输出里的 `parts[].t`、缓存键里的
+  `target` 必须是同一个值；普通 / `align` 只能改输出格式，不能各写一套语言约束。开关悬停对照不得改变译文语言（0.9.6）。
 
 ---
 
@@ -261,6 +269,8 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 - 旧缓存（纯字符串）仍命中；模型不遵守 `parts` 时 `parseAlignedArray` 退回 `parseArray`。
 - 脱敏 / 换行规范化改变了译文字符 → 对应当前这条的 `parts` 被丢弃（偏移不再可靠），不影响译文显示。
 - 缓存键仍只含原文 + scope；加一条术语只让命中它的段落失效（0.9.0 起）。
+- 普通 / align 共用 `systemPrompt(target, …)` 的目标语言行；`translate` 消息与缓存键里的 `target` 没有新增字段（0.9.6）。
+- 语言校验（`lib/lang-guard.js`）只做单条定向失效 / 不写缓存；旧缓存命中的异常条目重翻一次，正常译文不受影响（0.9.6）。
 - 段落切分更细会让**单元数**变多，但送翻文本总量不变；懒翻译、可见区优先、并发闸门、失败退避都沿用。
   `groupsForRange` 按顺序累计行数（不是每段重扫），避免大量段落的 O(n²)。
 
@@ -282,12 +292,12 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 ## 7. 测试
 
 ```bash
-node --test test/*.test.mjs          # 21 个文件，CI 发版前同一条
+node --test test/*.test.mjs          # 24 个文件，CI 发版前同一条
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp）
 # 自检页（本机 headless Chrome 需要 --no-sandbox）
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \
   --user-data-dir=/tmp/chrome-selftest --allow-file-access-from-files \
-  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 159 / 159
+  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 171 / 171
 node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 ```
 
@@ -298,6 +308,9 @@ node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
   `translate` 路由的 `alignments` / 缓存旁路 / 旧缓存降级 / 模型不遵守格式。
 - E2E 新增：`/aozora.html`（罗生门式 3 段）、`/pixiv.html`（pre-wrap 对白 + Ruby）；
   检查 DOM 顺序、悬停高亮与气泡、Ruby 显隐、关闭后逐字恢复。
+- 0.9.6 新增：目标语言（日 → 英悬停开 / 关、两种模式的提示词断言、句级高亮、切回中文替换旧英文）、
+  语言校验（英文目标回中文 / 正常英文 / 专名清单 / 短文本）、悬浮入口半隐藏几何（左右露半球 / 展开收起 /
+  自由悬浮 / 关闭自动隐藏）；E2E 用真实鼠标验证移入展开、移开收起、从半隐藏起拖不跳位、窄视口仍露半球。
 
 ---
 
@@ -305,7 +318,7 @@ node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 
 **先读**：`AGENTS.md` → `HANDOFF.md` §5–§6 → 本文 §1–§5。
 
-**先跑**：`git status -sb && node --test test/*.test.mjs`，再跑自检页（159 / 159），再跑 E2E；能上网时加 `--aozora-live` 跑真实《罗生门》。
+**先跑**：`git status -sb && node --test test/*.test.mjs`，再跑自检页（171 / 171），再跑 E2E；能上网时加 `--aozora-live` 跑真实《罗生门》。
 
 **不要重复实现**（已经有了）：
 
