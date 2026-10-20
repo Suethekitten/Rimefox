@@ -308,6 +308,97 @@
     return out;
   }
 
+  // ---------------- 保留区：段落里的 notranslate ----------------
+  // 整段单元（tokensOf）会把 notranslate / translate="no" / 站点规则排除的行内子元素一起拼进句子。
+  // 这些文字照样送翻当上下文（units.keepWrap 用 <k1>…</k1> 包住，提示词要求原样照抄），
+  // 但它们的文本节点永远不写、不清空：仅译文时按标记把译文切开，分别写进保留元素前后的文本节点；
+  // 切不开（模型漏了标记 / 换了顺序 / 那一侧没有文本节点）就整句写进其它节点、把保留元素隐藏（进事务，还原时恢复）。
+  // 判定与 isSkipped 里的三条相同：那里决定「不单独收集」，这里决定「在别人的句子里不能动」。
+  var KEEP_SELECTOR = '.notranslate,.no-translate,[translate="no"]';
+  function isProtectedEl(el) {
+    if (el.getAttribute('translate') === 'no') return true;
+    if (siteExclude && el.matches(siteExclude)) return true;
+    var cls = el.className;
+    return typeof cls === 'string' && /(^|\s)(notranslate|no-translate)(\s|$)/.test(cls);
+  }
+
+  // node 在 root 里所属的最外层保留元素（root 自己不算：它被保护的话根本不会收集）
+  function keepElOf(node, root) {
+    var found = null;
+    for (var cur = node.parentNode; cur && cur !== root && cur.nodeType === 1; cur = cur.parentNode) {
+      if (isProtectedEl(cur)) found = cur;
+    }
+    return found;
+  }
+
+  function hasKeepInside(el) {
+    return !!(el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR));
+  }
+
+  // 段落文本里属于保留元素的字符范围：[{ start, end, text, el }]，按出现顺序；换行处断开
+  function keepRangesOf(el, chars, text) {
+    var out = [];
+    var cur = null;
+    var owner = new Map();
+    for (var i = 0; i < chars.length; i += 1) {
+      var c = chars[i];
+      if (!c) continue; // 合成空格：不打断，也不单独开头
+      if (!c.node) {
+        cur = null; // 换行
+        continue;
+      }
+      if (!owner.has(c.node)) owner.set(c.node, keepElOf(c.node, el));
+      var keepEl = owner.get(c.node);
+      if (!keepEl) {
+        cur = null;
+      } else if (cur && cur.el === keepEl) {
+        cur.end = i + 1;
+      } else {
+        cur = { start: i, end: i + 1, el: keepEl };
+        out.push(cur);
+      }
+    }
+    out.forEach(function (k) {
+      k.text = text.slice(k.start, k.end);
+    });
+    return out;
+  }
+
+  function keepIndexOf(unit, node) {
+    var keep = unit.keep || [];
+    for (var i = 0; i < keep.length; i += 1) {
+      if (keep[i].el.contains(node)) return i;
+    }
+    return -1;
+  }
+
+  // 给单元挂上保留区；整段只剩保留内容（没有可翻的字）返回 false。
+  // inside：hasKeepInside(el) 的结果，同一容器的各段共用（每段都 querySelector 一遍，长容器会变成 O(n²)）
+  function attachKeep(unit, el, inside) {
+    unit.keep = inside ? keepRangesOf(el, unit.map.chars, unit.text) : [];
+    if (!unit.keep.length) return true;
+    var rest = '';
+    var at = 0;
+    unit.keep.forEach(function (k) {
+      rest += unit.text.slice(at, k.start);
+      at = k.end;
+    });
+    if (!/\S/.test(rest + unit.text.slice(at))) return false;
+    unit.wire = DT.units.keepWrap(unit.text, unit.keep);
+    return true;
+  }
+
+  // 隐藏保留元素（兜底：它的原文已经随整句译文写进别的节点）。except：这些不隐藏
+  function hideKept(unit, ops, except) {
+    var seen = new Set();
+    (unit.keep || []).forEach(function (k) {
+      if (seen.has(k.el) || (except && except.has(k.el))) return;
+      seen.add(k.el);
+      setStyle(k.el, 'display', 'none', ops);
+      setAttr(k.el, 'data-dt-keep-hidden', '1', ops);
+    });
+  }
+
   // 把元素里的文字按行分组（和 DT.unitText 同一套切法，非空行一一对应）：
   // 每行 { pieces: [{ node, start, end }], filled: 有没有字, keep, br: 行首的 <br>, nl: 行首在文本节点里的 \n }
   // tokens 不传时取整个元素（tokensOf）；own 单元传 ownTokens
@@ -757,6 +848,7 @@
     var sharedArea = null;
     var areaComputed = false;
     var changed = false; // 有没有段落要重新收集（新段落 / 撤掉了旧译文）
+    var keepInside = null; // 有没有 notranslate 等保留元素：懒算一次，全部段落已渲染时不查
     var groups = lineGroups(el, tokens);
     // Ruby 一次分配：按文档顺序扫一遍所有 <ruby>，用段落分隔 <br> 当边界。
     // 以前每个段落都 querySelectorAll('ruby') + Range.intersectsNode，长文 + 多 ruby 是 O(n²)。
@@ -901,6 +993,8 @@
         fallback: ranges.fallback || '',
         ruby: rubyAnnotationsFor(el, map.chars.slice(range.start, range.end), rubyBounds, own, assignedRuby)
       };
+      if (keepInside === null) keepInside = hasKeepInside(el);
+      if (!attachKeep(unit, el, keepInside)) return; // 这段只有 notranslate 的内容
       fillSnapshot(unit);
       // 已经翻过这个段落：原文没变就跳过；站点改过就先撤销旧记录再按新内容收集。
       // 放在 fillSnapshot 之后：替换型靠文本节点身份匹配，不依赖 index。
@@ -1522,11 +1616,16 @@
 
   // 一行译文写进这一行：第一个有字的片段换成「原来的行首缩进 + 译文」，同一行后面的片段清空
   // （行内的 <b> / <a> 和以前一样不保留格式，但只影响这一行）
-  function writeLine(group, line, edits, first) {
-    var pieces = group.pieces;
+  // kept(node)：保留区的文本节点，不写也不清空。这一行没有可写的片段时返回 false
+  function writeLine(group, line, edits, first, kept) {
+    var pieces = kept
+      ? group.pieces.filter(function (p) {
+          return !kept(p.node);
+        })
+      : group.pieces;
     var lead = 0;
     while (lead < pieces.length && !/\S/.test(pieceText(pieces[lead]))) lead += 1;
-    if (lead >= pieces.length) return;
+    if (lead >= pieces.length) return false;
     var head = pieces[lead];
     var indent = /^\s*/.exec(pieceText(head))[0];
     var value = indent + line;
@@ -1551,6 +1650,7 @@
     for (var k = lead + 1; k < pieces.length; k += 1) {
       edits.push({ node: pieces[k].node, start: pieces[k].start, end: pieces[k].end, value: k === restAt ? rest : '' });
     }
+    return true;
   }
 
   // 按文本节点合并改动后写入，所有写入都进事务；返回 [{ node, value: 原值, wrote: 写入值 }]
@@ -1580,11 +1680,14 @@
     });
   }
 
-  function clearGroup(group, edits, collapsed) {
+  function clearGroup(group, edits, collapsed, kept) {
     (group.pieces || []).forEach(function (p) {
+      if (kept && kept(p.node)) return;
       edits.push({ node: p.node, start: p.start, end: p.end, value: '' });
     });
-    if (group.nl) edits.push({ node: group.nl.node, start: group.nl.at, end: group.nl.at + 1, value: '' });
+    if (group.nl && !(kept && kept(group.nl.node))) {
+      edits.push({ node: group.nl.node, start: group.nl.at, end: group.nl.at + 1, value: '' });
+    }
     if (group.br) {
       if (collapsed) collapsed.push(group.br);
     }
@@ -1601,21 +1704,35 @@
     var ops = [];
     var collapsed = [];
     var edits = [];
+    // 分行段落里的保留区不按标记切分：每行整句写进本行其它节点，保留元素隐藏；
+    // 只有保留内容、没有可写节点的那一行原样留着（它的译文本来就是这段保留内容）
+    var kept = unit.keep && unit.keep.length
+      ? function (node) {
+          return keepIndexOf(unit, node) >= 0;
+        }
+      : null;
+    var shown = new Set();
     for (var k = 0; k < n; k += 1) {
       if (k >= assign.length) {
-        clearGroup(sel[k], edits, collapsed);
+        clearGroup(sel[k], edits, collapsed, kept);
         continue;
       }
-      writeLine(sel[k], assign[k], edits, k === 0);
+      if (!writeLine(sel[k], assign[k], edits, k === 0, kept) && kept) {
+        sel[k].pieces.forEach(function (p) {
+          var ki = keepIndexOf(unit, p.node);
+          if (ki >= 0) shown.add(unit.keep[ki].el);
+        });
+      }
     }
     (unit.groups.tail || []).forEach(function (g) {
-      clearGroup(g, edits, collapsed);
+      clearGroup(g, edits, collapsed, kept);
     });
     // 同一文本节点上的多行 edit 必须一次性从后往前写：逐行写会让后一行的偏移失效
     if (edits.length) applyEditsTx(edits, ops);
     collapsed.forEach(function (br) {
       setAttr(br, 'data-dt-collapsed', '1', ops);
     });
+    if (kept) hideKept(unit, ops, shown);
     var srcLines = DT.splitLines(unit.text);
     var saved = [];
     ops.forEach(function (op) {
@@ -1655,18 +1772,83 @@
     return nodes;
   }
 
-  // 仅译文：单行段落整体写进第一个文本节点，其余清空（保留图标等子元素）
-  function injectReplace(unit, text, area) {
+  // 单行保留区原地写回的计划：模型按原顺序留下了 N 个保留区 → N+1 段译文，
+  // 第 g 段写进第 g 个保留元素之前（g = N 时是最后一个之后）的文本节点。
+  // 返回 [{ nodes, text }]；有一段非空译文那一侧没有文本节点可写，返回 null（走兜底）
+  function keepPlan(unit, segs) {
+    var keep = unit.keep;
+    var group = (unit.groups.filled || [])[0];
+    if (!group || !segs || segs.length !== keep.length + 1) return null;
+    var gaps = segs.map(function (seg) {
+      return { nodes: [], spare: [], text: seg };
+    });
+    var gap = 0;
+    var seen = new Set();
+    group.pieces.forEach(function (p) {
+      if (seen.has(p.node)) return;
+      seen.add(p.node);
+      var ki = keepIndexOf(unit, p.node);
+      if (ki >= 0) {
+        gap = ki + 1;
+        return;
+      }
+      (/\S/.test(pieceText(p)) ? gaps[gap].nodes : gaps[gap].spare).push(p.node);
+    });
+    for (var g = 0; g < gaps.length; g += 1) {
+      if (gaps[g].nodes.length || !/\S/.test(gaps[g].text)) continue;
+      // 两个保留元素之间只有一个空格节点（<code>a</code> <code>b</code>）：译文的「和」写进这个空格
+      if (!gaps[g].spare.length) return null;
+      gaps[g].nodes = gaps[g].spare.slice(0, 1);
+    }
+    return gaps;
+  }
+
+  // 仅译文：单行段落整体写进第一个文本节点，其余清空（保留图标等子元素）。
+  // 有保留区时按 keepPlan 分段写；分不了就整句写进非保留节点，保留元素隐藏
+  function injectReplace(unit, text, area, segs) {
     var groups = unit.groups.filled || [];
     if (groups.length >= 2) return injectLines(unit, DT.splitLines(text), area);
-    var nodes = contentNodes(unit);
-    if (!nodes.length) return false;
     var saved = [];
     var ops = [];
+    var hasKeep = !!(unit.keep && unit.keep.length);
+    var plan = hasKeep ? keepPlan(unit, segs) : null;
+    if (plan) {
+      plan.forEach(function (gap, g) {
+        writeNodes(gap.nodes, gap.text, g === 0, ops, saved);
+      });
+    } else {
+      var nodes = contentNodes(unit).filter(function (node) {
+        return !hasKeep || keepIndexOf(unit, node) < 0;
+      });
+      if (!nodes.length) return false;
+      writeNodes(nodes, text, true, ops, saved);
+      if (hasKeep) hideKept(unit, ops);
+    }
 
+    var srcLines = DT.splitLines(unit.text);
+    var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: srcLines, aligned: true };
+    DT.replaced.push(item);
+    setAttr(unit.el, 'data-dt-replaced', '1', ops);
+    if (unit.whole) {
+      setAttr(unit.el, 'data-dt-src', '1', ops);
+      setAttr(unit.el, 'data-dt-sig', unit.sig, ops);
+    }
+    unit.renderMode = 'replace';
+    unit.targetNode = null;
+    unit.renderedText = text;
+    fillSnapshot(unit); // 快照改成"替换后的源文本"，下次 sourceChangedSnapshot 不会误报
+    pushRendered({ unit: unit, mode: 'replace', ops: ops, saved: saved, collapsed: [], replaced: item });
+    linkUnit(unit);
+    record('replace', null, unit.el, text, area);
+    return true;
+  }
+
+  // 一段译文写进一串文本节点：写进第一个（first 时保留它的行首缩进），其余清空。
+  function writeNodes(nodes, text, first, ops, saved) {
+    if (!nodes.length) return;
     // 首字下沉：首字放进下沉节点，其余放进后面的正文节点。
     // 否则整段中文都会挤进 71.5px 的 "N" 里（Aeon 仅译文模式实例）。
-    var drop = nodes.length > 1 && isDropcapNode(nodes[0]) ? nodes[0] : null;
+    var drop = first && nodes.length > 1 && isDropcapNode(nodes[0]) ? nodes[0] : null;
     var head = '';
     var tail = text;
     var restIndex = 0;
@@ -1690,28 +1872,12 @@
     for (var i = 0; i < nodes.length; i += 1) {
       var wrote;
       if (drop) wrote = i === 0 ? head : i === restIndex ? tail : '';
-      else wrote = i === 0 ? /^\s*/.exec(nodes[i].nodeValue)[0] + text : '';
+      // 保留元素后面的那段：模型给的空白就是这里的空白，不再叠原来的行首空格
+      else wrote = i === 0 ? (first ? /^\s*/.exec(nodes[i].nodeValue)[0] : '') + text : '';
       var before = nodes[i].nodeValue;
       setText(nodes[i], wrote, ops);
       saved.push({ node: nodes[i], value: before, wrote: wrote });
     }
-
-    var srcLines = DT.splitLines(unit.text);
-    var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: srcLines, aligned: true };
-    DT.replaced.push(item);
-    setAttr(unit.el, 'data-dt-replaced', '1', ops);
-    if (unit.whole) {
-      setAttr(unit.el, 'data-dt-src', '1', ops);
-      setAttr(unit.el, 'data-dt-sig', unit.sig, ops);
-    }
-    unit.renderMode = 'replace';
-    unit.targetNode = null;
-    unit.renderedText = text;
-    fillSnapshot(unit); // 快照改成"替换后的源文本"，下次 sourceChangedSnapshot 不会误报
-    pushRendered({ unit: unit, mode: 'replace', ops: ops, saved: saved, collapsed: [], replaced: item });
-    linkUnit(unit);
-    record('replace', null, unit.el, text, area);
-    return true;
   }
 
   // 含振假名的段落（仅译文模式）：不把中文写进 ruby/rb/rt/rp。
@@ -1721,12 +1887,15 @@
     var ops = [];
     var saved = [];
     var edits = [];
+    var hasKeep = !!(unit.keep && unit.keep.length);
     (unit.groups.filled || []).forEach(function (g) {
       (g.pieces || []).forEach(function (p) {
+        if (hasKeep && keepIndexOf(unit, p.node) >= 0) return;
         edits.push({ node: p.node, start: p.start, end: p.end, value: '' });
       });
     });
     if (edits.length) saved = applyEditsTx(edits, ops);
+    if (hasKeep) hideKept(unit, ops);
     (unit.ruby || []).forEach(function (node) {
       setStyle(node, 'display', 'none', ops);
       setAttr(node, 'data-dt-rt-hidden', '1', ops);
@@ -1937,6 +2106,7 @@
       area: '',
       ruby: rubyAnnotationsFor(el, map.chars)
     };
+    if (!attachKeep(unit, el, hasKeepInside(el))) return null;
     fillSnapshot(unit);
     return unit;
   }
@@ -1952,6 +2122,13 @@
     }
     var unit = isUnit ? unitOrEl : legacyUnit(unitOrEl, ownOrAlign && ownOrAlign.parts ? false : ownOrAlign);
     if (!unit || !unit.el || !unit.el.isConnected) return false;
+    // 保留区：text 可以带 <kN> 标记（模型原样回来的），也可以不带（按原文逐字找位置）
+    var segs = null;
+    if (text && unit.keep && unit.keep.length) {
+      var kept = DT.units.keepParse(text, unit.keep);
+      text = kept.text;
+      segs = kept.segs;
+    }
     if (!text) return false;
     unit.align = align;
     if (unit.gen !== DT.generation) return false; // 旧代际（还原 / 模式切换后晚到的结果）
@@ -1974,7 +2151,7 @@
 
     if (replaceMode) {
       if (unit.ruby && unit.ruby.length) return injectRuby(unit, text, lang, area);
-      return injectReplace(unit, text, area);
+      return injectReplace(unit, text, area, segs);
     }
     return injectDual(unit, text, lang, area);
   };
@@ -2183,9 +2360,10 @@
     // 兜底：记录丢了（站点克隆过节点 / 扩展重复注入）也不能留下收起的换行、隐藏的注音
     var folded = document.querySelectorAll('[data-dt-collapsed]');
     for (var f = 0; f < folded.length; f += 1) folded[f].removeAttribute('data-dt-collapsed');
-    var hidden = document.querySelectorAll('[data-dt-rt-hidden]');
+    var hidden = document.querySelectorAll('[data-dt-rt-hidden],[data-dt-keep-hidden]');
     for (var h = 0; h < hidden.length; h += 1) {
       hidden[h].removeAttribute('data-dt-rt-hidden');
+      hidden[h].removeAttribute('data-dt-keep-hidden');
       if (hidden[h].style && hidden[h].style.display === 'none') hidden[h].style.display = '';
     }
 

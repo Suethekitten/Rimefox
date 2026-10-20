@@ -241,6 +241,51 @@ await t('整页翻译：后台的 alignments 经 alignmentOf 校验后交给 DT.
 });
 
 
+await t('保留区：送翻带 <kN> 标记，注入拿到模型原样的回包', async () => {
+  const env = await boot({ config: { hoverCompare: true, lazy: false, skipSameLang: false } });
+  const DT = env.DT;
+  const unit = {
+    el: {
+      ...fakeElement(),
+      isConnected: true,
+      getBoundingClientRect: () => ({ width: 100, height: 20, top: 0, bottom: 20 })
+    },
+    text: 'Install Rimefox from the store today.',
+    keep: [{ start: 8, end: 15, text: 'Rimefox' }],
+    wire: 'Install <k1>Rimefox</k1> from the store today.',
+    sentences: [{ index: 0, start: 0, end: 37, text: 'Install Rimefox from the store today.' }],
+    style: 'plain',
+    own: false
+  };
+  const seen = [];
+  const asked = [];
+  DT.collectAll = () => [unit];
+  DT.inject = (u, text) => {
+    seen.push(text);
+    return true;
+  };
+  DT.sourceChanged = () => false;
+  DT.send = async (msg) => {
+    if (msg.type === 'config:get') {
+      return { ok: true, config: { hasKey: true, targetLang: 'zh-CN', mode: 'translation', hoverCompare: true, lazy: false, skipSameLang: false } };
+    }
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') {
+      asked.push(...msg.texts);
+      return { ok: true, results: ['今天从商店安装 <k1>凛狐</k1>。'], alignments: [null] };
+    }
+    return { ok: true };
+  };
+
+  await env.message({ type: 'dt:toggle' });
+  await flush();
+  await flush();
+  assert.deepEqual(asked, ['Install <k1>Rimefox</k1> from the store today.']);
+  assert.deepEqual(seen, ['今天从商店安装 <k1>凛狐</k1>。'], '标记留给 DT.inject 切分');
+  assert.equal(DT.keepText(unit, seen[0]), '今天从商店安装 Rimefox。');
+});
+
+
 await t('多段落共用容器：一段失败不会被另一段的成功清掉退避状态', async () => {
   const env = await boot({ config: { hoverCompare: true, lazy: false, skipSameLang: false } });
   const DT = env.DT;

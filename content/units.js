@@ -776,6 +776,113 @@
     return { reliable: true, local: true, parts: parts, text: target };
   };
 
+  // ---------------- 4b. 保留区标记 ----------------
+  // 段落里网页标明「不要翻译」的行内内容（notranslate / translate="no" / 站点规则排除）仍随整句送翻，
+  // 给模型当上下文；送翻时用 <k1>…</k1> 包住，提示词要求标记连同内容原样照抄、按译文语序摆放。
+  // keep：dom.js 给出的 [{ start, end, text }]（段落文本里的范围，按出现顺序、互不重叠），第 i 个编号 i+1。
+  // 后台 lib/prompt.js 的 hasKeepMarks 认同一套写法。
+  var KEEP_MARK = /[<＜]\s*(\/?)\s*k\s*(\d{1,3})\s*(\/?)\s*[>＞]/gi;
+  var KEEP_WORD = /[0-9A-Za-zÀ-ɏ]/;
+
+  U.keepWrap = function (text, keep) {
+    var s = String(text == null ? '' : text);
+    if (!keep || !keep.length) return s;
+    var out = '';
+    var at = 0;
+    keep.forEach(function (k, i) {
+      out += s.slice(at, k.start) + '<k' + (i + 1) + '>' + s.slice(k.start, k.end) + '</k' + (i + 1) + '>';
+      at = k.end;
+    });
+    return out + s.slice(at);
+  };
+
+  // 模型没留标记（或换了顺序）时，按原文逐字找保留内容：每个都要按顺序、整词、只出现一次
+  function keepLocate(text, keep) {
+    var segs = [];
+    var from = 0;
+    for (var i = 0; i < keep.length; i += 1) {
+      var needle = String(keep[i].text || '');
+      if (!needle) return null;
+      var at = text.indexOf(needle, from);
+      if (at < 0 || text.indexOf(needle) !== at || text.indexOf(needle, at + 1) >= 0) return null;
+      var end = at + needle.length;
+      if (KEEP_WORD.test(needle.charAt(0)) && at > 0 && KEEP_WORD.test(text.charAt(at - 1))) return null;
+      if (KEEP_WORD.test(needle.charAt(needle.length - 1)) && KEEP_WORD.test(text.charAt(end))) return null;
+      segs.push(text.slice(from, at));
+      from = end;
+    }
+    segs.push(text.slice(from));
+    return segs;
+  }
+
+  // 模型回来的译文 → { text, segs }
+  //   text：去掉标记，标记里的内容一律换回原文（模型改了也不算）；双语 / 悬停 / 去重都用它
+  //   segs：保留区之间的 keep.length + 1 段译文，仅译文原地写回用。标记按原顺序各出现一次时取标记位置，
+  //         否则按原文逐字找；都对不上（漏了、换了顺序、重复）是 null，调用方走兜底
+  U.keepParse = function (text, keep) {
+    var s = String(text == null ? '' : text);
+    var count = keep ? keep.length : 0;
+    if (!count) return { text: s, segs: null };
+    var pairs = [];
+    var cuts = [];
+    var open = null;
+    var m;
+    KEEP_MARK.lastIndex = 0;
+    while ((m = KEEP_MARK.exec(s))) {
+      var id = Number(m[2]);
+      if (!(id >= 1 && id <= count)) continue; // 不是发出去的编号：当普通文字
+      var tok = { id: id, start: m.index, end: m.index + m[0].length };
+      if (m[3]) {
+        if (open) cuts.push(tok);
+        else pairs.push(tok); // <k1/>：空保留区，只标位置
+      } else if (!m[1]) {
+        if (open) cuts.push(open);
+        open = tok;
+      } else if (open && open.id === id) {
+        pairs.push({ id: id, start: open.start, end: tok.end });
+        open = null;
+      } else {
+        cuts.push(tok);
+      }
+    }
+    if (open) cuts.push(open);
+    var drops = pairs
+      .map(function (p) {
+        return { start: p.start, end: p.end, id: p.id };
+      })
+      .concat(
+        cuts.map(function (c) {
+          return { start: c.start, end: c.end, id: 0 };
+        })
+      )
+      .sort(function (a, b) {
+        return a.start - b.start;
+      });
+    var plain = '';
+    var gap = '';
+    var gaps = [];
+    var order = [];
+    var at = 0;
+    drops.forEach(function (d) {
+      if (d.start < at) return; // 落在另一对标记里面
+      var between = s.slice(at, d.start);
+      plain += between;
+      gap += between;
+      if (d.id) {
+        plain += keep[d.id - 1].text;
+        gaps.push(gap);
+        gap = '';
+        order.push(d.id);
+      }
+      at = d.end;
+    });
+    plain += s.slice(at);
+    gaps.push(gap + s.slice(at));
+    var inOrder = order.length === count;
+    for (var i = 0; inOrder && i < order.length; i += 1) inOrder = order[i] === i + 1;
+    return { text: plain, segs: inOrder ? gaps : keepLocate(plain, keep) };
+  };
+
   // ---------------- 5. 签名 / 工具 ----------------
   // 源文本签名：SPA 路由切换、动态更新后判断「这个段落是不是原来那段」。
   // FNV-1a + 长度：比只取前 24 字可靠（同开头不同结尾的长段落不会被当成没变）

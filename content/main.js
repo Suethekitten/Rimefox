@@ -313,7 +313,8 @@
       // 只对多句段落请求结构化对齐；单句段落的段落级对应就是句子级，不需要额外字段
       var hoverOn = !DT.state.config || DT.state.config.hoverCompare !== false;
       queue.forEach(function (unit, ui) {
-        var parts = DT.splitLong(unit.text, maxUnit);
+        // 段落里有 notranslate 的行内内容时，送翻文本带 <kN> 保留标记（见 dom.js 的保留区）
+        var parts = DT.splitLong(DT.wireText(unit), maxUnit);
         unit.slots = new Array(parts.length);
         unit.ali = new Array(parts.length); // 每片的对齐（模型没给就是 undefined）
         unit.seps = parts.seps; // 段与段之间原来的分隔：在换行处切开的，拼回去仍是换行
@@ -384,7 +385,9 @@
         for (var k = 0; k < unit.slots.length; k += 1) {
           if (unit.slots[k] === undefined) return; // 还有段没回来（或失败了，等下次补扫重试）
         }
-        var text = DT.joinSlots(unit.slots, DT.translationSeps(unit.seps, target));
+        var raw = DT.joinSlots(unit.slots, DT.translationSeps(unit.seps, target));
+        // 去掉保留标记后的译文：对齐校验、去重都按页面上实际显示的文字算；注入时再按标记切分
+        var text = DT.keepText(unit, raw);
         unit.done = true;
         // 结构化对齐：n 的总和必须等于源句数，片段要按顺序出现在最终译文里；
         // 有一条不满足就返回 null（悬停降级为行 / 段落级，绝不按长度比例猜）
@@ -399,7 +402,11 @@
               ok = false;
               break;
             }
-            parts = parts.concat(one);
+            parts = parts.concat(
+              one.map(function (part) {
+                return part && part.t ? { n: part.n, t: DT.keepText(unit, part.t) } : part;
+              })
+            );
           }
           if (ok) align = DT.units.alignmentOf(parts, text, unit.sentences.length);
         }
@@ -431,7 +438,7 @@
           return;
         }
 
-        if (DT.inject(unit, text, target, align)) {
+        if (DT.inject(unit, raw, target, align)) {
           DT.state.translated += 1;
         }
       }

@@ -2,7 +2,7 @@
 // 运行：node test/prompt.test.mjs
 import assert from 'node:assert/strict';
 
-import { systemPrompt, temperatureFor, promptFingerprint } from '../lib/prompt.js';
+import { systemPrompt, temperatureFor, promptFingerprint, hasKeepMarks } from '../lib/prompt.js';
 import { LANGUAGES, STYLES, styleById, langLabel } from '../lib/config.js';
 
 let pass = 0;
@@ -212,6 +212,23 @@ t('歧义：混排规则不再写「把英文句子翻译成目标语言」', ()
   assert.ok(en.includes('把需要翻译、且尚未用English表达的部分转换成English'));
   assert.ok(!en.includes('中英混排时'));
   assert.ok(systemPrompt('zh-CN').includes('把需要翻译、且尚未用简体中文表达的部分转换成简体中文'));
+});
+
+t('保留标记：只有本批带成对 <kN> 标记才加说明，其它提示词逐字不变', () => {
+  assert.equal(hasKeepMarks(['Install <k1>Rimefox</k1> today.']), true);
+  assert.equal(hasKeepMarks(['a <k1>x</k2> b', 'if a < b and c > d', '<k1>没闭合']), false);
+  assert.equal(hasKeepMarks([]), false);
+  ['zh-CN', 'en'].forEach((target) => {
+    [false, true].forEach((align) => {
+      const plain = systemPrompt(target, 'plain', [], '', false, align);
+      assert.equal(systemPrompt(target, 'plain', [], '', false, align, false), plain);
+      const marked = systemPrompt(target, 'plain', [], '', false, align, true);
+      assert.ok(marked.startsWith(plain));
+      assert.ok(marked.includes('<k1>…</k1>'));
+      assert.ok(marked.includes('不翻译、不改写、不拆开'));
+      assert.equal(marked.includes('parts 的 t 里同样保留这些标记'), align);
+    });
+  });
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

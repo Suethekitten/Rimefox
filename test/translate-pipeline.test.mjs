@@ -379,6 +379,16 @@ await t('命中术语时提示词带上对照行，没命中的批次不带', as
   await setGlossary([]);
 });
 
+// 段落里的 notranslate（内容脚本用 <kN> 包住送来）：带标记的批次提示词要说明「原样照抄」，其它批次不加
+await t('保留标记：带 <k1> 的批次提示词加说明，回包原样带标记交回内容脚本', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => one.replace('Install', 'Installiere')));
+  const res = await translate(['Install <k1>Rimefox</k1> from the store 〔keep〕']);
+  assert.match(lastSystem, /保留标记（必须原样保留）/, '带标记的批次要有保留说明');
+  assert.equal(res.results[0], 'Installiere <k1>Rimefox</k1> from the store 〔keep〕');
+  await translate(['A line without keep marks 〔keep b〕']);
+  assert.doesNotMatch(lastSystem, /保留标记/, '没有标记就不该多出保留说明');
+});
+
 // 输入框翻译（0.9.0）：目标语言 'auto' 跟随页面，且不读不写缓存
 await t('noCache：输入框翻译不读也不写缓存', async () => {
   await setGlossary([]);

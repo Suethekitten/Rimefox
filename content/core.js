@@ -369,6 +369,16 @@
     return DT.isMostlyTargetLanguage(a, lang) && DT.similarity(a, b) >= DT.NEAR_DUP_THRESHOLD;
   };
 
+  // 保留区（dom.js 的 attachKeep）：段落里有 notranslate 等行内内容时，送翻文本带 <kN> 标记
+  // （unit.wire；缓存按它记，和不带标记的原文互不串）。没有保留区就是 unit.text
+  DT.wireText = function (unit) {
+    return (unit && unit.wire) || (unit ? unit.text : '');
+  };
+  // 模型回来的译文去掉保留标记（标记里的内容换回原文）：去重、对齐校验都按页面上实际显示的文字算
+  DT.keepText = function (unit, text) {
+    return unit && unit.keep && unit.keep.length ? DT.units.keepParse(text, unit.keep).text : text;
+  };
+
   // 长段落按句切开，避免单条请求过大。
   // 有分行（\n）的文本先按整行装段，一行本身超长才在行内按句切。
   // 返回的数组带 seps：seps[i] 是第 i 段和第 i+1 段之间原来的分隔（换行 '\n' / '\n\n'；行内切点处有空白为 ' '，没有为 ''）。

@@ -184,6 +184,12 @@
 
   // 仅译文模式：译文按行写回原来的文本节点。按行读出当前值（去掉行首缩进，和写回时加上的对齐），
   // 拼成与结果字符串逐字一致的目标文本，并记录每个字对应的节点 / 偏移。
+  // 保留区兜底时被隐藏的 notranslate 元素：它的文字已经随译文写进前面的节点，不再算渲染结果
+  function keptHidden(node) {
+    var el = node && node.parentElement;
+    return !!(el && el.closest('[data-dt-keep-hidden]'));
+  }
+
   function mapFromGroups(unit) {
     var text = '';
     var chars = [];
@@ -194,7 +200,7 @@
     groups.forEach(function (group) {
       var uniq = [];
       (group.pieces || []).forEach(function (piece) {
-        if (uniq.indexOf(piece.node) < 0) uniq.push(piece.node);
+        if (uniq.indexOf(piece.node) < 0 && !keptHidden(piece.node)) uniq.push(piece.node);
       });
       uniq.forEach(function (node) {
         useCount.set(node, (useCount.get(node) || 0) + 1);
@@ -204,7 +210,7 @@
     groups.forEach(function (group) {
       var nodes = [];
       (group.pieces || []).forEach(function (piece) {
-        if (nodes.indexOf(piece.node) < 0) nodes.push(piece.node);
+        if (nodes.indexOf(piece.node) < 0 && !keptHidden(piece.node)) nodes.push(piece.node);
       });
       if (!nodes.length) return;
       var line = '';

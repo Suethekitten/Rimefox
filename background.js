@@ -1,6 +1,6 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
 import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget } from './lib/config.js';
-import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
+import { systemPrompt, temperatureFor, promptFingerprint, hasKeepMarks } from './lib/prompt.js';
 import { looksForeignForTarget } from './lib/lang-guard.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseAlignedArray, parseArrayFromReasoning, isRunaway, normalizeTranslationBreaks, leaksWrapper } from './lib/parse.js';
@@ -70,6 +70,8 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
   let mismatch = false;
   // 本批命中的术语（没命中就是空数组，提示词里不会多出术语段）
   const hits = matchGlossary(glossary, texts);
+  // 段落里有网页标明不翻译的内容（<kN> 保留标记）：提示词加一段「原样照抄」
+  const keepMarked = hasKeepMarks(texts);
   while (attempt < 3 && !mismatch) {
     attempt += 1;
     if (attempt > 1) usageStats.retry();
@@ -88,7 +90,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
-          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align) },
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align, keepMarked) },
           { role: 'user', content: JSON.stringify(texts) }
         ]
       });
