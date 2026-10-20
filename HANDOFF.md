@@ -1,9 +1,10 @@
 # 凛狐 Rimefox 交接文档
 
 > 给接手开发的创作者：这份文档覆盖**它是什么、怎么跑、代码怎么组织、哪些坑已经踩过、下一步该做什么**。
-> 版本：0.6.2 ｜ 目录：`edge-bilingual/`
+> 目录：`edge-bilingual/`（版本号看 `manifest.json`，本文不记）
 > 翻译引擎（收集 → 分段 → 批量 → 解析 → 缓存 → 注入 → 还原）的实现细节、0.8.7 的优化、外部项目参考（Wenyi / Agent Book Translate）与后续路线，
 > 单独写在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)；改翻译链路前先读它。
+> **最近一次结构性整理（2026-10-20）**：文档去重与代码去重，动了哪些文件、什么故意没动，见 [docs/archive/2026-10-20-docs-and-dedup.md](docs/archive/2026-10-20-docs-and-dedup.md)。
 
 ---
 

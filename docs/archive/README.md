@@ -11,6 +11,7 @@
 | [STABILITY-AUDIT-0.9.2.md](STABILITY-AUDIT-0.9.2.md) | 稳定性 / 性能 / 恶性 bug 审计 | 0.9.2 |
 | [TOKEN-AUDIT.md](TOKEN-AUDIT.md) | 中日翻译 token 消耗审计 | 0.8.x |
 | [AIFW-PRIVACY-EVAL.md](AIFW-PRIVACY-EVAL.md) | OneAIFW 隐私方案评估（结论已实现于 `lib/privacy.js`） | 0.7.1 |
+| [2026-10-20-docs-and-dedup.md](2026-10-20-docs-and-dedup.md) | 2026-10-20 的文档去重 + 代码去重交接记录（谁去哪了、什么没做） | 0.9.8 |
 | [2026-10-19-dom-translation-units-plan.md](2026-10-19-dom-translation-units-plan.md) | DOM 单元模型重构的实施计划（已发布） | 0.9.1 |
 
 归档规则：
