@@ -1,6 +1,6 @@
 # 隐私说明
 
-最后更新：2026-10-19（对应 Rimefox 0.8.5）。
+最后更新：2026-10-20。
 
 > **English summary**: Rimefox has no author-operated server or telemetry. See the [full English privacy policy](docs/privacy.en.md). Page text you choose to translate is sent only to the API endpoint **you** configure (DeepSeek, OpenAI-compatible, Anthropic, Gemini…), under that provider's privacy policy. An optional, off-by-default local masking feature replaces reliably detectable sensitive values with placeholders before sending and restores them locally; the mapping never leaves the request. Your API key, settings and translation cache are stored locally; the key is also sent to your configured provider for authentication. No analytics, no telemetry, no third-party SDKs.
 
@@ -14,7 +14,8 @@
 |---|---|
 | 整页翻译 | 当前页面上要翻译的文字片段（默认只发屏幕附近的；关闭懒翻译后可能发送整页正文）。开启「AI 隐私保护翻译」时，其中的邮箱、电话、身份证号、银行卡号会先换成占位符 |
 | 划词翻译 | 你选中的文字 |
-| 随手翻译（弹窗） | 你在输入框里填的文字 |
+| 随手翻译（弹窗） | 你在弹窗输入框里填的文字 |
+| 输入框翻译（快捷键 / 右键菜单） | 你在网页输入框或可编辑区域里选中的文字，或整个框里的文字；密码框与支付类字段不会翻译 |
 | YouTube 字幕双语（默认关闭） | 当前视频的字幕文字（只发播放位置往后约 90 秒） |
 | 测试连接 | 两句固定的英文测试句 |
 
@@ -51,7 +52,7 @@ YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默
 
 ## 有限使用声明
 
-凛狐对用户数据的使用遵守 Chrome Web Store 用户数据政策，包括有限使用（Limited Use）要求：数据只用于提供本扩展披露的翻译功能，以及维护、保障和衡量这些功能；不出售，不用于个性化广告、信用评估或贷款，不允许人工读取（安全排查或法律要求除外）。
+凛狐对用户数据的使用遵守 Microsoft Edge 加载项与 Chrome Web Store 的用户数据政策，包括有限使用（Limited Use）要求：数据只用于提供本扩展披露的翻译功能，以及维护、保障和衡量这些功能；不出售，不用于个性化广告、信用评估或贷款，不允许人工读取（安全排查或法律要求除外）。
 
 ## 保存在本机的数据
 
@@ -70,7 +71,7 @@ YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默
 
 ## 不会做的事
 
-- 不读取浏览器 Cookie 或密码数据库；整页翻译跳过输入框和可编辑区域。主动划选或在弹窗提交的文字会按上述方式处理；YouTube 同源字幕请求可能携带浏览器凭据
+- 不读取浏览器 Cookie 或密码数据库；整页翻译跳过输入框和可编辑区域。主动划选、在弹窗提交、或在输入框里主动触发翻译的文字会按上述方式处理；YouTube 同源字幕请求可能携带浏览器凭据
 - 不记录浏览历史，不在后台访问你没打开的网站
 - 不向作者发送数据；仅按上述功能向用户配置的服务商发送请求，YouTube 字幕获取例外见上文
 - 不出售数据，不用于广告或信用评估

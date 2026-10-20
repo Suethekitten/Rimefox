@@ -1,10 +1,10 @@
 # Rimefox Privacy Policy
 
-This policy describes Rimefox 0.8.5 (last updated: 2026-10-19). Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
+Last updated: 2026-10-20. Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
 
 ## Information sent for translation
 
-Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, and YouTube caption text when subtitle translation is enabled. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page. Content scripts also run in subframes, so text in embedded frames is transmitted under the same rules when translated.
+Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, text you translate in a webpage text box with the shortcut or context menu, and YouTube caption text when subtitle translation is enabled. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page. Content scripts also run in subframes, so text in embedded frames is transmitted under the same rules when translated.
 
 When the optional local masking feature is enabled, reliably detectable values (email addresses, phone numbers, ID card numbers and bank card numbers, optionally Chinese names in explicit contexts) are replaced with `__PII_<TYPE>_<n>__` placeholders before the request is sent; only the placeholder text is transmitted. See “Optional local masking” below.
 
@@ -26,7 +26,7 @@ Off by default. When enabled in Settings → Privacy, the extension masks sensit
 
 ## Limited Use
 
-Rimefox's use of user data complies with the Chrome Web Store User Data Policy, including the Limited Use requirements. Data is used only to provide the translation features described in this policy and to maintain, secure and measure those features. It is not sold, not used for personalized advertising or creditworthiness decisions, and is not read by humans except as required for security or legal compliance.
+Rimefox's use of user data complies with the user data policies of the Microsoft Edge Add-ons website and the Chrome Web Store, including the Limited Use requirements. Data is used only to provide the translation features described in this policy and to maintain, secure and measure those features. It is not sold, not used for personalized advertising or creditworthiness decisions, and is not read by humans except as required for security or legal compliance.
 
 ## YouTube captions
 
@@ -52,7 +52,7 @@ Diagnostic output is copied locally only when requested and can contain the curr
 
 ## Access and excluded uses
 
-Rimefox does not access browser history or browse unopened sites in the background. Page translation skips input and editable controls; text you deliberately submit in the popup or select for translation is processed as described above. It does not read browser cookie or password databases. Same-origin YouTube caption requests may include browser credentials. The broad host permission supports translation on user-opened pages and requests to user-selected endpoints; the general content script excludes Google Accounts and Chrome Web Store pages. This exclusion is not a network firewall or a guarantee about an endpoint you manually configure.
+Rimefox does not access browser history or browse unopened sites in the background. Page translation skips input and editable controls; text you deliberately submit in the popup, select for translation, or translate in a webpage text box with the shortcut or context menu is processed as described above. It does not read browser cookie or password databases. Same-origin YouTube caption requests may include browser credentials. The broad host permission supports translation on user-opened pages and requests to user-selected endpoints; the general content script excludes Google Accounts and Chrome Web Store pages. This exclusion is not a network firewall or a guarantee about an endpoint you manually configure.
 
 ## Contact
 
