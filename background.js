@@ -1,6 +1,7 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
 import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint } from './lib/prompt.js';
+import { looksForeignForTarget } from './lib/lang-guard.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseAlignedArray, parseArrayFromReasoning, isRunaway, normalizeTranslationBreaks, leaksWrapper } from './lib/parse.js';
 import {
@@ -244,6 +245,15 @@ async function handleTranslate(msg, sender) {
         alignCache.delete(keyOf(text));
         hit = undefined;
         hitAlign = null;
+      } else if (looksForeignForTarget(fixed, target)) {
+        // 目标语言是英文（或其它拉丁字母语系），缓存里却是整段中文：0.9.5 之前 align 提示词
+        // 的中文示例把模型带偏后留下的坏结果。只失效这一条，不清整层、不动其它正常缓存，
+        // 下次照常请求；对齐旁路一起丢掉，避免继续拿错译文做句级对应。
+        cache.remove(keyOf(text));
+        alignCache.delete(keyOf(text));
+        hit = undefined;
+        hitAlign = null;
+        usageStats.languageMismatch();
       } else if (fixed !== hit) {
         // 换行被改写后译文偏移变了，旧对齐不能再用（下次悬停降级）
         cache.set(keyOf(text), fixed);
@@ -390,7 +400,12 @@ async function handleTranslate(msg, sender) {
           let result = '';
           if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {
             result = value;
-            if (!noCache) {
+            // 目标语言明显不符（例如英文目标却回了整段中文）：这次仍显示，但绝不写缓存 / 对齐旁路，
+            // 免得一次模型抽风永久生效；下次请求会重新翻。不再追加请求，也就不会重复计费。
+            if (looksForeignForTarget(value, target)) {
+              parts = null;
+              usageStats.languageMismatch();
+            } else if (!noCache) {
               cache.set(keyOf(text), value);
               if (wantAlign) rememberAlign(keyOf(text), parts);
             }

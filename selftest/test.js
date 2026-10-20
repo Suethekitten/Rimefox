@@ -2528,6 +2528,105 @@
     return true;
   });
 
+  // ---- 0.9.6 半隐藏几何：贴边收起时小球必须露出直径的一半 ----
+  // 用真实 getBoundingClientRect 量，不猜百分比；量之前把 host 的 left 过渡和 .dock 的 transform 过渡都关掉：
+  // 这里断言的是最终几何，动画本身由真实 Chrome E2E 用鼠标移入 / 移出验证，
+  // 关掉过渡也不会让 CI 的虚拟时间卡在动画中间。
+  function measureDock(cfg) {
+    if (!DT.dock.root()) emitConfig({ dockEnabled: true, page: {} });
+    DT.dock.setOpen(false);
+    var hostEl = DT.dock.host();
+    var dockEl = DT.dock.root().querySelector('.dock');
+    // host 的 left 有 0.16s 过渡、.dock 的 transform 有 0.32s 过渡：同步测量会读到过渡起点
+    // （style.left 已是目标值、getBoundingClientRect 还是旧位置）。这里量的是最终几何，
+    // 先把两处过渡都关掉；动画本身由真实 Chrome E2E 用鼠标移入 / 移出验证。
+    var prevHost = hostEl.style.transition;
+    var prevDock = dockEl.style.transition;
+    hostEl.style.transition = 'none';
+    dockEl.style.transition = 'none';
+    emitConfig(cfg);
+    var ball = DT.dock.root().querySelector('.ball').getBoundingClientRect();
+    var vw = document.documentElement.clientWidth || window.innerWidth || 0;
+    var out = {
+      vw: vw,
+      left: Math.round(ball.left),
+      right: Math.round(ball.right),
+      width: Math.round(ball.width),
+      top: Math.round(ball.top),
+      visible: Math.round(Math.max(0, Math.min(ball.right, vw) - Math.max(ball.left, 0))),
+      transform: getComputedStyle(dockEl).transform
+    };
+    hostEl.style.transition = prevHost;
+    dockEl.style.transition = prevDock;
+    return out;
+  }
+
+  check('悬浮入口·自动隐藏：右侧贴边露出半个小球（真实矩形）', function () {
+    var m = measureDock({ dockEnabled: true, dockAutoHide: true, dockSide: 'right', dockPos: null, page: {} });
+    var half = m.width / 2;
+    if (!(m.right > m.vw)) {
+      var dh = DT.dock.host();
+      return '小球没有缩进视口外：' + JSON.stringify(m) +
+        ' host=' + dh.style.left + ' side=' + dh.getAttribute('data-side') +
+        ' hostRect=' + JSON.stringify(dh.getBoundingClientRect()) +
+        ' view=' + JSON.stringify(DT.dock.view());
+    }
+    if (m.visible < half - 1.5) return '露得太少：' + JSON.stringify(m) + '，半宽 ' + half;
+    return true;
+  });
+
+  check('悬浮入口·自动隐藏：左侧贴边露出半个小球（真实矩形）', function () {
+    var m = measureDock({ dockEnabled: true, dockAutoHide: true, dockSide: 'left', dockPos: null, page: {} });
+    var half = m.width / 2;
+    if (!(m.left < 0)) return '小球没有缩进视口外：' + JSON.stringify(m);
+    if (m.visible < half - 1.5) return '露得太少：' + JSON.stringify(m) + '，半宽 ' + half;
+    return true;
+  });
+
+  check('悬浮入口·自动隐藏：展开后完整显示，收起再回到半个', function () {
+    var hostEl = DT.dock.host();
+    var dockEl = DT.dock.root().querySelector('.dock');
+    var prevHost = hostEl.style.transition;
+    var prev = dockEl.style.transition;
+    hostEl.style.transition = 'none';
+    dockEl.style.transition = 'none';
+    emitConfig({ dockEnabled: true, dockAutoHide: true, dockSide: 'right', dockPos: null, page: {} });
+    var vw = document.documentElement.clientWidth || window.innerWidth || 0;
+    DT.dock.setOpen(true);
+    var openRect = DT.dock.root().querySelector('.ball').getBoundingClientRect();
+    var openOk = openRect.right <= vw - 1 && openRect.left >= 0;
+    DT.dock.setOpen(false);
+    var closedRect = DT.dock.root().querySelector('.ball').getBoundingClientRect();
+    var visible = Math.max(0, Math.min(closedRect.right, vw) - Math.max(closedRect.left, 0));
+    var half = closedRect.width / 2;
+    hostEl.style.transition = prevHost;
+    dockEl.style.transition = prev;
+    if (!openOk) return '展开后小球没有完全回到视口内：' + JSON.stringify({ left: Math.round(openRect.left), right: Math.round(openRect.right), vw: vw });
+    if (visible < half - 1.5) return '收起后没有回到半个：visible=' + Math.round(visible) + '，半宽=' + half;
+    return true;
+  });
+
+  check('悬浮入口·自动隐藏：关掉自动隐藏时完整显示', function () {
+    var m = measureDock({ dockEnabled: true, dockAutoHide: false, dockSide: 'right', dockPos: null, page: {} });
+    if (m.right > m.vw) return '关掉自动隐藏后仍缩进视口外：' + JSON.stringify(m);
+    return true;
+  });
+
+  check('悬浮入口·自动隐藏：页面中间自由悬浮不缩进', function () {
+    var vw = document.documentElement.clientWidth || window.innerWidth || 800;
+    var m = measureDock({ dockEnabled: true, dockAutoHide: true, dockSide: 'right', dockPos: { x: Math.round(vw / 2), y: 160 }, page: {} });
+    if (m.transform !== 'none') return '自由悬浮不该有半隐藏位移：' + m.transform;
+    if (m.left < 0 || m.right > m.vw) return '自由悬浮不该缩进：' + JSON.stringify(m);
+    return true;
+  });
+
+  check('悬浮入口·自动隐藏：测完收起，不影响后面的用例', function () {
+    emitConfig({ dockEnabled: false, page: {} });
+    DT.state.config = null;
+    return document.getElementById('dt-dock') ? '关掉后还在' : true;
+  });
+
+
   // own 单元（子元素被跳过 / 已翻过，只翻直接文本）原地替换时，只改送去翻译的那些文本节点
   check('仅译文：own 单元不清空 notranslate / translate="no" / 已翻过的子元素', function () {
     var box = document.createElement('div');

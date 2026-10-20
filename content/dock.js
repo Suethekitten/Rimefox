@@ -55,9 +55,14 @@
       'transition:transform .32s cubic-bezier(.22,1,.36,1),opacity .2s ease;touch-action:none;cursor:grab}',
     '.dock[data-dark]{--bg:rgba(18,22,33,.78);--fg:#eef0f8;--muted:#94a3b8;--line:rgba(255,255,255,.12);--hi:inset 0 1px 0 rgba(255,255,255,.07);' +
       '--hover:rgba(255,255,255,.08);--shadow:0 2px 6px rgba(0,0,0,.4),0 18px 40px -12px rgba(0,0,0,.7);--acc:color-mix(in srgb,var(--dt-accent,#6a5cf0) 72%,white)}',
-    // 自动隐藏：收起时缩进屏幕边缘，只露出 14px 宽的半透明耳柄；鼠标移入弹簧滑出
-    '.dock[data-auto][data-snapped]:not([data-open]){transform:translateX(calc(100% - 14px));opacity:.8}',
-    ':host([data-side="left"]) .dock[data-auto][data-snapped]:not([data-open]){transform:translateX(calc(-100% + 14px))}',
+    // 自动隐藏：收起时缩进屏幕边缘，只露出半个小球；鼠标移入弹簧滑出。
+    // 用 ±50%（相对 .dock 自身宽度）而不是固定的 14px：小球在 .dock 里水平居中，
+    // 整块挪半个 dock 宽度 = 把小球圆心挪到视口边上，露出的正好是半个球；
+    // 球径、dock 宽度、页面缩放、滚动条都不影响这个比例。
+    '.dock[data-auto][data-snapped]:not([data-open]):not([data-drag]){transform:translateX(50%);opacity:.8}',
+    ':host([data-side="left"]) .dock[data-auto][data-snapped]:not([data-open]):not([data-drag]){transform:translateX(-50%)}',
+    // 拖动中撤掉半隐藏位移（见 onDragMove 的坐标折算），并且不要过渡：否则起拖会滑一下
+    '.dock[data-drag]{transition:none}',
     '.dock[data-drag],.dock[data-drag] .ball{cursor:grabbing}',
     '.panel{display:flex;flex-direction:column;gap:3px;padding:5px;border-radius:14px;background:var(--bg);border:1px solid var(--line);' +
       'box-shadow:var(--hi),var(--shadow);-webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%);' +
@@ -313,6 +318,18 @@
     };
   }
 
+  // 半隐藏时 .dock 被 transform 推出的横向位移（像素）；展开 / 自由悬浮 / 拖动中为 0。
+  // 读计算样式而不是自己按 50% 算：从悬停展开动画中途开始拖时，也能拿到真实位移。
+  function hideShiftX() {
+    if (!dock) return 0;
+    var t = window.getComputedStyle(dock).transform;
+    if (!t || t === 'none') return 0;
+    var m = /^matrix\(([^)]+)\)$/.exec(t);
+    if (!m) return 0;
+    var x = parseFloat(m[1].split(',')[4]);
+    return isFinite(x) ? Math.round(x) : 0;
+  }
+
   // 按配置（或刚拖完的位置）摆放 host；data-side / data-snapped 也在这里一起定
   function place() {
     if (!host || host.hidden) return null;
@@ -341,6 +358,9 @@
       // 移动超过 5px 才算拖，否则保持「点击按钮」的语义
       if (Math.abs(event.clientX - drag.sx) + Math.abs(event.clientY - drag.sy) < 5) return;
       drag.moved = true;
+      // 半隐藏时 .dock 被 transform 推出视口一半：起拖先把这段位移折算进 host 坐标，
+      // 再打开 data-drag（CSS 会撤掉半隐藏位移）。同步改完，小球才不会在起拖瞬间跳一下。
+      var hide = hideShiftX();
       // 真正开始拖了才捕获指针：太早捕获会把按钮的 click 抢到 dock 上
       try {
         dock.setPointerCapture(event.pointerId);
@@ -349,6 +369,10 @@
       }
       host.setAttribute('data-drag', '');
       dock.setAttribute('data-drag', '');
+      if (hide) {
+        host.style.left = Math.round(host.getBoundingClientRect().left + hide) + 'px';
+        drag.dx -= hide;
+      }
       clearTimeout(openTimer);
       clearTimeout(closeTimer);
       hideTip();

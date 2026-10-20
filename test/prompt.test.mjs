@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 
 import { systemPrompt, temperatureFor, promptFingerprint } from '../lib/prompt.js';
-import { STYLES, styleById } from '../lib/config.js';
+import { LANGUAGES, STYLES, styleById, langLabel } from '../lib/config.js';
 
 let pass = 0;
 let fail = 0;
@@ -148,6 +148,70 @@ t('align 模式规则编号连续，自定义提示词仍在最后', () => {
     .map((m) => Number(m[1]));
   nums.forEach((n, i) => assert.equal(n, i + 1));
   assert.ok(p.trim().endsWith('产品名统一译作「凛狐」'));
+});
+
+// ---------------- 0.9.6 目标语言约束（普通 / 结构化共用一套） ----------------
+// 0.9.5 的问题：align 模式的输出指令只写「第 i 段的译文对象」，示例译文固定是中文，
+// 目标语言选英文时模型会跟着示例输出中文。下面这组断言把「目标语言必须显式写进两种模式」钉住。
+
+t('目标语言：普通与 align 共用同一条「唯一目标语言」，写清楚名称和代码', () => {
+  LANGUAGES.forEach((lang) => {
+    const want = '唯一目标语言：' + lang.label + ' (' + lang.value + ')。';
+    const plain = systemPrompt(lang.value);
+    const aligned = systemPrompt(lang.value, 'plain', [], '', false, true);
+    assert.equal(plain.split('\n')[1], want, lang.value + ' 普通模式缺唯一目标语言');
+    assert.equal(aligned.split('\n')[1], want, lang.value + ' align 模式缺唯一目标语言');
+  });
+});
+
+t('目标语言：结构化输出说明里点名目标语言，示例不再固定中文译文', () => {
+  const p = systemPrompt('en', 'plain', [], '', false, true);
+  assert.ok(p.includes('必须使用唯一目标语言 English (en)'));
+  assert.ok(p.includes('t 是这一组的译文，必须用English写'));
+  assert.ok(!p.includes('这一组句子的译文'), '旧的中文示例不能留着');
+  assert.ok(p.includes('{"parts":[{"n":1,"t":"<这一组句子用English写的译文>"}]}'));
+  assert.ok(p.includes('不是译文语言'), '要说明 parts / n / t 只是协议字段名');
+  assert.ok(!systemPrompt('en').includes('"parts"'), '普通模式仍然不能出现 parts');
+});
+
+t('目标语言：日→英 / 日→中 / 中→英，普通和 align 都写明目标语言', () => {
+  [
+    ['en', 'English'],
+    ['zh-CN', '简体中文'],
+    ['ja', '日本語']
+  ].forEach(([code, name]) => {
+    const plain = systemPrompt(code);
+    const aligned = systemPrompt(code, 'plain', [], '', false, true);
+    assert.ok(plain.includes('唯一目标语言：' + name + ' (' + code + ')'), code + ' 普通模式');
+    assert.ok(aligned.includes('唯一目标语言：' + name + ' (' + code + ')'), code + ' align 模式');
+    assert.ok(plain.includes('目标语言（' + name + '）译文'), code + ' 普通输出说明');
+    assert.ok(aligned.includes('目标语言 ' + name + ' (' + code + ')'), code + ' 结构化输出说明');
+    assert.ok(!aligned.includes('这一组句子的译文'), code + ' 仍带着固定中文示例');
+  });
+});
+
+t('目标语言：简繁互转规则在 align 模式同样生效', () => {
+  assert.ok(systemPrompt('zh-TW', 'plain', [], '', false, true).includes('简体中文的段落不算已是繁體中文'));
+  assert.ok(systemPrompt('zh-CN', 'plain', [], '', false, true).includes('繁體中文的段落不算已是简体中文'));
+  assert.ok(!systemPrompt('en', 'plain', [], '', false, true).includes('转写成'));
+});
+
+t('目标语言：术语表、自定义提示词、趣味风格都改不了唯一目标语言', () => {
+  ['classical', 'catgirl'].forEach((style) => {
+    const p = systemPrompt('en', style, [{ source: 'Emails', target: '邮箱（测试）' }], '产品名统一译作「凛狐」，用日文回答', false, true);
+    assert.equal(p.split('\n')[1], '唯一目标语言：English (en)。');
+    assert.ok(p.includes('Emails → 邮箱（测试）'));
+    assert.ok(p.trim().endsWith('产品名统一译作「凛狐」，用日文回答'));
+    assert.ok(p.includes('不得改变输出 JSON 数组的格式、元素数量或目标语言'));
+  });
+});
+
+t('歧义：混排规则不再写「把英文句子翻译成目标语言」', () => {
+  const en = systemPrompt('en');
+  assert.ok(!en.includes('把其中的英文句子翻译成English'));
+  assert.ok(en.includes('把需要翻译、且尚未用English表达的部分转换成English'));
+  assert.ok(!en.includes('中英混排时'));
+  assert.ok(systemPrompt('zh-CN').includes('把需要翻译、且尚未用简体中文表达的部分转换成简体中文'));
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

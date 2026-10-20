@@ -96,11 +96,20 @@ const scope = {
 const LEGACY_SRC = '「你在做什么？」她问。\n「我在等人。」〔旧缓存〕';
 const LEGACY_BAD = '"What are you doing?" she asked.' + BS + 'n"I\'m waiting for someone."';
 const LEAKY_SRC = '「走吧。」〔旧缓存 2〕';
+// 0.9.6：缓存键标记 en、内容却是整段中文（0.9.5 align 提示词的中文示例带偏模型后留下的）
+const BAD_EN_SRC = 'ある日の暮方の事である。一人の下人が、羅生門の下で雨やみを待っていた。';
+const BAD_EN_VALUE =
+  '某日傍晚，一个下人正在罗生门下避雨。宽广的门下，除了这个男人以外，一个人也没有，只有一只蟋蟀停在斑驳的朱漆大圆柱上。';
+// 同一目标语言下正常的英文缓存：不能被上面的定向失效连累
+const GOOD_EN_SRC = 'Aligned English cache source fifteen';
+const GOOD_EN_VALUE = 'The cached English translation is still valid, and it should stay.';
 await sessionArea.set({
   'dt.cache.v1': {
     entries: [
       [makeKey(scope, LEGACY_SRC), LEGACY_BAD],
-      [makeKey(scope, LEAKY_SRC), '{"translation": "Let\'s go."}']
+      [makeKey(scope, LEAKY_SRC), '{"translation": "Let\'s go."}'],
+      [makeKey(scope, BAD_EN_SRC), BAD_EN_VALUE],
+      [makeKey(scope, GOOD_EN_SRC), GOOD_EN_VALUE]
     ]
   }
 });
@@ -448,6 +457,109 @@ await t('align：parts 不合法但带 translation 字段 → 退回普通解析
   assert.equal(res.ok, true);
   assert.equal(res.results[0], 'Wrap:' + src);
   assert.equal(res.alignments[0], null);
+});
+
+// ---------------- 0.9.6 目标语言：普通 / align 共用一套，缓存不能把中文当英文 ----------------
+const JP_LONG =
+  'ある日の暮方の事である。一人の下人が、羅生門の下で雨やみを待っていた。広い門の下には、この男のほかに誰もいない。';
+const ZH_LONG =
+  '某日傍晚，一个下人正在罗生门下避雨。宽广的门下，除了这个男人以外，一个人也没有，只有一只蟋蟀停在斑驳的朱漆大圆柱上。';
+
+// 受控假模型：系统提示词里明确写了「唯一目标语言：English (en)」才回英文，
+// 否则回中文 —— 这正是 0.9.5 的 align 提示词（没写目标语言、示例还是中文）会诱导出的行为。
+// 提示词以后如果把这条约束改掉，下面的用例会重新变红。
+function englishAwareReply(texts) {
+  const explicit = /唯一目标语言：English \(en\)/.test(lastSystem);
+  const aligned = /"parts"/.test(lastSystem);
+  const value = explicit ? 'This is the English translation.' : ZH_LONG;
+  return JSON.stringify(texts.map(() => (aligned ? { parts: [{ n: 1, t: value }] } : value)));
+}
+
+await t('align：提示词明确 English (en)，假模型才回英文；结构化 parts 正常解析', async () => {
+  await setGlossary([]);
+  reply = englishAwareReply;
+  calls = [];
+  const res = await send({ type: 'translate', texts: [JP_LONG], target: 'en', align: true });
+  assert.equal(res.ok, true);
+  assert.equal(res.results[0], 'This is the English translation.');
+  assert.deepEqual(res.alignments[0], [{ n: 1, t: 'This is the English translation.' }]);
+  assert.equal(calls.length, 1);
+  assert.match(lastSystem, /唯一目标语言：English \(en\)/, 'align 提示词必须写明目标语言');
+  assert.doesNotMatch(lastSystem, /这一组句子的译文/, 'align 示例不能固定中文译文');
+});
+
+await t('普通模式：同一个目标语言约束，假模型回英文', async () => {
+  reply = englishAwareReply;
+  calls = [];
+  const res = await send({ type: 'translate', texts: [JP_LONG + '〔普通〕'], target: 'en' });
+  assert.equal(res.results[0], 'This is the English translation.');
+  assert.equal(calls.length, 1);
+  assert.match(lastSystem, /唯一目标语言：English \(en\)/);
+  assert.doesNotMatch(lastSystem, /"parts"/, '普通模式不该出现结构化协议');
+});
+
+await t('align：模型回普通英文字符串数组 → 正常回退，译文保留、对齐为 null', async () => {
+  reply = (texts) => JSON.stringify(texts.map(() => 'Plain English fallback.'));
+  calls = [];
+  const res = await send({ type: 'translate', texts: ['Fallback source 〔en-align〕'], target: 'en', align: true });
+  assert.equal(res.results[0], 'Plain English fallback.');
+  assert.equal(res.alignments[0], null);
+  assert.equal(calls.length, 1);
+});
+
+await t('缓存：标记 en 却是整段中文 → 只失效这一条并重新翻译；正常英文缓存照常命中', async () => {
+  reply = englishAwareReply;
+  calls = [];
+  const bad = await send({ type: 'translate', texts: [BAD_EN_SRC], target: 'en' });
+  assert.equal(calls.length, 1, '坏缓存应重新翻译一次');
+  assert.equal(bad.cached, 0);
+  assert.equal(bad.results[0], 'This is the English translation.');
+
+  calls = [];
+  const good = await send({ type: 'translate', texts: [GOOD_EN_SRC], target: 'en' });
+  assert.equal(calls.length, 0, '正常英文缓存仍然命中，不能被整层清掉');
+  assert.equal(good.cached, 1);
+  assert.equal(good.results[0], GOOD_EN_VALUE);
+
+  calls = [];
+  const again = await send({ type: 'translate', texts: [BAD_EN_SRC], target: 'en' });
+  assert.equal(calls.length, 0, '重新翻好的英文结果应写回缓存');
+  assert.equal(again.cached, 1);
+  assert.equal(again.results[0], 'This is the English translation.');
+});
+
+await t('新回包：英文目标却回整段中文 → 这次照常显示，但绝不写缓存，下次重新请求', async () => {
+  reply = (texts) => JSON.stringify(texts.map(() => ZH_LONG));
+  calls = [];
+  const src = 'Live Chinese reply source 〔en-live〕';
+  const first = await send({ type: 'translate', texts: [src], target: 'en', align: true });
+  assert.equal(first.results[0], ZH_LONG, '这一次仍返回给页面，不吞掉译文');
+  assert.equal(first.alignments[0], null, '目标语言明显不符时不写对齐旁路');
+  assert.equal(calls.length, 1);
+
+  calls = [];
+  const second = await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 1, '坏结果没有进缓存，下次必须重新请求');
+  assert.equal(second.cached, 0);
+});
+
+await t('目标语言隔离：同一原文 en 与 zh-CN 各自缓存，不串用', async () => {
+  const src = 'Target isolation source 〔en-zh〕';
+  reply = englishAwareReply;
+  calls = [];
+  const en = await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(en.results[0], 'This is the English translation.');
+
+  reply = (texts) => JSON.stringify(texts.map(() => '中文译文〔隔离〕'));
+  calls = [];
+  const zh = await send({ type: 'translate', texts: [src], target: 'zh-CN' });
+  assert.equal(zh.results[0], '中文译文〔隔离〕');
+  assert.equal(calls.length, 1, 'en 的缓存不能给 zh-CN 用');
+
+  calls = [];
+  const enAgain = await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 0);
+  assert.equal(enAgain.results[0], 'This is the English translation.');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

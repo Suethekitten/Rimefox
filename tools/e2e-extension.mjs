@@ -120,6 +120,18 @@ const PAGES = {
 </body></html>`
 };
 
+// 假模型从系统提示词里认目标语言：0.9.6 用「唯一目标语言：Name (code)」，
+// 旧写法（普通模式的「目标语言（繁體中文）」）留作兜底。认不出来按简体中文。
+function targetCodeOf(system) {
+  const sys = String(system || '');
+  const m = /唯一目标语言：[^\n(]+\(([^)]+)\)/.exec(sys);
+  if (m) return m[1].trim();
+  if (sys.includes('目标语言（繁體中文）')) return 'zh-TW';
+  if (sys.includes('目标语言（简体中文）')) return 'zh-CN';
+  if (sys.includes('目标语言（English）')) return 'en';
+  return 'zh-CN';
+}
+
 const server = http.createServer((req, res) => {
   const route = req.url.split('?')[0];
   if (req.method === 'GET' && PAGES[route]) {
@@ -148,18 +160,29 @@ const server = http.createServer((req, res) => {
       stats.sent.push(...texts);
       if (!stats.firstOk) stats.firstOk = Date.now();
       let content;
-      const wantsAlign = body.messages[0].content.includes('"parts"');
+      const sys = String(body.messages[0].content || '');
+      // 0.9.6：从提示词里读目标语言。只有「唯一目标语言：English (en)」真的写进去时才回英文，
+      // 否则回中文 —— 这样提示词一旦退回旧写法，目标语言相关的 E2E 会重新变红。
+      const targetCode = targetCodeOf(sys);
+      const english = /^en/i.test(targetCode);
+      const hant = /^zh-(tw|hk|mo)/i.test(targetCode);
+      const prefix = hant ? '繁:' : '译:';
+      const wantsAlign = sys.includes('"parts"');
       if (wantsAlign) {
         stats.aligned += 1;
-        stats.lastAlignedSystem = String(body.messages[0].content || '');
+        stats.lastAlignedSystem = sys;
       }
-      const aligned = (text, prefix) => {
+      const aligned = (text, i) => {
         // 和内容脚本同一套简单切句：句末标点后断开；每句一个 n=1 的片段
         const sents = String(text)
           .split(/(?<=[。！？…])|(?<=[.!?])\s+/)
           .map((one) => one.trim())
           .filter(Boolean);
         const list = sents.length ? sents : [String(text)];
+        if (english) {
+          // 目标英文：回确定是英文的片段，n 仍按源句数切好，句级对照照常能校验
+          return { parts: list.map((one, k) => ({ n: 1, t: 'EN sentence ' + (i + 1) + '.' + (k + 1) })) };
+        }
         // 真实青空文库验收：译文用纯中文填充（同长度），这样「页面上是否残留假名」才是有效断言
         if (stats.aozoraLive && /[\u3040-\u30ff]/.test(String(text))) {
           return { parts: list.map((one) => ({ n: 1, t: '汉'.repeat(Math.max(4, one.length)) })) };
@@ -169,12 +192,11 @@ const server = http.createServer((req, res) => {
       if (texts.length === 1 && texts[0].includes('CITE')) content = '巴黎是首都[1]。';
       else if (texts.length === 1 && texts[0].includes('SPLIT')) content = '["Hello.","How are you?"]';
       else {
-        const hant = body.messages[0].content.includes('目标语言（繁體中文）');
-        const prefix = hant ? '繁:' : '译:';
         content = JSON.stringify(
-          texts.map((t) => {
+          texts.map((t, i) => {
             if (String(t).includes('trajectory')) return OWID_ZH;
-            if (wantsAlign) return aligned(t, prefix);
+            if (wantsAlign) return aligned(t, i);
+            if (english) return 'EN translation ' + (i + 1);
             if (stats.aozoraLive && /[\u3040-\u30ff]/.test(String(t))) return '汉'.repeat(Math.max(4, String(t).length));
             return prefix + t;
           })
@@ -854,6 +876,166 @@ async function selftestChecks() {
   }
 }
 
+// ---------------- 0.9.6 目标语言：日文 → 英文（悬停开 / 关） ----------------
+async function languageChecks() {
+  console.log('\n[目标语言：日文 → 英文]');
+  await patchConfig({ targetLang: 'en', hoverCompare: true, dockEnabled: false, customPrompt: '' });
+  const tab = await openTab(ORIGIN + '/aozora.html');
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(tab, "return document.querySelectorAll('#mt [data-dt-target]').length === 3"), 20000);
+  await settled(tab);
+  const textsOf = () =>
+    pageEval(tab, "return Array.from(document.querySelectorAll('#mt [data-dt-target]')).map(function (n) { return n.textContent; })");
+  const englishOnly = (list) =>
+    Array.isArray(list) && list.length === 3 && list.every((s) => s && s.trim() && !/[\u3040-\u30ff\u3400-\u9fff]/.test(s));
+
+  const alignedTexts = await textsOf();
+  check('悬停开启（align）：日文正文译成英文，不再变成中文', ready && englishOnly(alignedTexts), JSON.stringify(alignedTexts));
+  check(
+    '悬停开启：align 提示词写明唯一目标语言 English (en)',
+    String(stats.lastAlignedSystem).includes('唯一目标语言：English (en)') &&
+      !String(stats.lastAlignedSystem).includes('这一组句子的译文'),
+    String(stats.lastAlignedSystem).slice(0, 120)
+  );
+  const alignInfo = await contentEval(
+    tab,
+    "(function () { var tn = document.querySelectorAll('#mt [data-dt-target]')[1]; if (!tn || !tn.firstChild) return { align: false, sentences: -1 }; var u = window.__DT.unitOfNode(tn.firstChild); return { align: !!(u && u.align), sentences: u ? u.sentences.length : -1 }; })()"
+  );
+  check('悬停开启：结构化 parts 通过校验，句级对照可用', !!alignInfo && !!alignInfo.align, JSON.stringify(alignInfo));
+  const hover = await contentEval(
+    tab,
+    "(function () { var tn = document.querySelectorAll('#mt [data-dt-target]')[1]; if (!tn || !tn.firstChild) return { error: 'no-target' }; var r = document.createRange(); r.setStart(tn.firstChild, 1); r.setEnd(tn.firstChild, Math.min(5, tn.firstChild.nodeValue.length)); var rect = r.getBoundingClientRect(); window.__DT.hover.updateAt(rect.left + 1, rect.top + 1, tn.firstChild); var src = CSS.highlights.get('dt-hover-src'); var tgt = CSS.highlights.get('dt-hover-target'); return { src: src ? Array.from(src).map(function (x) { return x.toString(); }).join('|') : '', tgt: tgt ? Array.from(tgt).map(function (x) { return x.toString(); }).join('|') : '' }; })()"
+  );
+  check('悬停开启：英文译文上仍能高亮对应原句', !!hover && !!hover.src && !!hover.tgt, JSON.stringify(hover));
+
+  // 关掉悬停对照：先清缓存再重翻（缓存键不含 align，不清会直接命中上面那次的结果，普通提示词根本不会被调用）
+  await contentEval(tab, 'window.__DT.send({ type: "cache:clear" })');
+  await patchConfig({ hoverCompare: false });
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(tab, "return document.querySelectorAll('#mt [data-dt-target]').length === 0"), 10000);
+  stats.aligned = 0;
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const readyPlain = await until(() => pageEval(tab, "return document.querySelectorAll('#mt [data-dt-target]').length === 3"), 20000);
+  await settled(tab);
+  const plainTexts = await textsOf();
+  check('悬停关闭（普通模式）：同样译成英文', readyPlain && englishOnly(plainTexts), JSON.stringify(plainTexts));
+  check(
+    '悬停关闭：普通提示词同样写明唯一目标语言 English (en)，且没有 parts',
+    String(stats.lastSystem).includes('唯一目标语言：English (en)') && !String(stats.lastSystem).includes('"parts"'),
+    String(stats.lastSystem).slice(0, 120)
+  );
+
+  // 切回中文：页面上不能继续留着旧英文译文
+  await patchConfig({ targetLang: 'zh-CN', hoverCompare: true });
+  const switched = await until(
+    () =>
+      pageEval(
+        tab,
+        "var list = Array.from(document.querySelectorAll('#mt [data-dt-target]')); return list.length === 3 && list.every(function (n) { return n.textContent.indexOf('译:') === 0; });"
+      ),
+    25000
+  );
+  const switchedTexts = await textsOf();
+  check('切换目标语言：旧英文译文被中文译文替换', !!switched, JSON.stringify(switchedTexts));
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await patchConfig({ targetLang: 'zh-CN', hoverCompare: true });
+  await sleep(300);
+}
+
+// ---------------- 0.9.6 悬浮球半隐藏：真实矩形 + 真实鼠标 ----------------
+async function dockHideChecks() {
+  console.log('\n[悬浮入口·半隐藏]');
+  await patchConfig({ dockEnabled: true, dockAutoHide: true, dockSide: 'right', dockPos: null });
+  const d = await openTab(ORIGIN + '/page.html?dockhide');
+  await until(() => pageEval(d, "return !!document.getElementById('dt-dock')"));
+  await sleep(900); // 半隐藏 / 展开的过渡都跑完
+  const ballInfo = async () =>
+    JSON.parse(
+      await contentEval(
+        d,
+        '(function () { var root = window.__DT.dock.root(); var dockEl = root.querySelector(".dock"); var r = root.querySelector(".ball").getBoundingClientRect(); var vw = document.documentElement.clientWidth; return JSON.stringify({ left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), top: Math.round(r.top), height: Math.round(r.height), vw: vw, visible: Math.round(Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0))), transform: getComputedStyle(dockEl).transform, snapped: dockEl.hasAttribute("data-snapped") }); })()'
+      )
+    );
+
+  const right = await ballInfo();
+  check('右侧贴边半隐藏：至少露出半个小球', right.right > right.vw && right.visible >= right.width / 2 - 1, JSON.stringify(right));
+
+  const hoverX = right.vw - Math.round(right.visible / 2);
+  const hoverY = Math.round(right.top + right.height / 2);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverX, y: hoverY, pointerType: 'mouse' }, d.s);
+  // 悬停展开有 120ms 延迟 + 320ms 过渡，headless 下帧调度还可能更慢：轮询到展开完成，别用固定 sleep
+  let opened = null;
+  const openedOk = await until(async () => {
+    const m = await ballInfo();
+    if (m.transform === 'none') {
+      opened = m;
+      return true;
+    }
+    return false;
+  }, 6000);
+  if (!opened) opened = await ballInfo();
+  check('鼠标移入可见半球：Dock 完整展开', !!openedOk && opened.left >= 0 && opened.right <= opened.vw - 1, JSON.stringify(opened));
+
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(opened.vw / 2), y: 150, pointerType: 'mouse' }, d.s);
+  let closed = null;
+  const closedOk = await until(async () => {
+    const m = await ballInfo();
+    // 等过渡走完：既不是展开（transform none），也不在中间位置，而是稳定在半颗球
+    if (m.transform !== 'none' && m.visible >= m.width / 2 - 1 && m.visible <= m.width / 2 + 2) {
+      closed = m;
+      return true;
+    }
+    return false;
+  }, 6000);
+  if (!closed) closed = await ballInfo();
+  check('鼠标移开：重新半隐藏', !!closedOk && closed.right > closed.vw && closed.visible >= closed.width / 2 - 1, JSON.stringify(closed));
+
+  await patchConfig({ dockSide: 'left', dockPos: null });
+  await sleep(900);
+  const left = await ballInfo();
+  check('左侧贴边半隐藏：至少露出半个小球', left.left < 0 && left.visible >= left.width / 2 - 1, JSON.stringify(left));
+
+  // 从半隐藏的小球起拖到页面中间：起拖 / 松手都不能瞬移，松手后自由悬浮
+  const sx = Math.round(Math.min(left.right, left.vw) / 2);
+  const sy = Math.round(left.top + left.height / 2);
+  const tx = Math.round(left.vw / 2);
+  const ty = Math.round(left.top + 60);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: sx, y: sy, button: 'left', clickCount: 1, pointerType: 'mouse' }, d.s);
+  for (let i = 1; i <= 8; i += 1) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sx + ((tx - sx) * i) / 8, y: sy + ((ty - sy) * i) / 8, button: 'left', pointerType: 'mouse' }, d.s);
+    await sleep(30);
+  }
+  const duringDrag = await ballInfo();
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: tx, y: ty, button: 'left', clickCount: 1, pointerType: 'mouse' }, d.s);
+  await sleep(900);
+  const dropped = await ballInfo();
+  check(
+    '从半隐藏小球起拖：起拖 / 松手都不跳位，松手后自由悬浮',
+    Math.abs(dropped.left - duringDrag.left) <= 3 &&
+      dropped.transform === 'none' &&
+      !dropped.snapped &&
+      dropped.left > 80 &&
+      dropped.right < dropped.vw - 80,
+    JSON.stringify({ before: duringDrag, after: dropped })
+  );
+
+  await patchConfig({ dockAutoHide: false, dockSide: 'right', dockPos: null });
+  await sleep(900);
+  const off = await ballInfo();
+  check('关闭自动隐藏：完整显示', off.right <= off.vw && off.left >= 0, JSON.stringify(off));
+
+  await patchConfig({ dockAutoHide: true, dockSide: 'right', dockPos: null });
+  await send('Emulation.setDeviceMetricsOverride', { width: 420, height: 560, deviceScaleFactor: 1, mobile: false }, d.s);
+  await sleep(900);
+  const narrow = await ballInfo();
+  check('窄视口贴边：仍至少露出半个小球', narrow.right > narrow.vw && narrow.visible >= narrow.width / 2 - 1, JSON.stringify(narrow));
+  await send('Emulation.clearDeviceMetricsOverride', {}, d.s);
+  await sleep(400);
+
+  await patchConfig({ dockEnabled: false, dockPos: null, dockAutoHide: true });
+  await sleep(300);
+}
+
 let crashed = null;
 // ---------------- 输入框翻译 ----------------
 // 真实按键（CDP）走一遍：textarea / 只翻选区 / Ctrl+Z / 受控输入框 / contenteditable / 密码框 / 不写缓存
@@ -882,11 +1064,14 @@ async function inputChecks() {
         '; el.focus(); el.setSelectionRange(' + start + ', ' + end + '); return true;'
     );
 
+  // 输入框的目标语言跟随页面（<html lang="en"> → en），假接口对英文目标回英文标记；
+  // 不再假设译文一定带「译:」前缀（0.9.6 起假接口按目标语言回包）。
+  const EN = 'EN translation 1';
   // 1) textarea 整个框：Alt+I 翻完原地写回；目标语言跟随页面（<html lang="en"> → 提示词里是 English）
   await pageEval(tab, "document.getElementById('ta').focus(); return true");
   await pressAltI();
-  const whole = await waitValue('ta', '译:');
-  check('textarea：按 Alt+I 翻整个框并原地写回', whole === '译:Hello draft line', whole || '没有写回');
+  const whole = await waitValue('ta', 'EN translation');
+  check('textarea：按 Alt+I 翻整个框并原地写回', whole === EN, whole || '没有写回');
   check(
     '目标语言跟随页面：<html lang="en"> → 提示词里是 English',
     /English/.test(stats.lastSystem),
@@ -900,17 +1085,17 @@ async function inputChecks() {
   // 3) 有选区只翻选区
   await setBox('ta', 'One two three', 4, 7);
   await pressAltI();
-  const onlySel = await waitValue('ta', 'One 译:');
-  check('有选区只翻选区，别的文字不动', onlySel === 'One 译:two three', onlySel || '没有写回');
+  const onlySel = await waitValue('ta', 'One EN translation');
+  check('有选区只翻选区，别的文字不动', onlySel === 'One ' + EN + ' three', onlySel || '没有写回');
 
   // 4) 不写缓存：同一段重置后再翻，还是要发一次新请求（输入框里是草稿）
   await setBox('ta', 'Cache me not', 12, 12);
   await pressAltI();
-  await waitValue('ta', '译:Cache me not');
+  await waitValue('ta', 'EN translation');
   const afterFirst = stats.texts;
   await setBox('ta', 'Cache me not', 12, 12);
   await pressAltI();
-  await waitValue('ta', '译:Cache me not');
+  await waitValue('ta', 'EN translation');
   check('输入框翻译不进缓存：同一段再翻仍是一次新请求', stats.texts > afterFirst, '第一次后 ' + afterFirst + ' → 第二次后 ' + stats.texts);
 
   // 5) 模拟 React 受控输入框：必须收到 input 事件，state 跟着变
@@ -920,11 +1105,11 @@ async function inputChecks() {
     () =>
       pageEval(
         tab,
-        "const el = document.getElementById('rx'); return el.getAttribute('data-state') === '译:Controlled input' ? el.value : '';"
+        "const el = document.getElementById('rx'); return el.getAttribute('data-state') === " + JSON.stringify('EN translation 1') + " ? el.value : '';"
       ),
     20000
   );
-  check('受控输入框：收到 input 事件，state 跟着变', controlled === '译:Controlled input', controlled || '受控输入框没收到改动');
+  check('受控输入框：收到 input 事件，state 跟着变', controlled === EN, controlled || '受控输入框没收到改动');
 
   // 6) contenteditable 富文本：整段选中后按快捷键
   await pageEval(
@@ -933,10 +1118,10 @@ async function inputChecks() {
   );
   await pressAltI();
   const rich = await until(
-    () => pageEval(tab, "const el = document.getElementById('ce'); return el.textContent.indexOf('译:') === 0 ? el.textContent : '';"),
+    () => pageEval(tab, "const el = document.getElementById('ce'); return el.textContent.indexOf('EN translation') === 0 ? el.textContent : '';"),
     20000
   );
-  check('contenteditable：整段替换成译文', rich === '译:Editable rich text', rich || '富文本没被替换');
+  check('contenteditable：整段替换成译文', rich === EN, rich || '富文本没被替换');
 
   // 7) 密码框一律不碰
   await pageEval(tab, "document.getElementById('pw').focus(); return true");
@@ -988,13 +1173,14 @@ async function dockChecks() {
       '(function () { var r = window.__DT.dock.root().querySelector(".ball").getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()'
     )
   );
-  const clickBall = async () => {
-    const at = { x: ballAt.x, y: ballAt.y, button: 'left', clickCount: 1, pointerType: 'mouse' };
+  const clickAt = async ({ x, y }) => {
+    const at = { x, y, button: 'left', clickCount: 1, pointerType: 'mouse' };
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at }, d.s);
     await sleep(40);
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at }, d.s);
     await sleep(300);
   };
+  const clickBall = () => clickAt(ballAt);
   const enabledBefore = await contentEval(d, 'window.__DT.control.status().enabled');
   await clickBall();
   const enabledOn = await contentEval(d, 'window.__DT.control.status().enabled');
@@ -1005,6 +1191,23 @@ async function dockChecks() {
     enabledBefore === false && enabledOn === true && enabledOff === false,
     JSON.stringify({ enabledBefore, enabledOn, enabledOff })
   );
+
+  // 面板按钮（服务商）：真实 click 仍然能打开 / 收起菜单（0.9.3 捕获回归的另一个入口）
+  await contentEval(d, '(window.__DT.dock.setOpen(true), true)');
+  await sleep(350);
+  const providerAt = JSON.parse(
+    await contentEval(
+      d,
+      '(function () { var r = window.__DT.dock.root().querySelector("[data-act=provider]").getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()'
+    )
+  );
+  await clickAt(providerAt);
+  const menuOpened = await contentEval(d, 'window.__DT.dock.menu() ? !window.__DT.dock.menu().hidden : false');
+  await clickAt(providerAt);
+  const menuClosed = await contentEval(d, 'window.__DT.dock.menu() ? window.__DT.dock.menu().hidden : false');
+  check('面板按钮（服务商菜单）仍可点开 / 收起', menuOpened === true && menuClosed === true, JSON.stringify({ menuOpened, menuClosed }));
+  await contentEval(d, '(window.__DT.dock.setOpen(false), true)');
+
   await patchConfig({ dockEnabled: false, dockPos: null });
   await sleep(300);
 }
@@ -1015,7 +1218,9 @@ try {
   } else if (!flag('--youtube-only')) {
     await articleChecks();
     await paragraphChecks();
+    await languageChecks();
     await dockChecks();
+    await dockHideChecks();
     await hoverLocalChecks();
     await optionsChecks();
     await selftestChecks();

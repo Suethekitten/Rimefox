@@ -96,6 +96,7 @@ t('请求 / 响应 / token / 未知 usage / 缓存 / 重试 / 拆批 / 丢弃 / 
     cacheWriteTokens: 0,
     cacheHits: 1,
     cacheMisses: 3,
+    languageMismatch: 0,
     retries: 1,
     splits: 1,
     discarded: 1,
