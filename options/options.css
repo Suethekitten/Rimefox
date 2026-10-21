@@ -154,13 +154,62 @@ a:focus-visible {
 }
 
 .nav {
+  /* 液态玻璃导航：竖向透镜跟随当前分组 / 悬停 / 焦点 */
+  --glass-lens-strength: 10;
+  --glass-lens-depth: 2;
+  --glass-lens-cab: 0.8;
+  --glass-lens-blur: 0;
+  --glass-lens-brightness: 1.04;
+  --glass-lens-saturate: 1.5;
+  --nav-edge: color-mix(in srgb, var(--text-1) 8%, transparent);
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 6px;
+  border-radius: 16px;
+  background:
+    radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
+    color-mix(in srgb, var(--bg-card) 52%, transparent);
+  box-shadow: var(--shadow-card), var(--card-highlight);
+}
+
+/* 玻璃导轨：底座用普通磨砂，透镜才用 SVG 位移折射，避免给 220×N 的大面板生成一张大滤镜。 */
+.nav::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: 1px solid var(--nav-edge);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg-elevated) 22%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  pointer-events: none;
+}
+
+/* 透镜：位置 / 尺寸由 lib/liquid-glass/nav.js 逐帧写入。 */
+.glass-nav__thumb {
+  position: absolute;
+  z-index: 1;
+  left: 6px;
+  top: 6px;
+  width: calc(100% - 12px);
+  height: 33px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-elevated) 46%, transparent);
+  -webkit-backdrop-filter: var(--thumb-refraction, blur(10px) saturate(140%));
+  backdrop-filter: var(--thumb-refraction, blur(10px) saturate(140%));
+  box-shadow:
+    var(--card-highlight),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 10px 24px -16px color-mix(in srgb, var(--text-1) 40%, transparent);
+  pointer-events: none;
 }
 
 .nav-item {
   position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -233,6 +282,59 @@ a:focus-visible {
   background: var(--accent-grad);
   color: var(--on-accent);
   box-shadow: 0 4px 10px -4px var(--accent-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+/* 开玻璃时选中 / 悬停的底色让给透镜；关掉后恢复原来的强调色底。 */
+:root:not([data-liquid-glass="off"]) .nav-item.is-active,
+:root:not([data-liquid-glass="off"]) .nav-item:hover {
+  background: transparent;
+}
+
+/* 有导轨后，左侧强调色竖条收进内边距里，不再浮在导轨外。 */
+:root:not([data-liquid-glass="off"]) .nav-item::before {
+  left: -4px;
+}
+
+/* 关闭液态玻璃：导航回到原来的透明文字列表，透镜和导轨一起撤掉。 */
+:root[data-liquid-glass="off"] .nav {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+:root[data-liquid-glass="off"] .nav::before,
+:root[data-liquid-glass="off"] .glass-nav__thumb {
+  display: none;
+}
+
+/* 减少透明 / 关闭阴影沿用全局开关。 */
+:root[data-reduce-transparency] .nav::before {
+  background: var(--bg-card-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-reduce-transparency] .glass-nav__thumb {
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-no-shadow] .nav,
+:root[data-no-shadow] .glass-nav__thumb {
+  box-shadow: 0 0 #0000;
+}
+
+@media (forced-colors: active) {
+  .nav {
+    border: 1px solid ButtonText;
+  }
+
+  .nav::before,
+  .glass-nav__thumb {
+    display: none;
+  }
 }
 
 .sidebar-guide {
@@ -506,50 +608,83 @@ textarea::placeholder {
   text-align: right;
 }
 
-/* ---- 开关：38 × 22 底槽、18px 圆球；按住时圆球拉长 2px，松手弹回（弹簧曲线） ---- */
+/* ---- 开关：小号滑块（52 × 24 玻璃槽 + 30 × 20 透镜），和排版滑块共用同一套材质 ---- */
 input.switch {
   appearance: none;
   -webkit-appearance: none;
   position: relative;
   flex: none;
-  width: 38px;
-  height: 22px;
+  width: 52px;
+  height: 24px;
   margin: 0;
+  border: 1px solid var(--field-edge);
   border-radius: var(--r-pill);
   background: var(--switch-off);
   box-shadow: var(--switch-inset);
   cursor: pointer;
-  transition: background var(--dur) ease, box-shadow var(--dur) ease;
+  transition: background var(--dur) ease, border-color var(--dur) ease, box-shadow var(--dur) ease;
 }
 
+/* 开状态的强调色填充：和排版滑块一样填到透镜中心。 */
+input.switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 0;
+  height: 20px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 20%, transparent),
+    color-mix(in srgb, var(--accent) 55%, transparent)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  opacity: 0;
+  transition: width 220ms var(--ease-spring), opacity 180ms ease;
+}
+
+input.switch:checked::before {
+  width: 35px;
+  opacity: 1;
+}
+
+/* 透镜：30 × 20，和「字号 / 行高 / 间距」滑块是同一张 --glass-slider-filter。 */
 input.switch::after {
   content: "";
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 18px;
-  height: 18px;
+  width: 30px;
+  height: 20px;
   border-radius: var(--r-pill);
-  background: #fff;
-  box-shadow: var(--thumb-shadow);
-  transition: transform 260ms var(--ease-spring), width 200ms var(--ease-spring);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 48%),
+    color-mix(in srgb, #fff 16%, transparent);
+  -webkit-backdrop-filter: var(--glass-slider-filter, blur(6px) saturate(170%));
+  backdrop-filter: var(--glass-slider-filter, blur(6px) saturate(170%));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 -2px 3px rgba(15, 23, 42, 0.15),
+    0 2px 6px -2px rgba(15, 23, 42, 0.28);
+  transition: transform 260ms var(--ease-spring);
 }
 
 input.switch:active::after {
-  width: 20px;
+  transform: scale(1.03);
 }
 
 input.switch:checked {
-  background: var(--accent-grad);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 8px -2px var(--accent-shadow);
+  border-color: var(--accent-border);
 }
 
 input.switch:checked::after {
-  transform: translateX(16px);
+  transform: translateX(18px);
 }
 
 input.switch:checked:active::after {
-  transform: translateX(14px);
+  transform: translateX(18px) scale(1.03);
 }
 
 input.switch:focus-visible {
@@ -558,12 +693,37 @@ input.switch:focus-visible {
 }
 
 input.switch:checked:focus-visible {
-  box-shadow: 0 0 0 3px var(--accent-ring);
+  box-shadow: var(--switch-inset), 0 0 0 3px var(--accent-ring);
 }
 
 input.switch:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 减少透明 / 关闭液态玻璃：透镜回到实心白底 + 强调色描边，填充保持实色。 */
+:root[data-reduce-transparency] input.switch,
+:root[data-liquid-glass="off"] input.switch {
+  background: var(--switch-off);
+}
+
+:root[data-reduce-transparency] input.switch::after,
+:root[data-liquid-glass="off"] input.switch::after {
+  background: #fff;
+  border: 2px solid var(--accent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--thumb-shadow);
+}
+
+:root[data-reduce-transparency] input.switch::before,
+:root[data-liquid-glass="off"] input.switch::before {
+  background: var(--accent);
+}
+
+/* 关闭阴影：只留内高光，去掉外投影。 */
+:root[data-no-shadow] input.switch::after {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 /* ---- 按钮 ----
@@ -1850,9 +2010,120 @@ details.more > summary:focus-visible {
   width: 310px;
 }
 
-.typo-slider input[type="range"] {
+.typo-range-wrap {
+  position: relative;
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 26px;
+}
+
+.typo-range-wrap input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 26px;
+  margin: 0;
+  background: transparent;
+}
+
+/* 轨道：半透明玻璃槽；透镜是上面那枚真实的玻璃珠（原生 range 滑块只负责交互）。 */
+.typo-range-wrap input[type="range"]::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--bg-subtle) 88%, transparent);
+  border: 1px solid var(--field-edge);
+  box-shadow: var(--switch-inset);
+}
+
+.typo-range-wrap input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 30px;
+  height: 20px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  opacity: 0;
+  cursor: grab;
+}
+
+/* 强调色填充到透镜中心，玻璃透镜才有颜色可折射。 */
+.typo-fill {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 1;
+  width: 15px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  transform: translateY(-50%);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 20%, transparent),
+    color-mix(in srgb, var(--accent) 55%, transparent)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+/* 透镜：材质 / 位移滤镜复用 lib/liquid-glass（Sak，MIT）。 */
+.typo-lens {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 2;
+  width: 30px;
+  height: 20px;
+  border-radius: var(--r-pill);
+  transform: translateY(-50%);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 48%),
+    color-mix(in srgb, #fff 16%, transparent);
+  -webkit-backdrop-filter: var(--glass-slider-filter, blur(6px) saturate(170%));
+  backdrop-filter: var(--glass-slider-filter, blur(6px) saturate(170%));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 -2px 3px rgba(15, 23, 42, 0.15),
+    0 2px 6px -2px rgba(15, 23, 42, 0.28);
+  pointer-events: none;
+  transition: left 180ms var(--ease-spring), transform 160ms var(--ease-spring);
+}
+
+.typo-range-wrap.is-dragging .typo-lens {
+  transition: none;
+  transform: translateY(-50%) scale(1.06);
+}
+
+.typo-range-wrap input[type="range"]:focus-visible ~ .typo-lens {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* 减少透明 / 关闭液态玻璃：回到实心白球 + 强调色描边。 */
+:root[data-reduce-transparency] .typo-lens,
+:root[data-liquid-glass="off"] .typo-lens {
+  background: #fff;
+  border: 3px solid var(--accent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--thumb-shadow);
+}
+
+:root[data-liquid-glass="off"] .typo-fill {
+  display: none;
+}
+
+:root[data-reduce-transparency] .typo-fill {
+  background: var(--accent);
+}
+
+:root[data-no-shadow] .typo-lens,
+:root[data-no-shadow] .typo-fill {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 .typo-value {

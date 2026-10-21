@@ -16,6 +16,8 @@ import { applyI18n, t } from '../lib/i18n.js';
 import { normalizeHosts, hostListed } from '../lib/site-rules.js';
 import { applyUiTheme, applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig } from '../lib/ui-appearance.js';
 import { openWelcomePage } from '../lib/welcome.js';
+import { mountGlassDock } from '../lib/liquid-glass/dock.js';
+import { ensureGlassFilter } from '../lib/liquid-glass/material.js';
 
 const el = {
   ver: document.getElementById('ver'),
@@ -51,11 +53,13 @@ const el = {
   nightRow: document.getElementById('nightRow'),
   hoverRow: document.getElementById('hoverRow'),
   nightSite: document.getElementById('nightSite'),
-  nightHost: document.getElementById('nightHost')
+  nightHost: document.getElementById('nightHost'),
+  glassDock: document.getElementById('glassDock')
 };
 
 let tabId = null;
 let tabUrl = '';
+let glassDock = null;
 let supported = false;
 let injectFailed = false;
 let currentCfg = { targetLang: 'zh-CN' };
@@ -412,6 +416,27 @@ el.nightSite.addEventListener('change', async () => {
   renderNight();
 });
 
+// 按 <html data-liquid-glass> 挂载 / 销毁工具坞；关闭时 CSS 会把底部还原成普通图标栏。
+function syncGlassDock() {
+  const on = document.documentElement.getAttribute('data-liquid-glass') !== 'off';
+  if (on) {
+    ensureGlassFilter('mini-slider', { width: 20, height: 14, radius: 7 }, {
+      strength: 3.5, depth: 1.2, chromaticAberration: 1.2, blur: 0.35, brightness: 1.06, saturate: 1.7
+    });
+  }
+  if (on && !glassDock) {
+    try {
+      glassDock = mountGlassDock(el.glassDock);
+      if (glassDock) glassDock.syncLabels();
+    } catch (err) {
+      console.warn('[凛狐] 液态玻璃工具坞未启用：', err);
+    }
+  } else if (!on && glassDock) {
+    glassDock.destroy();
+    glassDock = null;
+  }
+}
+
 // 设置页或另一个弹窗改了配置：外观、主题图标、服务商、夜间开关跟着变
 function onConfigElsewhere(next) {
   const langBefore = currentCfg.uiLang;
@@ -419,8 +444,14 @@ function onConfigElsewhere(next) {
   uiTheme = currentCfg.uiTheme || 'auto';
   applyUiTheme(uiTheme);
   applyUiAppearance(currentCfg);
+  syncGlassDock();
   if (currentCfg.uiLang !== langBefore) {
     applyI18n(document, currentCfg.uiLang);
+    if (glassDock) {
+      glassDock.syncLabels();
+      // 标签变了要换一个透镜元素，否则 Chrome 的 backdrop 纹理可能还停在旧语言。
+      glassDock.reset();
+    }
     render();
   }
   renderThemeToggle();
@@ -475,6 +506,9 @@ async function init() {
   renderThemeToggle();
   renderNight();
   renderHover();
+  // 底部工具坞：折射滤镜 / 透镜动效复用 Liquid Glass Slider（Sak，MIT）。
+  // 设置里关掉「液态玻璃」时这里不会挂载，CSS 还原成普通图标栏。
+  syncGlassDock();
   watchConfig(onConfigElsewhere);
 }
 
@@ -658,6 +692,10 @@ el.langToggle.addEventListener('click', async () => {
   el.langToggle.disabled = false;
   if (!saved) return;
   applyI18n(document, next);
+  if (glassDock) {
+    glassDock.syncLabels();
+    glassDock.reset();
+  }
   render();
   renderMeta();
   renderThemeToggle();

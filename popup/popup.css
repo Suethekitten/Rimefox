@@ -741,10 +741,35 @@ kbd {
   flex: none;
   width: 32px;
   height: 18px;
+  border: 1px solid var(--field-edge);
   border-radius: var(--r-pill);
   background: var(--switch-off);
   box-shadow: var(--switch-inset);
-  transition: background var(--dur) ease, box-shadow var(--dur) ease;
+  transition: background var(--dur) ease, border-color var(--dur) ease, box-shadow var(--dur) ease;
+}
+
+/* 小滑块：强调色填充 + 20 × 14 透镜，和设置页开关 / 排版滑块同一套材质。 */
+.mini-switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 0;
+  height: 14px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 20%, transparent),
+    color-mix(in srgb, var(--accent) 55%, transparent)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  opacity: 0;
+  transition: width 220ms var(--ease-spring), opacity 180ms ease;
+}
+
+.tile input:checked + .mini-switch::before {
+  width: 20px;
+  opacity: 1;
 }
 
 .mini-switch::after {
@@ -752,29 +777,36 @@ kbd {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 14px;
+  width: 20px;
   height: 14px;
   border-radius: var(--r-pill);
-  background: #fff;
-  box-shadow: var(--thumb-shadow);
-  transition: transform 260ms var(--ease-spring), width 200ms var(--ease-spring);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 48%),
+    color-mix(in srgb, #fff 16%, transparent);
+  -webkit-backdrop-filter: var(--glass-mini-slider-filter, blur(4px) saturate(180%));
+  backdrop-filter: var(--glass-mini-slider-filter, blur(4px) saturate(180%));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 -1px 2px rgba(15, 23, 42, 0.12),
+    0 1px 4px -1px rgba(15, 23, 42, 0.26);
+  transition: transform 260ms var(--ease-spring);
 }
 
 .tile:active .mini-switch::after {
-  width: 16px;
+  transform: scale(1.03);
 }
 
 .tile input:checked + .mini-switch {
-  background: var(--accent-grad);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 8px -2px var(--accent-shadow);
+  border-color: var(--accent-border);
 }
 
 .tile input:checked + .mini-switch::after {
-  transform: translateX(14px);
+  transform: translateX(8px);
 }
 
 .tile:active input:checked + .mini-switch::after {
-  transform: translateX(12px);
+  transform: translateX(8px) scale(1.03);
 }
 
 .tile input:focus-visible + .mini-switch {
@@ -783,6 +815,30 @@ kbd {
 
 .tile input:disabled + .mini-switch {
   opacity: 0.5;
+}
+
+/* 减少透明 / 关闭液态玻璃：透镜回到实心白底 + 强调色描边，填充保持实色。 */
+:root[data-reduce-transparency] .mini-switch,
+:root[data-liquid-glass="off"] .mini-switch {
+  background: var(--switch-off);
+}
+
+:root[data-reduce-transparency] .mini-switch::after,
+:root[data-liquid-glass="off"] .mini-switch::after {
+  background: #fff;
+  border: 2px solid var(--accent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--thumb-shadow);
+}
+
+:root[data-reduce-transparency] .mini-switch::before,
+:root[data-liquid-glass="off"] .mini-switch::before {
+  background: var(--accent);
+}
+
+:root[data-no-shadow] .mini-switch::after {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 /* ---------------- 6. 随手翻译：聚焦展开抽屉 ----------------
@@ -1010,39 +1066,172 @@ kbd {
   font-weight: 600;
 }
 
-/* ---------------- 7. 底部 5 宫格图标栏 ---------------- */
+/* ---------------- 7. 底部液态玻璃工具坞 ----------------
+   5 个动作按钮不再是一排普通图标：底座是一层会折射页面的玻璃，
+   鼠标悬停 / 键盘聚焦时一枚液态透镜滑到按钮下方，按下放大、拖动拉伸。
+   材质、位移滤镜与弹簧复用 Sak（@Saknutella）的 Liquid Glass Slider（MIT），
+   见 THIRD-PARTY-NOTICES.md；滤镜节点由 lib/liquid-glass/material.js 生成。
+   这里没有选中项：按钮是命令，不是导航，拖动跨过按钮不会触发任何命令。 */
+
 .foot {
+  --glass-slots: 5;
+  --glass-height: 54px;
+  --glass-padding: 5px;
+  --glass-radius: calc(var(--glass-height) / 2);
+  --glass-thumb-width: 1;
+  --glass-thumb-radius: var(--glass-radius);
+  --glass-lens-protrude: 8px;
+  --glass-lens-grow: 1.38;
+  --glass-lens-strength: 9;
+  --glass-lens-depth: 2;
+  --glass-lens-cab: 0.8;
+  --glass-lens-blur: 0;
+  --glass-lens-brightness: 1.06;
+  --glass-lens-saturate: 1.5;
+  --glass-base-strength: 12;
+  --glass-base-depth: 6;
+  --glass-base-cab: 0.3;
+  --glass-base-blur: 2;
+  --glass-base-brightness: 1.03;
+  --glass-base-saturate: 1.25;
+  --glass-blur: 12px;
+  --glass-fallback: var(--bg-card-solid);
+  --glass-accent: var(--accent);
+  --glass-ink: var(--text-2);
+  --glass-tint: color-mix(in srgb, var(--bg-elevated) 36%, transparent);
+  --glass-edge: color-mix(in srgb, var(--text-1) 9%, transparent);
+  --glass-edge-border: 1px solid color-mix(in srgb, var(--text-1) 7%, transparent);
+  --glass-sheen: linear-gradient(160deg, color-mix(in srgb, white 14%, transparent), transparent 46%);
+  --glass-thumb-bg: color-mix(in srgb, var(--bg-elevated) 12%, transparent);
+  --glass-thumb-glow: inset 0 0 4px 0 color-mix(in srgb, var(--bg-elevated) 48%, transparent);
+  --glass-thumb-shadow: 0 10px 24px -12px color-mix(in srgb, var(--text-1) 34%, transparent);
+  --glass-shadow: var(--shadow-card), var(--card-highlight);
+  --glass-item-gap: 3px;
+  --glass-label-size: 11px;
+  --glass-label-weight: 500;
+  --glass-icon-size: 15px;
+  --glass-icon-transition: 400ms var(--ease-spring);
+  --glass-item-transition: color var(--dur) ease, transform 220ms var(--ease);
+  --glass-icon-active-scale: 0.92;
+  --light-x: 26%;
+  --press: 0;
+  --drag-x: 0px;
+
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 2px;
-  padding: 6px 8px 8px;
-  border-top: 1px solid var(--divider);
+  grid-template-columns: repeat(var(--glass-slots), minmax(0, 1fr));
+  align-items: stretch;
+  box-sizing: border-box;
+  height: var(--glass-height);
+  margin: 8px 10px 10px;
+  padding: var(--glass-padding);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--glass-radius);
+  /* 底座自身的极光：玻璃的折射需要一点颜色可弯，纯平背景看不出液态感。 */
+  background:
+    radial-gradient(60% 200% at 10% -40%, color-mix(in srgb, var(--accent) 32%, transparent), transparent 64%),
+    radial-gradient(50% 180% at 92% 150%, color-mix(in srgb, #7cc8f2 25%, transparent), transparent 66%),
+    radial-gradient(40% 160% at 55% 160%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
+    color-mix(in srgb, var(--bg-card) 70%, transparent);
+  box-shadow: var(--glass-shadow);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: pan-y;
 }
 
-.link {
+/* 底座玻璃：采样身后的极光，再叠一层很薄的雾面。 */
+.foot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--glass-sheen), var(--glass-tint);
+  -webkit-backdrop-filter: var(--glass-refraction, blur(var(--glass-blur)) saturate(140%));
+  backdrop-filter: var(--glass-refraction, blur(var(--glass-blur)) saturate(140%));
+  pointer-events: none;
+}
+
+/* 边缘高光单独一层，避免和模糊层互相影响。 */
+.foot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: var(--glass-edge-border);
+  border-radius: inherit;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  pointer-events: none;
+}
+
+/* 液态透镜：尺寸 / 圆角 / 位置由 JS 逐帧写入，这里只描述材质。 */
+.glass-dock__thumb {
+  position: absolute;
+  z-index: 5;
+  top: calc(var(--glass-padding) + var(--glass-thumb-inset, 0px));
+  bottom: calc(var(--glass-padding) + var(--glass-thumb-inset, 0px));
+  left: var(--glass-padding);
+  width: calc((100% - var(--glass-padding) * 2) / var(--glass-slots) * var(--glass-thumb-width));
+  box-sizing: border-box;
+  border-radius: var(--glass-thumb-radius);
+  background: var(--glass-thumb-bg);
+  -webkit-backdrop-filter: var(--thumb-refraction, blur(0px) brightness(var(--glass-lens-brightness)) saturate(var(--glass-lens-saturate)));
+  backdrop-filter: var(--thumb-refraction, blur(0px) brightness(var(--glass-lens-brightness)) saturate(var(--glass-lens-saturate)));
+  box-shadow:
+    var(--card-highlight),
+    inset 0 0 0 1px color-mix(in srgb, var(--text-1) 6%, transparent),
+    var(--glass-thumb-glow),
+    var(--glass-thumb-shadow);
+  opacity: var(--press);
+  transform: translate3d(var(--drag-x, 0px), 0, 0) scale(1, var(--squash, 1)) skewX(var(--lean, 0deg));
+  transform-origin: center;
+  pointer-events: none;
+}
+
+/* 选中色副本：与按钮共用 grid，按透镜轮廓裁切；图标变强调色，文字保持可读。 */
+.glass-dock__tint {
+  position: absolute;
+  inset: var(--glass-padding);
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(var(--glass-slots), minmax(0, 1fr));
+  opacity: var(--press);
+  pointer-events: none;
+}
+
+.glass-dock__copy {
+  pointer-events: none;
+}
+
+.foot .link {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
+  gap: var(--glass-item-gap);
   min-width: 0;
-  padding: 6px 2px 5px;
+  padding: 4px 2px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--glass-thumb-radius);
   background: transparent;
-  color: var(--text-2);
-  font-size: 11px;
-  line-height: 1.3;
+  color: var(--glass-ink);
+  font-size: var(--glass-label-size);
+  font-weight: var(--glass-label-weight);
+  line-height: 1.25;
   cursor: pointer;
-  transition: background var(--dur) ease, color var(--dur) ease;
+  transition: var(--glass-item-transition);
+  transform: translateY(var(--item-lift, 0px)) scale(var(--item-scale, 1));
 }
 
-.link svg {
-  width: 15px;
-  height: 15px;
-  transition: transform var(--dur) var(--ease), color var(--dur) ease;
+.foot .link svg {
+  flex: none;
+  width: var(--glass-icon-size);
+  height: var(--glass-icon-size);
+  transition: transform var(--glass-icon-transition), color var(--dur) ease;
 }
 
-.link span {
+.foot .link span {
   max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
@@ -1050,16 +1239,141 @@ kbd {
 }
 
 /* 英文标签更长：字号收一点，完整说明在 title 里 */
-:root[lang="en"] .link {
+:root[lang="en"] .foot .link {
+  font-size: 9.5px;
+}
+
+/* 透镜里的副本用强调色；放在 .foot .link 之后，确保盖过常规文字色。 */
+.foot .glass-dock__tint .link {
+  color: var(--glass-accent);
+}
+
+.foot > .link:hover,
+.foot > .link:focus-visible {
+  color: var(--text-1);
+}
+
+.foot > .link:hover svg {
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.foot > .link:active svg {
+  transform: scale(var(--glass-icon-active-scale));
+}
+
+.foot > .link:focus-visible {
+  outline-offset: -2px;
+}
+
+/* 按住 / 拖动时真实图标回到常规色，强调色只从透镜里的副本透出来。 */
+.foot[data-gesture] > .link,
+.foot[data-gesture] > .link:hover {
+  color: var(--glass-ink);
+  transition: none;
+}
+
+.foot[data-gesture] > .link:hover svg {
+  transform: none;
+}
+
+/* 减少透明：玻璃改成实色，透镜也改磨砂，不再采样背景。 */
+:root[data-reduce-transparency] .foot {
+  background: var(--bg-card-solid);
+}
+
+:root[data-reduce-transparency] .foot::before {
+  background: var(--glass-fallback);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-reduce-transparency] .glass-dock__thumb {
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-reduce-transparency] .glass-dock__tint {
+  display: none;
+}
+
+/* 关闭阴影：外投影归零，仍保留 1px 描边维持边界。 */
+:root[data-no-shadow] .foot {
+  box-shadow: 0 0 #0000;
+}
+
+:root[data-no-shadow] .glass-dock__thumb {
+  box-shadow: 0 0 #0000;
+}
+
+:root[data-no-shadow] .foot::after {
+  box-shadow: 0 0 #0000;
+}
+
+@media (forced-colors: active) {
+  .foot {
+    border: 1px solid ButtonText;
+  }
+
+  .foot::before,
+  .foot::after,
+  .glass-dock__thumb,
+  .glass-dock__tint {
+    display: none;
+  }
+
+  .foot > .link:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
+
+/* 关闭液态玻璃：底部回到普通 5 宫格图标栏（结构与 0.9.8 一致）。 */
+:root[data-liquid-glass="off"] .foot {
+  height: auto;
+  margin: 0;
+  padding: 6px 8px 8px;
+  border: 0;
+  border-top: 1px solid var(--divider);
+  border-radius: 0;
+  gap: 2px;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-liquid-glass="off"] .foot::before,
+:root[data-liquid-glass="off"] .foot::after,
+:root[data-liquid-glass="off"] .glass-dock__thumb,
+:root[data-liquid-glass="off"] .glass-dock__tint {
+  display: none;
+}
+
+:root[data-liquid-glass="off"] .foot .link {
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.3;
+  padding: 6px 2px 5px;
+  transform: none;
+  transition: background var(--dur) ease, color var(--dur) ease;
+}
+
+:root[data-liquid-glass="off"] .foot .link svg {
+  width: 15px;
+  height: 15px;
+}
+
+:root[data-liquid-glass="off"][lang="en"] .foot .link {
   font-size: 10px;
 }
 
-.link:hover {
+:root[data-liquid-glass="off"] .foot > .link:hover {
   background: var(--bg-subtle);
   color: var(--text-1);
 }
 
-.link:hover svg {
+:root[data-liquid-glass="off"] .foot > .link:hover svg {
   color: var(--accent);
   transform: translateY(-1px);
 }

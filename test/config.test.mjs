@@ -469,6 +469,13 @@ t('显式设置优先于页面语言；不认识的设置退回跟随页面', ()
   assert.equal(resolveInputTarget('xx', 'ko'), 'ko', '不认识的设置不算数，退回跟随页面');
 });
 
+t('液态玻璃默认开启，导入 true / false 都保留', () => {
+  assert.equal(DEFAULTS.liquidGlass, true);
+  const base = { theme: 'underline', uiTheme: 'auto' };
+  assert.equal(pickImportedConfig(envelope({ ...base, liquidGlass: true })).config.liquidGlass, true);
+  assert.equal(pickImportedConfig(envelope({ ...base, liquidGlass: false })).config.liquidGlass, false);
+});
+
 t('默认值：inputHotkey=alt+i、inputTargetLang=auto，且能通过导入校验', () => {
   assert.equal(DEFAULTS.inputHotkey, 'alt+i');
   assert.equal(DEFAULTS.inputTargetLang, 'auto');

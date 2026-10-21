@@ -89,11 +89,21 @@ export function enhanceTypoSelect(select, defaultValue) {
 
   const wrap = document.createElement('span');
   wrap.className = 'typo-slider';
+  const rangeWrap = document.createElement('span');
+  rangeWrap.className = 'typo-range-wrap';
   const range = document.createElement('input');
   range.type = 'range';
   range.min = '0';
   range.max = String(Math.max(0, select.options.length - 1));
   range.step = '1';
+  // 视觉透镜复用 lib/liquid-glass 的材质 / 位移滤镜；原生 range 仍是唯一的交互与数据源。
+  const fill = document.createElement('span');
+  fill.className = 'typo-fill';
+  fill.setAttribute('aria-hidden', 'true');
+  const lens = document.createElement('span');
+  lens.className = 'typo-lens';
+  lens.setAttribute('aria-hidden', 'true');
+  rangeWrap.append(range, fill, lens);
   const value = document.createElement('output');
   value.className = 'typo-value';
   const reset = document.createElement('button');
@@ -102,8 +112,20 @@ export function enhanceTypoSelect(select, defaultValue) {
   reset.textContent = '↺';
   reset.title = '恢复默认';
   reset.setAttribute('aria-label', '恢复默认');
-  wrap.append(range, value, reset);
+  wrap.append(rangeWrap, value, reset);
   select.after(wrap);
+
+  function positionLens() {
+    const min = Number(range.min) || 0;
+    const max = Number(range.max) || 0;
+    const width = range.clientWidth;
+    const lensWidth = lens.offsetWidth || 30;
+    const progress = max > min ? (Number(range.value) - min) / (max - min) : 0;
+    const left = Math.max(0, Math.min(width - lensWidth, progress * (width - lensWidth)));
+    lens.style.left = Math.round(left) + 'px';
+    // 强调色填充到透镜中心，给玻璃透镜一点可折射的颜色。
+    fill.style.width = Math.round(left + lensWidth / 2) + 'px';
+  }
 
   function sync() {
     const index = Math.max(0, select.selectedIndex);
@@ -113,6 +135,8 @@ export function enhanceTypoSelect(select, defaultValue) {
     range.setAttribute('aria-valuetext', value.textContent);
     if (title) range.setAttribute('aria-label', title.textContent);
     reset.hidden = String(SELECT_VALUE.get.call(select)) === String(defaultValue);
+    positionLens();
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(positionLens);
   }
 
   function choose(index) {
@@ -133,6 +157,10 @@ export function enhanceTypoSelect(select, defaultValue) {
     }
   });
   range.addEventListener('input', () => choose(Number(range.value)));
+  range.addEventListener('pointerdown', () => rangeWrap.classList.add('is-dragging'));
+  window.addEventListener('pointerup', () => rangeWrap.classList.remove('is-dragging'));
+  window.addEventListener('pointercancel', () => rangeWrap.classList.remove('is-dragging'));
+  if (typeof ResizeObserver === 'function') new ResizeObserver(positionLens).observe(rangeWrap);
   select.addEventListener('change', sync);
   reset.addEventListener('click', (event) => {
     event.preventDefault();

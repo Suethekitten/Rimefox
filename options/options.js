@@ -33,6 +33,8 @@ import {
   showSiteRulesResult,
   showCustomCssResult
 } from './appearance-ui.js';
+import { ensureGlassFilter } from '../lib/liquid-glass/material.js';
+import { mountGlassNav } from '../lib/liquid-glass/nav.js';
 import { bindSettingsSearch } from './search.js';
 import { createModelPicker } from './model-picker.js';
 import {
@@ -96,6 +98,7 @@ const fields = {
   accentColor: $('accentColor'),
   reduceTransparency: $('reduceTransparency'),
   disableShadow: $('disableShadow'),
+  liquidGlass: $('liquidGlass'),
   typoFontScale: $('typoFontScale'),
   typoLineHeight: $('typoLineHeight'),
   typoGap: $('typoGap'),
@@ -113,7 +116,10 @@ const fields = {
 
 
 fields.uiTheme.addEventListener('change', () => switchThemeAnimated(() => applyUiTheme(fields.uiTheme.value), fields.uiTheme));
-fields.uiLang.addEventListener('change', () => applyI18n(document, fields.uiLang.value));
+fields.uiLang.addEventListener('change', () => {
+  applyI18n(document, fields.uiLang.value);
+  if (glassNav) glassNav.refresh();
+});
 
 // ---------------- 外观：改了立刻预览（保存前就能看到效果） ----------------
 function previewLook() {
@@ -121,6 +127,7 @@ function previewLook() {
     accentColor: fields.accentColor.value,
     reduceTransparency: fields.reduceTransparency.checked,
     disableShadow: fields.disableShadow.checked,
+    liquidGlass: fields.liquidGlass.checked,
     typoFontScale: Number(fields.typoFontScale.value),
     typoLineHeight: Number(fields.typoLineHeight.value),
     typoGap: Number(fields.typoGap.value),
@@ -128,11 +135,32 @@ function previewLook() {
     theme: fields.theme.value
   };
   applyUiAppearance(form);
+  syncGlassNav();
   updateTypoPreview($('typoPreview'), form);
 }
 
+// 开关和排版滑块共用同一张 30×20 的固定滤镜（同一个小滑块材质，不是每个控件一张）。
+function ensureGlassFilters() {
+  if (document.documentElement.getAttribute('data-liquid-glass') === 'off') return;
+  ensureGlassFilter('slider', { width: 30, height: 20, radius: 10 }, {
+    strength: 6, depth: 2, chromaticAberration: 1.3, blur: 0.5, brightness: 1.05, saturate: 1.7
+  });
+}
+
+// 开关只写在 <html data-liquid-glass> 上；这里按属性挂载 / 销毁导航透镜。
+function syncGlassNav() {
+  const on = document.documentElement.getAttribute('data-liquid-glass') !== 'off';
+  if (on) ensureGlassFilters();
+  if (on && !glassNav) {
+    glassNav = mountGlassNav($('settingsNav'));
+  } else if (!on && glassNav) {
+    glassNav.destroy();
+    glassNav = null;
+  }
+}
+
 const accentPicker = createAccentPicker({ container: $('accentSwatches'), input: fields.accentColor, onPick: previewLook });
-['reduceTransparency', 'disableShadow', 'typoFontScale', 'typoLineHeight', 'typoGap', 'typoIndent', 'theme'].forEach((key) =>
+['reduceTransparency', 'disableShadow', 'liquidGlass', 'typoFontScale', 'typoLineHeight', 'typoGap', 'typoIndent', 'theme'].forEach((key) =>
   fields[key].addEventListener('change', previewLook)
 );
 // 字号 / 行高 / 间距：下拉框换成刻度滑块（下拉框仍是唯一的数据来源，只是藏起来）
@@ -143,6 +171,8 @@ fields.customCss.addEventListener('input', () => showCustomCssResult(fields.cust
 
 // 最近一次读到的配置（导出时用）
 let currentCfg = {};
+// 左侧导航的液态玻璃透镜（关闭时销毁，回到原来的文字列表）
+let glassNav = null;
 
 // 术语表编辑器：直接改 currentCfg.glossary，保存时统一清洗
 const glossaryEditor = createGlossaryEditor({
@@ -364,6 +394,7 @@ function applyConfig(cfg) {
   accentPicker.set(cfg.accentColor);
   fields.reduceTransparency.checked = !!cfg.reduceTransparency;
   fields.disableShadow.checked = !!cfg.disableShadow;
+  fields.liquidGlass.checked = cfg.liquidGlass !== false;
   fields.typoFontScale.value = String(cfg.typoFontScale || 100);
   fields.typoLineHeight.value = String(cfg.typoLineHeight || 0);
   fields.typoGap.value = String(Number.isFinite(Number(cfg.typoGap)) ? cfg.typoGap : 3);
@@ -388,6 +419,8 @@ function applyConfig(cfg) {
   picker.updateHint();
   glossaryEditor.render();
   applyI18n(document, fields.uiLang.value);
+  // 语言变了，导航条目宽度 / 高度可能变；重新量一次透镜槽位
+  if (glassNav) glassNav.refresh();
 }
 
 function readForm() {
@@ -448,6 +481,7 @@ function readForm() {
     accentColor: fields.accentColor.value || 'violet',
     reduceTransparency: fields.reduceTransparency.checked,
     disableShadow: fields.disableShadow.checked,
+    liquidGlass: fields.liquidGlass.checked,
     typoFontScale: Number(fields.typoFontScale.value) || 100,
     typoLineHeight: Number(fields.typoLineHeight.value) || 0,
     typoGap: Number(fields.typoGap.value),
@@ -787,6 +821,7 @@ function bindNav() {
   const visible = new Map();
   function highlight(id) {
     links.forEach((a) => a.classList.toggle('is-active', a.getAttribute('href') === '#' + id));
+    if (glassNav) glassNav.setActive(links.findIndex((a) => a.classList.contains('is-active')));
   }
   const io = new IntersectionObserver(
     (entries) => {
@@ -859,6 +894,7 @@ function onConfigElsewhere(next) {
   }
   applyUiTheme(merged.uiTheme || 'auto');
   applyUiAppearance(merged);
+  syncGlassNav();
   setResult($('saveResult'), '设置在别的页面被修改过；保存时会以这里的内容为准', 'bad');
 }
 
