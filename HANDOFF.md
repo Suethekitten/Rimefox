@@ -67,6 +67,7 @@ edge-bilingual/
 │   ├── usage.js           仅调试用的用量计数：HTTP、usage token、缓存、重试、拆批、失败、finish_reason
 │   ├── appearance.js      强调色预设、译文排版变量、译文自定义 CSS 清洗（纯函数，后台按网址算 page 对象用）
 │   ├── site-rules.js      站点规则：内置规则、校验、按网址匹配；夜间模式网站名单
+│   ├── liquid-glass/      液态玻璃（复用 Sak / MIT）：SVG 位移滤镜、材质、弹窗工具坞、设置页导航
 │   ├── ui-appearance.js   设置页/弹窗共用：强调色等写到 <html>、深浅色圆形过渡、跨页面配置同步、空闲执行
 │   ├── ui-theme-boot.js   设置页/弹窗的首帧主题与外观预判（<head> 同步执行，避免闪一帧白底）
 │   ├── ui-tokens.css      弹窗 / 设置页 / 欢迎页共用的设计变量：材质、三级文字、强调色派生、圆角、阴影、字体；深浅色与「减少透明 / 关闭阴影」都在这里切换（各页面 CSS 首行 @import）
@@ -88,8 +89,8 @@ edge-bilingual/
 │   └── styles/inject.css  译文样式与主题、页面明暗适配、夜间模式反色
 ├── welcome/               首次安装欢迎页 / 新手引导（index.html + welcome.css + welcome.js，无构建）
 ├── popup/                 工具栏面板（含随手翻译）
-├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索；拆分见 options/ 下各模块）
-├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 目标语言校验 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断）
+├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索、液态玻璃导航；拆分见 options/ 下各模块）
+├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 目标语言校验 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / 字幕运行时竞态 / 用量诊断 / 液态玻璃 / 注入清单一致性）
 ├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs，见 7.1c）
 └── selftest/              离线自检（e2e 脚本会顺带跑一遍，见 7.1c）
 ```
@@ -491,6 +492,8 @@ node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆�
 node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络请求、并发保存不丢项
 node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层页面、配置广播改模式 / 语言时整页重建、保留区送翻、注入被拒不再重发、长段落切片不切开保留区
 node test/sentence-align.test.mjs # 悬停对照的断句（缩写 / 脚注号 / 小写续接）与本地句子对齐：38 段人工语料每个句界都对
+node test/glass-dock.test.mjs # 液态玻璃：槽位几何 / 竖向槽位 / 橡皮筋 / 最近槽位 / 三通道滤镜
+node test/content-injection.test.mjs # 补注入清单与 manifest 完全一致（units / input 不漏、顺序不乱）
 ```
 > 每个文件的条数以 `node --test` 的输出为准，本文不维护数字。
 
@@ -691,21 +694,16 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.9.8）
+## 14. 本版技术记录（0.10.0）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.9.7 的容器保护 / 已翻译元素重新检查 / notranslate 保留区见 `e682c87`、`7581ee3`、`270872e`、`7a8c27d` 的提交说明与 §5.1、§5.2.1。
+> 0.9.8 的容器形态 / 保留区边界见提交 `ccfceca`、`6989cd2` 与 §5.1、§5.2.1。
 
-- **来源**：对 0.9.7（`e682c87^..57cfb25`）的代码审查：1 Critical、4 Important、6 Minor，集中在局部段落 / own 单元的形态切换和 `<kN>` 保留标记的边界。全部在本地复现后修复。
-- **C1 形态翻转**（`walk`）：局部段落（有直接文本 + 打断文字流的子块）以前排在「子元素全被跳过」之后。子块被原地替换（flex 行里的按钮 = 控件、仅译文）后打上 `data-dt-src`，容器的整棵子树签名也变了，下一轮 `usableChildren` 为 0 → 走 own 路径：own 单元 index 0 的签名对不上，撤掉「Published」的译文；新单元是 whole，被「by the author」留在容器里的译文节点（`:scope > [data-dt-target]`）挡住，`DT.inject` 返回 false，`main.js` 什么也不记，每轮重收、重发（命中缓存也要走一趟后台）。现在局部段落判定放在前面，形态只看结构；`settleForm(el, form, scope)` 记 whole / own / partial，形态变了（子块藏起来 / 显示出来）先撤双语段落再收，替换型照旧按文本节点认领不闪。局部段落除了子块，也对已翻过的 `data-dt-src` 子元素 walk（以前单独成段的行内子元素由它自己重新检查）。
-- **注入被拒**：`DT.inject` 拒绝时按原因打日志（`already-rendered` / `marked-translated` / `target-exists`）；`main.js` 对本代际被拒的单元记 `settled` + 计入跳过，内容不变就不再送翻。旧代际的结果不记（那一轮已作废）。
-- **签名范围**：`sourceSignature` 对 `el.__dtScope` 里的直接子元素（局部段落的子块、own 单元没拼进句子的子元素）只混属性、不往里看。子块被翻译 / 改字不再让父级每轮重建文字流，大容器也不用每轮对整棵子树算哈希。形态变了 scope 跟着变，签名自然对不上，会按新结构重收。
-- **I1 行内语义子元素**：flex / grid 父级把子项块化，`isStructural` 对 `<a>` / `<span>` 也返回 true，「See `<a>`documentation`</a>`.」被拆成三段、`.` 被 `skipText` 丢掉、双语译文成了 flex 子项。`breaksFlow` 现在对 `PHRASING_TAGS` 只在里面套着 `BLOCK_TAGS` 元素时才算打断（坑 2 的老问题，0.9.7 的局部段落又踩了一次）。行为变化：`<p>` 里 `display:block` 的 notranslate span 现在是句子里的保留区（自检 n9-c 改成真正的块级保留元素）。
-- **I2 切片**：`DT.splitLong` → `splitSentences` 的句末切点和 1.6 倍硬切点都避开 `<kN>…</kN>`；切点落在里面就挪到保留区前（保留区在开头就挪到后），整段只剩一个超长保留区不切。保留区不跨换行（`keepRangesOf` 在换行处断开），`splitByLines` 不用改。
-- **I3 / Minor 2 样式事务**：`setStyle` 用 `setProperty(..., 'important')`，op 里记 style 属性原文和写后的值：还原时属性没被动过就逐字放回，否则只撤我们这一条（带原来的优先级）。`hideKept` 写完读一次计算样式，没藏住（动画 / 用户样式）就撤回这一条、不打 `data-dt-keep-hidden`（`hover.js` 的 `keptHidden` 信这个标记）。这次读样式只在兜底路径上发生。
-- **I4 少回一行**：`injectLines` 里拿不到译文的行（`k >= assign.length`），上面的保留元素加进 `shown`，除非保留内容已原样出现在写进去的译文里（模型把几行并成一行，藏起来免得重复）。
-- **Minor**：`keepParse(text, keep, source)` 把超出编号的 `<k7>` 当成多余标记去掉（原文里本来就有这串字的除外）；`hideKept` 不藏带链接 / 按钮 / 图片 / svg 的保留元素（`KEEP_SOLID`）；局部段落多段的 `firstNode` 从本段开头找（以前都是容器的第一个文本节点，懒翻译量错位置）；`DT.restore` 的兜底也清 `[data-dt-replaced]`。
-- **性能**（无头 Chrome，稳态每轮 `DT.collect`）：600 个 own 元素 4.0–4.8 ms（0.9.7：4.4–5.5）；300 个子块的局部段落容器 1.0–1.3 ms（1.2–1.6）；20×15 嵌套局部段落双语 1.9–2.1 ms（2.0–2.4），仅译文 1.7 ms（1.1–1.6，多出来的是给已翻子块读计算样式，判形态要用）。审查里「0.9.6 是 0.05 ms」的差距来自 own 元素不再整块早退（子菜单靠祖先 class 显示也要补收），这个取舍不变。稳态轮次里 `textMap` 调用 0 次。
-- **测试**：自检 201 → **211**（新增 10 条：行内语义子元素、子块翻完仍是局部段落并收敛（按钮 / 链接两种 × 双语 / 仅译文）、形态变化撤旧译文、碎片过滤不变形、局部段落 firstNode、长段落切片不切开标记、`!important` 下藏得住、行内样式逐字还原、带链接 / 图标的不藏、少回一行保留行不藏；改写 2 条：外来编号去标记、n9-c 换成块级保留元素），新增 / 改写的 11 条在 0.9.7 代码上全部失败；content-main +2（注入被拒不重发、真实 `splitLong` + `hasKeepMarks` 的长段落链路），0.9.7 上都失败，测试桩改成按 `accept` 过滤；Node 24 个文件全绿；E2E 70 / 70（含自检页 211 / 211）。
-- **缓存 / 配置**：不改 `SCHEMA` / `makeKey` / 配置结构。flex 行的单元切分变了，带保留区的长段落切片位置变了，都会按新文本翻译，旧缓存不清；没有保留区的请求和 0.9.7 逐字一致。
-- **已知 / 未验证**：真实 Partner Center、Edge、真实付费模型未验证（`<kN>` 的照抄率仍只用假模型测过）。行内 `<a>` 里直接套 `<div>`（非 flex 父级）仍不算打断文字流，和 0.9.7 一样整句收。
+- **来源**：弹窗底部 5 宫格动作栏和设置页左侧导航接入 Sak（@Saknutella）的 [Liquid Glass Slider](https://github.com/Saknutella/liquid-glass-slider)（MIT）。复用它的位移贴图 + 三通道色散、每实例滤镜重建与弹簧积分。上游是单选导航：设置页保留「当前分组」语义，弹窗是命令栏，所以没有常驻选中项，透镜跟随 hover / 键盘焦点；拖动只拉伸，不提交命令。
+- **文件**：新增 `lib/liquid-glass/geometry.js`（纯函数）、`filter.js`（SVG 滤镜字符串）、`material.js`（DOM 接入 + 降级，支持只给透镜建滤镜，并新增 `ensureGlassFilter` 给开关 / 滑块共用固定尺寸滤镜）、`dock.js`（弹窗工具坞）、`nav.js`（竖向导航）；重写 `popup/popup.css` 第 7 节和开关小滑块；`popup/index.html` 底部加 `#glassDock` 与 `role="toolbar"`；`options/index.html` 加 `#settingsNav` 与「液态玻璃」开关；`options/options.css` 加竖向导轨 / 透镜 / 关闭态 / 开关小滑块 / 排版滑块透镜；`options/appearance-ui.js` 给字号 / 行高 / 间距滑块加透镜和强调色填充；`options/options.js` 挂载 / 销毁导航透镜并跟随滚动高亮；`lib/config.js` 加 `liquidGlass: true`；`lib/ui-appearance.js` / `ui-theme-boot.js` 写 `data-liquid-glass`；`lib/i18n.js` 加「快捷操作」「液态玻璃」。
+- **注入修复**：`background.js` 的 `ensureInjected` 补上 `content/units.js` 和 `content/input.js`，与 manifest 的 content_scripts 顺序一致。之前页面已经在跑、后台补注入时 `hover.js` 取不到 `DT.units`，会抛 `Cannot read properties of undefined (reading 'sentencesOf')`；`hover.js` 也加了防御，`DT.units` 缺失时直接返回。新增 `test/content-injection.test.mjs` 校验两份清单逐项一致，避免以后再漏。
+- **安全**：拖动判定 4px、垂直滑动 8px 取消手势；拖动跨过按钮时在 capture 阶段吞掉一次 click，避免误触「清缓存」；键盘用 roving tabindex + 左右方向键，只有 `:focus-visible` 才亮透镜；触摸松手后透镜淡出；设置页导航保留原生 Tab 顺序，另支持上下方向键。
+- **降级**：`backdrop-filter: url()` 不可用、WebKit 或 `data-reduce-transparency` 时不写滤镜变量，CSS 回落到磨砂；`data-no-shadow` 去掉外投影；`prefers-reduced-motion` 时弹簧直接到位；`forced-colors` 隐藏玻璃层只留按钮；`data-liquid-glass="off"` 时弹窗回到普通 5 宫格、设置页回到原来的文字导航，导航底座不再生成大尺寸滤镜。
+- **性能**：弹窗透镜放大时按 70ms / 10px 节流重建位移贴图；设置页导轨底座只用普通 blur，只有 208×36 的透镜生成 SVG 滤镜；设置页开关和排版滑块共用一张 30×20 的 `ensureGlassFilter` 滤镜，弹窗小开关单独一张 20×14，不是每个控件一张；静止时 `requestAnimationFrame` 停止。无第三方运行时依赖，仍是零构建。
+- **测试**：新增 `test/glass-dock.test.mjs`（槽位几何、竖向槽位、橡皮筋、最近槽位、指针槽位、三通道 scale）、`test/content-injection.test.mjs`（补注入清单与 manifest 逐项一致）；新增 `liquidGlass` 默认值与导入校验；Node 全量测试全绿。真实 Chrome 155 无头检查（`--no-sandbox`，仅本地）：弹窗挂载 2 个滤镜、hover 0.45、press 1.0 / 88×68、松手回弹、鼠标离开归零、键盘方向键、拖动 0 次 click、深浅色 / 减少透明、中英文透镜副本同步；设置页导航透镜跟随当前分组 / 悬停移动，开关关闭后透镜销毁、导航恢复原样式，再打开能重新挂载；设置页开关和排版滑块共用 `--glass-slider-filter`，滑块从 54px 移到 134px，关闭液态玻璃后滤镜回落到 `none`，开关变成白底强调色描边的小滑块。
+- **许可**：`THIRD-PARTY-NOTICES.md` 增补 Liquid Glass Slider 与 nikdelvin/liquid-glass 两段 MIT；`README.md` 加「致谢」；五个新文件头保留 Sak 与上游署名。
