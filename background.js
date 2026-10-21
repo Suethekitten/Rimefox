@@ -516,12 +516,16 @@ async function ensureInjected(tabId, frameId = 0) {
   try {
     await chrome.scripting.executeScript({
       target,
+      // 顺序必须和 manifest.json 的 content_scripts 一致：units.js 是 dom.js 的依赖，
+      // input.js 提供输入框翻译。漏掉它们时内容脚本仍能跑，但 hover / 输入框会报 undefined。
       files: [
         'content/core.js',
+        'content/units.js',
         'content/dom.js',
         'content/appearance.js',
         'content/main.js',
         'content/selection.js',
+        'content/input.js',
         'content/hover.js',
         'content/pip.js',
         'content/dock.js'

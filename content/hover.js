@@ -20,11 +20,15 @@
   if (!DT) return;
   if (DT.hover) return; // 允许重复注入
 
+  var U = DT.units;
+  // 防御：注入顺序异常（例如旧版 ensureInjected 漏掉 units.js）时宁可关掉悬停对照，
+  // 也不要在页面里抛未捕获异常、连累整页翻译。
+  if (!U) return;
+
   var hover = (DT.hover = {});
   var SRC_HL = 'dt-hover-src';
   var TGT_HL = 'dt-hover-target';
   var HAS_HIGHLIGHT = typeof Highlight === 'function' && typeof CSS !== 'undefined' && !!CSS.highlights;
-  var U = DT.units;
 
   var current = null;
   var currentKey = '';
