@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Microsoft Edge 加载项商店上架材料
 
-最后更新：2026-10-20，对应 `main`（Rimefox 0.9.6 复核）。
+最后更新：2026-10-21，对应 `main`（Rimefox 0.9.8）；商店里 0.9.6 已上线、0.9.7 审核中。
 
 > **分工**：提交状态、差哪几项、待办清单在 [STORE.md](STORE.md)（唯一主人）。
 > 本文只写 **Edge 与 Chrome 的差异**、Partner Center 的提交流程，以及只给 Edge 控制台用的粘贴文案（≥250 字符描述、search terms、notes for certification）。
@@ -9,8 +9,17 @@
 ## 结论
 
 - **代码不需要为 Edge 改**：MV3、无 `update_url`、无远程代码、无混淆，`lib/config.js` 已经区分 `edge://` 与 `chrome://`，`world: "MAIN"` 和 `minimum_chrome_version` 都是 Edge 支持的字段。
-- **真正要补的是非代码事项**：Partner Center 账号、审核用临时 API Key、Edge 侧文案与 300×300 logo、上传审核。
-- Edge 注册**免费**（Chrome 收一次性 $5），审核**最长 7 个工作日**，第一次提交被驳回很常见，按报告改完重提即可。
+- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线，0.9.7 随后提交、审核中（最长 7 个工作日）。
+- Edge 注册**免费**（Chrome 收一次性 $5）；后续更新用 **Packages → 上传新包**，版本号必须比线上大。
+
+## 商店标识
+
+| 项 | 值 |
+|---|---|
+| 商店页 | <https://microsoftedge.microsoft.com/addons/detail/pambegmmdpjplkfddafegbekknmelh> |
+| Store ID | `0RDCKC0145MG` |
+| CRX ID | `pambegmmdpjplkfddafegbekknmelh` |
+| Product ID | `9735085a-4809-4244-86be-3f9ddf90bf21` |
 
 ## 一、Edge 与 Chrome 的差异
 
@@ -52,7 +61,7 @@ Edge 目前对 **名称 / 描述引用其他浏览器** 比 Chrome 严：政策 
 node tools/package-store.mjs
 ```
 
-产物：`dist/Rimefox-v0.9.6-store.zip`（65 个文件，370,313 B，manifest.json 在 ZIP 根目录，已用 `System.IO.Compression` 复核）。**要传这个**，不是 GitHub Release 那个整仓包。
+产物：`dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录（0.9.6 已用它上传）。**要传这个**，不是 GitHub Release 那个整仓包；文件数与体积以当前输出为准。
 
 ### 3. 新建扩展并上传
 
@@ -231,7 +240,7 @@ Notes:
 | 截图（中文行） | 同上 | `docs/screenshots/store-0*.png` 5 张：中文界面 + 英文→中文，`node tools/screenshot-store.mjs --lang zh` 生成（0.9.6 界面） |
 | 小宣传图 | 440×280，可选 | 未做 |
 | 大宣传图 | 1400×560，可选 | 未做 |
-| 扩展包 | zip，manifest 在根 | `dist/Rimefox-v0.9.6-store.zip`（与上传到控制台的包 sha256 一致） |
+| 扩展包 | zip，manifest 在根 | 0.9.6 的包已上传并过审；下次更新重新 `node tools/package-store.mjs` 出包 |
 
 截图内容为真实扩展界面 + 本地测试接口返回的人工示例译文，未使用真实 Key；上传前自己再确认一遍没有泄露 Key、账号、私人页面。
 
@@ -266,12 +275,11 @@ Notes:
 
 ## 七、人工待办（只列 Edge 专属）
 
-提交状态与通用待办（账号、审核 Key、截图确认）见 [STORE.md](STORE.md)「当前状态」与「仍需人工完成」；Edge 这边只多这几步：
+提交状态见 [STORE.md](STORE.md)「当前状态」；Edge 这边只剩：
 
-1. 注册 / 验证 Partner Center 账号（免费，Individual 更快）。
-2. 出包后确认 zip 里有 `_locales/`（0.9.6 起），再用 **Packages → Replace** 上传。
-3. 两个语言行都填完（中文行填中文描述 + 中文截图），提交 Publish。
-4. 可选：补 440×280 小宣传图、1400×560 大宣传图。
+1. 等 0.9.7 认证结果（最长 7 个工作日）；被驳回就按报告改完重提，可能要求先升版本号。
+2. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大。
+3. 可选：补 440×280 小宣传图、1400×560 大宣传图。
 
 ## 八、官方依据（2026-10-20 查询）
 

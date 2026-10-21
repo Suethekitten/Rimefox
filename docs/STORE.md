@@ -11,13 +11,13 @@
 |---|---|
 | 仓库 | 已公开：<https://github.com/Suethekitten/Rimefox>（最新 Release 见 Releases 页） |
 | 商店包 | `node tools/package-store.mjs` 产出 `dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录 |
-| 提交状态 | **没有上传、没有提交审核、没有注册开发者账号、没有付款**（Chrome 与 Edge 都是） |
-| 上架顺序 | 先 Edge 后 Chrome，首发 0.9.8 —— 见 [ROADMAP.md](ROADMAP.md) §4.2 |
+| 提交状态（Edge） | **0.9.6 已上线**（2026-10-20 提交）；**0.9.7 审核中**（截至 2026-10-21）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pambegmmdpjplkfddafegbekknmelh> |
+| 提交状态（Chrome） | **没有上传、没有注册开发者账号、没有付款** |
 
-**提交审核前还差这 5 项**（都不需要改代码，明细见文末「仍需人工完成」）：
+**Chrome 提交审核前还差这 5 项**（都不需要改代码，明细见文末「仍需人工完成」；Edge 这 5 项已完成并过审 0.9.6）：
 
 1. 确认截图样张（0.9.6 界面，中英两套，见 [screenshots/](screenshots/)）
-2. 开发者账号（Chrome 一次性费用；Edge 免费）
+2. Chrome 开发者账号（一次性费用）
 3. 审核专用、限额、可撤销的 API Key
 4. 控制台 listing、单一用途、权限理由、Privacy practices
 5. 上传商店包并提交
