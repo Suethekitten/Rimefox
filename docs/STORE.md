@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-10-20，对应 `main`（Rimefox 0.9.8）。
+最后更新：2026-10-21，对应 `main`（Rimefox 0.9.8）。
 
 > 本文只写**通用材料 + Chrome**；Edge 的差异与专属填写内容见 [STORE-EDGE.md](STORE-EDGE.md)。
 > 历史审计（0.8.5 的「差哪 5 项」）已归档到 [archive/STORE-READINESS.md](archive/STORE-READINESS.md)，不再是现状。
@@ -12,6 +12,7 @@
 | 仓库 | 已公开：<https://github.com/Suethekitten/Rimefox>（最新 Release 见 Releases 页） |
 | 商店包 | `node tools/package-store.mjs` 产出 `dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录 |
 | 提交状态 | **没有上传、没有提交审核、没有注册开发者账号、没有付款**（Chrome 与 Edge 都是） |
+| 上架顺序 | 先 Edge 后 Chrome，首发 0.9.8 —— 见 [ROADMAP.md](ROADMAP.md) §4.2 |
 
 **提交审核前还差这 5 项**（都不需要改代码，明细见文末「仍需人工完成」）：
 
