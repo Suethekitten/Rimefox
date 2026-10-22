@@ -13,12 +13,13 @@
 | 商店包 | `node tools/package-store.mjs` 产出 `dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录 |
 | 提交状态（Edge） | **0.9.6 已上线**（2026-10-20 提交）；**0.9.7 审核中**（截至 2026-10-22）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh> |
 | 提交状态（Chrome） | **0.8.3 已上线**（2026-10-21 更新；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
+| Chrome 更新负责人 | 协助者（商店提供方 APXS 的账号）；出包与商店文案交给他上传 |
 
 两个商店都已走通首次上架；**当前的问题是版本落后**：
 
-- Chrome 线上是 **0.8.3**（首包用了旧版本），比 `main`（0.10.0）落后多个版本；
+- Chrome 线上是 **0.8.3**，由协助者发布；比 `main`（0.10.0）落后多个版本，0.10.0 等他有空再发布；
 - Edge 线上是 **0.9.6**，0.9.7 审核中，0.10.0 还没提审；
-- 下一次更新：**Chrome 可以现在就用 0.10.0 上传**（0.10.0 > 0.8.3，没有排队冲突）；**Edge 等 0.9.7 审核结束再传 0.10.0**，避免顶掉正在认证的版本；两边版本号都必须大于各自线上版本。
+- 下一次更新：**Chrome 交给协助者更新**——把 0.10.0 的商店包和文案发给他上传（0.10.0 > 0.8.3，没有排队冲突）；**Edge 等 0.9.7 审核结束再传 0.10.0**，避免顶掉正在认证的版本；两边版本号都必须大于各自线上版本。
 
 ## Chrome 商店标识
 
