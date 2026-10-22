@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-10-21，对应 `main`（Rimefox 0.9.8）。
+最后更新：2026-10-22，对应 `main`（Rimefox 0.10.0）；Chrome 商店线上 0.8.3，Edge 线上 0.9.6、0.9.7 审核中。
 
 > 本文只写**通用材料 + Chrome**；Edge 的差异与专属填写内容见 [STORE-EDGE.md](STORE-EDGE.md)。
 > 历史审计（0.8.5 的「差哪 5 项」）已归档到 [archive/STORE-READINESS.md](archive/STORE-READINESS.md)，不再是现状。
@@ -11,16 +11,23 @@
 |---|---|
 | 仓库 | 已公开：<https://github.com/Suethekitten/Rimefox>（最新 Release 见 Releases 页） |
 | 商店包 | `node tools/package-store.mjs` 产出 `dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录 |
-| 提交状态（Edge） | **0.9.6 已上线**（2026-10-20 提交）；**0.9.7 审核中**（截至 2026-10-21）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pambegmmdpjplkfddafegbekknmelh> |
-| 提交状态（Chrome） | **没有上传、没有注册开发者账号、没有付款** |
+| 提交状态（Edge） | **0.9.6 已上线**（2026-10-20 提交）；**0.9.7 审核中**（截至 2026-10-22）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pambegmmdpjplkfddafegbekknmelh> |
+| 提交状态（Chrome） | **0.8.3 已上线**（2026-10-21 更新；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
 
-**Chrome 提交审核前还差这 5 项**（都不需要改代码，明细见文末「仍需人工完成」；Edge 这 5 项已完成并过审 0.9.6）：
+两个商店都已走通首次上架；**当前的问题是版本落后**：
 
-1. 确认截图样张（0.9.6 界面，中英两套，见 [screenshots/](screenshots/)）
-2. Chrome 开发者账号（一次性费用）
-3. 审核专用、限额、可撤销的 API Key
-4. 控制台 listing、单一用途、权限理由、Privacy practices
-5. 上传商店包并提交
+- Chrome 线上是 **0.8.3**（首包用了旧版本），比 `main`（0.10.0）落后多个版本；
+- Edge 线上是 **0.9.6**，0.9.7 审核中，0.10.0 还没提审；
+- 下一次更新：**Chrome 可以现在就用 0.10.0 上传**（0.10.0 > 0.8.3，没有排队冲突）；**Edge 等 0.9.7 审核结束再传 0.10.0**，避免顶掉正在认证的版本；两边版本号都必须大于各自线上版本。
+
+## Chrome 商店标识
+
+| 项 | 值 |
+|---|---|
+| 商店页 | <https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
+| 扩展 ID | `gbaoafaogljdolpkppocfaeldejampeo` |
+| 提供方 | APXS |
+| 线上版本 | 0.8.3（2026-10-21 更新） |
 
 > GitHub Release 的 zip 从 0.8.6 起与商店包用同一份白名单，但多一层 `Rimefox/` 文件夹、manifest.json 不在根目录，**不能**当商店包上传。
 
@@ -167,14 +174,14 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 
 | 事项 | 说明 |
 |---|---|
-| 开发者账号 | 注册 Chrome Web Store 开发者并支付一次性费用（以官方结算页为准）；完成身份验证与 2FA |
-| 商店包上传 | 使用 `dist/Rimefox-v<当前版本>-store.zip`，不要上传 GitHub Release 的整仓包 |
-| 截图 / 宣传图 | 5 张 1280×800 截图已生成，需人工确认采用或重拍；按控制台要求补 440×280 |
-| 审核专用 API Key | 在控制台私密审核说明里提供限额、可撤销的 Key；不放入仓库、包或公开 Issue |
+| 开发者账号 | 已完成（Chrome）；后续保持 2FA |
+| 商店包上传 | 0.8.3 已上线（2026-10-21）；下一次更新重新出包，不要上传 GitHub Release 整仓包 |
+| 截图 / 宣传图 | 5 张已生成；Chrome listing 目前是 0.8.3 界面的旧截图，下次更新时换成 0.10.0 界面 |
+| 审核专用 API Key | 首次审核已通过；后续更新沿用同一个限额、可撤销的 Key |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
 | 支持入口 | 已可用：GitHub Issues 公开 |
-| 单一用途 / 权限说明 | 按本文档粘贴到控制台对应字段 |
-| 提交审核 | 上传后填写 listing 与 Privacy practices，再提交；本任务未执行 |
+| 单一用途 / 权限说明 | 已填写；权限或数据流有改动时同步更新 |
+| 提交审核 | 已完成（0.8.3）；后续更新走同样的上传 + 提交流程 |
 
 ## 风险与说明
 
@@ -184,7 +191,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | BYOK 无法直接测试 | 最高优先级：准备审核专用、限额、可撤销 Key，通过控制台私密说明交付 |
 | YouTube 非官方接口 | 明示非官方、默认关闭、仅 CC；验证当前可用性，避免品牌背书与「保证全部字幕可用」的承诺 |
 | 隐私政策与实际行为不一致 | 本次已按 0.8.5 代码核对；悬停对照开关、字幕稳定性、仅调试可见的用量统计都没有新增请求接收方或权限，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
-| 版本与仓库差异 | 以 `main` 实际版本为准；0.8.5 加入悬停气泡 / 三处快捷开关与 YouTube 字幕稳定性修复，未改权限、API Key 存储、请求接收方或服务商协议 |
+| 版本与仓库差异 | Chrome 线上 0.8.3、Edge 线上 0.9.6（0.9.7 审核中），都落后于 `main` 的 0.10.0；以商店后台实际版本为准，下一次更新统一用 0.10.0+ |
 
 ## 官方依据（2026-10-18 查询）
 

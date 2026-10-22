@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Microsoft Edge 加载项商店上架材料
 
-最后更新：2026-10-21，对应 `main`（Rimefox 0.9.8）；商店里 0.9.6 已上线、0.9.7 审核中。
+最后更新：2026-10-22，对应 `main`（Rimefox 0.10.0）；商店里 0.9.6 已上线、0.9.7 审核中，0.10.0 未提审。
 
 > **分工**：提交状态、差哪几项、待办清单在 [STORE.md](STORE.md)（唯一主人）。
 > 本文只写 **Edge 与 Chrome 的差异**、Partner Center 的提交流程，以及只给 Edge 控制台用的粘贴文案（≥250 字符描述、search terms、notes for certification）。
@@ -278,7 +278,7 @@ Notes:
 提交状态见 [STORE.md](STORE.md)「当前状态」；Edge 这边只剩：
 
 1. 等 0.9.7 认证结果（最长 7 个工作日）；被驳回就按报告改完重提，可能要求先升版本号。
-2. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大。
+2. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大（当前线上 0.9.6；0.10.0 是最新未提审版本）。
 3. 可选：补 440×280 小宣传图、1400×560 大宣传图。
 
 ## 八、官方依据（2026-10-20 查询）
