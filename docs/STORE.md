@@ -11,7 +11,7 @@
 |---|---|
 | 仓库 | 已公开：<https://github.com/Suethekitten/Rimefox>（最新 Release 见 Releases 页） |
 | 商店包 | `node tools/package-store.mjs` 产出 `dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录 |
-| 提交状态（Edge） | **0.9.6 已上线**（2026-10-20 提交）；**0.9.7 审核中**（截至 2026-10-22）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pambegmmdpjplkfddafegbekknmelh> |
+| 提交状态（Edge） | **0.9.6 已上线**（2026-10-20 提交）；**0.9.7 审核中**（截至 2026-10-22）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh> |
 | 提交状态（Chrome） | **0.8.3 已上线**（2026-10-21 更新；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
 
 两个商店都已走通首次上架；**当前的问题是版本落后**：

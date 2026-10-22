@@ -16,9 +16,9 @@
 
 | 项 | 值 |
 |---|---|
-| 商店页 | <https://microsoftedge.microsoft.com/addons/detail/pambegmmdpjplkfddafegbekknmelh> |
-| Store ID | `0RDCKC0145MG` |
-| CRX ID | `pambegmmdpjplkfddafegbekknmelh` |
+| 商店页 | <https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh> |
+| Store ID | `0RDCKCQ14SMG` |
+| CRX ID | `pampbegmmdpmjplkfddajfegbeknmelh` |
 | Product ID | `9735085a-4809-4244-86be-3f9ddf90bf21` |
 
 ## 一、Edge 与 Chrome 的差异

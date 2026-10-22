@@ -157,7 +157,7 @@
 
 **两个商店都已上架。**
 
-- **Edge**：线上 0.9.6；0.9.7 审核中（截至 2026-10-22，微软称最长 7 个工作日）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pambegmmdpjplkfddafegbekknmelh>
+- **Edge**：线上 0.9.6；0.9.7 审核中（截至 2026-10-22，微软称最长 7 个工作日）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh>
 - **Chrome**：线上 0.8.3（2026-10-21 更新；提供方 APXS），比 `main`（0.10.0）落后多个版本。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo>
 - 0.10.0 只发了 GitHub Release，**还没提审**；下一次商店更新用它（或更高版本），两边版本号都必须大于各自线上版本，Edge 还要等 0.9.7 审核结束。
 - 材料、listing 与待办见 [STORE.md](STORE.md)「当前状态」，Edge 差异见 [STORE-EDGE.md](STORE-EDGE.md)。
