@@ -72,7 +72,7 @@
 |---|---|---|---|
 | P0-1 | ✅ **表单 / 菜单 / 对话框被整块替换** | 0.7.2：`textOf` 跳过隐藏子树、含控件的容器强制下钻、替换时跳过隐藏节点；新增 2 条自检 | 已完成 |
 | P0-2 | ✅ **商店包补 MIT 署名** | 0.7.1 补丁：allowlist 加入 `LICENSE` / `THIRD-PARTY-NOTICES.md` / `licenses/`，出包时缺一个直接报错，测试同步 | 已完成 |
-| P0-3 | **公开仓库安全设置** | 开启 Private vulnerability reporting、Secret scanning + Push protection、Dependabot alerts | 待用户操作 |
+| P0-3 | ✅ **公开仓库安全设置** | 2026-10-22 开启：Private vulnerability reporting、Secret Protection（secret scanning）、Push protection、Dependency graph + Dependabot alerts / security updates | 已完成 |
 
 ### P1 — 功能缺口
 
