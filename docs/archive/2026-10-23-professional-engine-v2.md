@@ -4,9 +4,9 @@
 
 ## 交付状态
 
-已在本地分支 `codex/professional-engine-v2` 实现、集成并完成离线和无头 Chrome 验证，等待用户验收。基线为 `9bdb0fb7780603d5c0cfaf8069c9fce7004db142`；执行前工作树干净，`git log --oneline -5` 已检查，`git ls-remote origin HEAD refs/heads/main` 核对远端与本地一致。
+已在本地分支 `codex/professional-engine-v2` 实现、集成并完成离线和无头 Chrome 验证；用户验收后随 **0.11.4** 发布。基线为 `9bdb0fb7780603d5c0cfaf8069c9fce7004db142`；执行前工作树干净，`git log --oneline -5` 已检查，`git ls-remote origin HEAD refs/heads/main` 核对远端与本地一致。
 
-扩展版本仍为 0.11.3。没有修改 manifest/package/core 的版本号，没有推送、创建 Release、提交商店审核或调用真实付费模型。所有代码改动保留在本地工作树供审阅。配置数据结构独立迁移为 v7。
+扩展版本为 0.11.4。发布时同步 manifest/package/core 版本号；没有调用真实付费模型，也没有提交商店审核。配置数据结构独立迁移为 v7。
 
 ## 专业引擎实现
 

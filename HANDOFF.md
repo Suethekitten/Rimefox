@@ -731,18 +731,18 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.11.3）
+## 14. 本版技术记录（0.11.4）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.11.2 的 Atypon 引用 / 图表链接混排见提交 `1cb7fa0`；0.11.1 的仅译文引用重建见 `e508c49`；0.11.0 的医学专业模式见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md) 与 §15，引用识别 / 链接边界见 §5.2.1。
+> 0.11.3 的普通链接 / Ruby / pre-wrap / 悬浮球首帧见提交 `9bdb0fb`；专业引擎的完整实施与验收记录见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)。
 
-- **问题**：Science Advances 论文仅译文时，相邻段落已翻成中文，带多个文献引用和 Fig. 1 图表链接的段落却整段保持英文。本地等价夹具复现的触发条件：图表链接 `<a href="#F1">Fig. 1</a>` 不是保留区，`hasUnsafeInlineLink` 把它当成「普通行内链接 + 链接外还有正文」，`injectCitedOnly` 直接返回 false；同一段把 Fig. 1 换成纯文字即可原地翻译。只有图表链接的段落在仅译文下则退回双语。`main.js` 的 `tryInject` 又把注入失败记成 skipped + settled，之后再也不重试。
-- **混合行内安全渲染**（`content/dom.js`，见 §5.2.1）：`isXrefEl` 把指向本页锚点、可见文字是图表标签的链接当保留区；保留区带 `kind`（protect / cite / mention / xref / link / ruby）。内容区域里只要同时有普通文字和行内链接，普通链接也当原子（不再要求先有引用 / 图表链接；整段链接、导航和有小块的容器除外）。`injectMixed` 取代 `injectCitedOnly`：原子原地不动（不移动、不改属性），原子外的文字清空，译文作为新文本节点插在原子之间、永远不进单元内部的链接；落点词级 → 句级 → 按原句恢复，图表链接漏标记按标签唯一定位；`<br>` 和 pre-wrap 文本节点里的 `\n` 分行逐行对齐；中文目标下图表标签写成「图 1 / 表 1 / 式 1」、补充材料链接写成「补充材料 3」（可靠对应才写）；Ruby 元素整体作为原子保留，不把中文写进 rt/rp。双语里引用 / 图表链接 / 混合段落普通链接都放可点击副本。
-- **注入结果分类**：`DT.inject` 写 `unit.injectResult`（success / already-rendered / not-applicable / empty / stale-generation / stale-source / unsafe-structure / invalid-placement），新增 `DT.unitStamp`。`tryInject` 把 unsafe-structure / invalid-placement 记进 `renderFails` 和 `DT.state.renderFailed` / `lastRenderError`（进 `dt:status`），不算跳过、不记已处理；源文本和 DOM 状态都没变就不再收、不再请求，页面变了才重收（后台缓存里有译文）。`DT.releaseReplaced` 补上 `cited` 记录（以前站点改写后不放回）。
-- **缓存 / 提示词**：不改 `SCHEMA` / 配置结构 / `DT.tx` 语义。带图表链接或混合普通链接的段落，送翻文本多了 `<kN>` 标记，会按新文本翻译一次，旧缓存不清；提示词的保留标记说明点名「图表编号、链接文字」，只在本批带标记时出现。
-- **测试**：自检新增 `tpl-science-mixed`（结构照 0.11.0 抓取的真实 Atypon 写法；首句取自用户报告，其余为等价文字）、`tpl-pmc`（PMC 等价不良事件段落 + 普通补充材料链接）与混合行内用例：整段原地翻译、链接节点 / 属性不变、「图 1」/「补充材料 3」与点击、嵌套父节点、图表链接紧挨引用、只有图表链接、`<br>` 与 pre-wrap 换行、丢图表标记、引用 + 普通链接、注音 + 引用 / 链接、切换模式 / 撤销 / 重翻 / 站点改写后重翻；`test/content-main.test.mjs` 新增「模型已给译文、DOM 注入失败不算跳过 / 页面没变不重发」；E2E 新增混合行内和 PMC 本地页面。合并后 Node、自检、E2E 全部通过；真实网站效果待用户验收。
-- **悬浮入口首帧**：首次挂载 / body 重建 / 关闭后再打开时，host 先带 `data-init`（隐藏 + 禁 left/top 过渡）插入并强制布局；`render()` / `place()` 用真实尺寸、保存坐标、贴边和半隐藏状态算完最终位置后再撤掉 hidden，首帧不再从 (0,0) 飞过去。保存坐标越界由 `DT.dockPlace` clamp；body 直接子节点用轻量 MutationObserver 重挂，`pageshow` 再检查。正常拖拽 / 吸附 / 展开仍保留原过渡。
-- **已知限制**：模型把混合段落分行合并 / 拆开后行数对不上、或 Ruby / 链接结构无法安全重建时保持原文并报 invalid-placement / unsafe-structure（不退回双语，也不无限重试）；Ruby 混排时 `<ruby>` 整体保留、基字本身不翻译；混合段落里的普通链接默认保留原文字，只有图表 / 补充材料等可靠标签做本地化（任意链接文字翻译仍需链接级标记，ROADMAP P1-2）。
+- **专业引擎 v2**：新增静态 Professional Profile Registry，正式注册 general / medical；后台只通过 profile 的规则、术语、上下文、校验和指纹接口工作，专业模块不操作 DOM。医学适配器复用 lib/medical，没有重写提供商或另建模型调用管线；法律等未来 profile 只需静态 import 并注册。
+- **配置与兼容**：配置迁移到 v7，主字段 professionalProfile（general / medical）+ professionalOptions（quality fast / balanced / strict、subdomain、maxReviewRequests 0–3）；旧 medicalMode 继续双向兼容，旧弹窗只写布尔值也能切换。质量包括快速 / 标准 / 严格，严格只复核高风险片段，按消息预算而不是整页费率。
+- **医学规则 / 词库**：规则覆盖忠实性、证据、统计、剂量、医学符号、否定与因果边界；词库保留 100 条来源记录并增加稳定 id / version / aliases / contextHint，可疑的 multivariate analysis → 多因素分析 被 matchEnabled:false 隔离；有效英中 99 条、可反向 43 条，用户术语优先，长词优先，只注入本批命中词。
+- **上下文 / 校验 / 缓存**：本地只读标题、章节、当前批次及相邻块，保守识别显式长名缩写，冲突定义和跨论文混批丢弃；隐私模式不发送标题 / 章节。标准质量本地检查数字、百分比、p 值、CI、剂量、人数比例、研究编号、引用与隐私标记；语义规则只报可疑线索，不自动改写医学事实。专业缓存按 profile / 术语 / 校验版本 / 命中词 / 上下文 / 质量隔离，普通缓存键不变。
+- **JAMA 上标污染修复**：识别可见引用文本、/ 分隔和隐藏辅助标签，尽量把整个引用组作为原子；在清空原文前规划跨出 A / SUP / 引用包装 / CSS 特殊排版链的安全落点（pre-wrap 换行同样走安全边界）。不使用 font-size / vertical-align !important，不重建 innerHTML；字号、行高、引用节点 / 分隔符、href / id / ARIA / 点击监听和逐节点还原都有断言。
+- **测试**：完整 Node（含专业配置、引擎、管线、校验、医学评估）、离线自检、E2E（含配置质量选择 / 保存、医学开关、缓存、划词、输入框、悬停、Shadow DOM）通过；新增 inline-layout 三组视口 / 缩放矩阵，旧 HEAD 上能复现 SUP / CSS 上标污染。真实付费模型、真实 JAMA / Science / Nature / PMC 页面与真实浏览器系统缩放未验收。
+- **已知限制**：医学术语仍是小型审核核心集，不能把规则通过或模型复核当作医学准确性证明；语义检查主要覆盖部分英中 / 中英线索，复杂否定作用域、全文结论增删、诊断错译仍可能漏检；缩写定义依赖当前批次或邻近上下文；严格模式预算按消息而非整页计算。
 
 ## 15. 专业翻译引擎
 
