@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-10-23，0.11.1 正式发布（仅译文引用修复）；0.11.0 已发布（医学专业模式 + 通用学术引用 / 行内链接修复）；0.10.2 已发布（开放 Shadow DOM / B 站评论区）。0.10.1 已发布（论文引用保真、液态玻璃开关对齐）；Edge 线上 0.9.6（0.9.7 审核中）、Chrome 线上 0.8.3，见 §4.2。
+> 最近更新：2026-10-23，0.11.2 正式发布（论文段落里引用 + 图表链接混排的仅译文渲染）；0.11.1 正式发布（仅译文引用修复）；0.11.0 已发布（医学专业模式 + 通用学术引用 / 行内链接修复）；0.10.2 已发布（开放 Shadow DOM / B 站评论区）。0.10.1 已发布（论文引用保真、液态玻璃开关对齐）；Edge 线上 0.9.6（0.9.7 审核中）、Chrome 线上 0.8.3，见 §4.2。
 
 ---
 
@@ -65,6 +65,7 @@
 | 0.10.2 | 开放 Shadow DOM 翻译支持：B 站新版评论区正文 / 楼中楼进入现有翻译管线；受控 feed observer、共享样式、悬停降级、事务还原；普通网站不扫描 shadow root |
 | 0.11.0 | 医学专业模式（全局开关、审核词库、缓存隔离）；通用学术引用识别（Science / Atypon 等非 sup 结构）；@用户名与行内链接边界安全降级 |
 | 0.11.1 | 仅译文引用修复：引用边界新建文本节点，支持连续引用 / 重排 / 漏标记；不再因引用定位失败退回双语 |
+| 0.11.2 | 混合行内安全渲染：图表交叉引用链接成为保留区，引用 + 图表链接 + 普通链接混排的段落仅译文原地翻译；注入结果分类，DOM 注入失败不再算跳过 |
 
 ---
 
@@ -129,7 +130,8 @@
 | **0.10.1** | 补丁：Nature 等论文的上标引用不再混进译文（保留区 + 双语副本 + 降级）、液态玻璃开关对齐；详见 HANDOFF §14 |
 | **0.10.2** | 开放 Shadow DOM 翻译层 + B 站评论区适配；详见 [SHADOW-DOM-ADAPTER.md](SHADOW-DOM-ADAPTER.md) 与 HANDOFF §14 |
 | **0.11.0** | 医学专业模式 + Science / 通用学术引用识别 + @用户名 / 行内链接边界修复；详见 [PROFESSIONAL-TRANSLATION.md](PROFESSIONAL-TRANSLATION.md) 与 HANDOFF §14 |
-| **0.11.1** | 补丁：仅译文引用不再因 keepPlan 失败降级双语；引用之间无文本节点、重排、漏标记改为原地重建；详见 HANDOFF §14 |
+| **0.11.1** | 补丁：仅译文引用不再因 keepPlan 失败降级双语；引用之间无文本节点、重排、漏标记改为原地重建 |
+| **0.11.2** | 补丁：Science 段落里引用 + Fig. 1 混排整段不翻（图表链接被当成不安全的普通链接）；混合行内渲染 + 注入结果分类；详见 HANDOFF §14 |
 | **0.12.0** | 站点规则进阶 + 会话级 Key 存储 |
 | **0.13.0** | 夜间模式自动识别 + 悬浮入口增强 |
 
@@ -169,7 +171,7 @@
 **两个商店都已上架。**
 
 - **Edge**：线上 0.9.6；0.9.7 审核中（截至 2026-10-22，微软称最长 7 个工作日）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh>
-- **Chrome**：线上 0.8.3（由协助者发布并更新；2026-10-21 更新；提供方 APXS），比 `main`（0.11.1）落后多个版本，0.10.0 等他有空再发布。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo>
+- **Chrome**：线上 0.8.3（由协助者发布并更新；2026-10-21 更新；提供方 APXS），比 `main`（0.11.2）落后多个版本，0.10.0 等他有空再发布。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo>
 - 0.10.0 只发了 GitHub Release，**还没提审**；下一次商店更新用它（或更高版本），两边版本号都必须大于各自线上版本，Edge 还要等 0.9.7 审核结束。
 - 材料、listing 与待办见 [STORE.md](STORE.md)「当前状态」，Edge 差异见 [STORE-EDGE.md](STORE-EDGE.md)。
 

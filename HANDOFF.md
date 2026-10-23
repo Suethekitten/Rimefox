@@ -728,16 +728,17 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.11.1）
+## 14. 本版技术记录（0.11.2）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.11.0 的医学专业模式见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md)，引用识别 / 链接边界见 §5.2.1 与 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)。
+> 0.11.1 的仅译文引用重建见提交 `e508c49`；0.11.0 的医学专业模式见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md) 与 §15，引用识别 / 链接边界见 §5.2.1。
 
-- **问题**：0.11.0 的仅译文引用路径仍复用 keepPlan；引用之间没有文本节点、引用重排、模型漏标记、分行 / Ruby 等情况会让 keepPlan 失败，并 fallback-dual 调用 injectDual，导致仅译文页面出现英文正文 + 中文译文。
-- **修复**：新增 citeOnlyPlacement / injectCitedOnly。仅译文时清空普通文本，在引用 DOM 边界插入新的文本节点，保留原始引用节点的 href / id / title / aria-label / 样式和事件；不要求原文有对应文本节点，不调用 injectDual。
-- **落点恢复**：有完整标记时用 keepPlacement（词级 / 句级）；模型漏标记或标记无法放置时，按原文引用所属句子映射到译文句末，不跨句乱放，也不凭空生成编号。
-- **事务 / 生命周期**：文本改写、创建节点、容器标记全部走 RenderTransaction；还原逆序移除新节点并恢复原文本；cited 记录进入 stillOurs / renderedByIndex，hover 使用 mapFromNode(unit.el)。无法安全重建（非完整段落、多行、Ruby、普通行内链接混排、引用父级在链接内、落点失败）时保持原文并标记 failed-only，不显示半成品，也不转双语。
-- **测试**：selftest 新增无中间文本节点、连续引用、引用重排、漏标记、多句、notranslate + 引用、引用 + 普通链接、复原等夹具；完整 Node、自检页、Chrome E2E 通过。真实 Science / Nature / YouTube 未在本轮访问，真实网站验收仍由用户完成。
+- **问题**：Science Advances 论文仅译文时，相邻段落已翻成中文，带多个文献引用和 Fig. 1 图表链接的段落却整段保持英文。本地等价夹具复现的触发条件：图表链接 `<a href="#F1">Fig. 1</a>` 不是保留区，`hasUnsafeInlineLink` 把它当成「普通行内链接 + 链接外还有正文」，`injectCitedOnly` 直接返回 false；同一段把 Fig. 1 换成纯文字即可原地翻译。只有图表链接的段落在仅译文下则退回双语。`main.js` 的 `tryInject` 又把注入失败记成 skipped + settled，之后再也不重试。
+- **混合行内安全渲染**（`content/dom.js`，见 §5.2.1）：`isXrefEl` 把指向本页锚点、可见文字是图表标签的链接当保留区；保留区带 `kind`（protect / cite / mention / xref / link），有引用或图表链接的段落里普通链接也当原子。`injectMixed` 取代 `injectCitedOnly`：原子原地不动（不移动、不改属性），原子外的文字清空，译文作为新文本节点插在原子之间、永远不进单元内部的链接；落点词级 → 句级 → 按原句恢复，图表链接漏标记按标签唯一定位；`<br>` 分行逐行对齐；中文目标下图表标签写成「图 1 / 表 1 / 式 1」（可靠对应才写）。双语里引用 / 图表链接 / 混合段落普通链接都放可点击副本。
+- **注入结果分类**：`DT.inject` 写 `unit.injectResult`（success / already-rendered / not-applicable / empty / stale-generation / stale-source / unsafe-structure / invalid-placement），新增 `DT.unitStamp`。`tryInject` 把 unsafe-structure / invalid-placement 记进 `renderFails` 和 `DT.state.renderFailed` / `lastRenderError`（进 `dt:status`），不算跳过、不记已处理；源文本和 DOM 状态都没变就不再收、不再请求，页面变了才重收（后台缓存里有译文）。`DT.releaseReplaced` 补上 `cited` 记录（以前站点改写后不放回）。
+- **缓存 / 提示词**：不改 `SCHEMA` / 配置结构 / `DT.tx` 语义。带图表链接或混合普通链接的段落，送翻文本多了 `<kN>` 标记，会按新文本翻译一次，旧缓存不清；提示词的保留标记说明点名「图表编号、链接文字」，只在本批带标记时出现。
+- **测试**：自检新增 `tpl-science-mixed`（结构照 0.11.0 抓取的真实 Atypon 写法；首句取自用户报告，其余为等价文字）与混合行内用例：整段原地翻译、链接节点 / 属性不变、「图 1」与点击、嵌套父节点、图表链接紧挨引用、只有图表链接、`<br>` 分行、丢图表标记、引用 + 普通链接、注音失败分类、切换模式 / 撤销 / 重翻 / 站点改写后重翻（旧代码上失败）；`test/content-main.test.mjs` 新增「模型已给译文、DOM 注入失败不算跳过 / 页面没变不重发」；E2E 新增混合行内一节（本地页面）。合并后 Node、自检、E2E 全部通过；用户已在真实 Science 页面验收。
+- **已知限制**：注音 / pre-wrap 分行 / 模型合并或拆开分行的混合段落保持原文并报 unsafe-structure / invalid-placement；只有普通链接的段落仅译文仍降级双语（链接文字翻译需要链接级标记，ROADMAP P1-2）；混合段落里的普通链接保留原文字（§9）。
 
 ## 15. 医学专业模式
 
