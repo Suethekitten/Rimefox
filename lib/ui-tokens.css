@@ -261,6 +261,147 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   box-shadow: var(--thumb-shadow), 0 0 0 4px var(--accent-ring);
 }
 
+/* 开关（液态玻璃小滑块）：设置页 <input type="checkbox" class="switch">（常规 52 × 24、透镜 30 × 20）；
+   弹窗 <input role="switch"> 后面跟 <span class="switch switch-sm">（紧凑 32 × 18、透镜 20 × 14）。
+   槽、强调色填充、透镜、透镜上的玻璃滤镜只认下面这组变量：
+     透镜高 = 槽高 − 2 ×（描边 + 内距），行程 = 槽宽 − 透镜宽 − 2 ×（描边 + 内距）
+   填充和透镜都用 top / bottom 贴着槽的内边缘，上下间隙、开关两端间隙天然相等，开 / 关只改 translate。
+   全局的 `* { box-sizing: border-box }` 管不到 ::before / ::after，这里三层都写明 border-box。
+   透镜尺寸要等于 ensureGlassFilter 的贴图尺寸（设置页 'slider' 与排版滑块共用、弹窗 'mini-slider'），
+   test/switch-geometry.test.mjs 会对一遍。 */
+.switch {
+  --switch-w: 52px;
+  --switch-h: 24px;
+  --switch-border: 1px;
+  --switch-pad: 1px;
+  --switch-knob-w: 30px;
+  --switch-travel: calc(var(--switch-w) - var(--switch-knob-w) - 2 * (var(--switch-border) + var(--switch-pad)));
+  --switch-glass: var(--glass-slider-filter, blur(6px) saturate(170%));
+  --switch-knob-shadow: inset 0 -2px 3px rgba(15, 23, 42, 0.15), 0 2px 6px -2px rgba(15, 23, 42, 0.28);
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--switch-w);
+  height: var(--switch-h);
+  margin: 0;
+  vertical-align: middle;
+  border: var(--switch-border) solid var(--field-edge);
+  border-radius: var(--r-pill);
+  background: var(--switch-off);
+  box-shadow: var(--switch-inset);
+  cursor: pointer;
+  transition: background var(--dur) ease, border-color var(--dur) ease, box-shadow var(--dur) ease;
+}
+
+.switch-sm {
+  --switch-w: 32px;
+  --switch-h: 18px;
+  --switch-knob-w: 20px;
+  --switch-glass: var(--glass-mini-slider-filter, blur(4px) saturate(180%));
+  --switch-knob-shadow: inset 0 -1px 2px rgba(15, 23, 42, 0.12), 0 1px 4px -1px rgba(15, 23, 42, 0.26);
+}
+
+/* 填充（::before）和透镜（::after）共用同一个框：上下左都贴着槽内边缘留 --switch-pad */
+.switch::before,
+.switch::after {
+  content: "";
+  position: absolute;
+  top: var(--switch-pad);
+  bottom: var(--switch-pad);
+  left: var(--switch-pad);
+  box-sizing: border-box;
+  border-radius: var(--r-pill);
+}
+
+/* 填充：开状态铺满槽内（右端 = 透镜右缘），透镜底下整片是强调色；
+   只填到透镜中心的话，玻璃会把填充的断口折射成偏在一边的「小球」，看起来透镜不居中。
+   宽度用不回弹的缓动，免得弹簧回弹时冲出槽外。 */
+.switch::before {
+  width: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 20%, transparent),
+    color-mix(in srgb, var(--accent) 55%, transparent)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  opacity: 0;
+  transition: width 260ms var(--ease), opacity 180ms ease;
+}
+
+.switch:checked::before,
+:checked + .switch::before {
+  width: calc(var(--switch-travel) + var(--switch-knob-w));
+  opacity: 1;
+}
+
+/* 透镜：位置只用 translate、按下只用 scale（从中心等比放大），两者互不覆盖 */
+.switch::after {
+  width: var(--switch-knob-w);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 48%),
+    color-mix(in srgb, #fff 16%, transparent);
+  -webkit-backdrop-filter: var(--switch-glass);
+  backdrop-filter: var(--switch-glass);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    var(--switch-knob-shadow);
+  transition: translate 260ms var(--ease-spring), scale 260ms var(--ease-spring);
+}
+
+.switch:checked::after,
+:checked + .switch::after {
+  translate: var(--switch-travel) 0;
+}
+
+.switch:active::after,
+label:active > .switch::after {
+  scale: 1.03;
+}
+
+.switch:checked,
+:checked + .switch {
+  border-color: var(--accent-border);
+}
+
+.switch:focus-visible,
+:focus-visible + .switch {
+  outline: none;
+  box-shadow: var(--switch-inset), 0 0 0 3px var(--accent-ring);
+}
+
+.switch:disabled,
+:disabled + .switch {
+  opacity: 0.5;
+}
+
+.switch:disabled {
+  cursor: not-allowed;
+}
+
+/* 减少透明 / 关闭液态玻璃：透镜回到实心白底 + 强调色描边（描边画在透镜尺寸以内），填充保持实色 */
+:root[data-reduce-transparency] .switch::after,
+:root[data-liquid-glass="off"] .switch::after {
+  background: #fff;
+  border: 2px solid var(--accent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--thumb-shadow);
+}
+
+:root[data-reduce-transparency] .switch::before,
+:root[data-liquid-glass="off"] .switch::before {
+  background: var(--accent);
+}
+
+/* 关闭阴影：只留内高光，去掉外投影 */
+:root[data-no-shadow] .switch::after {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
 /* 深浅色切换：圆形扩散由 JS 驱动 clip-path，这里关掉默认的淡入淡出 */
 ::view-transition-old(root),
 ::view-transition-new(root) {

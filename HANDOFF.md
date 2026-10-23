@@ -70,7 +70,7 @@ edge-bilingual/
 │   ├── liquid-glass/      液态玻璃（复用 Sak / MIT）：SVG 位移滤镜、材质、弹窗工具坞、设置页导航
 │   ├── ui-appearance.js   设置页/弹窗共用：强调色等写到 <html>、深浅色圆形过渡、跨页面配置同步、空闲执行
 │   ├── ui-theme-boot.js   设置页/弹窗的首帧主题与外观预判（<head> 同步执行，避免闪一帧白底）
-│   ├── ui-tokens.css      弹窗 / 设置页 / 欢迎页共用的设计变量：材质、三级文字、强调色派生、圆角、阴影、字体；深浅色与「减少透明 / 关闭阴影」都在这里切换（各页面 CSS 首行 @import）
+│   ├── ui-tokens.css      弹窗 / 设置页 / 欢迎页共用的设计变量：材质、三级文字、强调色派生、圆角、阴影、字体；深浅色与「减少透明 / 关闭阴影」都在这里切换（各页面 CSS 首行 @import）；设置页和弹窗共用的开关 `.switch`（弹窗加 `.switch-sm`）也在这里
 │   └── welcome.js         首次安装判断 / 欢迎页语言默认值 / getURL 打开（纯函数，可单测）
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
@@ -471,6 +471,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 | 41 | 局部段落的形态跟着子块的翻译状态变（0.9.7） | flex 行里的按钮被原地替换、打上 `data-dt-src` 后，下一轮容器变成 own 单元：第一段译文被撤掉，新单元被最后一段的旧译文节点挡住注入失败，每轮重收、重发同一段（命中缓存也要走一趟后台，缓存没了就重复计费），日志里什么也没有 | 局部段落判定排在「子元素全被跳过」之前；`settleForm` 记形态，变了先撤双语再收；`DT.inject` 拒绝时打日志，`main.js` 记成已处理、不再原样重发（见 5.1） |
 | 42 | 长段落切片切在保留区标记中间 | 一片以 `<k1>` 结尾、下一片只有 `</k1>`，两片都不成对，后台不加「原样照抄」说明；模型丢了标记，仅译文走兜底把 notranslate 的内容藏起来换成译文 | `DT.splitLong` 的句末切点和硬切点都避开 `<kN>…</kN>`，整段只剩一个超长保留区就不切 |
 | 43 | 上标文献引用被当成普通文字（Nature） | 「…diseases1,2.」整句送翻：仅译文把译文写进第一个文本节点、清空链接里的数字，上标和跳转都没了，模型写的数字留在正文里；双语译文里只是普通数字。保留区原来的兜底（整句写进别的节点、隐藏保留元素）对引用也不行：藏了就丢引用，不藏就数字重复 | 上标引用当保留区；带引用的单元走 `injectCited`：词级 → 句级 → 降级成双语，双语放上标副本（见 5.2.1） |
+| 44 | 开关按「内框 = width × height」写 `top: 2px` 和 translate 行程 | 全局 `* { box-sizing: border-box }` 让 1px 描边吃掉内框：透镜上 2px 下 0px、开状态贴住右边框；它又管不到 `::before / ::after`，减少透明时 2px 描边把透镜撑出槽外；开状态填充只到透镜中心，玻璃把断口折射成偏在一边的「小球」（0.10.0） | 设置页和弹窗共用 `ui-tokens.css` 的 `.switch`：只认 `--switch-w / -h / -border / -pad / -knob-w`，填充和透镜用 top / bottom 贴内边缘、border-box，开 / 关只改 `translate`，开状态填充铺到透镜右缘；透镜尺寸改了要同步 `ensureGlassFilter` 的贴图尺寸 |
 
 ---
 
@@ -508,6 +509,7 @@ node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层�
 node test/sentence-align.test.mjs # 悬停对照的断句（缩写 / 脚注号 / 小写续接）与本地句子对齐：38 段人工语料每个句界都对
 node test/glass-dock.test.mjs # 液态玻璃：槽位几何 / 竖向槽位 / 橡皮筋 / 最近槽位 / 三通道滤镜
 node test/content-injection.test.mjs # 补注入清单与 manifest 完全一致（units / input 不漏、顺序不乱）
+node test/switch-geometry.test.mjs # 开关：设置页 / 弹窗共用一套几何变量，透镜尺寸 = 玻璃滤镜贴图尺寸，页面里没有第二份实现
 ```
 > 每个文件的条数以 `node --test` 的输出为准，本文不维护数字。
 
