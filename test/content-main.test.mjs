@@ -403,6 +403,62 @@ await t('注入被拒（结构对不上 / 已有译文）：记成已处理，�
   assert.equal(DT.state.skipped, 1, '算进「跳过」，进度条才能走完');
 });
 
+// 混合行内内容：模型已经返回非空译文，DOM 注入却失败（结构不支持 / 落点定不下来）——
+// 这不是「跳过」也不是「已处理」：要记下原因；页面没变就不再请求（不重复计费），页面变了才重新收集
+await t('注入失败（模型已给译文、DOM 写不进去）：不算跳过 / 已处理，记 renderFailed；页面没变不再请求，页面变了再收', async () => {
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ config: { lazy: true, skipSameLang: false }, hooks });
+  const DT = env.DT;
+  DT.generation = 1;
+  const el = {
+    ...fakeElement(),
+    isConnected: true,
+    getBoundingClientRect: () => ({ width: 600, height: 20, top: 0, bottom: 20 })
+  };
+  const unit = () => ({ el, text: 'Building on this work (10), see Fig. 1.', index: 0, gen: 1, sentences: [], style: 'plain' });
+  let injects = 0;
+  let stamp = 'dom-v1';
+  const asked = [];
+  DT.collectAll = (accept) => [unit()].filter((u) => !accept || accept(u));
+  DT.unitStamp = () => stamp;
+  DT.inject = (u, raw) => {
+    injects += 1;
+    assert.ok(raw && raw.length, '注入时手里确实有模型给的译文');
+    u.injectResult = { code: 'unsafe-structure', reason: 'test-structure' };
+    return false;
+  };
+  DT.sourceChanged = () => false;
+  DT.send = async (msg) => {
+    if (msg.type === 'config:get') {
+      return { ok: true, config: { hasKey: true, targetLang: 'zh-CN', mode: 'translation', lazy: true, skipSameLang: false } };
+    }
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') {
+      asked.push(...msg.texts);
+      return { ok: true, results: msg.texts.map((x) => '译：' + x), alignments: msg.texts.map(() => null) };
+    }
+    return { ok: true };
+  };
+
+  await env.message({ type: 'dt:toggle' });
+  for (let i = 0; i < 4; i += 1) await flush();
+  assert.equal(injects, 1);
+  assert.equal(asked.length, 1);
+  assert.equal(DT.state.skipped || 0, 0, '模型给了译文但写不进页面，不能静默算成「跳过」');
+  assert.equal(DT.state.translated || 0, 0, '也不能算成翻译成功');
+  assert.equal(DT.state.renderFailed, 1, '要记成注入失败');
+  assert.match(DT.state.lastRenderError, /unsafe-structure: test-structure/);
+  await rescan(hooks);
+  await rescan(hooks);
+  assert.equal(asked.length, 1, '页面没变：同一个确定性错误不再重新请求翻译');
+  assert.equal(injects, 1);
+  stamp = 'dom-v2'; // 页面更新了
+  await rescan(hooks);
+  assert.equal(asked.length, 2, '页面变了才重新收集（后台缓存里有译文，不会再调用模型）');
+  assert.equal(injects, 2);
+  assert.equal(DT.state.renderFailed, 1, '同一段只算一次失败');
+});
+
 await t('保留区：超长段落切片后，带标记的每一片都是成对的 <kN>（后台才会加「原样照抄」的说明）', async () => {
   const { hasKeepMarks } = await import(new URL('lib/prompt.js', root));
   const env = await boot({ config: { lazy: false, skipSameLang: false } });

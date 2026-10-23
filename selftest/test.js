@@ -2919,6 +2919,193 @@
     });
   });
 
+  // ---------------- 混合行内内容：Science 段落里文献引用 + 图表链接 + 普通文字 ----------------
+  // 以前：图表链接 <a href="#F1">Fig. 1</a> 不是保留区，被 hasUnsafeInlineLink 当成「普通行内链接」，
+  // 整段引用重建被拒，段落一直是英文（main.js 还把它记成跳过，不再重试）
+  var MIX_ZH =
+    '在此基础上，我们尝试为材料引入光降解性，使用户能够在时空上控制网络降解。' +
+    '光是一种理想的刺激，因为它可以以很高的空间和时间精度施加（<k1>10</k1>）。' +
+    '邻硝基苄酯等光敏基团已被广泛引入水凝胶网络（<k2>10</k2>–<k3>12</k3>），香豆素衍生物则提供红移吸收（<k4>13</k4>–<k5>16</k5>）。' +
+    '因此我们设计了一种可光降解的交联剂，并表征了网络的形成与侵蚀（<k6>Fig. 1</k6>），' +
+    '这建立在此前对可降解水凝胶（<k7>16</k7>–<k8>24</k8>）及其作为细胞培养平台（<k9>25</k9>–<k10>29</k10>）的研究之上。';
+  var MIX_LABELS = ['10', '10', '12', '13', '16', '图 1', '16', '24', '25', '29'];
+
+  function mixShown(zh) {
+    return stripMarks(zh).replace(/Fig\. (\d)/g, '图 $1');
+  }
+  function linkFacts(root) {
+    return Array.prototype.map.call(root.querySelectorAll('a'), function (a) {
+      return [a.getAttribute('href'), a.id, a.getAttribute('role'), a.getAttribute('data-xml-rid')].join('|');
+    });
+  }
+  // 链接外还剩的英文单词（正文没翻完就会有）
+  function englishOutsideLinks(root) {
+    return textNodesIn(root).filter(function (n) {
+      return /[A-Za-z]{3,}/.test(n.nodeValue) && !(n.parentElement && n.parentElement.closest('a'));
+    }).map(function (n) { return n.nodeValue.trim().slice(0, 30); });
+  }
+
+  check('混合行内·收集：Science 段落里 9 个引用编号和 Fig. 1 图表链接都是原子，链接属性不进送翻正文', function () {
+    return withTemplate('tpl-science-mixed', 'translation', function (box) {
+      var u = DT.collect(box.querySelector('#sci-mixed'))[0];
+      if (!u) return '没收到单元';
+      var r = eq((u.keep || []).map(function (k) { return k.text + ':' + k.kind; }), [
+        '10:cite', '10:cite', '12:cite', '13:cite', '16:cite', 'Fig. 1:xref', '16:cite', '24:cite', '25:cite', '29:cite'
+      ]);
+      if (r !== true) return '原子：' + r;
+      if (u.wire.indexOf('erosion (<k6>Fig. 1</k6>), building') < 0) return '图表链接标记不对：' + u.wire.slice(400, 560);
+      if (u.wire.indexOf('networks (<k2>10</k2>–<k3>12</k3>), and') < 0) return '范围引用标记不对';
+      return /core-collateral|data-xml-rid|doc-biblioref|#F1/.test(u.wire) ? '链接属性进了送翻文本' : true;
+    });
+  });
+
+  check('混合行内·仅译文：引用 + Fig. 1 的 Science 段落整段变中文，引用 / 图表链接是同一批节点、属性不变，Fig. 1 只包住「图 1」、可点击，还原逐字一致', function () {
+    return withTemplate('tpl-science-mixed', 'translation', function (box) {
+      var p = box.querySelector('#sci-mixed');
+      var before = p.innerHTML;
+      var links = Array.prototype.slice.call(p.querySelectorAll('a'));
+      var facts = linkFacts(p);
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, MIX_ZH, 'zh-CN')) return 'inject 返回 false：' + JSON.stringify(u.injectResult);
+      if (u.injectResult.code !== 'success') return '结果应是 success：' + JSON.stringify(u.injectResult);
+      if (p.querySelector('[data-dt-target]')) return '仅译文不该退回双语';
+      if (DT.normalizeText(p.textContent) !== DT.normalizeText(mixShown(MIX_ZH))) return '页面上的译文不对：' + p.textContent.slice(0, 120);
+      var english = englishOutsideLinks(p);
+      if (english.length) return '链接外还有英文正文：' + english.join(' | ');
+      var now = Array.prototype.slice.call(p.querySelectorAll('a'));
+      if (now.length !== links.length || now.some(function (a, i) { return a !== links[i]; })) return '链接节点被换了';
+      var r = eq(linkFacts(p), facts);
+      if (r !== true) return '链接属性被改：' + r;
+      r = eq(now.map(function (a) { return a.textContent; }), MIX_LABELS);
+      if (r !== true) return '链接里的文字不对（译文落进链接 / 编号被改）：' + r;
+      var fig = p.querySelector('a[href="#F1"]');
+      if (clickHash(fig) !== '#F1') return 'Fig. 1 不能点击';
+      if (clickHash(p.querySelector('a[href="#core-collateral-R25"]')) !== '#core-collateral-R25') return '引用不能点击';
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('混合行内·切换模式 / 撤销 / 重新翻译 / 页面更新：双语放可点击副本，仅译文能再翻，站点改了图表标签后放回原文并按新内容重翻', function () {
+    return withTemplate('tpl-science-mixed', 'translation', function (box) {
+      var p = box.querySelector('#sci-mixed');
+      var before = p.innerHTML;
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, MIX_ZH, 'zh-CN')) return '第一次仅译文失败';
+      DT.restore();
+      if (p.innerHTML !== before) return '撤销后不一致';
+      DT.state.mode = 'dual';
+      u = DT.collect(p)[0];
+      if (!DT.inject(u, MIX_ZH, 'zh-CN')) return '双语失败：' + JSON.stringify(u.injectResult);
+      var target = p.querySelector('[data-dt-target]');
+      if (!target) return '双语没有译文块';
+      var r = eq(Array.prototype.map.call(target.querySelectorAll('a'), function (a) { return a.textContent; }), MIX_LABELS);
+      if (r !== true) return '双语副本：' + r;
+      if (target.querySelector('[id]')) return '双语副本里有 id';
+      if (clickHash(target.querySelector('a[href="#F1"]')) !== '#F1') return '双语里的图表链接副本不能点击';
+      DT.restore();
+      if (p.innerHTML !== before) return '双语还原后不一致';
+      DT.state.mode = 'translation';
+      u = DT.collect(p)[0];
+      if (!u || !DT.inject(u, MIX_ZH, 'zh-CN')) return '重新翻译失败：' + JSON.stringify(u && u.injectResult);
+      // 站点重渲染：把图表链接的标签改成 Fig. 3（页面上这一处现在是我们写的「图 1」）
+      var label = p.querySelector('a[href="#F1"]').firstChild;
+      label.nodeValue = 'Fig. 3';
+      if (DT.releaseReplaced() !== 1) return '站点改写后没有放回待翻译';
+      if (englishOutsideLinks(p).length === 0) return '放回后应恢复英文原文';
+      u = DT.collect(p)[0];
+      if (!u || u.text.indexOf('(Fig. 3)') < 0) return '没有按新内容重新收集：' + (u ? u.text.slice(380, 460) : '');
+      if (!DT.inject(u, MIX_ZH.replace('Fig. 1', 'Fig. 3'), 'zh-CN')) return '按新内容重翻失败';
+      if (p.querySelector('a[href="#F1"]').textContent !== '图 3') return '新标签没写成「图 3」';
+      DT.restore();
+      return p.innerHTML === before.replace('>Fig. 1<', '>Fig. 3<') ? true : '还原后应是站点改过的原文';
+    });
+  });
+
+  check('混合行内·嵌套父节点 / 图表链接紧挨引用 / 只有图表链接 / <br> 分行：都原地变中文，链接完整、可点击，还原逐字一致', function () {
+    var cases = [
+      ['#sci-nested', '网络侵蚀被限制在受光照的区域（<k1>Fig. 1</k1>；<k2>16</k2>–<k3>24</k3>），与早先的报道一致（<k4>25</k4>–<k5>29</k5>）。', ['图 1', '16', '24', '25', '29']],
+      ['#sci-figonly', '凝胶化动力学汇总于（<k1>Fig. 2</k1>），流变数据见（<k2>Table 1</k2>）。', ['图 2', '表 1']],
+      ['#sci-lines', '第一行引用了早先的工作（<k1>10</k1>）。\n第二行指向网络数据（<k2>Fig. 1</k2>）。', ['10', '图 1']]
+    ];
+    var errors = [];
+    cases.forEach(function (c) {
+      withTemplate('tpl-science-mixed', 'translation', function (box) {
+        var p = box.querySelector(c[0]);
+        var before = p.innerHTML;
+        var links = Array.prototype.slice.call(p.querySelectorAll('a'));
+        var u = DT.collect(p)[0];
+        if (!u || !DT.inject(u, c[1], 'zh-CN')) { errors.push(c[0] + '：inject 失败 ' + JSON.stringify(u && u.injectResult)); return; }
+        if (p.querySelector('[data-dt-target]')) errors.push(c[0] + '：退回了双语');
+        var english = englishOutsideLinks(p);
+        if (english.length) errors.push(c[0] + '：还有英文正文 ' + english.join(' | '));
+        var now = Array.prototype.slice.call(p.querySelectorAll('a'));
+        if (now.length !== links.length || now.some(function (a, i) { return a !== links[i]; })) errors.push(c[0] + '：链接节点变了');
+        var r = eq(now.map(function (a) { return a.textContent; }), c[2]);
+        if (r !== true) errors.push(c[0] + '：链接文字 ' + r);
+        if (clickHash(now[0]) !== now[0].getAttribute('href')) errors.push(c[0] + '：链接不能点击');
+        if (c[0] === '#sci-lines') {
+          var br = p.querySelector('br');
+          var head = '';
+          var tail = '';
+          var past = false;
+          textNodesIn(p).forEach(function (n) {
+            if (br.compareDocumentPosition(n) & 4) past = true;
+            else past = false;
+            if (past) tail += n.nodeValue;
+            else head += n.nodeValue;
+          });
+          if (DT.normalizeText(head) !== '第一行引用了早先的工作（10）。' || DT.normalizeText(tail) !== '第二行指向网络数据（图 1）。') {
+            errors.push('分行：' + JSON.stringify([head, tail]));
+          }
+        }
+        DT.restore();
+        if (p.innerHTML !== before) errors.push(c[0] + '：还原后不一致');
+      });
+    });
+    return errors.length ? errors.join('；') : true;
+  });
+
+  check('混合行内·模型丢了图表链接的标记：按标签在译文里唯一定位，链接放回原处，正文里不重复出现「Fig. 1」', function () {
+    return withTemplate('tpl-science-mixed', 'translation', function (box) {
+      var p = box.querySelector('#sci-mixed');
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, MIX_ZH.replace('<k6>Fig. 1</k6>', 'Fig. 1'), 'zh-CN')) return 'inject 失败：' + JSON.stringify(u.injectResult);
+      if (textOutsideLinks(p, 'Fig. 1') || textOutsideLinks(p, '图 1')) return '链接外重复出现了图表标签';
+      var shown = DT.normalizeText(p.textContent);
+      return shown.indexOf('形成与侵蚀（图 1），这建立') >= 0 ? true : '图表链接没放回原处：' + shown.slice(150, 230);
+    });
+  });
+
+  check('混合行内·引用 + 普通链接：普通链接当原子保留（文字原样、可点击），中文正文写在链接外，原地翻译成功', function () {
+    return withTemplate('tpl-cite-only', 'translation', function (box) {
+      var p = box.querySelector('#cite-link');
+      var before = p.innerHTML;
+      var link = p.querySelector('a[href="#paper"]');
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, '详情参见<k1>paper</k1><k2>1</k2>。', 'zh-CN')) return 'inject 失败：' + JSON.stringify(u.injectResult);
+      if (p.querySelector('[data-dt-target]')) return '不该退回双语';
+      if (p.querySelector('a[href="#paper"]') !== link || link.textContent !== 'paper') return '普通链接被改：' + link.textContent;
+      if (textInsideLinks(p, '详情') || !textOutsideLinks(p, '详情')) return '中文正文落进了链接';
+      if (clickHash(link) !== '#paper') return '普通链接不能点击';
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('混合行内·结构不支持（注音 + 引用）：保持原文、不退回双语，注入结果明确是 unsafe-structure', function () {
+    return withTemplate('tpl-science-mixed', 'translation', function (box) {
+      var p = box.querySelector('#sci-ruby');
+      var before = p.innerHTML;
+      var u = DT.collect(p)[0];
+      if (!u) return '没收到单元';
+      if (DT.inject(u, '关于汉字暮方的研究（<k1>13</k1>）存在。', 'zh-CN')) return '注音段落不该原地重建';
+      if (!u.injectResult || u.injectResult.code !== 'unsafe-structure') return '结果分类不对：' + JSON.stringify(u.injectResult);
+      if (p.querySelector('[data-dt-target]')) return '不该退回双语';
+      return p.innerHTML === before ? true : '失败时原段落被改了';
+    });
+  });
+
   check('行内链接·仅译文：@username 用户名链接保持原样，后面的译文不落进 <a>；多个链接 / 嵌套 span / 空文本节点同样安全', function () {
     var cases = [
       ['#link-start', '@alice', 'ALICE 回复：这很重要。'],

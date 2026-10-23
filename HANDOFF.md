@@ -383,17 +383,26 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
   文字流里带 notranslate 的行内 `<code>`（GitHub）、行内子元素里嵌的保留元素同样按保留区处理。整段只剩保留内容的段落不收。
 - **文献引用**（`isCitationEl`）：Nature / Springer 的 `<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>`；Science / Atypon 的 `<a role="doc-biblioref" href="#core-collateral-R1"><i>1</i></a>–<a …>`（没有 sup，直接夹在正文里，目标在 `div.citations`）；Wikipedia `sup.reference`、Markdown 脚注（`role="doc-noteref"`）、带 citation / reference 语义的 span、无链接但带强提示的 `<sup>` 也是保留区。
   判定是组合证据：候选行内元素 + 可见文字只有编号和分隔符（`1,2`、`3–5`、`[3]`）+ 数字都在链接里 + 每个链接有 DPUB 角色 / citation 字样，或指向本页且目标真的像参考文献（`li`、`doc-biblioentry`、`#ref/#bib/#cite/#fn`、reference / biblio class 等）。数学指数、序数、化学式（`<sub>`）、图表 / 章节锚点、站外链接、普通数字链接、链接包在上标外面（`<a><sup>2</sup></a>`）都不算。
-  行内链接边界：普通混合链接无法安全原地切分时，非引用单元可降级双语（原段落 / 链接不动，译文另起一块）；带引用的仅译文单元保持原文并报失败，不双语回退。`@username` 提及链接作为保留区，链接文字和点击范围保持原样。实现位置：`content/dom.js` 的 `isCitationEl` / `isMentionEl` / `looksLikeReferenceTarget` / `hasUnsafeInlineLink` / `DT.inject`。
+  **图表交叉引用**（`isXrefEl`）：指向本页锚点、可见文字是图表标签的链接（Fig. 1、Figs. 2 and 3、Fig. 1, A and B、Table S1、Eq. 4、Movie S2、Supplementary Fig. 3）也是保留区（`kind: 'xref'`）；裸数字链接、站外链接、普通文字链接不算。
+  **混合段落**：有文献引用或图表链接的段落里，普通链接也当原子（`keepRangesOf` 收第二遍，`kind: 'link'`：文字原样、仍可点击、链接范围不变），@提及（`kind: 'mention'`）、notranslate（`kind: 'protect'`）照旧。
+  只有普通链接、没有引用 / 图表链接的段落仍按旧规则：普通混合链接无法安全原地切分时降级双语（§9）。实现位置：`content/dom.js` 的 `isCitationEl` / `isMentionEl` / `isXrefEl` / `keepRangesOf` / `injectMixed` / `DT.inject`。
   渲染走 `injectCited`：先用 `DT.units.keepMarks` 取每个标记在「去掉标记和标记内容」的译文里的落点（同号重复只认第一次；不按原文逐字找 —— 引用只是几个数字，译文里本来就可能有同样的数字）。
-  **仅译文**：引用链接原地不动，清除普通英文文本后，按引用边界创建新的文本节点（原文没有对应文本节点也能插），不要求原来的英文段落与文本节点一一对应；新节点全部走 RenderTransaction。
-  落点先后与页面一致 → 词级；模型换了先后 → `keepPlacement` 把每个挪到所在那一句的句末标点前（`sentenceEndAt`）；模型漏标记 → 按原文引用所属句子映射到译文句末（`citeOnlyPlacement`）。
-  两组在原文里隔着字、译文里挨着 → 中间补一个逗号。不能安全重建（分行 / Ruby / 普通行内链接混排 / 引用父级在链接内）时保持原文并标记该单元失败，**不会降级成双语**；只有用户选择双语模式才走 `injectDual`。
+  **仅译文**（`injectMixed`，混合行内安全渲染，取代 0.11.1 的 `injectCitedOnly`）：DOM 结构和可翻译文字分开 —— 原子（引用、图表链接、混合段落里的普通链接、提及、notranslate）原地不动，节点身份 / href / id / 事件监听都不变；
+  原子之外的文字节点（含空白）全部清空，译文按原子的落点切成 N+1 段，作为新文本节点插在原子之间；新节点永远不进单元内部的链接（`safeSlot`），中文正文不会继承超链接。不移动原有节点，所有改动走 RenderTransaction。
+  落点：先后与页面一致 → 词级；模型换了先后 → `keepPlacement` 挪到所在那一句的句末标点前（`sentenceEndAt`）；模型漏了标记 → 按原文所在句映射到译文句末（`atomPlacement`）；
+  图表链接的标记丢了 → 按它的标签（Fig. 1 / 图 1）在译文里唯一定位、从正文里去掉（`recoverXrefMarks`）。`<br>` 分行的段落逐行对齐（第 2 行起以 `<br>` 开头、译文行数一致）。
+  图表链接的可见标签在中文目标下按 `xrefLabel` 写成「图 1 / 表 1 / 式 1」（只对「标签 + 单个编号」、标签只有一个文本节点时；进事务，还原放回 Fig. 1），对应不上就保留原标签。
+  两组引用在原文里隔着字、译文里挨着 → 中间补一个逗号。结构不支持（注音、pre-wrap 文本里的换行）或落点定不下来（行数对不上）时保持原文、注入结果写明原因，**不会降级成双语**；只有用户选择双语模式才走 `injectDual`。
   不藏引用（藏 = 丢引用），也不往别的句子里硬插。
-  双语：译文节点按落点插上标副本（`citeClone`：去掉 `id` 和 `data-dt-*`，`href` / 上标样式 / `aria-label` / `title` 照旧，点了跳到参考文献，参考文献里的返回链接仍指向原上标；副本带 `data-dt-cite`），
-  notranslate 保留区照旧放原文文字；有引用的标记丢了就一个副本都不放（原段落里的引用完好）。悬停的 `mapFromNode` 按阅读顺序取译文节点里的所有文本节点。
+  双语：译文节点按落点插原子的副本（`atomClone` / `citeClone`：去掉 `id` 和 `data-dt-*`，`href` / 上标样式 / `aria-label` / `title` 照旧，点了跳到参考文献 / 图表，参考文献里的返回链接仍指向原上标；图表链接副本的标签同样按 `xrefLabel` 写；副本带 `data-dt-cite`），
+  notranslate / 提及照旧放原文文字；有结构性原子（引用 / 图表链接 / 混合段落普通链接）的标记丢了就一个副本都不放（原段落里的都完好）。悬停的 `mapFromNode` 按阅读顺序取译文节点里的所有文本节点。
   诊断按钮的 `placements` 记 `cite`：`exact` / `sentence` / `failed-only`（仅译文无法安全重建） / `dropped`（双语标记缺失）。
   缓存键是送翻文本：旧版本把引用压平进译文的条目（键里没有标记）不会被带标记的段落命中，不清用户缓存，旧条目随容量淘汰。
-  提示词只在本批带标记时多一句「文献引用编号的标记紧跟所引词句，不另写、合并或删掉引用编号」。
+  提示词只在本批带标记时多一句「文献引用编号的标记紧跟所引词句，不另写、合并或删掉引用编号」，标记说明里点名「文献引用编号、图表编号、链接文字」。
+- **注入结果分类**（`DT.inject` 写 `unit.injectResult` / `DT.lastInject`，返回值仍是 true / false）：`success` / `already-rendered` / `not-applicable` / `empty` / `stale-generation` / `stale-source` / `unsafe-structure` / `invalid-placement`。
+  `main.js` 的 `tryInject`：`unsafe-structure` / `invalid-placement` 是「模型给了译文、但写不进页面」，记进 `renderFails`（`{ text, stamp: DT.unitStamp(unit), code, reason }`），`DT.state.renderFailed` / `lastRenderError` 进 `dt:status`，
+  **不算跳过、不记成已处理**；源文本和 DOM 状态（`DT.unitStamp` = 源节点签名）都没变时下一轮不再收、不再请求（确定性错误不无限重试、不重复计费），页面变了才重新收集（后台缓存里有译文，不再调用模型）。
+  `stale-source` 标脏、本轮结束后重收；`stale-generation` 什么都不记；`already-rendered` / `not-applicable` / `empty` 照旧记成已处理。`DT.releaseReplaced` 也释放 `cited` 记录：站点改写后放回原文、按新内容重翻。
 - **多译文节点**：同一个容器里多个 `[data-dt-target]` 是正常的；`cleanupDuplicateTargets` 只清理
   `data-dt-unit` 相同的克隆副本，不能按「同一父级只留一个」清理。
 
@@ -474,6 +483,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 | 42 | 长段落切片切在保留区标记中间 | 一片以 `<k1>` 结尾、下一片只有 `</k1>`，两片都不成对，后台不加「原样照抄」说明；模型丢了标记，仅译文走兜底把 notranslate 的内容藏起来换成译文 | `DT.splitLong` 的句末切点和硬切点都避开 `<kN>…</kN>`，整段只剩一个超长保留区就不切 |
 | 43 | 上标文献引用被当成普通文字（Nature） | 「…diseases1,2.」整句送翻：仅译文把译文写进第一个文本节点、清空链接里的数字，上标和跳转都没了，模型写的数字留在正文里；双语译文里只是普通数字。保留区原来的兜底（整句写进别的节点、隐藏保留元素）对引用也不行：藏了就丢引用，不藏就数字重复 | 上标引用当保留区；带引用的单元走 `injectCited`：仅译文在引用边界创建文本节点（词级 / 句级 / 漏标记恢复），不能安全重建就保持原文报失败；双语放上标副本（见 5.2.1） |
 | 44 | 开关按「内框 = width × height」写 `top: 2px` 和 translate 行程 | 全局 `* { box-sizing: border-box }` 让 1px 描边吃掉内框：透镜上 2px 下 0px、开状态贴住右边框；它又管不到 `::before / ::after`，减少透明时 2px 描边把透镜撑出槽外；开状态填充只到透镜中心，玻璃把断口折射成偏在一边的「小球」（0.10.0） | 设置页和弹窗共用 `ui-tokens.css` 的 `.switch`：只认 `--switch-w / -h / -border / -pad / -knob-w`，填充和透镜用 top / bottom 贴内边缘、border-box，开 / 关只改 `translate`，开状态填充铺到透镜右缘；透镜尺寸改了要同步 `ensureGlassFilter` 的贴图尺寸 |
+| 45 | 图表链接（Fig. 1）被当成普通行内链接（Science） | 引用和 Fig. 1 混排的段落：`hasUnsafeInlineLink` 拒绝整段引用重建（`injectCitedOnly` 返回 false），段落一直是英文；`tryInject` 又把注入失败记成跳过 + 已处理，之后再也不重试；只有图表链接的段落在仅译文下退回双语 | 图表链接是原子（`isXrefEl`），混合段落里普通链接也是原子，`injectMixed` 原地重建；`DT.inject` 给出结果分类，DOM 注入失败不算跳过、页面没变不重发（见 5.2.1） |
 
 ---
 
@@ -483,7 +493,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 ```
 chrome-extension://<扩展ID>/selftest/index.html
 ```
-纯前端用例覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口（含半隐藏：左右贴边露半球 / 展开收起 / 关闭自动隐藏 / 中间不缩进）、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、断句（缩写 / 首字母 / 脚注号 / 小写续接）、本地句子对齐（一对多 / 多对一 / 数字锚点 / 调换语序整段合并）、悬停句级 / 行级 / 段落级（双语不弹气泡、没有模型对齐也逐句）、代际隔离与段落级 SPA 更新、真实《罗生门》夹具（单 `<br>`+全角缩进 / rb/rp/rt / 图片基字 Ruby / 只有 fixture 时也要跑）、0.9.7 容器保护（直接文本 + 块级 / 控件子元素不整块替换、句子不被拆、嵌套列表 / `<main>`、正文夹标题的注音归属、引用块前后分段、懒翻译第二轮仍收子段落、诊断一致）、已翻译元素重新检查（双语改字重收、只改样式不重翻、子菜单露出补收 / 译文挪到子菜单前、祖先 class 展开、仅译文不闪、整块改下钻不重复、行内子元素并成整段、原文藏起来撤译文）、段落里的保留区（notranslate / translate="no" / 站点规则排除：送翻标记、双语、仅译文原地分段写回、换序 / 漏标记兜底、GitHub 式行内 code、分行段落、0.9.7 局部段落、own 单元和局部段落直接子级的保留元素（隐藏 / 块级的不收、旁边已翻过的子元素不动）、还原逐字一致）、0.9.8 容器形态与保留区边界（flex / grid 块化的链接 / span 仍是一句、子块翻完后仍是局部段落并收敛、形态变化撤旧译文、碎片过滤不变形、局部段落 firstNode、长段落切片不切开标记、`!important` 下兜底藏得住、行内样式逐字还原、带链接 / 图标的保留元素不藏、少回一行时保留行不藏）、文献引用（`tpl-nature-cite` 是 nature.com 的真实段落 DOM：收集与标记、双语上标副本 / 点击跳转 / 无重复 id、仅译文原地写回、换序挪句末、丢标记降级、改号 / 抄重 / 编号不成链接、长段落切片、双语和仅译文的悬停逐句、数学上标 / 序数 / 化学式 / 站外链接 / 普通链接不误判、Wikipedia 引注与 Markdown 脚注照认，都校验还原逐字一致）。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
+纯前端用例覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口（含半隐藏：左右贴边露半球 / 展开收起 / 关闭自动隐藏 / 中间不缩进）、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、断句（缩写 / 首字母 / 脚注号 / 小写续接）、本地句子对齐（一对多 / 多对一 / 数字锚点 / 调换语序整段合并）、悬停句级 / 行级 / 段落级（双语不弹气泡、没有模型对齐也逐句）、代际隔离与段落级 SPA 更新、真实《罗生门》夹具（单 `<br>`+全角缩进 / rb/rp/rt / 图片基字 Ruby / 只有 fixture 时也要跑）、0.9.7 容器保护（直接文本 + 块级 / 控件子元素不整块替换、句子不被拆、嵌套列表 / `<main>`、正文夹标题的注音归属、引用块前后分段、懒翻译第二轮仍收子段落、诊断一致）、已翻译元素重新检查（双语改字重收、只改样式不重翻、子菜单露出补收 / 译文挪到子菜单前、祖先 class 展开、仅译文不闪、整块改下钻不重复、行内子元素并成整段、原文藏起来撤译文）、段落里的保留区（notranslate / translate="no" / 站点规则排除：送翻标记、双语、仅译文原地分段写回、换序 / 漏标记兜底、GitHub 式行内 code、分行段落、0.9.7 局部段落、own 单元和局部段落直接子级的保留元素（隐藏 / 块级的不收、旁边已翻过的子元素不动）、还原逐字一致）、0.9.8 容器形态与保留区边界（flex / grid 块化的链接 / span 仍是一句、子块翻完后仍是局部段落并收敛、形态变化撤旧译文、碎片过滤不变形、局部段落 firstNode、长段落切片不切开标记、`!important` 下兜底藏得住、行内样式逐字还原、带链接 / 图标的保留元素不藏、少回一行时保留行不藏）、文献引用（`tpl-nature-cite` 是 nature.com 的真实段落 DOM：收集与标记、双语上标副本 / 点击跳转 / 无重复 id、仅译文原地写回、换序挪句末、丢标记降级、改号 / 抄重 / 编号不成链接、长段落切片、双语和仅译文的悬停逐句、数学上标 / 序数 / 化学式 / 站外链接 / 普通链接不误判、Wikipedia 引注与 Markdown 脚注照认，都校验还原逐字一致）、混合行内内容（Science 等价段落：引用 + Fig. 1 图表链接整段原地翻译、链接节点 / 属性不变、「图 1」标签与点击、嵌套父节点、图表链接紧挨引用、只有图表链接、`<br>` 分行、丢图表标记、引用 + 普通链接、注音段落的失败分类、切换模式 / 撤销 / 重翻 / 站点改写后重翻）。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
 
 > 用例条数以自检页输出的 `通过 / 总数` 为准，本文不记数字：上次记数字，三个地方记成了 163 / 201 / 211。
 
@@ -507,7 +517,7 @@ node test/subtitles-session.test.mjs # 字幕运行时 A–Q：语言/视频切�
 node test/usage.test.mjs       # 三协议 usage 提取 + 统计聚合
 node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆批、部分成功、usage 汇总
 node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络请求、并发保存不丢项
-node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层页面、配置广播改模式 / 语言时整页重建、保留区送翻、注入被拒不再重发、长段落切片不切开保留区
+node test/content-main.test.mjs # 内容脚本调度：注入失败（模型已给译文、DOM 写不进去）不算跳过、页面没变不重发；自动翻译只在顶层页面、配置广播改模式 / 语言时整页重建、保留区送翻、注入被拒不再重发、长段落切片不切开保留区
 node test/sentence-align.test.mjs # 悬停对照的断句（缩写 / 脚注号 / 小写续接）与本地句子对齐：38 段人工语料每个句界都对
 node test/glass-dock.test.mjs # 液态玻璃：槽位几何 / 竖向槽位 / 橡皮筋 / 最近槽位 / 三通道滤镜
 node test/content-injection.test.mjs # 补注入清单与 manifest 完全一致（units / input / shadow / B 站适配器不漏、顺序不乱）
@@ -519,7 +529,7 @@ node test/switch-geometry.test.mjs # 开关：设置页 / 弹窗共用一套几�
 
 ### 7.1c 真实浏览器端到端检查（发版前）
 ```
-node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 文献引用（Nature 上标，真实点击）/ Shadow DOM 夹具 / 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
+node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 文献引用（Nature 上标，真实点击）/ 混合行内（Science 引用 + 图表链接）/ Shadow DOM 夹具 / 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
 node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
 node tools/e2e-extension.mjs --bilibili-live  # 真实 B 站视频页评论区验收（需要能上 bilibili.com；未登录只显示首屏，滚动 / 楼中楼会显示未验证）
@@ -630,7 +640,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 13. **真实网站覆盖**：0.9.2 只对青空文库《罗生门》做了真实页面验收；Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，不能当成已验证
 13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
 14. **目标语言校验是保守的定向失效**：只覆盖「英文等拉丁字母目标却整段回中日韩正文」这种高置信度情况；短文本、专名 / 术语清单不做自动失效，旧缓存里的这类条目可能保留，重新翻译即可覆盖；中文 / 日文目标方向没有做自动校验
-15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式现在会保留原文引用节点并重建文本节点，引用定位失败时保持原文并报失败，不再自动变成双语。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
+15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式保留原文引用节点并重建文本节点；引用和图表链接、普通链接混排的段落走混合行内渲染，原地翻成译文。仍不支持原地重建的：注音 + 引用 / 图表链接、pre-wrap 文本里换行的混合段落、模型把分行合并 / 拆开的混合段落（保持原文，注入结果写明原因，不退回双语）。只有普通链接、没有引用 / 图表链接的段落在仅译文下仍降级成双语（让链接文字也翻译需要链接级标记，见 ROADMAP P1-2）；混合段落里的普通链接保留原文字。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
 
 ---
 

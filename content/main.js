@@ -32,6 +32,10 @@
   // 等译文期间原文又被站点改掉的次数（DT.sourceChanged）。连续 CHURN_MAX 次就不再翻这个元素：
   // 计时器、实时行情这类一直在变的内容，否则每变一次就重发一次请求
   var churn = new WeakMap(); // el → Map(段键 → 连续被站点改写次数)
+  // 模型给了译文、但写不进页面（DOM 结构不支持 / 落点定不下来）的单元：{ text, stamp, code, reason }。
+  // 不算「跳过」也不算「已处理」：源文本和 DOM 状态（DT.unitStamp）都没变就不再收、不再请求；
+  // 页面变了才重新收集（译文在后台缓存里，重新注入不会再调用模型）
+  var renderFails = new WeakMap();
   var CHURN_MAX = 3;
   var retryTimer = 0;
   var retryAt = 0;
@@ -181,6 +185,8 @@
       translated: DT.state.translated,
       failed: DT.state.failed,
       skipped: DT.state.skipped || 0,
+      renderFailed: DT.state.renderFailed || 0,
+      lastRenderError: DT.state.lastRenderError || '',
       lastError: DT.state.lastError || '',
       busy: running
     };
@@ -290,6 +296,9 @@
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
         if (unit.style === 'plain' && cfg.skipSameLang !== false && !jaPageToZh && DT.looksLikeTarget(unit.text, target)) return false;
         if (unitState(settled, unit) === unit.text) return false;
+        // 上次注入失败、页面也没变：同一个确定性错误不再重试，也不再请求翻译
+        var broken = unitState(renderFails, unit);
+        if (broken && broken.text === unit.text && broken.stamp === (DT.unitStamp ? DT.unitStamp(unit) : '')) return false;
         if ((unitState(churn, unit) || 0) >= CHURN_MAX) return false;
         // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
         // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
@@ -446,11 +455,31 @@
           return;
         }
 
-        if (DT.inject(unit, raw, target, align)) {
+        var injected = DT.inject(unit, raw, target, align);
+        var outcome = unit.injectResult || null;
+        var code = injected ? 'success' : outcome ? outcome.code : 'already-rendered';
+        if (injected) {
           DT.state.translated += 1;
-        } else if (unit.gen === DT.generation) {
-          // 写不进页面（已经有译文、结构对不上）：记成已处理，内容没变就不再每轮重收、重发同一段
-          // （命中缓存也要走一次后台；缓存没了就是重复计费）。旧代际的结果另当别论，那一轮已经作废
+          dropUnitState(renderFails, unit);
+        } else if (code === 'stale-generation' || unit.gen !== DT.generation) {
+          // 旧代际的结果：那一轮已经作废，什么都不记
+        } else if (code === 'stale-source') {
+          // 源节点已经不在页面上：页面更新了，本轮结束后重新收集
+          dirty = true;
+        } else if (code === 'unsafe-structure' || code === 'invalid-placement') {
+          // 模型已经给了译文，只是写不进页面：不算跳过、不记成已处理，记下原因；
+          // 源文本和 DOM 状态都没变就不再重试（不重复请求），页面变了再收（后台缓存里有译文）
+          if (!unitState(renderFails, unit)) DT.state.renderFailed = (DT.state.renderFailed || 0) + 1;
+          setUnitState(renderFails, unit, {
+            text: unit.text,
+            stamp: DT.unitStamp ? DT.unitStamp(unit) : '',
+            code: code,
+            reason: outcome && outcome.reason ? outcome.reason : ''
+          });
+          DT.state.lastRenderError = code + (outcome && outcome.reason ? ': ' + outcome.reason : '');
+        } else {
+          // 已经有译文 / 不适用 / 没有译文：记成已处理，内容没变就不再每轮重收、重发同一段
+          // （命中缓存也要走一次后台；缓存没了就是重复计费）
           DT.state.skipped = (DT.state.skipped || 0) + 1;
           setUnitState(settled, unit, unit.text);
         }
@@ -602,6 +631,8 @@
     DT.state.translated = 0;
     resetFailures();
     DT.state.skipped = 0;
+    DT.state.renderFailed = 0;
+    DT.state.lastRenderError = '';
     DT.state.lastError = '';
     applyChrome();
     // 注意：这里故意不 await —— 弹窗要能立刻拿到状态并开始轮询
@@ -620,6 +651,7 @@
     DT.restore();
     settled = new WeakMap();
     churn = new WeakMap();
+    renderFails = new WeakMap();
     resetFailures();
     applyChrome();
     DT.toast('已还原原文');
@@ -867,10 +899,13 @@
     DT.restore();
     settled = new WeakMap();
     churn = new WeakMap();
+    renderFails = new WeakMap();
     resetFailures();
     DT.state.total = 0;
     DT.state.translated = 0;
     DT.state.skipped = 0;
+    DT.state.renderFailed = 0;
+    DT.state.lastRenderError = '';
     DT.state.lastError = '';
     applyChrome();
     if (DT.state.enabled) translatePage({ reset: true, silent: true });

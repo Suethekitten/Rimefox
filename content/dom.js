@@ -447,14 +447,84 @@
     return yes;
   }
 
+  // ---------------- 图表 / 表格 / 公式的交叉引用链接 ----------------
+  // Science：(<a href="#F1" data-xml-rid="F1">Fig. 1</a>)。它是正文里的结构，不是可翻译的普通链接：
+  // 以前它被当成「普通行内链接」，和文献引用混在一段里时整段引用重建被拒（hasUnsafeInlineLink），段落一直是英文；
+  // 只有它没有引用时仅译文又退回双语。现在当保留区：链接节点原样保留、可点击，可见标签在有可靠对应时写成「图 1」。
+  // 只认「指向本页锚点 + 可见文字是图表标签」：Fig. 1 / Figs. 2 and 3 / Table S1 / Eq. 4 / Movie S2 / Supplementary Fig. 3。
+  // 裸数字（See figure <a>2</a>）、站外链接、普通文字链接都不算
+  var XREF_HEAD = /^(?:(?:supplementary|suppl\.?|extended\s+data)\s+)?(?:fig(?:ure)?s?\.?|tables?|tab\.?|eqs?\.?|equations?|movies?|videos?|schemes?|box(?:es)?|data\s+file|notes?)\s*\(?[A-Z]?S?\d+[A-Za-z]?\)?/i;
+  var XREF_TAIL = /^(?:[\s,–—\-&;()]|and|to|[A-Z](?![a-z])|S?\d+[A-Za-z]?)*$/;
+
+  function isXrefEl(el) {
+    if (!el || el.nodeType !== 1 || tagOf(el) !== 'A') return false;
+    var href = el.getAttribute('href') || '';
+    var hash = href.indexOf('#');
+    if (hash < 0 || hash === href.length - 1) return false;
+    var text = DT.normalizeText(el.textContent || '');
+    if (!text || text.length > 48) return false;
+    var head = XREF_HEAD.exec(text);
+    if (!head || !XREF_TAIL.test(text.slice(head[0].length))) return false;
+    if (isCitationEl(el)) return false;
+    if (hash > 0) {
+      var url = null;
+      try {
+        url = new URL(href, document.baseURI);
+      } catch (err) {
+        return false;
+      }
+      if (url.origin !== location.origin || url.pathname !== location.pathname) return false;
+    }
+    return true;
+  }
+
+  // 图表标签的可靠对应（只对中文目标、只对「标签 + 单个编号」）：Fig. 1 → 图 1、Table S2 → 表 S2、Eq. 3 → 式 3。
+  // 「Fig. 1, A and B」这类带分图说明的、日文等其他目标都原样保留
+  var XREF_ZH = [
+    [/^fig(?:ure)?s?\.?$/i, '图', '圖'],
+    [/^(?:tables?|tab\.?)$/i, '表', '表'],
+    [/^(?:eqs?\.?|equations?)$/i, '式', '式']
+  ];
+  function xrefLabel(text, target) {
+    var t = String(target || '');
+    if (t.indexOf('zh') !== 0) return '';
+    var m = /^(.*?)\s*(S?\d+[A-Za-z]?)$/.exec(DT.normalizeText(text || ''));
+    if (!m) return '';
+    var hant = /^zh-(tw|hk|mo|hant)/i.test(t);
+    for (var i = 0; i < XREF_ZH.length; i += 1) {
+      if (XREF_ZH[i][0].test(m[1])) return (hant ? XREF_ZH[i][2] : XREF_ZH[i][1]) + ' ' + m[2];
+    }
+    return '';
+  }
+
+  // 混合段落里的普通链接：段落里已经有文献引用 / 图表链接时，普通链接也当原子保留（文字原样、仍可点击），
+  // 译文写在它外面 —— 中文正文不会落进 <a>、也不会让链接扩到整句
+  function isPlainLinkEl(el) {
+    return !!el && el.nodeType === 1 && tagOf(el) === 'A' && el.hasAttribute('href');
+  }
+
   // node 在 root 里所属的最外层保留元素（root 自己不算：它被保护的话根本不会收集）。
-  // 文献引用也是保留区：编号不翻、页面上的上标链接不写
-  function keepElOf(node, root) {
+  // 文献引用 / 图表链接也是保留区：编号和链接不翻、页面上的节点不写。withLinks：混合段落，普通链接也算
+  function keepElOf(node, root, withLinks) {
     var found = null;
     for (var cur = node.parentNode; cur && cur !== root && cur.nodeType === 1; cur = cur.parentNode) {
-      if (isProtectedEl(cur) || isCitationEl(cur) || isMentionEl(cur)) found = cur;
+      if (isProtectedEl(cur) || isCitationEl(cur) || isMentionEl(cur) || isXrefEl(cur) || (withLinks && isPlainLinkEl(cur))) found = cur;
     }
     return found;
+  }
+
+  // 保留区的种类：protect（notranslate）/ cite / mention / xref（图表链接）/ link（混合段落里的普通链接）
+  function keepKind(el) {
+    if (isProtectedEl(el)) return 'protect';
+    if (isCitationEl(el)) return 'cite';
+    if (isMentionEl(el)) return 'mention';
+    if (isXrefEl(el)) return 'xref';
+    return 'link';
+  }
+
+  // 结构性原子：引用 / 图表链接 / 混合段落里的普通链接。带这些的单元走混合行内渲染（injectCited）
+  function isStructKeep(k) {
+    return !!k && (k.kind === 'cite' || k.kind === 'xref' || k.kind === 'link');
   }
 
   function hasCitationInside(el) {
@@ -475,15 +545,23 @@
     return false;
   }
 
-  function hasKeepInside(el) {
-    if (el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR)) return true;
-    return hasMentionInside(el) || hasCitationInside(el);
+  function hasXrefInside(el) {
+    if (!el.querySelectorAll) return false;
+    var links = el.querySelectorAll('a[href*="#"]');
+    for (var i = 0; i < links.length; i += 1) {
+      if (isXrefEl(links[i])) return true;
+    }
+    return false;
   }
 
-  function hasCitation(unit) {
-    return (unit.keep || []).some(function (k) {
-      return k.cite;
-    });
+  function hasKeepInside(el) {
+    if (el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR)) return true;
+    return hasMentionInside(el) || hasCitationInside(el) || hasXrefInside(el);
+  }
+
+  // 有文献引用 / 图表链接 / 混合段落普通链接：走混合行内渲染（injectCited），不走 keepPlan
+  function hasStructAtom(unit) {
+    return (unit.keep || []).some(isStructKeep);
   }
 
   // 译文整体写回第一个文本节点时，如果第一个节点在普通 <a> 里，整段译文会继承链接。
@@ -531,8 +609,15 @@
     return !breaksFlow(parent, kid);
   }
 
-  // 段落文本里属于保留元素的字符范围：[{ start, end, text, el }]，按出现顺序；换行处断开
+  // 段落文本里属于保留元素的字符范围：[{ start, end, text, el, kind, cite }]，按出现顺序；换行处断开。
+  // 第一遍不含普通链接；段落里出现了文献引用 / 图表链接（混合段落），再按「普通链接也算」收一遍
   function keepRangesOf(el, chars, text) {
+    var out = keepScan(el, chars, text, false);
+    if (out.some(function (k) { return k.kind === 'cite' || k.kind === 'xref'; })) out = keepScan(el, chars, text, true);
+    return out;
+  }
+
+  function keepScan(el, chars, text, withLinks) {
     var out = [];
     var cur = null;
     var owner = new Map();
@@ -543,7 +628,7 @@
         cur = null; // 换行
         continue;
       }
-      if (!owner.has(c.node)) owner.set(c.node, keepElOf(c.node, el));
+      if (!owner.has(c.node)) owner.set(c.node, keepElOf(c.node, el, withLinks));
       var keepEl = owner.get(c.node);
       if (!keepEl) {
         cur = null;
@@ -556,7 +641,8 @@
     }
     out.forEach(function (k) {
       k.text = text.slice(k.start, k.end);
-      k.cite = isCitationEl(k.el);
+      k.kind = keepKind(k.el);
+      k.cite = k.kind === 'cite';
     });
     return out;
   }
@@ -2232,25 +2318,16 @@
     }
   }
 
-  // ---------------- 带文献引用的段落 ----------------
-  // 仅译文：引用链接原地不动，清理普通文本后按 N+1 段重建译文。
-  //   能从标记位置定位就精确写；模型换了顺序 / 漏了标记就按原文句子顺序恢复到句末。
-  //   新文本节点按引用 DOM 边界插入，不要求原文本身有对应文本节点；不能安全重建时返回 false，绝不降级双语。
-  // 双语：保持原来的 injectDual / 副本逻辑。
+  // ---------------- 混合行内内容：正文里夹着引用 / 图表链接 / 普通链接 / 提及 / notranslate ----------------
+  // 仅译文（injectMixed）：DOM 结构和可翻译文字分开处理 ——
+  //   原子（unit.keep 里的元素：文献引用、图表链接、混合段落里的普通链接、@提及、notranslate）原样留在原位，
+  //   节点身份、href / id / 事件都不动；原子之外的文字节点全部清空；译文按原子的落点切成 N+1 段，
+  //   作为新文本节点插在原子之间（永远不进单元内部的链接），<br> 分行时逐行对齐。不移动原有节点，所有改动走 RenderTransaction。
+  //   落点：模型留下的标记位置（词级）→ 换了先后就挪到各自那一句的句末 → 标记丢了按原文所在句对到译文句末；
+  //   图表链接的标记丢了时按它的标签（Fig. 1 / 图 1）在译文里唯一定位。定不下来就失败（保持原文、报原因），绝不退回双语。
+  // 双语（含绝对定位 / 界面区域导致的 replaceMode）：保持 keepPlan / 副本逻辑
   function injectCited(unit, marks, plain, lang, area, replaceMode) {
-    if (replaceMode && DT.state.mode === 'translation') {
-      var onlyPlace = citeOnlyPlacement(unit, marks);
-      var onlySegs = onlyPlace ? citeSegs(unit, marks.stripped, onlyPlace.at) : null;
-      if (!onlySegs || onlySegs.length !== (unit.keep || []).length + 1) {
-        unit.citeMode = 'failed-only';
-        return false;
-      }
-      unit.citeMode = onlyPlace.recovered || onlyPlace.snapped ? 'sentence' : 'exact';
-      if (injectCitedOnly(unit, onlySegs, onlyPlace, area)) return true;
-      unit.citeMode = 'failed-only';
-      return false;
-    }
-    // 双语（含定位 / 固定定位导致的 replaceMode）：保留 0.11.0 的行为。
+    if (replaceMode && DT.state.mode === 'translation') return injectMixed(unit, marks, area);
     if (replaceMode) {
       var single = (unit.groups.filled || []).length < 2 && !(unit.ruby && unit.ruby.length);
       var place = single ? DT.units.keepPlacement(marks.stripped, marks.at) : null;
@@ -2296,98 +2373,223 @@
   }
 
 
-  // 仅译文：从译文句子和原文引用所属句恢复落点。模型漏标记 / 标记乱序时不再把整段降级成双语。
-  // 原文引用按它在原文里的句子顺序映射到译文句子；只保证不跨句乱放，位置固定在句末。
-  function citeOnlyPlacement(unit, marks) {
+  // 注入失败的原因（unit.injectResult）：main.js 据此区分「结构不支持」和「已处理」，不把失败当成跳过
+  function failInject(unit, code, reason) {
+    unit.citeMode = 'failed-only';
+    unit.injectResult = { code: code, reason: reason };
+    return false;
+  }
+
+  // 图表链接的标记丢了：按它的标签（原文 Fig. 1 或对应的「图 1」）在译文里找，只出现一次才算；找到就把这串字
+  // 从译文里拿掉（页面上由链接本身显示）。文献引用只是几个数字，不这样找（译文里本来就可能有同样的数字）
+  function recoverXrefMarks(unit, marks) {
     var keep = unit.keep || [];
-    if (!keep.length || !marks) return null;
-    var list = marks.at || [];
-    var all = list.length === keep.length;
-    for (var i = 0; all && i < list.length; i += 1) all = list[i] >= 0;
-    if (all) {
-      var placed = DT.units.keepPlacement(marks.stripped, list);
-      if (placed) return { at: placed.at, snapped: !!placed.snapped, recovered: false };
+    var stripped = marks.stripped;
+    var at = marks.at.slice();
+    keep.forEach(function (k, i) {
+      if (at[i] >= 0 || k.kind !== 'xref') return;
+      var labels = [k.text, xrefLabel(k.text, DT.state.target)].filter(Boolean);
+      for (var j = 0; j < labels.length; j += 1) {
+        var hit = stripped.indexOf(labels[j]);
+        if (hit < 0 || stripped.indexOf(labels[j], hit + 1) >= 0) continue;
+        var len = labels[j].length;
+        stripped = stripped.slice(0, hit) + stripped.slice(hit + len);
+        at = at.map(function (p) {
+          return p > hit ? p - len : p;
+        });
+        at[i] = hit;
+        return;
+      }
+    });
+    return { stripped: stripped, at: at };
+  }
+
+  // 一行里各原子的落点（行内偏移，按页面顺序单调不减）。items：[{ start: 原文行内偏移, at: 译文行内偏移或 -1 }]。
+  // 标记都在 → keepPlacement（词级，换序时挪句末）；有标记丢了 / 仍对不上 → 按原文所在句对到译文句末（只保证不跨句）
+  function atomPlacement(srcLine, dstLine, items) {
+    if (!items.length) return { at: [], mode: 'exact' };
+    var at = items.map(function (it) {
+      return it.at;
+    });
+    if (at.every(function (p) { return p >= 0; })) {
+      var placed = DT.units.keepPlacement(dstLine, at);
+      if (placed) return { at: placed.at, mode: placed.snapped ? 'sentence' : 'exact' };
     }
-    var src = DT.units.sentencesOf(unit.text || '');
-    var dst = DT.units.sentencesOf(marks.stripped || '');
-    if (!src.length || !dst.length) return null;
-    var at = [];
-    var prev = -1;
-    for (var j = 0; j < keep.length; j += 1) {
-      var pos = keep[j].start || 0;
+    var dst = DT.units.sentencesOf(dstLine);
+    if (!dst.length) {
+      return /\S/.test(dstLine) ? null : { at: items.map(function () { return 0; }), mode: 'sentence' };
+    }
+    var src = DT.units.sentencesOf(srcLine);
+    var out = [];
+    var prev = 0;
+    items.forEach(function (it) {
       var si = 0;
-      while (si + 1 < src.length && pos >= src[si + 1][0]) si += 1;
+      while (si + 1 < src.length && it.start >= src[si + 1][0]) si += 1;
       var di = Math.min(si, dst.length - 1);
-      var end = DT.units.sentenceEndAt(marks.stripped, dst[di][0]);
+      var end = DT.units.sentenceEndAt(dstLine, dst[di][0]);
       if (end < prev) end = prev;
-      at.push(end);
+      out.push(end);
       prev = end;
+    });
+    return { at: out, mode: 'sentence' };
+  }
+
+  // 文字的落点不能在单元内部的链接里（混合段落里链接本身就是原子，正常不会出现；兜底再往外挪到链接外面）
+  function safeSlot(unit, node, after) {
+    var cur = node;
+    for (var p = cur.parentNode; p && p !== unit.el && p.nodeType === 1; p = p.parentNode) {
+      if (tagOf(p) === 'A') cur = p;
     }
-    return { at: at, snapped: true, recovered: true };
+    return { parent: cur.parentNode, before: after ? cur.nextSibling : cur };
   }
 
-  // 引用边界的新文本节点落点。只允许放在引用元素所在父级；父级位于链接内时失败。
-  function citeTextParent(el) {
-    var parent = el && el.parentNode;
-    if (!parent || parent.nodeType !== 1 || !parent.isConnected) return null;
-    if (parent.closest && parent.closest('a')) return null;
-    return parent;
+  // 图表链接的可见标签换成「图 1」：只在标签只有一个文本节点时写，写进事务、还原时放回 Fig. 1
+  function relabelXref(k, ops, saved) {
+    var label = xrefLabel(k.text, DT.state.target);
+    if (!label || label === k.text) return k.text;
+    var texts = [];
+    var walker = document.createTreeWalker(k.el, NodeFilter.SHOW_TEXT);
+    for (var t = walker.nextNode(); t; t = walker.nextNode()) {
+      if (/\S/.test(t.nodeValue)) texts.push(t);
+    }
+    if (texts.length !== 1) return k.text;
+    var node = texts[0];
+    var before = node.nodeValue;
+    var lead = /^\s*/.exec(before)[0];
+    var trail = /\s*$/.exec(before)[0];
+    var wrote = lead + label + trail;
+    setText(node, wrote, ops);
+    saved.push({ node: node, value: before, wrote: wrote });
+    return label;
   }
 
-  // 仅译文引用重建：保留原始引用节点，清理普通文本，在引用之间创建新文本节点。
-  // 不调用 injectDual，不隐藏整段，不修改引用 href / id / 事件；所有插入和文本改写走 RenderTransaction。
-  function injectCitedOnly(unit, segs, place, area) {
+  // 页面上实际显示的文字（单元里所有文本节点按阅读顺序）：和悬停的 mapFromNode(unit.el) 一致
+  function shownTextOf(el) {
+    var out = '';
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (var t = walker.nextNode(); t; t = walker.nextNode()) out += t.nodeValue;
+    return out;
+  }
+
+  function injectMixed(unit, marks, area) {
     var keep = unit.keep || [];
-    if (!segs || segs.length !== keep.length + 1) return false;
-    if (!unit.whole) return false;
-    if ((unit.groups && unit.groups.filled && unit.groups.filled.length > 1) || (unit.ruby && unit.ruby.length)) return false;
-    if (hasUnsafeInlineLink(unit)) return false;
-    var i;
-    for (i = 0; i < keep.length; i += 1) {
-      if (!keep[i] || !keep[i].el || !citeTextParent(keep[i].el)) return false;
+    if (!keep.length) return failInject(unit, 'unsafe-structure', 'no-atoms');
+    if (unit.ruby && unit.ruby.length) return failInject(unit, 'unsafe-structure', 'ruby');
+    var groups = (unit.groups && unit.groups.filled) || [];
+    var multi = groups.length > 1;
+    // 分行段落：第 2 行起每行要以 <br> 开头（pre-wrap 文本节点里的 \n 中间没法插节点）
+    for (var g = 1; g < groups.length; g += 1) {
+      if (!groups[g].br) return failInject(unit, 'unsafe-structure', 'pre-wrap-lines');
     }
+    var fixed = recoverXrefMarks(unit, marks);
+    var stripped = fixed.stripped;
+    var srcLines = multi ? unit.text.split('\n') : [unit.text];
+    // 单行段落：模型多给的换行当空格（逐字替换，长度不变，落点不偏）
+    var dstLines = multi ? stripped.split('\n') : [stripped.replace(/\n/g, ' ')];
+    if (!multi) stripped = dstLines[0];
+    if (multi && (srcLines.length !== groups.length || dstLines.length !== groups.length)) {
+      return failInject(unit, 'invalid-placement', 'line-count');
+    }
+    var srcOff = [];
+    var dstOff = [];
+    var so = 0;
+    var dOff = 0;
+    for (var l = 0; l < srcLines.length; l += 1) {
+      srcOff.push(so);
+      dstOff.push(dOff);
+      so += srcLines[l].length + 1;
+      dOff += dstLines[l].length + 1;
+    }
+    // 每个原子属于原文的哪一行；模型把标记放到别的行里就当丢了，在它自己那一行里恢复
+    var lineOf = keep.map(function (k) {
+      var li = 0;
+      while (li + 1 < srcOff.length && k.start >= srcOff[li + 1]) li += 1;
+      return li;
+    });
+    var at = new Array(keep.length);
+    var mode = 'exact';
+    for (l = 0; l < srcLines.length; l += 1) {
+      var idx = [];
+      var items = [];
+      keep.forEach(function (k, i) {
+        if (lineOf[i] !== l) return;
+        var p = fixed.at[i];
+        var inLine = p >= dstOff[l] && p <= dstOff[l] + dstLines[l].length;
+        idx.push(i);
+        items.push({ start: k.start - srcOff[l], at: inLine ? p - dstOff[l] : -1 });
+      });
+      var placed = atomPlacement(srcLines[l], dstLines[l], items);
+      if (!placed) return failInject(unit, 'invalid-placement', 'no-sentence');
+      if (placed.mode !== 'exact') mode = 'sentence';
+      idx.forEach(function (i, n) {
+        at[i] = dstOff[l] + placed.at[n];
+      });
+    }
+
+    // 页面顺序的落点序列：第 l 行开头的 <br>，再是这一行的原子
+    var seq = [];
+    for (l = 0; l < groups.length || l < 1; l += 1) {
+      if (l > 0) seq.push({ node: groups[l].br, pos: dstOff[l] - 1, br: true });
+      keep.forEach(function (k, i) {
+        if (lineOf[i] === l) seq.push({ node: k.el, pos: at[i], keep: i });
+      });
+    }
+    var texts = [];
+    var from = 0;
+    seq.forEach(function (item, n) {
+      var seg = stripped.slice(from, Math.max(from, item.pos));
+      var prev = n > 0 ? seq[n - 1] : null;
+      if (prev && prev.keep != null && item.keep != null && !/\S/.test(seg)) seg += citeSeparator(unit, prev.keep, item.keep);
+      texts.push(seg);
+      from = Math.max(from, item.br ? item.pos + 1 : item.pos);
+    });
+    texts.push(stripped.slice(from));
 
     var ops = [];
     var saved = [];
     var seen = new Set();
-    (unit.map.chars || []).forEach(function (c) {
-      if (!c || !c.node || seen.has(c.node)) return;
-      seen.add(c.node);
-      if (keepIndexOf(unit, c.node) >= 0) return;
-      if (c.node.nodeValue === '') return;
-      var before = c.node.nodeValue;
-      setText(c.node, '', ops);
-      saved.push({ node: c.node, value: before, wrote: '' });
+    // 原子之外的文字节点全部清空（含空白节点：中文译文里不该夹着原来的空格）
+    groups.concat((unit.groups && unit.groups.tail) || []).forEach(function (group) {
+      (group.pieces || []).forEach(function (piece) {
+        var node = piece.node;
+        if (seen.has(node)) return;
+        seen.add(node);
+        if (keepIndexOf(unit, node) >= 0 || node.nodeValue === '') return;
+        var before = node.nodeValue;
+        setText(node, '', ops);
+        saved.push({ node: node, value: before, wrote: '' });
+      });
     });
 
-    function put(text, parent, before) {
-      if (!text) return null;
+    var inserted = [];
+    function put(text, slot) {
+      if (!text || !slot || !slot.parent) return;
       var node = document.createTextNode(text);
-      insertNode(node, parent, before, ops);
+      insertNode(node, slot.parent, slot.before, ops);
       nodeUnit.set(node, unit);
-      return node;
+      ownNodes.add(node);
+      inserted.push(node);
     }
+    // 第 0 段在序列第一个之前；第 n 段紧跟在第 n-1 个之后
+    put(texts[0], safeSlot(unit, seq[0].node, false));
+    for (var n = 1; n < texts.length; n += 1) put(texts[n], safeSlot(unit, seq[n - 1].node, true));
+    keep.forEach(function (k) {
+      if (k.kind === 'xref') relabelXref(k, ops, saved);
+    });
 
-    // 第 0 段在第一组引用之前；第 i 段插在第 i-1 组引用之后（即两组之间）。
-    put(segs[0], citeTextParent(keep[0].el), keep[0].el);
-    for (i = 1; i < keep.length; i += 1) {
-      put(segs[i], citeTextParent(keep[i - 1].el), keep[i - 1].el.nextSibling);
-    }
-    put(segs[keep.length], citeTextParent(keep[keep.length - 1].el), keep[keep.length - 1].el.nextSibling);
-
-    var rendered = citeRendered(unit, segs);
-    var srcLines = DT.splitLines(unit.text);
-    var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: srcLines, aligned: true };
+    var rendered = shownTextOf(unit.el);
+    var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: DT.splitLines(unit.text), aligned: true };
     DT.replaced.push(item);
     setAttr(unit.el, 'data-dt-replaced', '1', ops);
     if (unit.whole) {
       setAttr(unit.el, 'data-dt-src', '1', ops);
       setAttr(unit.el, 'data-dt-sig', unit.sig, ops);
     }
+    unit.citeMode = mode;
     unit.renderMode = 'cited';
     unit.targetNode = null;
     unit.renderedText = rendered;
-    unit.citedInserted = Array.prototype.slice.call(unit.el.childNodes);
+    unit.citedInserted = inserted;
     fillSnapshot(unit);
     pushRendered({ unit: unit, mode: 'cited', ops: ops, saved: saved, replaced: item });
     linkUnit(unit);
@@ -2410,16 +2612,35 @@
     return copy;
   }
 
+  // 原子的副本：图表链接的标签按 xrefLabel 换成「图 1」（只有一个文本节点时）
+  function atomClone(k) {
+    var copy = citeClone(k.el);
+    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : '';
+    if (label) {
+      var texts = [];
+      var walker = document.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
+      for (var t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (/\S/.test(t.nodeValue)) texts.push(t);
+      }
+      if (texts.length === 1) texts[0].nodeValue = /^\s*/.exec(texts[0].nodeValue)[0] + label + /\s*$/.exec(texts[0].nodeValue)[0];
+    }
+    return copy;
+  }
+
   // 双语译文节点里按标记位置放回引用副本，notranslate 的保留区照旧放原文文字。
   // 有引用的标记丢了：一个副本都不放（原段落里的引用完好，不在译文里猜位置），译文只留文字
-  function fillCited(node, unit, marks) {
+  function fillCited(node, unit, rawMarks) {
     var keep = unit.keep;
+    var marks = recoverXrefMarks(unit, rawMarks);
+    marks.at = marks.at.slice();
+    // 结构性原子（引用 / 图表链接 / 混合段落里的普通链接）在双语译文里放可点击的副本；
+    // 其中有标记丢了就一个副本都不放（原段落里的都完好），notranslate / 提及照旧放原文文字
     var citesOk = keep.every(function (k, i) {
-      return !k.cite || marks.at[i] >= 0;
+      return !isStructKeep(k) || marks.at[i] >= 0;
     });
     var items = [];
     keep.forEach(function (k, i) {
-      if (marks.at[i] < 0 || (k.cite && !citesOk)) return;
+      if (marks.at[i] < 0 || (isStructKeep(k) && !citesOk)) return;
       items.push({ at: marks.at[i], k: k, i: i });
     });
     items.sort(function (a, b) {
@@ -2432,7 +2653,7 @@
       var seg = marks.stripped.slice(pos, item.at);
       if (prev >= 0 && !/\S/.test(seg)) seg += citeSeparator(unit, prev, item.i);
       if (seg) node.appendChild(document.createTextNode(seg));
-      node.appendChild(item.k.cite ? citeClone(item.k.el) : document.createTextNode(item.k.text));
+      node.appendChild(isStructKeep(item.k) ? atomClone(item.k) : document.createTextNode(item.k.text));
       pos = item.at;
       prev = item.i;
     });
@@ -2510,7 +2731,8 @@
     var released = 0;
     var list = rendered.slice();
     list.forEach(function (rec) {
-      if (rec.mode !== 'replace' && rec.mode !== 'ruby') return;
+      // cited：混合行内渲染（引用 / 图表链接原地保留、译文是新文本节点）同样是原地改写，站点改了也要放回
+      if (rec.mode !== 'replace' && rec.mode !== 'ruby' && rec.mode !== 'cited') return;
       if (!rec.unit.el.isConnected) {
         dropRendered(rec);
         return;
@@ -2673,6 +2895,29 @@
     return unit;
   }
 
+  // 注入结果分类（unit.injectResult / DT.lastInject）。DT.inject 仍返回 true / false（兼容旧调用），
+  // main.js 的 tryInject 按 code 决定怎么记：
+  //   success          已写进页面
+  //   already-rendered 这一段已经有译文 / 已标记翻译过（不用再注入）
+  //   not-applicable   单元本身就是引用 / 提及链接，没有可改写的正文
+  //   empty            去掉标记后没有译文
+  //   stale-generation 旧代际晚到的结果（还原 / 模式切换后）
+  //   stale-source     源节点已经不在页面上（页面更新了，需要重新收集）
+  //   unsafe-structure 当前 DOM 结构没法安全写回（注音 / pre-wrap 分行 / 祖先链接里的混排 / 渲染器拒绝）
+  //   invalid-placement 引用 / 链接在译文里的位置定不下来（行数对不上 / 没有句子）
+  function injectOutcome(unit, ok, code, reason) {
+    var res = { code: code, reason: reason || '' };
+    if (unit) unit.injectResult = res;
+    DT.lastInject = { code: code, reason: res.reason, text: unit ? previewText(unit.text) : '' };
+    if (!ok && code !== 'stale-generation') DT.log('inject ' + code + ':', res.reason, unit ? previewText(unit.text) : '');
+    return ok;
+  }
+
+  // 一个单元当前的源 DOM 状态（文字 / 子元素 class / style / 显隐）：注入失败后，状态没变就不再重试同一段
+  DT.unitStamp = function (unit) {
+    return unit && unit.el ? sourceSignature(unit.el) : '';
+  };
+
   // 对外：注入一条译文。unit 为段落单元（新调用）或元素（兼容旧调用）
   DT.inject = function (unitOrEl, text, lang, ownOrAlign) {
     var isUnit = !!(unitOrEl && unitOrEl.map && unitOrEl.groups);
@@ -2683,21 +2928,24 @@
       align = ownOrAlign;
     }
     var unit = isUnit ? unitOrEl : legacyUnit(unitOrEl, ownOrAlign && ownOrAlign.parts ? false : ownOrAlign);
-    if (!unit || !unit.el || !unit.el.isConnected) return false;
+    if (unit) unit.injectResult = null;
+    if (!unit || !unit.el || !unit.el.isConnected) return injectOutcome(unit, false, 'stale-source', 'disconnected');
     // 根节点本身就是文献引用 / 用户名提及（独立链接或 citation span）：没有可安全改写的正文，原样保留。
-    if (!(unit.keep && unit.keep.length) && (isCitationEl(unit.el) || isMentionEl(unit.el))) return false;
+    if (!(unit.keep && unit.keep.length) && (isCitationEl(unit.el) || isMentionEl(unit.el))) {
+      return injectOutcome(unit, false, 'not-applicable', 'root-is-atom');
+    }
     // 保留区：text 可以带 <kN> 标记（模型原样回来的），也可以不带（按原文逐字找位置）
     var segs = null;
-    var cited = null; // 文献引用：每个保留区在译文里的落点（见 injectCited）
+    var cited = null; // 结构性原子（引用 / 图表链接 / 混合段落普通链接）在译文里的落点（见 injectCited）
     if (text && unit.keep && unit.keep.length) {
-      if (hasCitation(unit)) cited = DT.units.keepMarks(text, unit.keep, unit.text);
+      if (hasStructAtom(unit)) cited = DT.units.keepMarks(text, unit.keep, unit.text);
       var kept = DT.units.keepParse(text, unit.keep, unit.text);
       text = kept.text;
       segs = kept.segs;
     }
-    if (!text) return false;
+    if (!text) return injectOutcome(unit, false, 'empty', 'no-text');
     unit.align = align;
-    if (unit.gen !== DT.generation) return false; // 旧代际（还原 / 模式切换后晚到的结果）
+    if (unit.gen !== DT.generation) return injectOutcome(unit, false, 'stale-generation', 'old-generation');
     var rec = findRenderedFor(unit.el, unit);
     var refused =
       rec && stillOurs(rec)
@@ -2708,11 +2956,8 @@
             unit.whole && unit.el.querySelector && unit.el.querySelector(':scope > [data-dt-target]')
             ? 'target-exists'
             : '';
-    if (refused) {
-      // 收集和注入对这一段的看法不一致：调用方会把它记成已处理，这里留下原因方便查
-      DT.log('inject refused:', refused, previewText(unit.text));
-      return false;
-    }
+    // 收集和注入对这一段的看法不一致：调用方会把它记成已处理，这里留下原因方便查
+    if (refused) return injectOutcome(unit, false, 'already-rendered', refused);
 
     var area = unit.area || (unit.area = DT.areaOf(unit.el));
     // 用户可以选择"界面也保留原文"：那样连导航/按钮都不替换，全都追加
@@ -2726,25 +2971,21 @@
       (allowChromeReplace && area !== 'content');
 
     // 普通行内链接不能因为写回第一个文本节点而吞掉整段译文 / 把链接扩到整段。
-    // 非引用单元无法安全原地切分时降级成双语；带引用的仅译文单元交给 injectCitedOnly，失败就保持原文。
-    if (replaceMode && area === 'content' && hasUnsafeInlineLink(unit)) {
+    // 带引用 / 图表链接的单元里，普通链接本身就是原子（见 keepRangesOf），交给混合行内渲染，不走这里；
+    // 只有普通链接的单元无法安全原地切分时降级成双语（已知限制，见 HANDOFF §9）。
+    if (!cited && replaceMode && area === 'content' && hasUnsafeInlineLink(unit)) {
       var outerLink = unit.el.closest && unit.el.closest('a');
-      if (outerLink && outerLink !== unit.el) {
-        DT.log('link boundary: refuse in-place write inside ancestor link', previewText(unit.text));
-        return false;
-      }
-      // 带引用的仅译文：交给 injectCitedOnly 判断；普通行内链接不安全时保持原文并报失败，不转双语。
-      if (!(cited && DT.state.mode === 'translation')) {
-        unit.linkFallback = 'dual';
-        replaceMode = false;
-      }
+      if (outerLink && outerLink !== unit.el) return injectOutcome(unit, false, 'unsafe-structure', 'inside-ancestor-link');
+      unit.linkFallback = 'dual';
+      replaceMode = false;
     }
-    if (cited) return injectCited(unit, cited, text, lang, area, replaceMode);
-    if (replaceMode) {
-      if (unit.ruby && unit.ruby.length) return injectRuby(unit, text, lang, area);
-      return injectReplace(unit, text, area, segs);
-    }
-    return injectDual(unit, text, lang, area);
+    var ok;
+    if (cited) ok = injectCited(unit, cited, text, lang, area, replaceMode);
+    else if (replaceMode) ok = unit.ruby && unit.ruby.length ? injectRuby(unit, text, lang, area) : injectReplace(unit, text, area, segs);
+    else ok = injectDual(unit, text, lang, area);
+    if (ok) return injectOutcome(unit, true, 'success', unit.citeMode || unit.renderMode || '');
+    var why = unit.injectResult;
+    return injectOutcome(unit, false, why ? why.code : 'unsafe-structure', why ? why.reason : 'renderer-refused');
   };
 
   // ---------------- 诊断 ----------------
@@ -2995,6 +3236,8 @@
     DT.state.translated = 0;
     DT.state.failed = 0;
     DT.state.skipped = 0;
+    DT.state.renderFailed = 0;
+    DT.state.lastRenderError = '';
     DT.state.total = 0;
   };
 })();

@@ -297,6 +297,14 @@ window.__outer = document.getElementById('outer');
 </script>
 </body></html>`;
 
+// selftest/index.html 里的夹具模板（夹具只存一份，E2E 直接取用）
+function templateOf(id) {
+  const html = fs.readFileSync(path.join(ROOT, 'selftest', 'index.html'), 'utf8');
+  const m = new RegExp('<template id="' + id + '">([\\s\\S]*?)<\\/template>').exec(html);
+  if (!m) throw new Error('selftest/index.html 里找不到 ' + id);
+  return m[1];
+}
+
 const PAGES = {
   '/shadow-bili.html': SHADOW_BILI_PAGE,
   '/shadow-auto.html': SHADOW_AUTO_PAGE,
@@ -306,6 +314,10 @@ ${NATURE_FIXTURE}
 </body></html>`,
   '/science-cite.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Science citations</title></head><body>
 ${SCIENCE_FIXTURE}
+</body></html>`,
+  // 混合行内内容：文献引用 + Fig. 1 图表链接 + 普通文字（selftest 的 tpl-science-mixed，只存一份）
+  '/science-mixed.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Science mixed inline</title></head><body>
+${templateOf('tpl-science-mixed')}
 </body></html>`,
   '/inline-links.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Inline links</title></head><body>
 ${LINK_FIXTURE}
@@ -821,6 +833,64 @@ async function citationChecks() {
 
   await tabMsg(t.tabId, { type: 'dt:toggle' });
   const after = await until(() => pageEval(t, "return document.querySelector('[data-dt-target],[data-dt-replaced]') ? '' : document.querySelector('.fx-nature').innerHTML"), 8000);
+  check('关闭翻译后 DOM 逐字还原', after === before, after === before ? '' : String(after || '').slice(0, 120));
+}
+
+// 混合行内内容（Science 段落：引用 + Fig. 1）：仅译文原地变成译文、链接节点和属性不变、图表标签写成「图 1」、真实点击；
+// 双语放可点击副本；结构不支持的注音段落记成注入失败（不是跳过）；关闭后逐字还原
+async function scienceMixedChecks() {
+  console.log('\n[混合行内内容（Science 引用 + 图表链接）]');
+  const t = await openTab(ORIGIN + '/science-mixed.html');
+  const before = await pageEval(t, "return document.querySelector('.fx-science').innerHTML");
+  const linksBefore = await pageEval(t, "return Array.from(document.querySelectorAll('#sci-mixed a')).map((a) => [a.getAttribute('href'), a.id, a.getAttribute('role')].join('|'))");
+  const labels = ['10', '10', '12', '13', '16', '图 1', '16', '24', '25', '29'];
+
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const dualReady = await until(() => pageEval(t, "return document.querySelectorAll('#sci-mixed [data-dt-target] a').length === 10"), 20000);
+  await settled(t);
+  const dual = await pageEval(
+    t,
+    `const target = document.querySelector('#sci-mixed [data-dt-target]');
+    const fig = target.querySelector('a[href="#F1"]');
+    history.replaceState(null, '', location.pathname);
+    fig.click();
+    return { labels: Array.from(target.querySelectorAll('a')).map((a) => a.textContent), ids: target.querySelectorAll('[id]').length, hash: location.hash };`
+  );
+  check('双语：译文块里引用和图表链接是可点击的副本（无 id），图表标签「图 1」', !!dualReady && dual.ids === 0 && JSON.stringify(dual.labels) === JSON.stringify(labels) && dual.hash === '#F1', JSON.stringify(dual));
+
+  await tabMsg(t.tabId, { type: 'dt:setMode', mode: 'translation' });
+  const ready = await until(() => pageEval(t, "return !!document.querySelector('#sci-mixed[data-dt-replaced]') && !!document.querySelector('#sci-figonly[data-dt-replaced]')"), 20000);
+  await settled(t);
+  const only = await pageEval(
+    t,
+    `const p = document.getElementById('sci-mixed');
+    const links = Array.from(p.querySelectorAll('a'));
+    const fig = p.querySelector('a[href="#F1"]');
+    const outside = [];
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (!n.parentElement.closest('a') && n.nodeValue.trim()) outside.push(n.nodeValue);
+    history.replaceState(null, '', location.pathname);
+    fig.click();
+    return {
+      dual: !!document.querySelector('#sci-mixed [data-dt-target], #sci-figonly [data-dt-target]'),
+      start: p.textContent.slice(0, 2),
+      labels: links.map((a) => a.textContent),
+      facts: links.map((a) => [a.getAttribute('href'), a.id, a.getAttribute('role')].join('|')),
+      prefixed: outside.join('').indexOf('译:') >= 0,
+      hash: location.hash,
+      figonly: document.getElementById('sci-figonly').textContent.slice(0, 2)
+    };`
+  );
+  check('仅译文：引用 + 图表链接的段落原地翻译，不退回双语（只有图表链接的段落也是）', !!ready && !only.dual && only.start === '译:' && only.figonly === '译:', JSON.stringify({ ready, dual: only.dual, start: only.start, figonly: only.figonly }));
+  check('仅译文：引用和图表链接是原来的节点（href / id / role 不变），图表标签写成「图 1」，译文在链接外', JSON.stringify(only.facts) === JSON.stringify(linksBefore) && JSON.stringify(only.labels) === JSON.stringify(labels) && only.prefixed, JSON.stringify(only.labels));
+  check('仅译文：点「图 1」跳到图表', only.hash === '#F1', only.hash);
+  const status = await tabMsg(t.tabId, { type: 'dt:status' });
+  check('注入失败分类：注音 + 引用段落记成注入失败（不是跳过 / 已处理），原因写明', !!status && status.renderFailed === 1 && /unsafe-structure: ruby/.test(status.lastRenderError || ''), JSON.stringify(status && { renderFailed: status.renderFailed, lastRenderError: status.lastRenderError, skipped: status.skipped }));
+  const rubyKept = await pageEval(t, "const p = document.getElementById('sci-ruby'); return !p.querySelector('[data-dt-target]') && p.textContent.indexOf('漢字の') === 0");
+  check('注入失败分类：结构不支持的段落保持原文，不退回双语', rubyKept === true, String(rubyKept));
+
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const after = await until(() => pageEval(t, "return document.querySelector('[data-dt-target],[data-dt-replaced]') ? '' : document.querySelector('.fx-science').innerHTML"), 8000);
   check('关闭翻译后 DOM 逐字还原', after === before, after === before ? '' : String(after || '').slice(0, 120));
 }
 
@@ -1908,6 +1978,7 @@ try {
     await citationChecks();
     await scienceLiveChecks(ORIGIN + '/science-cite.html');
     await inlineLinkChecks();
+    await scienceMixedChecks();
     await languageChecks();
     await localeChecks();
     await dockChecks();
