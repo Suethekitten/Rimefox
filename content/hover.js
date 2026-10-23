@@ -580,6 +580,20 @@
     marked.push(unit.el, target);
   }
 
+  // 鼠标在 shadow 边界上、caretRangeFromPoint 拿不到内部文本节点时的安全降级：
+  // 高亮整段（双语）或显示整段原文气泡（仅译文），绝不去猜某一句。
+  function markWholeRange(unit) {
+    var maps = mapsFor(unit);
+    if (!maps || !maps.tgt) return;
+    if (unit.renderMode === 'dual') {
+      if (maps.src) paint(SRC_HL, hover.rangeOf(maps.src, [0, maps.src.text.length]));
+      paint(TGT_HL, hover.rangeOf(maps.tgt, [0, maps.tgt.text.length]));
+      return;
+    }
+    paint(TGT_HL, hover.rangeOf(maps.tgt, [0, maps.tgt.text.length]));
+    showTip(unit.el, unit.map ? unit.map.text : '', 'paragraph');
+  }
+
   function mapsFor(unit) {
     // 同一个单元、渲染结果没变就复用文本表；替换型单元没有 targetNode，靠 renderedText 判断
     var fresh = cache && cache.unit === unit && cache.rendered === unit.renderedText;
@@ -619,7 +633,17 @@
     }
 
     var caret = caretAt(x, y);
-    if (!caret || caret.node.nodeType !== 3) return;
+    if (!caret || caret.node.nodeType !== 3) {
+      // caretRangeFromPoint 在部分 Shadow DOM / 事件 retarget 场景拿不到内部文本节点。
+      // 单元已经由 composedPath / 宿主映射确定，降级为整段高亮或整段原文气泡。
+      if (unit !== current || currentKey !== 'whole') {
+        clear();
+        current = unit;
+        currentKey = 'whole';
+        markWholeRange(unit);
+      }
+      return;
+    }
     var maps = mapsFor(unit);
     var tgt = maps.tgt;
     if (!tgt) return;
@@ -688,7 +712,14 @@
   document.addEventListener(
     'mousemove',
     function (event) {
-      moveArgs = { x: event.clientX, y: event.clientY, node: event.target };
+      // 开放 Shadow DOM 里的事件会 retarget 到宿主；composedPath()[0] 才是评论正文节点。
+      var target = event.target;
+      try {
+        if (event.composedPath && event.composedPath().length) target = event.composedPath()[0];
+      } catch (err) {
+        target = event.target;
+      }
+      moveArgs = { x: event.clientX, y: event.clientY, node: target };
       if (!moveRaf) moveRaf = requestAnimationFrame(flushMove);
     },
     { capture: true, passive: true }

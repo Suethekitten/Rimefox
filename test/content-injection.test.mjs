@@ -46,6 +46,9 @@ t('依赖顺序：units 在 dom 之前，input 在 hover / pip / dock 之前', (
   assert.ok(actual.indexOf('content/input.js') >= 0, '缺少 input.js');
   assert.ok(actual.indexOf('content/units.js') < actual.indexOf('content/dom.js'));
   assert.ok(actual.indexOf('content/input.js') < actual.indexOf('content/hover.js'));
+  assert.ok(actual.indexOf('content/dom.js') < actual.indexOf('content/shadow.js'));
+  assert.ok(actual.indexOf('content/shadow.js') < actual.indexOf('content/adapters/bilibili-comments.js'));
+  assert.ok(actual.indexOf('content/adapters/bilibili-comments.js') < actual.indexOf('content/main.js'));
 });
 
 t('清单里的每个文件都存在', () => {

@@ -86,7 +86,11 @@
   DT.isOwnNode = function (node) {
     if (!node) return false;
     if (node.nodeType === 1) {
-      return node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui');
+      return (
+        node.hasAttribute('data-dt-target') ||
+        node.hasAttribute('data-dt-ui') ||
+        node.hasAttribute('data-dt-shadow-style')
+      );
     }
     // 只认我们真正写过的文本节点；不能把 nodeUnit 里的原文节点也算成自己的，
     // 否则站点新增一个文本节点（childList）时观察器会当成本身变化而忽略。
@@ -141,6 +145,9 @@
   // 会对同一个元素反复取样式，10k 节点时这是明显的主线程开销。
   var scanStyles = null;
   var renderStyles = null;
+  // 一轮 collect 内已经走过的节点。Shadow DOM 的 slot 分发 / 多层 root 可能把
+  // 同一个 light DOM 节点送到两条路径，靠它保证不重复收集、不重复送翻。
+  var walkSeen = null;
   // 一轮同步注入内缓存源元素的 computed style：makeNode / copyTypography / 首字下沉
   // 会对同一个容器反复 getComputedStyle；每次插入译文后再读样式会触发整段重排。
   DT.beginRenderCache = function () {
@@ -1172,6 +1179,10 @@
   function walk(el, out) {
     if (out.length >= MAX_UNITS) return;
     if (!el || el.nodeType !== 1) return;
+    if (walkSeen) {
+      if (walkSeen.has(el)) return;
+      walkSeen.add(el);
+    }
     // 整块已翻译且源文本没变：在 isSkipped 的 getComputedStyle 之前返回。
     // 站点插入译文后，容器首次取样式会强制整块重排，长文增量重扫会因此卡住。
     // 局部段落（夹着块级子元素的容器）、只翻了直接文本的元素（own 单元）例外：
@@ -1194,6 +1205,26 @@
     // 正文里夹标题的青空文库），不是段落。判据只看结构，不看文字多少：
     // 「See <a>很长的链接</a>.」、「<span>Hello</span> <span>World</span>」仍是一句
     var breaks = own && el.children.length ? flowBreaks(el) : [];
+
+    // 开放 Shadow DOM：宿主自己的 light DOM 不再当正文扫，改走 shadow root；
+    // slot 只走 assignedNodes，避免 light DOM 与分发后的内容被翻译两次。
+    // closed root 没有 shadowRoot，按普通元素处理（安全跳过）。
+    if (DT.shadow && DT.shadow.active()) {
+      if (DT.shadow.skip(el)) return;
+      var shadowRoot = DT.shadow.enter(el);
+      if (shadowRoot) {
+        var shadowKids = shadowRoot.children;
+        for (var si = 0; si < shadowKids.length; si += 1) walk(shadowKids[si], out);
+        return;
+      }
+      if (DT.shadow.isSlot(el)) {
+        var assigned = DT.shadow.assigned(el);
+        for (var ai = 0; ai < assigned.length; ai += 1) {
+          if (assigned[ai] && assigned[ai].nodeType === 1) walk(assigned[ai], out);
+        }
+        return;
+      }
+    }
 
     // 只翻了直接文本的元素，子元素露出来了（子菜单 display:none → block、行内子元素显示出来）：按现在的结构重新收集。
     // 露出来的是块级子元素：自己那段收成局部段落、子块各自下钻。双语译文原来追加在元素末尾，
@@ -1312,7 +1343,14 @@
   DT.collectAll = function (accept) {
     var out = [];
     var full = false;
+    if (DT.shadow && DT.shadow.prune) DT.shadow.prune();
     var roots = DT.collectRoots();
+    // 适配器指定的 Shadow DOM 内容根（Bilibili 只收评论正文，不扫整个组件树）。
+    // 普通网站 / 未启用 Shadow DOM 时这里是空数组，不增加开销。
+    if (DT.shadow && DT.shadow.active && DT.shadow.active()) {
+      var extra = DT.shadow.collectTargets ? DT.shadow.collectTargets() : [];
+      if (extra && extra.length) roots = roots.concat(extra);
+    }
     for (var i = 0; i < roots.length; i += 1) {
       if (out.length >= MAX_UNITS) {
         full = true;
@@ -1334,14 +1372,22 @@
     collectAccept = accept || null;
     scanStyles = new WeakMap();
     citeMemo = new WeakMap();
+    walkSeen = new WeakSet();
     try {
-      walk(start, out);
+      if (start.nodeType === 11) {
+        // ShadowRoot 是 DocumentFragment，不能直接交给只认 Element 的 walk。
+        var fragKids = start.children || [];
+        for (var fi = 0; fi < fragKids.length; fi += 1) walk(fragKids[fi], out);
+      } else {
+        walk(start, out);
+      }
     } catch (err) {
       DT.log('collect error', err);
     } finally {
       collectAccept = null;
       scanStyles = null;
       citeMemo = null;
+      walkSeen = null;
     }
     DT.lastCollectFull = out.length >= MAX_UNITS;
     DT.log('collect units:', out.length);
@@ -1603,6 +1649,14 @@
     }
     if (list.indexOf(unit) < 0) list.push(unit);
     if (unit.whole) nodeUnit.set(unit.el, unit);
+    // 开放 Shadow DOM 的事件会 retarget 到宿主。只把单元最近的宿主映射到本单元：
+    // 整条评论 / 整个评论区外壳覆盖多条评论，绝不能拿第一条评论冒充整块区域的 hover 单元。
+    if (DT.shadow && DT.shadow.active && DT.shadow.active()) {
+      var hostRoot = unit.el.getRootNode ? unit.el.getRootNode() : null;
+      if (hostRoot && hostRoot.host && !nodeUnit.has(hostRoot.host)) {
+        nodeUnit.set(hostRoot.host, unit);
+      }
+    }
   }
 
   // 找这个段落已经渲染过的记录。
@@ -2611,6 +2665,7 @@
   // 对外：SPA 路由切换后的"体检"。
   // 不清空整页译文（那会造成整页闪烁重翻），只撤掉那些源文本确实变了的段落。
   DT.refreshStale = function () {
+    if (DT.shadow && DT.shadow.prune) DT.shadow.prune();
     var removed = DT.releaseReplaced();
     var list = rendered.slice();
     list.forEach(function (rec) {
@@ -2635,6 +2690,7 @@
   // 页面把整块内容删掉（无限滚动 / SPA 重建）后，rendered / tx 里仍会持有旧节点。
   // 每次翻译前清一次，避免长时间运行内存只增不减。
   DT.pruneDetached = function () {
+    if (DT.shadow && DT.shadow.prune) DT.shadow.prune();
     var list = rendered.slice();
     var removed = 0;
     list.forEach(function (rec) {
@@ -2648,9 +2704,24 @@
     return removed;
   };
 
+  // 兜底清理要覆盖开放 Shadow DOM：document.querySelectorAll 不进 shadow root。
+  function queryAllDeep(selector) {
+    var out = Array.prototype.slice.call(document.querySelectorAll(selector));
+    if (DT.shadow && DT.shadow.all) {
+      out = out.concat(DT.shadow.all(selector));
+    }
+    var seen = new Set();
+    return out.filter(function (node) {
+      if (!node || seen.has(node)) return false;
+      seen.add(node);
+      return true;
+    });
+  }
+
   // 对外：还原原文。逆序回放 RenderTransaction：
   // 只撤销仍是我们写入的值 / 仍是我们的节点；站点已经改过 / 删除的，保留站点的新状态。
   DT.restore = function () {
+    if (DT.shadow && DT.shadow.reset) DT.shadow.reset();
     for (var i = tx.length - 1; i >= 0; i -= 1) {
       if (!tx[i].done) undoOps([tx[i]]);
     }
@@ -2669,9 +2740,9 @@
     DT.bumpGeneration();
 
     // 兜底：记录丢了（站点克隆过节点 / 扩展重复注入）也不能留下收起的换行、隐藏的注音
-    var folded = document.querySelectorAll('[data-dt-collapsed]');
+    var folded = queryAllDeep('[data-dt-collapsed]');
     for (var f = 0; f < folded.length; f += 1) folded[f].removeAttribute('data-dt-collapsed');
-    var hidden = document.querySelectorAll('[data-dt-rt-hidden],[data-dt-keep-hidden]');
+    var hidden = queryAllDeep('[data-dt-rt-hidden],[data-dt-keep-hidden]');
     for (var h = 0; h < hidden.length; h += 1) {
       hidden[h].removeAttribute('data-dt-rt-hidden');
       hidden[h].removeAttribute('data-dt-keep-hidden');
@@ -2679,14 +2750,14 @@
     }
 
     // 移除追加的译文节点
-    var targets = document.querySelectorAll('[data-dt-target]');
+    var targets = queryAllDeep('[data-dt-target]');
     for (var t = 0; t < targets.length; t += 1) {
       if (targets[t].closest && targets[t].closest('[data-dt-ui]')) continue;
       targets[t].remove();
     }
 
     // 清掉标记（局部段落 / own 单元的容器只有 data-dt-replaced，没有 data-dt-src）
-    var sources = document.querySelectorAll('[data-dt-src],[data-dt-replaced]');
+    var sources = queryAllDeep('[data-dt-src],[data-dt-replaced]');
     for (var j = 0; j < sources.length; j += 1) {
       sources[j].removeAttribute('data-dt-src');
       sources[j].removeAttribute('data-dt-sig');

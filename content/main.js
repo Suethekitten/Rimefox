@@ -804,6 +804,10 @@
       for (var i = 0; i < records.length; i += 1) {
         var record = records[i];
         var target = record.target;
+        // 新插入的 B 站评论宿主先登记；shadow root 稍后才创建时由 shadow.js 延迟补扫。
+        if (record.type === 'childList' && record.addedNodes && record.addedNodes.length && DT.shadow) {
+          DT.shadow.noteAdded(record.addedNodes);
+        }
         // 忽略我们自己造成的变更：每插一批译文都会触发一次，
         // 不过滤的话每轮翻译结束后都要白跑一遍整页扫描
         if (target && target.nodeType === 1 && target.closest && target.closest('[data-dt-ui]')) continue;
@@ -881,6 +885,18 @@
           }
           translatePage({ silent: true });
         }, 300);
+        // B 站楼中楼回复通常在点击后异步加载；300ms 时可能还没进 DOM。
+        // 只在启用 Shadow DOM 的站点补一次 1.2s 后的增量扫描，不为每个 thread 建 Observer。
+        if (DT.shadow && DT.shadow.active && DT.shadow.active()) {
+          setTimeout(function () {
+            if (!DT.state.enabled) return;
+            if (running) {
+              dirty = true;
+              return;
+            }
+            translatePage({ silent: true });
+          }, 1200);
+        }
       },
       true
     );
@@ -1067,6 +1083,9 @@
     if (window.top !== window) {
       DT.log('content script ready (iframe)', DT.VERSION);
       return;
+    }
+    if (DT.shadow && DT.shadow.setChangeHandler) {
+      DT.shadow.setChangeHandler(scheduleIncremental);
     }
     startObserver();
     bindHoverRescan();

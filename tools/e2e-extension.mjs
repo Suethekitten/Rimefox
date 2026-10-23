@@ -36,6 +36,13 @@ const LIVE_AOZORA = flag('--aozora-live')
     })()
   : '';
 const VERBOSE = flag('--verbose');
+const SHADOW_ONLY = flag('--shadow-only');
+const BILIBILI_LIVE = flag('--bilibili-live')
+  ? (() => {
+      const arg = option('--bilibili-live');
+      return arg && !arg.startsWith('--') ? arg : 'https://www.bilibili.com/zh-Hans/video/BV1xrnz6gEVD';
+    })()
+  : '';
 const t0 = Date.now();
 const verbose = (...args) => VERBOSE && console.log('    · ' + ((Date.now() - t0) / 1000).toFixed(1) + 's', ...args);
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-e2e-'));
@@ -83,7 +90,201 @@ const NATURE_FIXTURE = (() => {
   return m[1];
 })();
 
+const SHADOW_BILI_PAGE = `<!doctype html><html lang="en" data-dt-shadow-test><head><meta charset="utf-8"><title>Bilibili shadow fixture</title>
+<style>body{font:15px/1.6 system-ui;margin:24px;max-width:760px} bili-comments{display:block;margin-top:16px} .spacer{height:1600px}</style></head><body>
+<h1 id="video-title">A normal video title that is outside the comment shadow roots.</h1>
+<p id="video-desc">The video description is ordinary DOM and should keep translating as before.</p>
+<bili-comments id="comments"></bili-comments>
+<div id="closed"></div>
+<button id="late-reply" type="button">late reply</button>
+<button id="show-hidden" type="button">show hidden</button>
+<div class="spacer"></div>
+<script>
+(function () {
+  function upgrade(root) {
+    try { if (window.customElements && customElements.upgrade) customElements.upgrade(root); } catch (err) {}
+  }
+  class BiliRichText extends HTMLElement {
+    constructor() {
+      super();
+      var root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<div id="contents"></div>';
+    }
+    contents() { return this.shadowRoot.querySelector('#contents'); }
+    setText(text) { this.contents().textContent = text; }
+    setRich(text) {
+      var c = this.contents();
+      c.textContent = '';
+      c.appendChild(document.createTextNode(text + ' '));
+      var a = document.createElement('a');
+      a.id = 'comment-link';
+      a.href = '#comment-link';
+      a.textContent = '@friend';
+      c.appendChild(a);
+      c.appendChild(document.createTextNode(' and a link.'));
+    }
+  }
+  class BiliCommentRenderer extends HTMLElement {
+    constructor() {
+      super();
+      var root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<div class="user" id="user">User Name</div><div class="time" id="time">2 hours ago</div><bili-rich-text></bili-rich-text><div class="actions" id="actions">Like 12</div>';
+      upgrade(root);
+    }
+    rich() { return this.shadowRoot.querySelector('bili-rich-text'); }
+    setText(text) { var r = this.rich(); if (r) r.setText(text); }
+    setRich(text) { var r = this.rich(); if (r) r.setRich(text); }
+  }
+  class BiliReplyRenderer extends HTMLElement {
+    constructor() {
+      super();
+      var root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<bili-comment-renderer></bili-comment-renderer>';
+      upgrade(root);
+    }
+    renderer() { return this.shadowRoot.querySelector('bili-comment-renderer'); }
+  }
+  class BiliThreadRenderer extends HTMLElement {
+    constructor() {
+      super();
+      var root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<div id="comment"></div><div id="replies"></div>';
+      var r = document.createElement('bili-comment-renderer');
+      root.querySelector('#comment').appendChild(r);
+      upgrade(root);
+    }
+    primary() { return this.shadowRoot.querySelector('#comment bili-comment-renderer'); }
+    replies() { return this.shadowRoot.querySelector('#replies'); }
+    setPrimary(text, rich) { if (rich) this.primary().setRich(text); else this.primary().setText(text); }
+    addReply(text) {
+      var wrap = document.createElement('bili-comment-reply-renderer');
+      this.replies().appendChild(wrap);
+      var r = wrap.renderer();
+      if (r) r.setText(text);
+      return wrap;
+    }
+  }
+  class BiliComments extends HTMLElement {
+    constructor() {
+      super();
+      var root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<div id="feed"></div>';
+    }
+    feed() { return this.shadowRoot.querySelector('#feed'); }
+  }
+  customElements.define('bili-rich-text', BiliRichText);
+  customElements.define('bili-comment-renderer', BiliCommentRenderer);
+  customElements.define('bili-comment-reply-renderer', BiliReplyRenderer);
+  customElements.define('bili-comment-thread-renderer', BiliThreadRenderer);
+  customElements.define('bili-comments', BiliComments);
+
+  var comments = document.getElementById('comments');
+  window.__comments = comments;
+  function addThread(primary, reply, rich) {
+    var thread = document.createElement('bili-comment-thread-renderer');
+    comments.feed().appendChild(thread);
+    thread.setPrimary(primary, rich);
+    if (reply) thread.addReply(reply);
+    return thread;
+  }
+  window.biliAddThread = function (primary, reply) {
+    return addThread(primary, reply || '');
+  };
+  window.biliLateReply = function () {
+    var first = comments.feed().children[0];
+    if (first) first.addReply('Late nested reply loaded after the click in the fixture.');
+  };
+  window.biliShowHidden = function () {
+    var hidden = window.__hiddenThread;
+    if (hidden) hidden.replies().style.display = '';
+  };
+  window.biliSort = function () {
+    var feed = comments.feed();
+    var list = Array.prototype.slice.call(feed.children).reverse();
+    feed.textContent = '';
+    list.forEach(function (one) { feed.appendChild(one); });
+  };
+  window.biliReplace = function () {
+    var old = window.__comments;
+    old.remove();
+    var next = document.createElement('bili-comments');
+    next.id = 'comments';
+    document.body.insertBefore(next, document.getElementById('closed'));
+    window.__comments = next;
+    var thread = document.createElement('bili-comment-thread-renderer');
+    next.feed().appendChild(thread);
+    thread.setPrimary('A fresh comment tree after switching the video.');
+    return next;
+  };
+
+  addThread('Top-level comment one: the new Bilibili comment tree lives in shadow roots.', 'Nested reply one: I can see this reply after expanding.');
+  addThread('Top-level comment two: this video is great, and the comments should translate too.', 'Nested reply two: same here, the reply is also translated.');
+  var withInput = addThread('Comment with an input box should still translate its body.');
+  var ta = document.createElement('textarea');
+  ta.id = 'shadow-input';
+  ta.value = 'shadow input draft';
+  withInput.shadowRoot.querySelector('#comment').appendChild(ta);
+  var hidden = addThread('Top-level comment with a hidden reply should translate its body.');
+  hidden.replies().classList.add('hidden-reply');
+  hidden.replies().style.display = 'none';
+  window.__hiddenThread = hidden;
+  hidden.addReply('Hidden reply text should stay untranslated until it is shown.');
+
+  var rich = addThread('', '');
+  rich.setPrimary('Top-level comment with an inline mention is translated while the link stays clickable.', true);
+
+  var closedRoot = document.getElementById('closed').attachShadow({ mode: 'closed' });
+  closedRoot.innerHTML = '<bili-comment-renderer></bili-comment-renderer>';
+  upgrade(closedRoot);
+  closedRoot.querySelector('bili-comment-renderer').setText('Closed shadow comment must not be translated.');
+  window.__closedRoot = closedRoot;
+
+  document.getElementById('late-reply').addEventListener('click', function () {
+    setTimeout(window.biliLateReply, 700);
+  });
+  document.getElementById('show-hidden').addEventListener('click', function () {
+    window.biliShowHidden();
+  });
+})();
+</script>
+</body></html>`;
+const SHADOW_AUTO_PAGE = `<!doctype html><html lang="en" data-dt-shadow-auto><head><meta charset="utf-8"><title>Generic shadow fixture</title></head><body>
+<h1 id="title">Generic open Shadow DOM fixture</h1>
+<x-card id="card1"><span id="slot1">Slotted light DOM text should be translated exactly once.</span></x-card>
+<x-outer id="outer"></x-outer>
+<x-closed id="closed"></x-closed>
+<script>
+class XCard extends HTMLElement {
+  constructor() {
+    super();
+    var root = this.attachShadow({ mode: 'open' });
+    root.innerHTML = '<div id="body">Shadow body text inside a custom card should be translated.</div><slot></slot>';
+  }
+}
+class XOuter extends HTMLElement {
+  constructor() {
+    super();
+    var root = this.attachShadow({ mode: 'open' });
+    root.innerHTML = '<x-card id="inner"><span id="inner-slot">Nested slotted text should also be translated once.</span></x-card>';
+  }
+}
+class XClosed extends HTMLElement {
+  constructor() {
+    super();
+    var root = this.attachShadow({ mode: 'closed' });
+    root.innerHTML = '<div>Closed shadow text must not be translated.</div>';
+  }
+}
+customElements.define('x-card', XCard);
+customElements.define('x-outer', XOuter);
+customElements.define('x-closed', XClosed);
+window.__outer = document.getElementById('outer');
+</script>
+</body></html>`;
+
 const PAGES = {
+  '/shadow-bili.html': SHADOW_BILI_PAGE,
+  '/shadow-auto.html': SHADOW_AUTO_PAGE,
   [NATURE_PATH]: `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Nature citations</title>
 <style>.fx-nature sup{position:relative;top:-.375em;font-size:.75em;line-height:0;vertical-align:baseline}</style></head><body>
 ${NATURE_FIXTURE}
@@ -360,7 +561,7 @@ async function openTab(url, before) {
     await send('Page.navigate', { url }, s);
   }
   await until(() => evaluate(s, "['off', 'on'].indexOf(document.documentElement.getAttribute('data-dt')) >= 0"), 30000);
-  const tabId = await swEval('const t = await chrome.tabs.query({}); return t.filter((x) => x.url === ' + JSON.stringify(url) + ').map((x) => x.id).pop();');
+  const tabId = await swEval('const t = await chrome.tabs.query({}); return t.filter((x) => x.url === ' + JSON.stringify(url) + ' || (x.url && x.url.indexOf(' + JSON.stringify(url) + ') === 0)).map((x) => x.id).pop();');
   return { s, targetId, tabId };
 }
 const tabMsg = (tabId, msg) => swEval('return await chrome.tabs.sendMessage(' + tabId + ', ' + JSON.stringify(msg) + ', { frameId: 0 });');
@@ -927,6 +1128,195 @@ async function youtubeChecks(url) {
   await patchConfig({ subtitleTranslate: false });
 }
 
+
+
+// ---------------- 0.10.2 真实 Bilibili 评论区验收 ----------------
+async function liveBilibiliChecks(url) {
+  console.log('\n[B站真实评论区]');
+  // 真实 B 站评论区大多是中文；目标设成英文才能验证「中文评论 → 英文译文」，
+  // 否则 looksLikeTarget 会正确地把中文评论当成已是目标语言跳过。
+  await patchConfig({ targetLang: 'en', hoverCompare: true, lazy: false, dockEnabled: false });
+  const tab = await openTab(url);
+  if (!tab.tabId) {
+    const bv = (String(url).match(/BV[0-9A-Za-z]+/) || [])[0] || '';
+    tab.tabId = await swEval('const t = await chrome.tabs.query({}); return t.filter((x) => x.url && x.url.indexOf(' + JSON.stringify(bv) + ') >= 0).map((x) => x.id).pop();');
+  }
+  // 评论区在视频下方：B 站要等真实的 window scroll 才挂载 feed。
+  await pageEval(tab, "var c=document.querySelector('bili-comments'); if(c){var y=c.getBoundingClientRect().top+window.scrollY-200;window.scrollTo(0,Math.max(700,y));} return true;");
+  await sleep(2500);
+  let loaded = null;
+  for (let i = 0; i < 6 && !loaded; i += 1) {
+    await pageEval(tab, "window.scrollBy(0, 600); return true;");
+    await sleep(2000);
+    loaded = await pageEval(
+      tab,
+      "var c=document.querySelector('bili-comments');var r=c&&c.shadowRoot;var f=r&&r.querySelector('#feed');return f?Array.from(f.children).filter(function(x){return /^BILI-COMMENT-THREAD-RENDERER$/i.test(x.tagName);}).length:0;"
+    );
+  }
+  const structure = await pageEval(
+    tab,
+    "var c=document.querySelector('bili-comments');var r=c&&c.shadowRoot;var f=r&&r.querySelector('#feed');var t=f&&f.children[0];var cr=t&&t.shadowRoot&&t.shadowRoot.querySelector('bili-comment-renderer');var rich=cr&&cr.shadowRoot&&cr.shadowRoot.querySelector('bili-rich-text');return {comments:!!c,root:!!r,feed:!!f,threads:f?f.children.length:0,commentRoot:!!(cr&&cr.shadowRoot),rich:!!rich,richRoot:!!(rich&&rich.shadowRoot),contents:!!(rich&&rich.shadowRoot&&rich.shadowRoot.querySelector('#contents'))};"
+  );
+  check('真实 B站：bili-comments 使用开放 shadow root，thread / comment / rich-text 可访问', !!loaded && !!structure && structure.root && structure.feed && structure.commentRoot && structure.richRoot && structure.contents, JSON.stringify(structure));
+  const targets = () => pageEval(tab, SHADOW_ALL_JS + "; return shadowAll('#contents [data-dt-target]').length;");
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => targets().then((n) => n >= 1), 40000);
+  await settled(tab);
+  const first = await pageEval(tab, SHADOW_ALL_JS + "; var c=shadowAll('#contents').filter(function(x){var t=x.textContent.trim();return t.length>20&&t.indexOf('登录后查看')<0;})[0]; return c ? {text:c.textContent.replace(/\\s+/g,' ').slice(0,160),target:c.querySelector('[data-dt-target]')?c.querySelector('[data-dt-target]').textContent.slice(0,160):''} : null;");
+  check('真实 B站：评论区正文写入译文', !!ready && !!first && !!first.target && first.target.length > 0, JSON.stringify(first));
+  const meta = await pageEval(tab, SHADOW_ALL_JS + "; return shadowAll('.user,.time,.actions').filter(function(e){return e.querySelector('[data-dt-target]');}).length;");
+  check('真实 B站：评论区昵称 / 时间 / 操作区没有译文', meta === 0, meta);
+  const before = await targets();
+  await pageEval(tab, "window.scrollTo(0, document.documentElement.scrollHeight); return true;");
+  const grew = await until(() => targets().then((n) => n > before), 15000);
+  check('真实 B站：向下滚动加载的新评论进入翻译队列', !!grew, before + ' -> ' + (await targets()));
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await sleep(1200);
+  const restored = await pageEval(tab, SHADOW_ALL_JS + "; return {targets:shadowAll('[data-dt-target]').length,replaced:shadowAll('[data-dt-replaced]').length,text:shadowAll('#contents')[0]?shadowAll('#contents')[0].textContent.slice(0,120):''};");
+  check('真实 B站：关闭翻译后评论区原文恢复、无残留', restored.targets === 0 && restored.replaced === 0 && restored.text.length > 0, JSON.stringify(restored));
+  const diag = await contentEval(tab, 'window.__DT.shadow.diagnostics()');
+  check('真实 B站：observer 释放', !!diag && diag.observers === 0, JSON.stringify(diag));
+}
+
+// ---------------- 0.10.2 开放 Shadow DOM / Bilibili 评论区 ----------------
+const SHADOW_ALL_JS = [
+  'function shadowAll(sel) {',
+  '  var out = []; var seen = new Set();',
+  '  function visit(root) {',
+  '    try { var list = root.querySelectorAll(sel); for (var i=0;i<list.length;i+=1) { if (!seen.has(list[i])) { seen.add(list[i]); out.push(list[i]); } } } catch (err) {}',
+  '    var all = []; try { all = root.querySelectorAll("*"); } catch (err) { return; }',
+  '    for (var j=0;j<all.length;j+=1) if (all[j].shadowRoot) visit(all[j].shadowRoot);',
+  '  }',
+  '  visit(document); return out;',
+  '}'
+].join('\n');
+async function shadowChecks() {
+  console.log('\n[Shadow DOM / Bilibili 评论]');
+  await patchConfig({ targetLang: 'zh-CN', hoverCompare: true, lazy: false, dockEnabled: false });
+  const tab = await openTab(ORIGIN + '/shadow-bili.html');
+  const contentTargets = () =>
+    pageEval(tab, SHADOW_ALL_JS + "; return shadowAll('#contents [data-dt-target]').length;");
+  const contentTexts = () =>
+    pageEval(tab, SHADOW_ALL_JS + "; return shadowAll('#contents').map(function(c){return {text:c.textContent,targets:c.querySelectorAll('[data-dt-target]').length,replaced:c.hasAttribute('data-dt-replaced')};});");
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => contentTargets().then((n) => n >= 7), 30000);
+  await settled(tab);
+  check('B站夹具：普通标题 / 简介仍在翻译', await pageEval(tab, "return !!document.querySelector('#video-title [data-dt-target]') && !!document.querySelector('#video-desc [data-dt-target]')"));
+  check('B站夹具：一级评论、楼中楼、含输入框评论、隐藏回复的正文都发现', ready, await contentTargets());
+  const style = await pageEval(tab, SHADOW_ALL_JS + "; var t=shadowAll('#contents [data-dt-target]')[0]; if(!t) return null; var cs=getComputedStyle(t); var root=t.getRootNode(); var st=root.querySelector&&root.querySelector('[data-dt-shadow-style]'); return {display:cs.display, marginTop:cs.marginTop, whiteSpace:cs.whiteSpace, sheet:(root.adoptedStyleSheets||[]).length, style:!!st, len:st?st.textContent.length:0};");
+  check('Shadow DOM 译文样式实际生效（display / margin / 样式表）', !!style && style.display === 'block' && style.marginTop !== '0px' && (style.sheet > 0 || style.style), JSON.stringify(style));
+  const scanMs = await contentEval(tab, "(function(){var t0=performance.now();for(var i=0;i<3;i+=1){window.__DT.collectAll(function(){return false;});}return (performance.now()-t0)/3;})()");
+  check('B站夹具：11 条评论的增量收集耗时可控', typeof scanMs === 'number' && scanMs < 400, scanMs.toFixed(1) + ' ms/次');
+  const first = await pageEval(tab, SHADOW_ALL_JS + "; return shadowAll('#contents').slice(0,4).map(function(c){return c.textContent;});" );
+  check('B站夹具：评论正文拿到译文', Array.isArray(first) && first.every((s) => s.indexOf('译:') >= 0), JSON.stringify(first));
+  const meta = await pageEval(tab, SHADOW_ALL_JS + "; return shadowAll('.user,.time,.actions').map(function(e){return {text:e.textContent,targets:e.querySelectorAll('[data-dt-target]').length};});");
+  check('B站夹具：昵称 / 时间 / 点赞 / 操作区不翻译', Array.isArray(meta) && meta.length >= 8 && meta.every((x) => x.targets === 0), JSON.stringify(meta.slice(0,5)));
+  const hidden = await pageEval(tab, SHADOW_ALL_JS + "; var h=shadowAll('.hidden-reply')[0]; if(!h) return -1; var n=0; shadowAll('#contents').forEach(function(c){var cur=c; while(cur){if(cur===h){n+=c.querySelectorAll('[data-dt-target]').length;break;}var p=cur.parentNode; if(!p){var r=cur.getRootNode&&cur.getRootNode();p=r&&r.host?r.host:null;} cur=p;}}); return n;");
+  check('B站夹具：未展开的隐藏回复不翻译', hidden === 0, hidden);
+  const input = await pageEval(tab, SHADOW_ALL_JS + "; var t=shadowAll('#shadow-input')[0]; return t ? t.value : '';");
+  check('B站夹具：评论输入框保持原值', input === 'shadow input draft', input);
+  const closed = await pageEval(tab, "return window.__closedRoot ? window.__closedRoot.querySelectorAll('[data-dt-target]').length : -1;");
+  check('B站夹具：closed shadow root 安全跳过', closed === 0, closed);
+  const sentBefore = stats.texts;
+  const added = await pageEval(tab, "window.biliAddThread('Dynamically inserted top-level comment after the initial scan.', 'Dynamically inserted nested reply after the initial scan.'); return true;");
+  const grew = await until(() => contentTargets().then((n) => n >= 9), 20000);
+  await settled(tab);
+  const dynamicTexts = await pageEval(tab, SHADOW_ALL_JS + "; return shadowAll('#contents').map(function(c){return c.textContent;});");
+  check('B站夹具：动态新增一级评论和楼中楼自动翻译', !!added && !!grew && dynamicTexts.some((s) => s.indexOf('Dynamically inserted top-level') >= 0 && s.indexOf('译:') >= 0), grew);
+  check('B站夹具：动态只送新增内容', stats.texts > sentBefore, stats.texts + ' / ' + sentBefore);
+
+  // 点击后异步加载的楼中楼：300ms 扫描时还没进 DOM，1.2s 的补扫接住。
+  const beforeLate = await contentTargets();
+  await pageEval(tab, "document.getElementById('late-reply').click(); return true;");
+  const late = await until(() => contentTargets().then((n) => n >= beforeLate + 1), 15000);
+  await settled(tab);
+  check('B站夹具：点击后异步加载的楼中楼自动翻译', !!late, beforeLate + ' -> ' + (await contentTargets()));
+  await pageEval(tab, "document.getElementById('show-hidden').click(); return true;");
+  const shown = await until(() => pageEval(tab, SHADOW_ALL_JS + "; var h=shadowAll('.hidden-reply')[0]; if(!h) return false; var hit=null; shadowAll('#contents').forEach(function(c){var cur=c; while(cur){if(cur===h){hit=c;break;}var p=cur.parentNode; if(!p){var r=cur.getRootNode&&cur.getRootNode();p=r&&r.host?r.host:null;} cur=p;}}); return !!hit && hit.querySelectorAll('[data-dt-target]').length === 1;"), 15000);
+  const showState = await pageEval(tab, SHADOW_ALL_JS + "; var h=shadowAll('.hidden-reply')[0]; if(!h) return null; var hit=null; shadowAll('#contents').forEach(function(c){var cur=c; while(cur){if(cur===h){hit=c;break;}var p=cur.parentNode; if(!p){var r=cur.getRootNode&&cur.getRootNode();p=r&&r.host?r.host:null;} cur=p;}}); return {display:getComputedStyle(h).display,rects:hit?hit.getClientRects().length:-1,text:hit?hit.textContent:'',targets:hit?hit.querySelectorAll('[data-dt-target]').length:-1};");
+  check('B站夹具：展开隐藏回复后补翻', !!shown, JSON.stringify(showState));
+  await pageEval(tab, "window.biliSort(); return true;");
+  await settled(tab);
+  const sorted = await contentTargets();
+  check('B站夹具：排序重建后译文还在', sorted >= 10, sorted);
+  const link = await pageEval(tab, SHADOW_ALL_JS + "; var a=shadowAll('#comment-link')[0]; return a ? {href:a.getAttribute('href'),connected:a.isConnected} : null;");
+  check('B站夹具：评论里的链接还在', !!link && link.href === '#comment-link' && link.connected, JSON.stringify(link));
+
+  // 悬停：content 里的文字节点可以直接解析到 TranslationUnit
+  const hover = await contentEval(tab, "(function(){" + SHADOW_ALL_JS + "; var u=shadowAll('#contents [data-dt-target]')[0]; if(!u) return {error:'no-target'}; var c=u.parentNode; var tn=null; for(var i=0;i<c.childNodes.length;i+=1){if(c.childNodes[i].nodeType===3){tn=c.childNodes[i];break;}} if(!tn) return {error:'no-text'}; var unit=window.__DT.unitOfNode(tn); return {unit:!!unit, text:unit?unit.text.slice(0,20):''};})()");
+  check('悬停：Shadow DOM 译文能解析到单元', !!(hover && hover.unit), JSON.stringify(hover));
+  await pageEval(tab, SHADOW_ALL_JS + "; var u=shadowAll('#contents [data-dt-target]')[0]; if(u) u.scrollIntoView({block:'center'}); return true;");
+  await sleep(300);
+  const hoverAt = await pageEval(tab, SHADOW_ALL_JS + "; var u=shadowAll('#contents [data-dt-target]')[0]; if(!u) return null; var c=u.parentNode; for(var i=0;i<c.childNodes.length;i+=1){if(c.childNodes[i].nodeType===3&&c.childNodes[i].nodeValue.trim()){var r=document.createRange();r.setStart(c.childNodes[i],0);r.setEnd(c.childNodes[i],Math.min(3,c.childNodes[i].nodeValue.length));var b=r.getBoundingClientRect();return {x:b.left+2,y:b.top+b.height/2};}} return null;");
+  let painted = null;
+  if (hoverAt) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(hoverAt.x), y: Math.round(hoverAt.y), pointerType: 'mouse' }, tab.s);
+    painted = await until(() => contentEval(tab, "(function(){var a=CSS.highlights.get('dt-hover-src');var b=CSS.highlights.get('dt-hover-target');var tip=document.querySelector('.dt-hover-tip');return {src:!!a,tgt:!!b,tip:!!(tip&&!tip.hidden)};})()"), 3000);
+  }
+  check('悬停：真实鼠标进入 Shadow DOM 正文能高亮 / 降级出气泡', !!painted && (painted.src || painted.tgt || painted.tip), JSON.stringify({ at: hoverAt, painted: painted }));
+  // 仅译文：正文原地替换，链接 / 昵称 / 输入框不被清掉
+  await tabMsg(tab.tabId, { type: 'dt:setMode', mode: 'translation' });
+  const only = await until(() => pageEval(tab, SHADOW_ALL_JS + "; var c=shadowAll('#contents'); return c.length && c.every(function(x){return x.hasAttribute('data-dt-replaced') || x.querySelector('[data-dt-target]');});"), 20000);
+  await settled(tab);
+  const onlyLink = await pageEval(tab, SHADOW_ALL_JS + "; var a=shadowAll('#comment-link')[0]; return a ? {href:a.getAttribute('href'),connected:a.isConnected} : null;");
+  const onlyInput = await pageEval(tab, SHADOW_ALL_JS + "; var t=shadowAll('#shadow-input')[0]; return t ? t.value : '';");
+  check('仅译文：Shadow DOM 内正文原地替换', !!only);
+  check('仅译文：链接和输入框仍保留', !!onlyLink && onlyLink.connected && onlyLink.href === '#comment-link' && onlyInput === 'shadow input draft', JSON.stringify({ link: onlyLink, input: onlyInput }));
+
+
+  await tabMsg(tab.tabId, { type: 'dt:setMode', mode: 'dual' });
+  await until(() => contentTargets().then((n) => n >= 10), 20000);
+  await settled(tab);
+  const diag = await contentEval(tab, 'window.__DT.shadow.diagnostics()');
+  check('Observer：B站评论区只保留受控的 feed 边界', !!diag && diag.observers >= 1 && diag.observers <= 2, JSON.stringify(diag));
+
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await sleep(700);
+  const restored = await pageEval(tab, SHADOW_ALL_JS + "; return {targets:shadowAll('[data-dt-target]').length, replaced:shadowAll('[data-dt-replaced]').length, src:shadowAll('[data-dt-src]').length, texts:shadowAll('#contents').map(function(c){return c.textContent;})};");
+  check('还原：Shadow DOM 译文 / 标记全部清掉，原文恢复', restored.targets === 0 && restored.replaced === 0 && restored.src === 0 && restored.texts.some((s) => s.indexOf('Top-level comment one') >= 0), JSON.stringify({ targets: restored.targets, replaced: restored.replaced, src: restored.src }));
+  const cleanDiag = await contentEval(tab, 'window.__DT.shadow.diagnostics()');
+  check('还原：Shadow DOM observer 全部释放', !!cleanDiag && cleanDiag.observers === 0, JSON.stringify(cleanDiag));
+
+  // 切换视频：重建 bili-comments 后旧 observer 不残留
+  const cachedBefore = stats.texts;
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(() => contentTargets().then((n) => n >= 10), 20000);
+  await settled(tab);
+  check('缓存：重新打开评论区时相同评论文本不重复请求', stats.texts === cachedBefore, cachedBefore + ' -> ' + stats.texts);
+  await pageEval(tab, "window.biliReplace(); return true;");
+  const switched = await until(() => pageEval(tab, SHADOW_ALL_JS + "; return shadowAll('#contents [data-dt-target]').length >= 1 && shadowAll('#contents').some(function(c){return c.textContent.indexOf('fresh comment tree') >= 0 && c.textContent.indexOf('译:') >= 0;});"), 20000);
+  await settled(tab);
+  const switchDiag = await contentEval(tab, 'window.__DT.shadow.diagnostics()');
+  check('切换视频：新评论树自动翻译，旧 observer 已清理', !!switched && !!switchDiag && switchDiag.observers <= 1, JSON.stringify(switchDiag));
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+
+  // 通用 auto 模式：多层 open root + slot 去重 + closed 跳过
+  console.log('\n[Shadow DOM / 通用夹具]');
+  const auto = await openTab(ORIGIN + '/shadow-auto.html');
+  await tabMsg(auto.tabId, { type: 'dt:toggle' });
+  const autoReady = await until(() => pageEval(auto, SHADOW_ALL_JS + "; return shadowAll('[data-dt-target]').length >= 5;"), 20000);
+  await settled(auto);
+  const autoStats = await pageEval(auto, SHADOW_ALL_JS + "; return {all:shadowAll('[data-dt-target]').length, slot:shadowAll('#slot1 [data-dt-target]').length, inner:shadowAll('#inner-slot [data-dt-target]').length};");
+  check('通用夹具：单层 / 多层开放 root 都能翻译', !!autoReady && autoStats.all >= 5, JSON.stringify(autoStats));
+  check('通用夹具：slot 分发内容只翻译一次', autoStats.slot === 1 && autoStats.inner === 1, JSON.stringify(autoStats));
+  check('通用夹具：closed shadow root 安全跳过', await pageEval(auto, "var c=document.getElementById('closed'); return !c.shadowRoot;") === true);
+  await tabMsg(auto.tabId, { type: 'dt:toggle' });
+  await sleep(500);
+  const autoRestored = await pageEval(auto, SHADOW_ALL_JS + "; return {targets:shadowAll('[data-dt-target]').length, slot:document.getElementById('slot1').textContent};");
+  check('通用夹具：还原后无残留', autoRestored.targets === 0 && autoRestored.slot.indexOf('Slotted light DOM') === 0, JSON.stringify(autoRestored));
+  const autoDiag = await contentEval(auto, 'window.__DT.shadow.diagnostics()');
+  check('通用夹具：还原后 observer 释放', !!autoDiag && autoDiag.observers === 0, JSON.stringify(autoDiag));
+
+  // 普通网页：适配器不启用，collectAll 不调用 collectTargets / 不遍历 shadow root。
+  const normal = await openTab(ORIGIN + '/page.html?shadow-normal');
+  await tabMsg(normal.tabId, { type: 'dt:toggle' });
+  await settled(normal);
+  const normalMs = await contentEval(normal, "(function(){var t0=performance.now();for(var i=0;i<3;i+=1){window.__DT.collectAll(function(){return false;});}return (performance.now()-t0)/3;})()");
+  const shadowOff = await contentEval(normal, 'window.__DT.shadow.active()');
+  check('普通网页：不启用 Shadow DOM，收集无额外遍历', shadowOff === false && typeof normalMs === 'number' && normalMs < 50, JSON.stringify({ active: shadowOff, ms: normalMs }));
+  await tabMsg(normal.tabId, { type: 'dt:toggle' });
+}
+
 // ---------------- 自检页 ----------------
 // AGENTS.md 要求改 dom.js 前后「selftest/index.html 全部通过」。这里顺手跑一遍，
 // 发版前不用再手动打开 chrome-extension://<id>/selftest/index.html
@@ -1307,7 +1697,11 @@ async function dockChecks() {
 }
 
 try {
-  if (LIVE_AOZORA) {
+  if (SHADOW_ONLY) {
+    await shadowChecks();
+  } else if (BILIBILI_LIVE) {
+    await liveBilibiliChecks(BILIBILI_LIVE);
+  } else if (LIVE_AOZORA) {
     await liveAozoraChecks(LIVE_AOZORA);
   } else if (!flag('--youtube-only')) {
     await articleChecks();
@@ -1321,6 +1715,7 @@ try {
     await optionsChecks();
     await selftestChecks();
     await inputChecks();
+    await shadowChecks();
   }
   if (YOUTUBE) await youtubeChecks(YOUTUBE);
 } catch (err) {

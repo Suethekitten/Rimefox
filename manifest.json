@@ -3,7 +3,7 @@
   "default_locale": "zh_CN",
   "name": "__MSG_extensionName__",
   "short_name": "凛狐",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "114",
   "permissions": [
@@ -56,6 +56,8 @@
         "content/core.js",
         "content/units.js",
         "content/dom.js",
+        "content/shadow.js",
+        "content/adapters/bilibili-comments.js",
         "content/appearance.js",
         "content/main.js",
         "content/selection.js",
@@ -85,7 +87,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["icons/icon32.png"],
+      "resources": ["icons/icon32.png", "content/styles/inject.css"],
       "matches": ["<all_urls>"]
     }
   ]

@@ -522,6 +522,8 @@ async function ensureInjected(tabId, frameId = 0) {
         'content/core.js',
         'content/units.js',
         'content/dom.js',
+        'content/shadow.js',
+        'content/adapters/bilibili-comments.js',
         'content/appearance.js',
         'content/main.js',
         'content/selection.js',
