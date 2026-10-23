@@ -383,14 +383,15 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
   文字流里带 notranslate 的行内 `<code>`（GitHub）、行内子元素里嵌的保留元素同样按保留区处理。整段只剩保留内容的段落不收。
 - **文献引用**（`isCitationEl`）：Nature / Springer 的 `<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>`；Science / Atypon 的 `<a role="doc-biblioref" href="#core-collateral-R1"><i>1</i></a>–<a …>`（没有 sup，直接夹在正文里，目标在 `div.citations`）；Wikipedia `sup.reference`、Markdown 脚注（`role="doc-noteref"`）、带 citation / reference 语义的 span、无链接但带强提示的 `<sup>` 也是保留区。
   判定是组合证据：候选行内元素 + 可见文字只有编号和分隔符（`1,2`、`3–5`、`[3]`）+ 数字都在链接里 + 每个链接有 DPUB 角色 / citation 字样，或指向本页且目标真的像参考文献（`li`、`doc-biblioentry`、`#ref/#bib/#cite/#fn`、reference / biblio class 等）。数学指数、序数、化学式（`<sub>`）、图表 / 章节锚点、站外链接、普通数字链接、链接包在上标外面（`<a><sup>2</sup></a>`）都不算。
-  行内链接边界：普通混合链接无法安全原地切分时，仅译文降级成双语（原段落 / 链接不动，译文另起一块）；`@username` 提及链接作为保留区，链接文字和点击范围保持原样。实现位置：`content/dom.js` 的 `isCitationEl` / `isMentionEl` / `looksLikeReferenceTarget` / `hasUnsafeInlineLink` / `DT.inject`。
+  行内链接边界：普通混合链接无法安全原地切分时，非引用单元可降级双语（原段落 / 链接不动，译文另起一块）；带引用的仅译文单元保持原文并报失败，不双语回退。`@username` 提及链接作为保留区，链接文字和点击范围保持原样。实现位置：`content/dom.js` 的 `isCitationEl` / `isMentionEl` / `looksLikeReferenceTarget` / `hasUnsafeInlineLink` / `DT.inject`。
   渲染走 `injectCited`：先用 `DT.units.keepMarks` 取每个标记在「去掉标记和标记内容」的译文里的落点（同号重复只认第一次；不按原文逐字找 —— 引用只是几个数字，译文里本来就可能有同样的数字）。
-  仅译文：上标链接原地不动，文本节点永远不写。落点先后与页面一致 → 词级写回（`keepPlan`）；模型换了先后 → `keepPlacement` 把每个挪到所在那一句的句末标点前（`sentenceEndAt`），挪完一致就句级写回；
-  两组在原文里隔着字、译文里挨着 → 中间补一个逗号。标记丢了 / 挪完仍对不上 / 分行或 Ruby 段落 / 两个引用之间没有文本节点可写 → 降级成双语：原段落和引用原样保留，译文另起一块；
+  **仅译文**：引用链接原地不动，清除普通英文文本后，按引用边界创建新的文本节点（原文没有对应文本节点也能插），不要求原来的英文段落与文本节点一一对应；新节点全部走 RenderTransaction。
+  落点先后与页面一致 → 词级；模型换了先后 → `keepPlacement` 把每个挪到所在那一句的句末标点前（`sentenceEndAt`）；模型漏标记 → 按原文引用所属句子映射到译文句末（`citeOnlyPlacement`）。
+  两组在原文里隔着字、译文里挨着 → 中间补一个逗号。不能安全重建（分行 / Ruby / 普通行内链接混排 / 引用父级在链接内）时保持原文并标记该单元失败，**不会降级成双语**；只有用户选择双语模式才走 `injectDual`。
   不藏引用（藏 = 丢引用），也不往别的句子里硬插。
   双语：译文节点按落点插上标副本（`citeClone`：去掉 `id` 和 `data-dt-*`，`href` / 上标样式 / `aria-label` / `title` 照旧，点了跳到参考文献，参考文献里的返回链接仍指向原上标；副本带 `data-dt-cite`），
   notranslate 保留区照旧放原文文字；有引用的标记丢了就一个副本都不放（原段落里的引用完好）。悬停的 `mapFromNode` 按阅读顺序取译文节点里的所有文本节点。
-  诊断按钮的 `placements` 记 `cite`：`exact` / `sentence` / `fallback-dual` / `dropped`。
+  诊断按钮的 `placements` 记 `cite`：`exact` / `sentence` / `failed-only`（仅译文无法安全重建） / `dropped`（双语标记缺失）。
   缓存键是送翻文本：旧版本把引用压平进译文的条目（键里没有标记）不会被带标记的段落命中，不清用户缓存，旧条目随容量淘汰。
   提示词只在本批带标记时多一句「文献引用编号的标记紧跟所引词句，不另写、合并或删掉引用编号」。
 - **多译文节点**：同一个容器里多个 `[data-dt-target]` 是正常的；`cleanupDuplicateTargets` 只清理
@@ -471,7 +472,7 @@ subtitles.js（扩展环境，只在 YouTube 加载；纯函数在 subtitles-cor
 | 40 | `data-dt-src` 一打上，`isSkipped` 就让整棵子树永远跳过 | 双语模式站点改了字，旧译文一直挂着（`refreshStale` 只在网址变化时跑）；`<li>` 只翻了直接文本，子菜单显示出来后永远不翻 | 有渲染记录的已翻译元素签名变了就重新检查；own 单元不覆盖子元素，子菜单露出来按局部段落重收（见 5.1） |
 | 41 | 局部段落的形态跟着子块的翻译状态变（0.9.7） | flex 行里的按钮被原地替换、打上 `data-dt-src` 后，下一轮容器变成 own 单元：第一段译文被撤掉，新单元被最后一段的旧译文节点挡住注入失败，每轮重收、重发同一段（命中缓存也要走一趟后台，缓存没了就重复计费），日志里什么也没有 | 局部段落判定排在「子元素全被跳过」之前；`settleForm` 记形态，变了先撤双语再收；`DT.inject` 拒绝时打日志，`main.js` 记成已处理、不再原样重发（见 5.1） |
 | 42 | 长段落切片切在保留区标记中间 | 一片以 `<k1>` 结尾、下一片只有 `</k1>`，两片都不成对，后台不加「原样照抄」说明；模型丢了标记，仅译文走兜底把 notranslate 的内容藏起来换成译文 | `DT.splitLong` 的句末切点和硬切点都避开 `<kN>…</kN>`，整段只剩一个超长保留区就不切 |
-| 43 | 上标文献引用被当成普通文字（Nature） | 「…diseases1,2.」整句送翻：仅译文把译文写进第一个文本节点、清空链接里的数字，上标和跳转都没了，模型写的数字留在正文里；双语译文里只是普通数字。保留区原来的兜底（整句写进别的节点、隐藏保留元素）对引用也不行：藏了就丢引用，不藏就数字重复 | 上标引用当保留区；带引用的单元走 `injectCited`：词级 → 句级 → 降级成双语，双语放上标副本（见 5.2.1） |
+| 43 | 上标文献引用被当成普通文字（Nature） | 「…diseases1,2.」整句送翻：仅译文把译文写进第一个文本节点、清空链接里的数字，上标和跳转都没了，模型写的数字留在正文里；双语译文里只是普通数字。保留区原来的兜底（整句写进别的节点、隐藏保留元素）对引用也不行：藏了就丢引用，不藏就数字重复 | 上标引用当保留区；带引用的单元走 `injectCited`：仅译文在引用边界创建文本节点（词级 / 句级 / 漏标记恢复），不能安全重建就保持原文报失败；双语放上标副本（见 5.2.1） |
 | 44 | 开关按「内框 = width × height」写 `top: 2px` 和 translate 行程 | 全局 `* { box-sizing: border-box }` 让 1px 描边吃掉内框：透镜上 2px 下 0px、开状态贴住右边框；它又管不到 `::before / ::after`，减少透明时 2px 描边把透镜撑出槽外；开状态填充只到透镜中心，玻璃把断口折射成偏在一边的「小球」（0.10.0） | 设置页和弹窗共用 `ui-tokens.css` 的 `.switch`：只认 `--switch-w / -h / -border / -pad / -knob-w`，填充和透镜用 top / bottom 贴内边缘、border-box，开 / 关只改 `translate`，开状态填充铺到透镜右缘；透镜尺寸改了要同步 `ensureGlassFilter` 的贴图尺寸 |
 
 ---
@@ -629,7 +630,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 13. **真实网站覆盖**：0.9.2 只对青空文库《罗生门》做了真实页面验收；Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，不能当成已验证
 13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
 14. **目标语言校验是保守的定向失效**：只覆盖「英文等拉丁字母目标却整段回中日韩正文」这种高置信度情况；短文本、专名 / 术语清单不做自动失效，旧缓存里的这类条目可能保留，重新翻译即可覆盖；中文 / 日文目标方向没有做自动校验
-15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仍无法保证所有未知出版社结构；真实模型能否原样照抄 `<kN>` 标记、仅译文能否总能安全原地落点，只用假模型 / 夹具验证过（落点不安全会降级成双语，不丢引用）。
+15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式现在会保留原文引用节点并重建文本节点，引用定位失败时保持原文并报失败，不再自动变成双语。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
 
 ---
 
@@ -717,16 +718,16 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.11.0）
+## 14. 本版技术记录（0.11.1）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.10.2 的 Shadow DOM / B 站评论区见 [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md)；医学模式的完整交接见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md)，词库来源与许可见 [docs/MEDICAL-DATA-AUDIT.md](docs/MEDICAL-DATA-AUDIT.md)。
+> 0.11.0 的医学专业模式见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md)，引用识别 / 链接边界见 §5.2.1 与 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)。
 
-- **医学专业模式**：新增全局 `medicalMode`（默认关闭，设置页 / 弹窗共用）；100 条审核术语，来源 MIT 词表 + Wikidata/P486，AIX-Text 因许可证缺口未打包；医学规则和本批命中术语进入提示词，用户术语优先且最多 20 条总预算；缓存键只在开启时追加 `medical` 段，普通缓存和旧缓存键不变；MV3 service worker 禁止 dynamic import，词库改为静态 import。
-- **通用学术引用**：`isCitationEl` 不再只认 `sup`；Science / Atypon 的 `a[role=doc-biblioref]`、citation span、无链接强提示上标、编号组都可识别；弱证据链接必须指向本页且目标像参考文献（列表项 + 年份 / `ref` / `bib` / `cite` / `fn` / reference class 等）；数学、序数、化学式、图表 / 章节锚点、站外数字链接保留为普通文本。
-- **行内链接边界**：`@username` 提及链接作为保留区；普通混合行内链接无法安全原地切分时不把整段译文写进 `<a>`，仅译文降级成双语，原链接和点击范围不变；整段原文就是链接时允许原地翻译。
-- **测试**：新增 Science 真页夹具 / 实站 headed 检查、Nature / Wikipedia / Markdown 回归、引用反例、`yt-attributed-string` 风格的 @ 提及夹具、普通混合链接 / 整段链接 / 双语 / 还原测试；完整 Node、自检页、Chrome E2E 通过。
-- **未验证**：真实 YouTube 评论在自动化 Chrome 中没有加载出评论项，未做实站评论验收；Springer / Wiley / Elsevier / PLOS / PMC / arXiv 未逐站验证；真实付费模型对大量 `<kN>` 标记的遵守率仍只由假模型 / 夹具覆盖。
+- **问题**：0.11.0 的仅译文引用路径仍复用 keepPlan；引用之间没有文本节点、引用重排、模型漏标记、分行 / Ruby 等情况会让 keepPlan 失败，并 fallback-dual 调用 injectDual，导致仅译文页面出现英文正文 + 中文译文。
+- **修复**：新增 citeOnlyPlacement / injectCitedOnly。仅译文时清空普通文本，在引用 DOM 边界插入新的文本节点，保留原始引用节点的 href / id / title / aria-label / 样式和事件；不要求原文有对应文本节点，不调用 injectDual。
+- **落点恢复**：有完整标记时用 keepPlacement（词级 / 句级）；模型漏标记或标记无法放置时，按原文引用所属句子映射到译文句末，不跨句乱放，也不凭空生成编号。
+- **事务 / 生命周期**：文本改写、创建节点、容器标记全部走 RenderTransaction；还原逆序移除新节点并恢复原文本；cited 记录进入 stillOurs / renderedByIndex，hover 使用 mapFromNode(unit.el)。无法安全重建（非完整段落、多行、Ruby、普通行内链接混排、引用父级在链接内、落点失败）时保持原文并标记 failed-only，不显示半成品，也不转双语。
+- **测试**：selftest 新增无中间文本节点、连续引用、引用重排、漏标记、多句、notranslate + 引用、引用 + 普通链接、复原等夹具；完整 Node、自检页、Chrome E2E 通过。真实 Science / Nature / YouTube 未在本轮访问，真实网站验收仍由用户完成。
 
 ## 15. 医学专业模式
 

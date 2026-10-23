@@ -274,6 +274,7 @@
 
   function targetMapOf(unit) {
     if (unit.renderMode === 'replace') return mapFromGroups(unit);
+    if (unit.renderMode === 'cited') return mapFromNode(unit.el);
     if (unit.renderMode === 'ruby') return mapFromNode(unit.targetNode);
     return mapFromNode(unit.targetNode);
   }
@@ -566,7 +567,7 @@
 
   function markWhole(unit) {
     if (!unit) return;
-    if (unit.renderMode === 'replace' || unit.renderMode === 'ruby') {
+    if (unit.renderMode === 'replace' || unit.renderMode === 'cited' || unit.renderMode === 'ruby') {
       var original = unit.map ? unit.map.text : '';
       unit.el.setAttribute('data-dt-hover', 'replaced');
       marked.push(unit.el);

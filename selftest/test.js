@@ -2499,7 +2499,7 @@
     });
   });
 
-  check('文献引用·模型丢了标记：仅译文降级成双语（原段落和引用原样保留），双语不放任何副本、不在译文里猜位置；都能还原', function () {
+  check('文献引用·模型丢了标记：仅译文按原句恢复落点、不双语回退；双语保持原段落且不放副本；都能还原', function () {
     var drop = NATURE_ZH.replace('<k5>11,12,13,14</k5>', '');
     var out = [];
     ['translation', 'dual'].forEach(function (mode) {
@@ -2508,16 +2508,27 @@
           var p = box.querySelector('.fx-nature p');
           var before = box.innerHTML;
           var originalText = DT.normalizeText(p.textContent);
+          var originalSups = supsOf(p);
           var u = DT.collect(p)[0];
           if (!DT.inject(u, drop, 'zh-CN')) return mode + '：inject 返回 false';
           var target = p.querySelector('[data-dt-target]');
-          if (!target) return mode + '：应插入双语译文块';
-          if (supsOf(target).length) return mode + '：标记丢了不该放副本';
-          var rest = DT.normalizeText(Array.prototype.filter.call(p.childNodes, function (n) { return n !== target; }).map(function (n) { return n.textContent; }).join(''));
-          if (rest !== originalText) return mode + '：原段落被改了';
-          if (supsOf(p, target).length !== 5) return mode + '：原上标少了';
-          var want = mode === 'translation' ? 'fallback-dual' : 'dropped';
-          if (lastCite() !== want) return mode + '：落点应是 ' + want + '：' + lastCite();
+          if (mode === 'translation') {
+            if (target) return '仅译文：模型丢标记不应双语回退';
+            var shown = DT.normalizeText(p.textContent);
+            if (/Genome-wide|diseases|Given that/.test(shown)) return '仅译文：仍残留英文正文';
+            if (supsOf(p).length !== 5) return '仅译文：原引用数量变了';
+            if (lastCite() === 'fallback-dual' || lastCite() === 'failed-only') return '仅译文：落点失败：' + lastCite();
+          } else {
+            if (!target) return '双语：应插入双语译文块';
+            if (supsOf(target).length) return '双语：标记丢了不该放副本';
+            var rest = DT.normalizeText(Array.prototype.filter.call(p.childNodes, function (n) { return n !== target; }).map(function (n) { return n.textContent; }).join(''));
+            if (rest !== originalText) return '双语：原段落被改了';
+            if (supsOf(p, target).length !== 5) return '双语：原上标少了';
+            if (lastCite() !== 'dropped') return '双语：落点应是 dropped：' + lastCite();
+          }
+          // 原文上标节点 / 顺序不变
+          var nowSups = supsOf(p, target);
+          if (nowSups.length !== originalSups.length || nowSups.some(function (s, i) { return s !== originalSups[i]; })) return mode + '：原引用节点被换了';
           DT.restore();
           return box.innerHTML === before ? true : mode + '：还原后不一致';
         })
@@ -2764,6 +2775,147 @@
         return u ? (u.keep || []).map(function (k) { return k.text + (k.cite ? '*' : ''); }).join(',') : sel + ':没收到';
       });
       return eq(pos, ['[1]*', '[1,2]*', '1,2*', '1*']) === true ? true : '漏判：' + pos;
+    });
+  });
+
+  function citeOriginal(p) {
+    return Array.prototype.map.call(p.querySelectorAll('a[role="doc-biblioref"]'), function (a) {
+      return { el: a, href: a.getAttribute('href'), id: a.getAttribute('id'), text: a.textContent };
+    });
+  }
+
+  function citeUnchanged(before, p) {
+    var now = citeOriginal(p);
+    if (now.length !== before.length) return '引用数量变了：' + before.length + ' → ' + now.length;
+    for (var i = 0; i < now.length; i += 1) {
+      if (now[i].el !== before[i].el) return '引用节点身份变了（第 ' + (i + 1) + ' 个）';
+      if (now[i].href !== before[i].href || now[i].text !== before[i].text) return '引用 href / 编号变了（第 ' + (i + 1) + ' 个）';
+    }
+    return true;
+  }
+
+  check('文献引用·仅译文：两个引用之间没有可写文本节点时，插入新文本节点，不产生双语回退', function () {
+    return withTemplate('tpl-cite-only', 'translation', function (box) {
+      var p = box.querySelector('#cite-gap');
+      var before = p.innerHTML;
+      var cites = citeOriginal(p);
+      var u = DT.collect(p)[0];
+      if (!u || !u.keep || u.keep.length !== 2) return '收集：' + (u && u.keep && u.keep.length);
+      if (!DT.inject(u, '甲<k1>1</k1>中间<k2>2</k2>乙。', 'zh-CN')) return 'inject 返回 false';
+      if (p.querySelector('[data-dt-target]')) return '仅译文不应插入双语译文块';
+      var r = citeUnchanged(cites, p);
+      if (r !== true) return r;
+      var a1 = p.querySelector('#cite-a1');
+      if (!a1.nextSibling || a1.nextSibling.nodeType !== 3 || a1.nextSibling.nodeValue.indexOf('中间') < 0) return '两个引用之间没有新文本节点：' + (a1.nextSibling && a1.nextSibling.nodeValue);
+      if (!textOutsideLinks(p, '甲') || !textOutsideLinks(p, '乙')) return '链接外没有完整译文：' + p.textContent;
+      if (textInsideLinks(p, '甲') || textInsideLinks(p, '中间') || textInsideLinks(p, '乙')) return '译文落进了引用链接';
+      if (clickHash(a1) !== '#cite-R1') return '引用链接不能点击';
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致：' + p.innerHTML;
+    });
+  });
+
+  check('文献引用·仅译文：多个连续引用、引用重排和句末引用都只显示译文，引用节点 / 链接保持不变', function () {
+    var errors = [];
+    [
+      ['#cite-three', '甲<k1>1</k1>中间<k2>2</k2>再<k3>3</k3>乙。', 3, 'exact'],
+      ['#cite-reorder', '甲<k2>2</k2>中间<k1>1</k1>乙。', 2, 'sentence']
+    ].forEach(function (item) {
+      withTemplate('tpl-cite-only', 'translation', function (box) {
+        var p = box.querySelector(item[0]);
+        var before = p.innerHTML;
+        var cites = citeOriginal(p);
+        var u = DT.collect(p)[0];
+        if (!DT.inject(u, item[1], 'zh-CN')) { errors.push(item[0] + '：inject false'); DT.restore(); return; }
+        if (p.querySelector('[data-dt-target]')) errors.push(item[0] + '：出现双语回退');
+        var r = citeUnchanged(cites, p);
+        if (r !== true) errors.push(item[0] + '：' + r);
+        var shown = DT.normalizeText(p.textContent);
+        if (shown.indexOf('甲') < 0 || shown.indexOf('乙') < 0) errors.push(item[0] + '：译文不完整：' + shown);
+        if (/Alpha|First|second|third|omega/.test(shown)) errors.push(item[0] + '：仍残留英文正文：' + shown);
+        if (citeOriginal(p).length !== item[2]) errors.push(item[0] + '：引用数量不对');
+        if (lastCite() !== item[3]) errors.push(item[0] + '：citeMode=' + lastCite());
+        DT.restore();
+        if (p.innerHTML !== before) errors.push(item[0] + '：还原不一致');
+      });
+    });
+    return errors.length ? errors.join('；') : true;
+  });
+
+  check('文献引用·仅译文：模型漏掉标记时按原句顺序恢复句末落点，不双语回退，也不凭空生成编号', function () {
+    return withTemplate('tpl-cite-only', 'translation', function (box) {
+      var p = box.querySelector('#cite-gap');
+      var before = p.innerHTML;
+      var cites = citeOriginal(p);
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, '甲中间乙。', 'zh-CN')) return 'inject 返回 false';
+      if (p.querySelector('[data-dt-target]')) return '模型漏标记时不应双语回退';
+      var r = citeUnchanged(cites, p);
+      if (r !== true) return r;
+      var shown = DT.normalizeText(p.textContent);
+      if (/Alpha|omega/.test(shown)) return '仍残留英文正文：' + shown;
+      if (shown.indexOf('甲') < 0 || shown.indexOf('乙') < 0) return '译文不完整：' + shown;
+      if ((shown.match(/[12]/g) || []).length !== 2) return '引用编号数量变了：' + shown;
+      if (lastCite() === 'fallback-dual') return '仍走了 fallback-dual';
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('文献引用·仅译文：notranslate 保留元素和引用一起原地保留，普通英文仍被译文替换', function () {
+    return withTemplate('tpl-cite-only', 'translation', function (box) {
+      var p = box.querySelector('#cite-notranslate');
+      var before = p.innerHTML;
+      var brand = p.querySelector('.notranslate');
+      var u = DT.collect(p)[0];
+      if (!u || !u.keep || u.keep.length < 2) return '收集 keep：' + (u && u.keep && u.keep.length);
+      if (!DT.inject(u, '使用<k1>Rimefox</k1><k2>1</k2>现在。', 'zh-CN')) return 'inject 返回 false';
+      if (p.querySelector('[data-dt-target]')) return '不应双语回退';
+      if (p.querySelector('.notranslate') !== brand || brand.textContent !== 'Rimefox') return 'notranslate 被替换';
+      var a = p.querySelector('#cite-n1');
+      if (!a || a.getAttribute('href') !== '#cite-R1') return '引用被改';
+      var shown = DT.normalizeText(p.textContent);
+      if (/Use|now\./.test(shown)) return '普通英文没被替换：' + shown;
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('文献引用·仅译文：多句段落模型漏标记时，引用按原句顺序落在各自句末，不混到别的句子', function () {
+    return withTemplate('tpl-cite-only', 'translation', function (box) {
+      var p = box.querySelector('#cite-sentences');
+      var before = p.innerHTML;
+      var cites = citeOriginal(p);
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, '第一句。第二句。', 'zh-CN')) return 'inject 返回 false';
+      if (p.querySelector('[data-dt-target]')) return '不应双语回退';
+      var r = citeUnchanged(cites, p);
+      if (r !== true) return r;
+      var a1 = p.querySelector('#cite-s1');
+      var a2 = p.querySelector('#cite-s2');
+      if (!a1.nextSibling || a1.nextSibling.nodeValue.indexOf('。第二句') < 0) return '第一句引用后的文本不对：' + (a1.nextSibling && a1.nextSibling.nodeValue);
+      if (!a2.nextSibling || a2.nextSibling.nodeValue.indexOf('。') < 0) return '第二句引用后的文本不对：' + (a2.nextSibling && a2.nextSibling.nodeValue);
+      if (lastCite() === 'fallback-dual' || lastCite() === 'failed-only') return '落点失败：' + lastCite();
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('文献引用·仅译文：引用与普通行内链接混排时不退回双语；无法安全重建就保持原文并报失败', function () {
+    return withTemplate('tpl-cite-only', 'translation', function (box) {
+      var p = box.querySelector('#cite-link');
+      var before = p.innerHTML;
+      var u = DT.collect(p)[0];
+      var ok = DT.inject(u, '参见<k1>1</k1>论文。', 'zh-CN');
+      if (p.querySelector('[data-dt-target]')) return '混排行内链接时不应双语回退';
+      if (ok) {
+        if (!p.querySelector('a[role="doc-biblioref"]')) return '重建后引用丢失';
+        if (!p.querySelector('a[href="#paper"]')) return '重建后普通链接丢失';
+      } else if (p.innerHTML !== before) {
+        return '不能安全重建时原段落被改了';
+      }
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
     });
   });
 

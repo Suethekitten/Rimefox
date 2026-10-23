@@ -1505,8 +1505,8 @@ async function scienceLiveChecks(url = 'https://www.science.org/doi/10.1126/scia
     result.restored = p.innerHTML === before;
     return result;
   })()`);
-  // 真实首段有 9 组引用；演示译文只带 2 组标记时，代码会安全降级成双语块而不是硬写。
-  check('Science 实页：仅译文保留原引用链接、点击目标不变，无法安全落点时降级且完整还原', injected.ok && injected.sourceIntact && !injected.targetInsideLink && injected.targetCount <= 1 && injected.restored, JSON.stringify(injected));
+  // 真实首段有 9 组引用；演示译文只带 2 组标记时，按原句顺序恢复落点，不插入双语块。
+  check('Science 实页：仅译文原地重建、保留原引用链接和点击目标，无双语回退且完整还原', injected.ok && injected.sourceIntact && !injected.targetInsideLink && injected.targetCount === 0 && injected.restored, JSON.stringify(injected));
 }
 
 // ---------------- 自检页 ----------------

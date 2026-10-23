@@ -1574,7 +1574,7 @@
     return node;
   }
 
-  // cite：带文献引用的段落用了哪种落点（exact / sentence / fallback-dual / dropped，见 injectCited）
+  // cite：带文献引用的段落用了哪种落点（exact / sentence / failed-only / dropped；双语的 fallback-dual 仅用于非正文定位，见 injectCited）
   function record(where, node, sourceEl, text, area, cite) {
     try {
       var entry = {
@@ -1814,6 +1814,11 @@
     var saved = rec.saved || [];
     for (var i = 0; i < saved.length; i += 1) {
       if (!saved[i].node.isConnected || saved[i].node.nodeValue !== saved[i].wrote) return false;
+    }
+    if (rec.mode === 'cited' && rec.unit && rec.unit.citedInserted) {
+      for (var c = 0; c < rec.unit.citedInserted.length; c += 1) {
+        if (!rec.unit.citedInserted[c].isConnected) return false;
+      }
     }
     return rec.mode === 'ruby' ? !!rec.node && rec.node.isConnected : true;
   }
@@ -2228,12 +2233,24 @@
   }
 
   // ---------------- 带文献引用的段落 ----------------
-  // 仅译文：页面上的上标链接原地不动（它的文本节点永远不写），译文按落点切成 N+1 段写在它们前后（keepPlan）。
-  //   落点先用模型留下的标记位置（词级）；模型换了引用的先后，挪到各自那一句的句末（句级，units.keepPlacement）。
-  //   定不下来 —— 标记丢了、挪完仍对不上、分行 / 注音段落、两个引用之间没有文本节点可写 —— 安全降级成双语：
-  //   原段落连同引用原样保留，译文另起一块。不按原文字符偏移硬插，也不把引用挪进别的句子。
-  // 双语：译文里按标记位置放上标的副本（双语译文顺序随意，不受页面顺序限制）
+  // 仅译文：引用链接原地不动，清理普通文本后按 N+1 段重建译文。
+  //   能从标记位置定位就精确写；模型换了顺序 / 漏了标记就按原文句子顺序恢复到句末。
+  //   新文本节点按引用 DOM 边界插入，不要求原文本身有对应文本节点；不能安全重建时返回 false，绝不降级双语。
+  // 双语：保持原来的 injectDual / 副本逻辑。
   function injectCited(unit, marks, plain, lang, area, replaceMode) {
+    if (replaceMode && DT.state.mode === 'translation') {
+      var onlyPlace = citeOnlyPlacement(unit, marks);
+      var onlySegs = onlyPlace ? citeSegs(unit, marks.stripped, onlyPlace.at) : null;
+      if (!onlySegs || onlySegs.length !== (unit.keep || []).length + 1) {
+        unit.citeMode = 'failed-only';
+        return false;
+      }
+      unit.citeMode = onlyPlace.recovered || onlyPlace.snapped ? 'sentence' : 'exact';
+      if (injectCitedOnly(unit, onlySegs, onlyPlace, area)) return true;
+      unit.citeMode = 'failed-only';
+      return false;
+    }
+    // 双语（含定位 / 固定定位导致的 replaceMode）：保留 0.11.0 的行为。
     if (replaceMode) {
       var single = (unit.groups.filled || []).length < 2 && !(unit.ruby && unit.ruby.length);
       var place = single ? DT.units.keepPlacement(marks.stripped, marks.at) : null;
@@ -2276,6 +2293,106 @@
     var out = segs[0] || '';
     for (var i = 0; i < unit.keep.length; i += 1) out += unit.keep[i].text + (segs[i + 1] || '');
     return out;
+  }
+
+
+  // 仅译文：从译文句子和原文引用所属句恢复落点。模型漏标记 / 标记乱序时不再把整段降级成双语。
+  // 原文引用按它在原文里的句子顺序映射到译文句子；只保证不跨句乱放，位置固定在句末。
+  function citeOnlyPlacement(unit, marks) {
+    var keep = unit.keep || [];
+    if (!keep.length || !marks) return null;
+    var list = marks.at || [];
+    var all = list.length === keep.length;
+    for (var i = 0; all && i < list.length; i += 1) all = list[i] >= 0;
+    if (all) {
+      var placed = DT.units.keepPlacement(marks.stripped, list);
+      if (placed) return { at: placed.at, snapped: !!placed.snapped, recovered: false };
+    }
+    var src = DT.units.sentencesOf(unit.text || '');
+    var dst = DT.units.sentencesOf(marks.stripped || '');
+    if (!src.length || !dst.length) return null;
+    var at = [];
+    var prev = -1;
+    for (var j = 0; j < keep.length; j += 1) {
+      var pos = keep[j].start || 0;
+      var si = 0;
+      while (si + 1 < src.length && pos >= src[si + 1][0]) si += 1;
+      var di = Math.min(si, dst.length - 1);
+      var end = DT.units.sentenceEndAt(marks.stripped, dst[di][0]);
+      if (end < prev) end = prev;
+      at.push(end);
+      prev = end;
+    }
+    return { at: at, snapped: true, recovered: true };
+  }
+
+  // 引用边界的新文本节点落点。只允许放在引用元素所在父级；父级位于链接内时失败。
+  function citeTextParent(el) {
+    var parent = el && el.parentNode;
+    if (!parent || parent.nodeType !== 1 || !parent.isConnected) return null;
+    if (parent.closest && parent.closest('a')) return null;
+    return parent;
+  }
+
+  // 仅译文引用重建：保留原始引用节点，清理普通文本，在引用之间创建新文本节点。
+  // 不调用 injectDual，不隐藏整段，不修改引用 href / id / 事件；所有插入和文本改写走 RenderTransaction。
+  function injectCitedOnly(unit, segs, place, area) {
+    var keep = unit.keep || [];
+    if (!segs || segs.length !== keep.length + 1) return false;
+    if (!unit.whole) return false;
+    if ((unit.groups && unit.groups.filled && unit.groups.filled.length > 1) || (unit.ruby && unit.ruby.length)) return false;
+    if (hasUnsafeInlineLink(unit)) return false;
+    var i;
+    for (i = 0; i < keep.length; i += 1) {
+      if (!keep[i] || !keep[i].el || !citeTextParent(keep[i].el)) return false;
+    }
+
+    var ops = [];
+    var saved = [];
+    var seen = new Set();
+    (unit.map.chars || []).forEach(function (c) {
+      if (!c || !c.node || seen.has(c.node)) return;
+      seen.add(c.node);
+      if (keepIndexOf(unit, c.node) >= 0) return;
+      if (c.node.nodeValue === '') return;
+      var before = c.node.nodeValue;
+      setText(c.node, '', ops);
+      saved.push({ node: c.node, value: before, wrote: '' });
+    });
+
+    function put(text, parent, before) {
+      if (!text) return null;
+      var node = document.createTextNode(text);
+      insertNode(node, parent, before, ops);
+      nodeUnit.set(node, unit);
+      return node;
+    }
+
+    // 第 0 段在第一组引用之前；第 i 段插在第 i-1 组引用之后（即两组之间）。
+    put(segs[0], citeTextParent(keep[0].el), keep[0].el);
+    for (i = 1; i < keep.length; i += 1) {
+      put(segs[i], citeTextParent(keep[i - 1].el), keep[i - 1].el.nextSibling);
+    }
+    put(segs[keep.length], citeTextParent(keep[keep.length - 1].el), keep[keep.length - 1].el.nextSibling);
+
+    var rendered = citeRendered(unit, segs);
+    var srcLines = DT.splitLines(unit.text);
+    var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: srcLines, aligned: true };
+    DT.replaced.push(item);
+    setAttr(unit.el, 'data-dt-replaced', '1', ops);
+    if (unit.whole) {
+      setAttr(unit.el, 'data-dt-src', '1', ops);
+      setAttr(unit.el, 'data-dt-sig', unit.sig, ops);
+    }
+    unit.renderMode = 'cited';
+    unit.targetNode = null;
+    unit.renderedText = rendered;
+    unit.citedInserted = Array.prototype.slice.call(unit.el.childNodes);
+    fillSnapshot(unit);
+    pushRendered({ unit: unit, mode: 'cited', ops: ops, saved: saved, replaced: item });
+    linkUnit(unit);
+    record('replace', null, unit.el, rendered, area, unit.citeMode);
+    return true;
   }
 
   // 上标引用的副本：href / 上标样式 / aria-label / title 照旧，点了照样跳到参考文献；
@@ -2609,15 +2726,18 @@
       (allowChromeReplace && area !== 'content');
 
     // 普通行内链接不能因为写回第一个文本节点而吞掉整段译文 / 把链接扩到整段。
-    // 无法安全原地切分时降级成双语：原段落（含链接）不动，译文另起一块；链接祖先包裹正文时宁可不写。
+    // 非引用单元无法安全原地切分时降级成双语；带引用的仅译文单元交给 injectCitedOnly，失败就保持原文。
     if (replaceMode && area === 'content' && hasUnsafeInlineLink(unit)) {
       var outerLink = unit.el.closest && unit.el.closest('a');
       if (outerLink && outerLink !== unit.el) {
         DT.log('link boundary: refuse in-place write inside ancestor link', previewText(unit.text));
         return false;
       }
-      unit.linkFallback = 'dual';
-      replaceMode = false;
+      // 带引用的仅译文：交给 injectCitedOnly 判断；普通行内链接不安全时保持原文并报失败，不转双语。
+      if (!(cited && DT.state.mode === 'translation')) {
+        unit.linkFallback = 'dual';
+        replaceMode = false;
+      }
     }
     if (cited) return injectCited(unit, cited, text, lang, area, replaceMode);
     if (replaceMode) {
