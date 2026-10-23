@@ -580,7 +580,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 ```
 
-返回每个命中文本节点的实际 `getComputedStyle()`（font-weight / font-size / font-family / font-style / line-height）、祖先链（STRONG / B / SPAN / class / style）、所在翻译单元、**写入前**的 DOM 摘要与祖先链，以及当前 DOM。`__DT.styleBoundaryAware === 1` 表示加载的是含样式边界修复的 0.11.5 脚本；如果为 undefined，说明 Chrome 仍加载旧扩展实例，需要重新加载本地扩展或刷新扩展页。
+返回每个命中文本节点的实际 `getComputedStyle()`（font-weight / font-size / font-family / font-style / line-height）、祖先链（STRONG / B / SPAN / class / style）、所在翻译单元、**写入前**的 DOM 摘要与祖先链，以及当前 DOM。`__DT.styleBoundaryAware === 1` 表示加载的是含样式边界修复的 0.11.6 脚本；如果为 undefined，说明 Chrome 仍加载旧扩展实例，需要重新加载本地扩展或刷新扩展页。
 
 ### 7.3 日志
 - 设置页勾选「输出调试日志」→ 网页 Console 过滤 `[凛狐]`
@@ -761,17 +761,17 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.11.5）
+ ## 14. 本版技术记录（0.11.6）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.11.4 的专业引擎 / 医学质量 / JAMA 上标修复见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)；0.11.3 的普通链接 / Ruby / pre-wrap / 悬浮球见提交 9bdb0fb。
+> 0.11.5 的双向排版 / RichHTML 修复见提交 4c2784d。
 
-- **双向排版**：新增 content/direction.js，目标语言按 BCP 47（含 script 子标签）映射方向，原始方向按最近 dir、computed direction、文档语言和文字特征判断。双语 makeNode 设置目标 dir/lang/direction/unicode-bidi:isolate；完整仅译文块通过事务设置块方向，部分 / 共享段落把写入文本节点移进 data-dt-dir="wrap" 壳；引用 / 链接 / Ruby 原子不改。悬停原文气泡保留源方向，划词气泡跟随目标方向。
-- **RichHTML 仅译文**：中文医学段落里的 [8]、［9］、上标本地数字链接、本地参考文献数字链接和补充材料链接进入结构原子；仅译文不再因 hasUnsafeInlineLink 设置 linkFallback='dual'，无法安全重建时保持原文并报 unsafe-structure / unsafe-inline-link。普通 “See section 1” / 图表数字锚点 / 站外数字链接仍不误判。
-- **反复闪烁**：医学上下文快照读取 DT.replacedOf(el).src，不读取已替换后的译文；只有网站自身标题 / 章节 / 文档结构 mutation 才触发 contextChanged，翻译器自己的译文、data-dt-dir 壳和移动后的原文本节点都计入 own node，不再触发补扫循环。动态导航等无关节点只做增量补扫，不撤销已翻译正文。
-- **诊断**：新增 DT.debugStats / DT.debugSnapshot / DT.debugReset，记录 startOverCount、restoreCount、contextChangedCount、incrementalScanCount、injectDualCount、linkFallbackCount 和最多 24 条原因；不记录论文正文，不持续输出 console。新增 Chinagp 等价 E2E：稳定正文不重复请求、动态导航不 startOver / restore / 重复双语。
-- **测试**：完整 Node、离线自检、Chrome E2E、inline-layout 三组视口 / 缩放矩阵通过；新增阿拉伯 / 希伯来 / 波斯 / 中文 / 英文 / 日文方向映射、dir / CSS / !important、居中、双语、部分段落、pre-wrap、中文医学 RichHTML、[8]/［9］引用、链接保留和动态导航回归。真实 chinagp.net / Al Jazeera / 付费模型未在本轮验收。
+- **韩文随机加粗**：仅译文的 writeNodes 仍会优先复用第一个可写 TextNode。若该节点位于局部 strong / b / em / 粗体 span 内，完整译文会继承局部强调。新增 font-weight / font-style / font-family 样式边界：局部强调壳未覆盖整段时，在壳外创建 RenderTransaction 保护的 TextNode；整段强调壳或加粗标题保留原样式。
+- **字体族**：朝鲜日报等站点会用 NotoSansKR-Bold 等粗体字体族但 computed font-weight=400。styleOf 缓存之前漏掉 fontFamily，导致这一层无法识别；现在同时比较 fontWeight、fontStyle 和 bold/black/heavy 字体族。
+- **多行 / 混合**：injectLines 对只被一行使用的行首节点做壳外迁移；injectMixed 的 put 经过 styleSafeSlot；pre-wrap、嵌套 strong/em、行内链接和引用均有本地 fixture。
+- **诊断**：DT.inspectTextStyle(needle) 返回实际 computed font-weight / font-size / font-family / font-style、从文本节点到正文容器的祖先链、写入前 DOM / 样式与当前 DOM；DT.diagnose 增加 styleBoundaryAware / styleInspector。真实朝鲜日报地址可通过 tools/e2e-extension.mjs --chosun-live 使用本地假翻译检查，不发真实付费请求。
+- **测试**：Node、自检、完整 E2E、真实朝鲜日报实时页面检查通过；compare 翻译前后字重和粗体字族，并覆盖还原 / 再次翻译。
 
-## 15. 专业翻译引擎
+ ## 15. 专业翻译引擎
 
 专业策略通过静态 Registry 接入共用翻译管线，医学是首个实现；配置迁移、数据、上下文、质量与费用边界统一见 [专业引擎文档](docs/PROFESSIONAL-TRANSLATION.md)。当前本地实施与验收证据见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)。DOM 引用的插入安全独立于专业模式，见 [翻译引擎渲染契约](docs/TRANSLATION-ENGINE-HANDOFF.md#33-仅译文)。

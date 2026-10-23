@@ -1037,7 +1037,7 @@ async function koreanBoldChecks() {
     return { start: info('bold-start'), mid: info('bold-mid'), end: info('bold-end'), span: info('bold-span'), b: info('bold-b'), medium: info('bold-medium'), family: info('bold-family'), em: info('bold-em'), multi: info('multi-bold'), nested: info('nested-bold'), prewrap: info('prewrap'), whole: info('whole-strong'), heading: info('whole-heading'), link: info('link-strong'), linkCount: document.querySelectorAll('#link-strong a[href="#ref-1"]').length };
   })()`);
   const loaded = await contentEval(t, "({ version: window.__DT.VERSION, styleBoundaryAware: window.__DT.styleBoundaryAware, inspect: typeof window.__DT.inspectTextStyle })");
-  check('实际加载的扩展脚本：0.11.5 且包含样式边界修复 / 诊断器', loaded.version === '0.11.5' && loaded.styleBoundaryAware === 1 && loaded.inspect === 'function', JSON.stringify(loaded));
+  check('实际加载的扩展脚本：0.11.6 且包含样式边界修复 / 诊断器', loaded.version === '0.11.6' && loaded.styleBoundaryAware === 1 && loaded.inspect === 'function', JSON.stringify(loaded));
   const inspect = await contentEval(t, "window.__DT.inspectTextStyle('译:', 12)");
   const affected = (inspect.matches || []).find(function (m) { return m.before && m.before.sourceHtml && m.before.sourceHtml.indexOf('<strong>') >= 0 && m.style && parseInt(m.style.fontWeight, 10) < 600; });
   check('样式诊断：记录写入前 DOM / 祖先链 / computed font-weight，并显示局部强调未污染整段', !!affected && affected.before.chain.some(function (x) { return x && parseInt(x.fontWeight, 10) >= 600; }) && affected.afterHtml.indexOf('strong') >= 0, JSON.stringify(affected && { parent: affected.parent, before: affected.before.chain[0], after: affected.chain[0] }));
