@@ -507,6 +507,16 @@
     tip._expand.textContent = DT.uiText('展开全文', 'Show full text');
     tip._close.setAttribute('aria-label', DT.uiText('关闭提示', 'Close'));
     tip._body.textContent = tipPreview(full);
+    // 气泡展示的是原文：原文 RTL 时气泡内容仍按 RTL 读，不能跟随页面上的 LTR 译文。
+    var srcUnit = DT.unitOfNode ? DT.unitOfNode(anchor) : null;
+    var srcDir = (srcUnit && srcUnit.sourceDir) || (DT.direction ? DT.direction.sourceDir(anchor, full) : '');
+    if (srcDir) {
+      tip._body.setAttribute('dir', srcDir);
+      tip._body.style.setProperty('text-align', 'start', 'important');
+    } else {
+      tip._body.removeAttribute('dir');
+      tip._body.style.removeProperty('text-align');
+    }
     tip._body.setAttribute('aria-label', DT.uiText('内容，可滚动查看', 'Content, scrollable'));
     tip.hidden = false;
     positionTip(anchor);

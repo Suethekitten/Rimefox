@@ -78,6 +78,7 @@ edge-bilingual/
 ├── content/               内容脚本（classic script，不能 import）
 │   ├── core.js            命名空间 DT、文本工具、DT.send（带超时）、toast
 │   ├── units.js           翻译单元结构层（纯函数）：文本映射 / 段落 / 句子 / 对齐校验 / 签名
+│   ├── direction.js       目标 / 原始文字方向（BCP 47、dir、computed style、文字特征）；双语 / 仅译文方向元数据
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）；站点规则的只翻 / 跳过区域
 │   ├── appearance.js      网页里的外观：强调色、译文排版、自定义 CSS、页面明暗、夜间模式写到 <html> 上
 │   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗；DT.control 给悬浮入口用
@@ -406,6 +407,23 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
 - **多译文节点**：同一个容器里多个 `[data-dt-target]` 是正常的；`cleanupDuplicateTargets` 只清理
   `data-dt-unit` 相同的克隆副本，不能按「同一父级只留一个」清理。
 
+### 5.2.2 双向文字排版（RTL / LTR）
+
+- **目标方向**：`content/direction.js` 提供 BCP 47 目标语言 → 方向映射。基础 RTL 语言包括 `ar he fa ur ps ckb ug sd yi dv` 等；`ug-Arab` / `ku-Arab` 为 RTL，`ug-Cyrl` / `ku-Latn` 为 LTR；中文、英文、日文、韩文等为 LTR。script 子标签优先于基础语言。
+- **原始方向**：优先最近的显式 `dir="rtl|ltr"`，其次 `getComputedStyle(el).direction`，再退回文档 `dir` / `lang`；computed 为默认 LTR 且正文明显以 RTL 字符为主时用文字特征纠正。不能只用 `document.dir`。
+- **双语**：`makeNode()` 给译文节点设置目标 `dir` / `lang`、inline `direction` 和 `unicode-bidi:isolate`；块级译文用目标方向的 `text-align:start`，源块居中 / 两端对齐时保留。原文节点方向不变。
+- **仅译文**：完整独占正文块（`unit.whole`）在 `injectReplace` / `injectLines` / `injectMixed` 成功后用事务设置块 `dir` / `direction` / `text-align`；部分 / 共享容器不改父级，把写过的文本节点移进 inline `[data-dt-dir="wrap"]` 隔离壳（节点身份保留，`move` + `insert` 都进 RenderTransaction）。
+- **混合内容**：`injectMixed` 的每段新译文在方向不一致时放入隔离壳，原始引用 / 链接 / Ruby / 图片保持自己的方向；完整混合段落可改整块方向。不要在用户译文里插不可见方向控制字符，也不使用 `bidi-override` / `html,body { direction:ltr !important }`。
+- **样式 / 还原**：`content/styles/inject.css` 的 `.dt-target` 改为 `text-align:start` + `unicode-bidi:isolate`，inline 边距用 `margin-inline-start`。方向壳由事务移除并先把原文本节点放回；块方向的 `dir` / style 也由事务还原。悬停气泡保留原文方向，划词气泡用目标方向。
+- **诊断**：`data-dt-dir` 的壳不进入切分 / 签名；已知限制是局部共享段落中普通链接仍可能走旧的双语兜底，纯 Ruby 段落仍走 `injectRuby` 的独立容器。
+
+### 5.2.3 稳定正文：不因链接回退双语，不被自身 DOM 操作打断
+
+- 仅译文不再走 `linkFallback = 'dual'`。`hasUnsafeInlineLink` 找不到安全结构时保留原文并写 `unsafe-structure / unsafe-inline-link`；只有用户主动选择双语才 `injectDual`。
+- 中文学术引用常见 `[8]`、`［9］`、上标本地锚点和普通补充材料链接：带方括号的本地数字链接、上标本地数字链接、指向参考文献目标的数字链接进入 `keep`；普通 “See section 1” 数字锚点不误判。
+- 医学上下文快照读取已替换单元的 `DT.replacedOf(el).src`，不读取页面上的译文；只有 `noteContextMutation` 记录的网站自身标题 / 章节 / DOM 变化才走 `contextChanged`。翻译器自己插入的译文、`data-dt-dir` 方向壳和移动后的原文本节点都算 own node，不触发补扫 / startOver。
+- `DT.debugStats` / `DT.debugSnapshot()` 记录 `startOverCount`、`restoreCount`、`contextChangedCount`、`incrementalScanCount`、`injectDualCount`、`linkFallbackCount` 及最多 24 条原因；不输出正文，不持续写 console。
+
 ### 5.3 `textOf()` 必须排除自己的节点
 
 `textOf(el)` 递归时跳过 `[data-dt-target]` 和 `[data-dt-ui]` 子树。
@@ -731,18 +749,16 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.11.4）
+## 14. 本版技术记录（0.11.5）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.11.3 的普通链接 / Ruby / pre-wrap / 悬浮球首帧见提交 `9bdb0fb`；专业引擎的完整实施与验收记录见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)。
+> 0.11.4 的专业引擎 / 医学质量 / JAMA 上标修复见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)；0.11.3 的普通链接 / Ruby / pre-wrap / 悬浮球见提交 9bdb0fb。
 
-- **专业引擎 v2**：新增静态 Professional Profile Registry，正式注册 general / medical；后台只通过 profile 的规则、术语、上下文、校验和指纹接口工作，专业模块不操作 DOM。医学适配器复用 lib/medical，没有重写提供商或另建模型调用管线；法律等未来 profile 只需静态 import 并注册。
-- **配置与兼容**：配置迁移到 v7，主字段 professionalProfile（general / medical）+ professionalOptions（quality fast / balanced / strict、subdomain、maxReviewRequests 0–3）；旧 medicalMode 继续双向兼容，旧弹窗只写布尔值也能切换。质量包括快速 / 标准 / 严格，严格只复核高风险片段，按消息预算而不是整页费率。
-- **医学规则 / 词库**：规则覆盖忠实性、证据、统计、剂量、医学符号、否定与因果边界；词库保留 100 条来源记录并增加稳定 id / version / aliases / contextHint，可疑的 multivariate analysis → 多因素分析 被 matchEnabled:false 隔离；有效英中 99 条、可反向 43 条，用户术语优先，长词优先，只注入本批命中词。
-- **上下文 / 校验 / 缓存**：本地只读标题、章节、当前批次及相邻块，保守识别显式长名缩写，冲突定义和跨论文混批丢弃；隐私模式不发送标题 / 章节。标准质量本地检查数字、百分比、p 值、CI、剂量、人数比例、研究编号、引用与隐私标记；语义规则只报可疑线索，不自动改写医学事实。专业缓存按 profile / 术语 / 校验版本 / 命中词 / 上下文 / 质量隔离，普通缓存键不变。
-- **JAMA 上标污染修复**：识别可见引用文本、/ 分隔和隐藏辅助标签，尽量把整个引用组作为原子；在清空原文前规划跨出 A / SUP / 引用包装 / CSS 特殊排版链的安全落点（pre-wrap 换行同样走安全边界）。不使用 font-size / vertical-align !important，不重建 innerHTML；字号、行高、引用节点 / 分隔符、href / id / ARIA / 点击监听和逐节点还原都有断言。
-- **测试**：完整 Node（含专业配置、引擎、管线、校验、医学评估）、离线自检、E2E（含配置质量选择 / 保存、医学开关、缓存、划词、输入框、悬停、Shadow DOM）通过；新增 inline-layout 三组视口 / 缩放矩阵，旧 HEAD 上能复现 SUP / CSS 上标污染。真实付费模型、真实 JAMA / Science / Nature / PMC 页面与真实浏览器系统缩放未验收。
-- **已知限制**：医学术语仍是小型审核核心集，不能把规则通过或模型复核当作医学准确性证明；语义检查主要覆盖部分英中 / 中英线索，复杂否定作用域、全文结论增删、诊断错译仍可能漏检；缩写定义依赖当前批次或邻近上下文；严格模式预算按消息而非整页计算。
+- **双向排版**：新增 content/direction.js，目标语言按 BCP 47（含 script 子标签）映射方向，原始方向按最近 dir、computed direction、文档语言和文字特征判断。双语 makeNode 设置目标 dir/lang/direction/unicode-bidi:isolate；完整仅译文块通过事务设置块方向，部分 / 共享段落把写入文本节点移进 data-dt-dir="wrap" 壳；引用 / 链接 / Ruby 原子不改。悬停原文气泡保留源方向，划词气泡跟随目标方向。
+- **RichHTML 仅译文**：中文医学段落里的 [8]、［9］、上标本地数字链接、本地参考文献数字链接和补充材料链接进入结构原子；仅译文不再因 hasUnsafeInlineLink 设置 linkFallback='dual'，无法安全重建时保持原文并报 unsafe-structure / unsafe-inline-link。普通 “See section 1” / 图表数字锚点 / 站外数字链接仍不误判。
+- **反复闪烁**：医学上下文快照读取 DT.replacedOf(el).src，不读取已替换后的译文；只有网站自身标题 / 章节 / 文档结构 mutation 才触发 contextChanged，翻译器自己的译文、data-dt-dir 壳和移动后的原文本节点都计入 own node，不再触发补扫循环。动态导航等无关节点只做增量补扫，不撤销已翻译正文。
+- **诊断**：新增 DT.debugStats / DT.debugSnapshot / DT.debugReset，记录 startOverCount、restoreCount、contextChangedCount、incrementalScanCount、injectDualCount、linkFallbackCount 和最多 24 条原因；不记录论文正文，不持续输出 console。新增 Chinagp 等价 E2E：稳定正文不重复请求、动态导航不 startOver / restore / 重复双语。
+- **测试**：完整 Node、离线自检、Chrome E2E、inline-layout 三组视口 / 缩放矩阵通过；新增阿拉伯 / 希伯来 / 波斯 / 中文 / 英文 / 日文方向映射、dir / CSS / !important、居中、双语、部分段落、pre-wrap、中文医学 RichHTML、[8]/［9］引用、链接保留和动态导航回归。真实 chinagp.net / Al Jazeera / 付费模型未在本轮验收。
 
 ## 15. 专业翻译引擎
 

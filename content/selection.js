@@ -292,6 +292,13 @@
     paintBubble();
     bubble.dataset.state = state || 'done';
     bubble._textEl.textContent = text;
+    if (DT.direction) {
+      var targetDir = DT.direction.dirForLang(DT.state.target);
+      bubble._textEl.setAttribute('dir', targetDir);
+      bubble._textEl.style.setProperty('direction', targetDir, 'important');
+      bubble._textEl.style.setProperty('text-align', 'start', 'important');
+      bubble._textEl.style.setProperty('unicode-bidi', 'isolate', 'important');
+    }
     bubble._lastRect = rect;
     var canAdd = (state || 'done') === 'done' && !!lastPair;
     bubble._copyEl.style.display = (state || 'done') === 'done' ? 'inline-flex' : 'none';

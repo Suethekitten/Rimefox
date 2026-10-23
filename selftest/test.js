@@ -3643,6 +3643,221 @@
     return night ? '夜间模式下不该再判断明暗（页面已经反色）' : true;
   });
 
+  check('中国全科医学 RichHTML：中文医学段落 → 英文仅译文，[8] / ［9］ / 补充材料链接保留，不触发 linkFallback 双语', function () {
+    return withTemplate('tpl-chinagp', 'translation', function (box) {
+      var p = box.querySelector('#gp-p');
+      var before = p.innerHTML;
+      var links = Array.prototype.slice.call(p.querySelectorAll('a'));
+      var hrefs = links.map(function (a) { return a.getAttribute('href'); });
+      var prev = DT.state.target;
+      DT.state.target = 'en';
+      try {
+        var u = DT.collect(p)[0];
+        if (!u) return '没收到单元';
+        var reply = 'In the 2.1 ATF6 pathway, ATF6α and ATF6β expression increases (<k1>[8]</k1>) and is linked to endoplasmic reticulum stress (<k2>［9］</k2>); see <k3>补充材料</k3>.';
+        if (!DT.inject(u, reply, 'en')) return 'inject 失败：' + JSON.stringify(u.injectResult);
+        if (u.injectResult.code !== 'success') return '不是 success：' + JSON.stringify(u.injectResult);
+        if (p.querySelector('[data-dt-target]')) return '仅译文出现了双语块';
+        if (p.querySelectorAll('a').length !== links.length) return '链接数量变了';
+        var now = Array.prototype.slice.call(p.querySelectorAll('a'));
+        if (now.some(function (a, i) { return a !== links[i] || a.getAttribute('href') !== hrefs[i]; })) return '链接节点 / href 被改';
+        if (textInsideLinks(p, 'ATF6') || !textOutsideLinks(p, 'ATF6')) return '正文落进链接或没有正文';
+        if (now[0].textContent !== '[8]' || now[1].textContent !== '［9］') return '引用编号被改：' + now.map(function (a) { return a.textContent; }).join(',');
+        DT.restore();
+        if (p.innerHTML !== before) return '还原不一致';
+        return true;
+      } finally {
+        DT.state.target = prev;
+      }
+    });
+  });
+
+  // ---------------- 双向文字排版（RTL / LTR） ----------------
+  function directionCase(mode, target, fn) {
+    return withTemplate('tpl-direction', mode, function (box) {
+      var prev = DT.state.target;
+      DT.state.target = target;
+      try {
+        return fn(box);
+      } finally {
+        DT.state.target = prev;
+      }
+    });
+  }
+
+  function firstTextRect(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (var n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!/\S/.test(n.nodeValue)) continue;
+      var r = document.createRange();
+      r.setStart(n, 0);
+      r.setEnd(n, Math.min(n.nodeValue.length, 8));
+      return { node: n, rect: r.getBoundingClientRect() };
+    }
+    return null;
+  }
+
+  check('双向排版·语言方向映射：阿拉伯 / 希伯来等 RTL，CJK / 拉丁 LTR；BCP47 script 优先', function () {
+    var got = ['ar', 'he', 'fa', 'ur', 'ps', 'ckb', 'ug', 'ug-Cyrl', 'sd', 'yi', 'dv', 'ku-Arab', 'ku-Latn', 'pa-Arab', 'pa-Guru', 'zh-CN', 'en', 'ja', 'ko'].map(function (x) { return DT.direction.dirForLang(x); });
+    return eq(got, ['rtl', 'rtl', 'rtl', 'rtl', 'rtl', 'rtl', 'rtl', 'ltr', 'rtl', 'rtl', 'rtl', 'rtl', 'ltr', 'rtl', 'ltr', 'ltr', 'ltr', 'ltr', 'ltr']) === true ? true : '方向映射：' + JSON.stringify(got);
+  });
+
+  check('双向排版·原始方向：显式 dir / computed RTL / 文档回退；无 dir 的阿拉伯正文靠文字特征，LTR 英文引用不误判', function () {
+    return directionCase('translation', 'zh-CN', function (box) {
+      var auto = box.querySelector('#dir-auto');
+      var quote = box.querySelector('#dir-quote');
+      if (DT.direction.sourceDir(auto, auto.textContent) !== 'rtl') return '无 dir 的阿拉伯正文没识别成 RTL';
+      if (DT.direction.sourceDir(quote, quote.textContent) !== 'ltr') return '英文里的阿拉伯引用被误判成 RTL';
+      var ua = DT.collect(auto)[0];
+      if (!ua || !DT.inject(ua, '中文自动方向。', 'zh-CN')) return 'auto 注入失败';
+      if (auto.getAttribute('dir') !== 'ltr' || getComputedStyle(auto).direction !== 'ltr') return 'auto 段落目标方向不是 LTR';
+      DT.restore();
+      return true;
+    });
+  });
+
+  check('双向排版·阿拉伯语 dir=rtl → 简体中文：块方向、起始对齐和几何都变成 LTR，还原逐字一致', function () {
+    return directionCase('translation', 'zh-CN', function (box) {
+      var p = box.querySelector('#dir-ar');
+      var before = p.innerHTML;
+      if (getComputedStyle(p).direction !== 'rtl') return '源段落不是 RTL';
+      var u = DT.collect(p)[0];
+      if (!u || !DT.inject(u, '机器能够获得人类大脑的能力吗？AI 与 GPT-5（2025）', 'zh-CN')) return 'inject 失败：' + JSON.stringify(u && u.injectResult);
+      if (p.getAttribute('dir') !== 'ltr') return '块 dir 不是 ltr：' + p.getAttribute('dir');
+      if (getComputedStyle(p).direction !== 'ltr') return '块 computed direction 不是 ltr：' + getComputedStyle(p).direction;
+      if (getComputedStyle(p).textAlign !== 'start') return '正文不是起始对齐：' + getComputedStyle(p).textAlign;
+      var r = firstTextRect(p);
+      if (!r) return '没有找到译文文本';
+      if (r.rect.left > p.getBoundingClientRect().left + p.getBoundingClientRect().width * 0.5) return 'LTR 译文几何仍在右侧：' + JSON.stringify(r.rect);
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('双向排版·希伯来 / 波斯语 / 英语 / 中文 → 目标语言方向：LTR 目标左起、RTL 目标右起', function () {
+    var cases = [
+      ['#dir-he', 'en', 'Hello world! Numbers 2025 and 24.2%.', 'ltr'],
+      ['#dir-fa', 'ja', 'こんにちは世界。2025 年と 24.2%。', 'ltr'],
+      ['#dir-en', 'ar', 'مرحبا بالعالم! AI GPT-5 في 2025.', 'rtl'],
+      ['#dir-zh', 'he', 'שלום עולם! 2025 ו־24.2%。', 'rtl']
+    ];
+    var errors = [];
+    cases.forEach(function (c) {
+      directionCase('translation', c[1], function (box) {
+        var p = box.querySelector(c[0]);
+        var before = p.innerHTML;
+        var u = DT.collect(p)[0];
+        if (!u || !DT.inject(u, c[2], c[1])) { errors.push(c[0] + '：inject false'); return; }
+        if (p.getAttribute('dir') !== c[3] || getComputedStyle(p).direction !== c[3]) errors.push(c[0] + '：方向 ' + p.getAttribute('dir') + '/' + getComputedStyle(p).direction);
+        var r = firstTextRect(p);
+        if (r) {
+          var rect = p.getBoundingClientRect();
+          if (c[3] === 'ltr' && r.rect.left > rect.left + rect.width * 0.5) errors.push(c[0] + '：LTR 几何在右侧');
+          if (c[3] === 'rtl' && r.rect.left < rect.left + rect.width * 0.5) errors.push(c[0] + '：RTL 几何在左侧');
+        }
+        DT.restore();
+        if (p.innerHTML !== before) errors.push(c[0] + '：还原不一致');
+      });
+    });
+    return errors.length ? errors.join('；') : true;
+  });
+
+  check('双向排版·CSS direction / !important / 居中标题：正文改成目标方向，居中保留，还原样式与属性', function () {
+    return directionCase('translation', 'zh-CN', function (box) {
+      var errors = [];
+      ['#dir-css', '#dir-css-important'].forEach(function (sel) {
+        var p = box.querySelector(sel);
+        var before = p.outerHTML;
+        if (getComputedStyle(p).direction !== 'rtl') { errors.push(sel + '：源不是 CSS RTL'); return; }
+        var u = DT.collect(p)[0];
+        if (!DT.inject(u, '中文正文，AI GPT 与 2025。', 'zh-CN')) errors.push(sel + '：inject false');
+        else if (getComputedStyle(p).direction !== 'ltr') errors.push(sel + '：CSS 方向没被修正 ' + getComputedStyle(p).direction);
+        DT.restore();
+        if (p.outerHTML !== before) errors.push(sel + '：还原不一致');
+      });
+      var c = box.querySelector('#dir-center');
+      var cb = c.outerHTML;
+      var cu = DT.collect(c)[0];
+      if (!DT.inject(cu, '居中标题', 'zh-CN')) errors.push('#dir-center：inject false');
+      else if (getComputedStyle(c).textAlign !== 'center') errors.push('#dir-center：居中没保留');
+      DT.restore();
+      if (c.outerHTML !== cb) errors.push('#dir-center：还原不一致');
+      return errors.length ? errors.join('；') : true;
+    });
+  });
+
+  check('双向排版·双语：原文保持 RTL，新译文节点独立 LTR、isolate，居中区块不误改', function () {
+    return directionCase('dual', 'zh-CN', function (box) {
+      var p = box.querySelector('#dir-ar');
+      var before = p.innerHTML;
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, '机器能够获得人类大脑的能力吗？', 'zh-CN')) return 'inject false';
+      if (p.getAttribute('dir') !== 'rtl' || getComputedStyle(p).direction !== 'rtl') return '原文方向被改';
+      var t = p.querySelector('[data-dt-target]');
+      if (!t) return '没有译文节点';
+      if (t.getAttribute('dir') !== 'ltr' || getComputedStyle(t).direction !== 'ltr') return '译文方向不是 LTR：' + t.getAttribute('dir') + '/' + getComputedStyle(t).direction;
+      if (getComputedStyle(t).unicodeBidi !== 'isolate') return '译文没有 isolate：' + getComputedStyle(t).unicodeBidi;
+      DT.restore();
+      return p.innerHTML === before ? true : '还原不一致';
+    });
+  });
+
+  check('双向排版·混合链接 / 部分段落：原文容器保持 RTL，新译文局部隔离为 LTR，链接与块级兄弟不动', function () {
+    var errors = [];
+    return directionCase('translation', 'zh-CN', function (box) {
+      var p = box.querySelector('#dir-links');
+      var before = p.innerHTML;
+      var link = p.querySelector('#dir-link');
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, '中文与<k1>Supplement 3</k1>和英文 AI GPT。', 'zh-CN')) errors.push('#dir-links：inject false');
+      else {
+        if (p.getAttribute('dir') !== 'ltr' || getComputedStyle(p).direction !== 'ltr') errors.push('#dir-links：完整段落方向没变成 LTR');
+        var wraps = p.querySelectorAll('[data-dt-dir="wrap"]');
+        if (!wraps.length || getComputedStyle(wraps[0]).direction !== 'ltr') errors.push('#dir-links：译文没有局部 LTR');
+        if (p.querySelector('#dir-link') !== link || link.getAttribute('href') !== '#dir-ref') errors.push('#dir-links：链接被改');
+      }
+      DT.restore();
+      if (p.innerHTML !== before) errors.push('#dir-links：还原不一致');
+      var partial = box.querySelector('#dir-partial');
+      var pb = partial.innerHTML;
+      var block = partial.querySelector('.dir-block');
+      var us = DT.collect(partial);
+      var flow = us[0];
+      if (!flow || flow.whole) errors.push('#dir-partial：没有部分单元');
+      else if (!DT.inject(flow, '中文部分段落 AI。', 'zh-CN')) errors.push('#dir-partial：inject false');
+      else if (getComputedStyle(partial).direction !== 'rtl') errors.push('#dir-partial：父容器被改方向');
+      else if (!partial.querySelector('[data-dt-dir="wrap"]')) errors.push('#dir-partial：没有局部方向壳');
+      else if (!getComputedStyle(partial.querySelector('[data-dt-dir="wrap"]')).direction.includes('ltr')) errors.push('#dir-partial：局部不是 LTR');
+      if (partial.querySelector('div') !== block) errors.push('#dir-partial：块级兄弟被替换');
+      DT.restore();
+      if (partial.innerHTML !== pb) errors.push('#dir-partial：还原不一致');
+      return errors.length ? errors.join('；') : true;
+    });
+  });
+
+  check('双向排版·pre-wrap 多行 / 同页混合 RTL-LTR：目标方向生效，硬换行保留，互不污染', function () {
+    var errors = [];
+    return directionCase('translation', 'zh-CN', function (box) {
+      var lines = box.querySelector('#dir-lines');
+      var lb = lines.innerHTML;
+      var u = DT.collect(lines)[0];
+      if (!DT.inject(u, '第一行中文。\n第二行中文。', 'zh-CN')) errors.push('#dir-lines：inject false');
+      else {
+        if (getComputedStyle(lines).direction !== 'ltr') errors.push('#dir-lines：方向不是 LTR');
+        if (lines.textContent.indexOf('\n') < 0) errors.push('#dir-lines：硬换行丢失');
+      }
+      var ar = box.querySelector('#dir-ar');
+      var en = box.querySelector('#dir-en');
+      var au = DT.collect(ar)[0];
+      var eu = DT.collect(en)[0];
+      if (!DT.inject(au, '阿拉伯语译文。', 'zh-CN') || !DT.inject(eu, 'English translation.', 'zh-CN')) errors.push('同页混合：inject false');
+      else if (getComputedStyle(ar).direction !== 'ltr' || getComputedStyle(en).direction !== 'ltr') errors.push('同页混合：方向不一致');
+      DT.restore();
+      if (lines.innerHTML !== lb) errors.push('#dir-lines：还原不一致');
+      return errors.length ? errors.join('；') : true;
+    });
+  });
+
   // ---------------- 悬浮入口 ----------------
   // 和运行时一样：先放进 DT.state.config 再通知（main.js 的 loadConfig 就是这个顺序）
   function emitConfig(cfg) {
@@ -4223,18 +4438,24 @@
           var flow = units[0];
           if (units.length !== 2 || !flow || flow.whole) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, u.whole]; }));
           if (DT.wireText(flow) !== 'Use <k1>--force</k1> with the <k2>Rimefox</k2> CLI carefully.') return '送翻文本：' + DT.wireText(flow);
-          if (!DT.inject(flow, reply, 'zh-CN')) return 'inject 返回 false';
+          if (modes[i] === 'translation') {
+            // 这是一个带普通链接 / 块级兄弟的局部段落：不能为了链接退回双语。
+            // 统一安全渲染器无法安全重建时保留原文并写明失败，不插入译文。
+            if (DT.inject(flow, reply, 'zh-CN')) return '仅译文 + 不安全局部链接应安全失败';
+            if (!flow.injectResult || flow.injectResult.code !== 'unsafe-structure' || flow.injectResult.reason !== 'unsafe-inline-link') return '失败分类不对：' + JSON.stringify(flow.injectResult);
+            if (outer.querySelector('[data-dt-target]')) return '仅译文不该插入双语';
+            if (outer.querySelector('code').textContent !== '--force' || outer.querySelector('.notranslate:not(code)').textContent !== 'Rimefox') return '保留元素被改';
+            var a = outer.querySelector('a');
+            if (!a || a.textContent.indexOf('Rimefox') < 0 || a.getAttribute('href') !== '#f') return '原链接被吞';
+            DT.restore();
+            return outer.innerHTML === before ? true : '失败时原文被改';
+          }
+          if (!DT.inject(flow, reply, 'zh-CN')) return '双语 inject 返回 false';
           if (outer.querySelector('code').textContent !== '--force' || outer.querySelector('.notranslate:not(code)').textContent !== 'Rimefox') return '保留元素被改：' + outer.innerHTML;
           var target = outer.querySelector('[data-dt-target]');
           if (!target || target.textContent !== '小心地将 --force 与 Rimefox 命令行一起使用。') return '译文节点：' + (target && target.textContent);
           if (target.nextSibling !== outer.querySelector('div')) return '译文没插在块级子元素前';
           if (target.closest('a')) return '译文块落进了链接';
-          if (modes[i] === 'translation') {
-            // 混合链接不再为了仅译文而清空链接文字；保守降级成双语，原文链接保持可点。
-            var a = outer.querySelector('a');
-            if (!a || a.textContent.indexOf('Rimefox') < 0 || a.getAttribute('href') !== '#f') return '原链接被吞：' + (a && a.textContent);
-            if (outer.textContent.indexOf('Use ') !== 0) return '原文字丢失：' + outer.textContent;
-          }
           DT.restore();
           return outer.innerHTML === before ? true : '还原不一致：' + outer.innerHTML;
         });

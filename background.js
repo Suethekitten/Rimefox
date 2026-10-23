@@ -588,6 +588,7 @@ async function ensureInjected(tabId, frameId = 0) {
       files: [
         'content/core.js',
         'content/units.js',
+        'content/direction.js',
         'content/dom.js',
         'content/shadow.js',
         'content/adapters/bilibili-comments.js',

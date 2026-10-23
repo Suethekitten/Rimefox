@@ -319,6 +319,12 @@ ${SCIENCE_FIXTURE}
   '/science-mixed.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Science mixed inline</title></head><body>
 ${templateOf('tpl-science-mixed')}
 </body></html>`,
+  '/chinagp.html': `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>中国全科医学 RichHTML</title></head><body>
+${templateOf('tpl-chinagp')}
+</body></html>`,
+  '/direction.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Bidirectional layout</title></head><body>
+${templateOf('tpl-direction')}
+</body></html>`,
   '/pmc.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>PMC adverse events</title></head><body>
 ${templateOf('tpl-pmc')}
 </body></html>`,
@@ -934,6 +940,89 @@ async function pmcChecks() {
   await tabMsg(t.tabId, { type: 'dt:toggle' });
   const after = await until(() => pageEval(t, "return document.querySelector('[data-dt-target],[data-dt-replaced]') ? '' : document.querySelector('#pmc-ae').innerHTML"), 8000);
   check('PMC 普通链接：关闭翻译后原文逐字还原', after === before, after === before ? '' : String(after || '').slice(0, 120));
+}
+
+
+// RTL 页面 -> LTR 目标 / LTR 页面 -> RTL 目标：检查真实扩展管线的 dir 与计算样式
+
+// 中国全科医学 RichHTML：医学专业模式 + 中文→英文仅译文；检查无 linkFallback 双语、无自身 mutation 循环
+async function chinagpChecks() {
+  console.log('\n[中国全科医学 RichHTML]');
+  await patchConfig({
+    targetLang: 'en',
+    mode: 'translation',
+    lazy: false,
+    hoverCompare: false,
+    dockEnabled: false,
+    professionalProfile: 'medical',
+    medicalMode: true,
+    professionalOptions: { quality: 'fast', subdomain: 'auto', maxReviewRequests: 0 }
+  });
+  const t = await openTab(ORIGIN + '/chinagp.html');
+  await contentEval(t, 'window.__DT.debugReset()');
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(t, "return !!document.querySelector('#gp-p[data-dt-replaced]') && !!document.querySelector('#gp-heading[data-dt-replaced]')"), 20000);
+  await settled(t);
+  const first = await contentEval(t, `(() => {
+    const p = document.getElementById('gp-p');
+    const links = Array.from(p.querySelectorAll('a'));
+    return {
+      dual: !!p.querySelector('[data-dt-target]'),
+      links: links.map((a) => [a.getAttribute('href'), a.textContent].join('|')),
+      text: p.textContent.slice(0, 80),
+      stats: window.__DT.debugSnapshot()
+    };
+  })()`);
+  const requestsBefore = stats.requests;
+  await sleep(2200);
+  const second = await contentEval(t, "(() => ({ stats: window.__DT.debugSnapshot(), dual: !!document.querySelector('#gp-p [data-dt-target]'), replaced: document.querySelectorAll('#gp-p[data-dt-replaced]').length }))()");
+  check('中国全科医学：稳定正文不重复请求模型', stats.requests === requestsBefore, JSON.stringify({ before: requestsBefore, after: stats.requests }));
+  check('中国全科医学：医学 + 仅译文中文→英文，[8]/［9］/补充材料链接保留，无双语块', !!ready && !first.dual && first.links.length === 3 && first.links[0].indexOf('#gp-ref8') === 0 && first.links[1].indexOf('#gp-ref9') === 0 && first.links[2].indexOf('#gp-supp') === 0, JSON.stringify(first));
+  check('中国全科医学：稳定正文运行多轮观察后不 startOver / restore / 重复双语', second.stats.stats.startOverCount === 0 && second.stats.stats.restoreCount === 0 && second.stats.stats.injectDualCount === 0 && second.stats.stats.linkFallbackCount === 0 && !second.dual && second.replaced === 1, JSON.stringify(second.stats));
+  // 动态导航：只改无关节点，不应导致全页 startOver/restore。
+  const navRequests = stats.requests;
+  await pageEval(t, "const n=document.getElementById('gp-nav'); const s=document.createElement('span'); s.setAttribute('data-nav','1'); n.appendChild(s); return true;");
+  await sleep(1400);
+  const afterNav = await contentEval(t, "window.__DT.debugSnapshot()");
+  check('中国全科医学：无关导航节点更新不重新请求正文', stats.requests === navRequests, JSON.stringify({ before: navRequests, after: stats.requests }));
+  check('中国全科医学：动态导航更新只做增量补扫，不撤销已翻译正文', afterNav.stats.startOverCount === 0 && afterNav.stats.restoreCount === 0 && afterNav.stats.injectDualCount === 0, JSON.stringify(afterNav));
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return !document.querySelector('[data-dt-target],[data-dt-replaced]')"), 10000);
+  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', professionalProfile: 'general', medicalMode: false, professionalOptions: { quality: 'balanced', subdomain: 'auto', maxReviewRequests: 1 } });
+}
+
+async function directionChecks() {
+  console.log('\n[双向文字排版]');
+  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false, dockEnabled: false });
+  let t = await openTab(ORIGIN + '/direction.html');
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(t, "return !!document.querySelector('#dir-ar[data-dt-replaced]') && !!document.querySelector('#dir-links[data-dt-replaced]')"), 20000);
+  await settled(t);
+  const zh = await pageEval(t, `const ar = document.getElementById('dir-ar');
+    const links = document.getElementById('dir-links');
+    const center = document.getElementById('dir-center');
+    return {
+      arDir: ar.getAttribute('dir'), arComputed: getComputedStyle(ar).direction, arAlign: getComputedStyle(ar).textAlign,
+      linksDir: links.getAttribute('dir'), linksComputed: getComputedStyle(links).direction,
+      centerAlign: getComputedStyle(center).textAlign,
+      dual: !!document.querySelector('#dir-ar [data-dt-target]'),
+      text: ar.textContent.slice(0, 30)
+    };`);
+  check('阿拉伯语 RTL → 中文 LTR：完整段落、混合链接段落和起始对齐都变成 LTR', !!ready && zh.arDir === 'ltr' && zh.arComputed === 'ltr' && zh.arAlign === 'start' && zh.linksDir === 'ltr' && zh.linksComputed === 'ltr' && !zh.dual, JSON.stringify(zh));
+  check('居中标题保留居中，不被目标方向强制改成左对齐', zh.centerAlign === 'center', zh.centerAlign);
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return document.querySelector('#dir-ar[data-dt-replaced]') ? '' : 'restored'"), 8000);
+
+  await patchConfig({ targetLang: 'ar' });
+  t = await openTab(ORIGIN + '/direction.html');
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const readyRtl = await until(() => pageEval(t, "return !!document.querySelector('#dir-en[data-dt-replaced]')"), 20000);
+  await settled(t);
+  const rtl = await pageEval(t, "const p = document.getElementById('dir-en'); return { dir: p.getAttribute('dir'), computed: getComputedStyle(p).direction, target: !!p.querySelector('[data-dt-target]') };");
+  check('英语 LTR → 阿拉伯语 RTL：目标段落从右到左显示，原文方向被正确替换', !!readyRtl && rtl.dir === 'rtl' && rtl.computed === 'rtl' && !rtl.target, JSON.stringify(rtl));
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  // 后续语言用例从默认双语模式开始；不要把 translation 留在配置里。
+  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', dockEnabled: false });
 }
 
 async function paragraphChecks() {
@@ -2039,6 +2128,8 @@ try {
     await inlineLinkChecks();
     await scienceMixedChecks();
     await pmcChecks();
+    await chinagpChecks();
+    await directionChecks();
     await languageChecks();
     await localeChecks();
     await dockChecks();

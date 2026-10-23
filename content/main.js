@@ -131,6 +131,28 @@
   // 以前每次都直接覆盖 DT.state，翻译中的页面不重建，同一页就混着双语和仅译文、或混着两种语言
   var cfgMode = null;
   var cfgTarget = null;
+  var debugStats = {
+    startOverCount: 0,
+    restoreCount: 0,
+    contextChangedCount: 0,
+    incrementalScanCount: 0,
+    injectDualCount: 0,
+    linkFallbackCount: 0
+  };
+  var debugReasons = [];
+  function noteDebug(reason, extra) {
+    if (debugReasons.length >= 24) debugReasons.shift();
+    debugReasons.push({ reason: String(reason || ''), extra: extra || '', at: Date.now() });
+  }
+  DT.debugStats = debugStats;
+  DT.debugReasons = debugReasons;
+  DT.debugReset = function () {
+    Object.keys(debugStats).forEach(function (key) { debugStats[key] = 0; });
+    debugReasons.length = 0;
+  };
+  DT.debugSnapshot = function () {
+    return { stats: Object.assign({}, debugStats), reasons: debugReasons.slice(-12) };
+  };
   var contextDirty = true;
   var renderedContextScopes = [];
 
@@ -166,6 +188,12 @@
       }
       if (node.nodeType !== 1) return;
       if (node.hasAttribute && (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui') || node.getAttribute('aria-hidden') === 'true')) return;
+      // 已替换的正文 / 标题 / 局部段落：上下文要读原 src，不能读页面上已经变成译文的文本。
+      var replaced = DT.replacedOf && DT.replacedOf(node);
+      if (replaced && typeof replaced.src === 'string') {
+        text += replaced.src.slice(0, Math.max(0, limit - text.length));
+        return;
+      }
       var children = node.childNodes || [];
       for (var i = 0; i < children.length && text.length < limit; i += 1) read(children[i]);
     }
@@ -419,11 +447,16 @@
       // 先让已被站点改写的标题释放原文记录，再取当前上下文；所有 DOM 读取仍受本轮异常处理保护。
       DT.releaseReplaced();
       medical = professionalProfileFor(cfg) === 'medical';
+      var contextWasDirty = contextDirty;
       snapshot = medical ? documentSnapshot() : null;
       contextDirty = false;
       contextKey = snapshot ? documentFingerprint(snapshot) : '';
-      if (medical && contextChanged(snapshot)) {
-        startOver();
+      // 只有网站自己的标题 / 章节 / 文档结构变化才做全页重建。
+      // 翻译器自己插入译文造成的 mutation 已在 noteContextMutation 过滤；
+      // 这里再要求 contextDirty，避免每次增量补扫都拿译文后的标题和原快照比较。
+      if (medical && contextWasDirty && contextChanged(snapshot)) {
+        debugStats.contextChangedCount += 1;
+        startOver('context-changed');
         return;
       }
       DT.state.renderedMedical = medical;
@@ -704,7 +737,8 @@
           DT.releaseReplaced();
           scopeSnapshots = new WeakMap();
           if (contextChanged(documentSnapshot())) {
-            startOver();
+            debugStats.contextChangedCount += 1;
+            startOver('context-changed-after-batch');
             return;
           }
         }
@@ -940,6 +974,7 @@
   var incrementalDue = 0;
   function scheduleIncremental() {
     if (!DT.state.enabled) return;
+    debugStats.incrementalScanCount += 1;
     // 防抖，但要有上限：持续更新的页面（聊天 / 论坛 / 直播）每次变动都重置 600ms，
     // 会永远等不到翻译。第一次变动定一个截止时间，之后只提前不推迟。
     var now = Date.now();
@@ -1032,7 +1067,7 @@
     if (DT.isOwnNode) return DT.isOwnNode(node);
     return (
       node.nodeType === 1 &&
-      (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui'))
+      (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui') || node.hasAttribute('data-dt-dir'))
     );
   }
 
@@ -1119,7 +1154,9 @@
   }
 
   // 中途重建：作废在途的一轮（它回来的结果会被丢弃），清空重来
-  function startOver() {
+  function startOver(reason) {
+    debugStats.startOverCount += 1;
+    noteDebug('startOver', reason || 'explicit');
     cancelRun();
     DT.state.renderedProfessional = undefined;
     DT.state.renderedContext = undefined;

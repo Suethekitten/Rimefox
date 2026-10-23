@@ -89,6 +89,7 @@
       return (
         node.hasAttribute('data-dt-target') ||
         node.hasAttribute('data-dt-ui') ||
+        node.hasAttribute('data-dt-dir') ||
         node.hasAttribute('data-dt-shadow-style')
       );
     }
@@ -201,6 +202,7 @@
     if (!el || el.nodeType !== 1) return true;
     if (SKIP_TAGS[tagOf(el)]) return true;
     if (el.hasAttribute('data-dt-target')) return true;
+    if (el.hasAttribute('data-dt-dir')) return true;
     if (!recheck && el.hasAttribute('data-dt-src')) return true; // 已翻译过
     if (el.closest && el.closest('[data-dt-ui]')) return true;
     if (el.getAttribute('translate') === 'no') return true;
@@ -243,7 +245,7 @@
           if (kid.nodeValue) out.push({ node: kid, keep: keep });
         } else if (kid.nodeType === 1) {
           if (kid.hasAttribute('data-dt-target')) continue;
-          if (kid.hasAttribute('data-dt-ui')) continue;
+          if (kid.hasAttribute('data-dt-ui') || kid.hasAttribute('data-dt-dir')) continue;
           var tag = tagOf(kid);
           if (NON_TEXT_TAGS[tag]) continue;
           if (tag === 'BR') {
@@ -524,11 +526,28 @@
   // 译文写在它外面 —— 中文正文不会落进 <a>、也不会让链接扩到整句
   function isPlainLinkEl(el) {
     if (!el || el.nodeType !== 1 || tagOf(el) !== 'A' || !el.hasAttribute('href')) return false;
-    // 上标 / 下标里的链接通常是引注、脚注或数学标记，交给 citation / xref 判定，不算普通正文链接。
-    if (el.closest && el.closest('sup,sub')) return false;
-    // 纯数字 / 符号锚点多半是页内数学、脚注或站点控件，不把整段它当普通链接；交给原有路径。
     var text = String(el.textContent || '').replace(/\s+/g, ' ').trim();
-    if (!text || /^[\d\s.,;:!?()[\]{}<>/\\|~@#$%^&*_+=\-–—]+$/.test(text)) return false;
+    if (!text) return false;
+    // 上标 / 下标里的链接通常是引注、脚注或数学标记；本地锚点的 [8] / 8 也当原子，
+    // 但站外数字链接仍交给 citation 反例路径，不当普通正文链接。
+    var href = el.getAttribute('href') || '';
+    var numeric = /^[\[［(（]?\s*\d{1,4}\s*[\]］)）]?$/.test(text);
+    if (numeric) {
+      // 普通 "See section 1" 的数字锚点不是引用；只有方括号编号、上标、或指向参考文献目标才当原子。
+      if (el.closest && el.closest('sup,sub')) {
+        if (href.charAt(0) !== '#') return false;
+        return true;
+      }
+      if (/[\[［(（]/.test(text)) return true;
+      var target = null;
+      try {
+        target = href.charAt(0) === '#' ? document.getElementById(href.slice(1)) : null;
+      } catch (err) {
+        target = null;
+      }
+      return !!(looksLikeReferenceTarget(target) || /(ref|bib|cite|fn|note|reference)/i.test(href));
+    }
+    if (el.closest && el.closest('sup,sub')) return false;
     // 链接里嵌 notranslate 时由 notranslate 保护，不能再把整条链接当普通原子。
     if (el.querySelector && el.querySelector(KEEP_SELECTOR)) return false;
     return true;
@@ -1126,6 +1145,7 @@
     }
     mixText(el.getAttribute('class') || '');
     mixText(el.getAttribute('style') || '');
+    mixText(el.getAttribute('dir') || '');
     mixText(el.getAttribute('aria-hidden') || '');
     mix(el.hidden ? 1 : 0);
     (function visit(node) {
@@ -1139,7 +1159,7 @@
           continue;
         }
         if (kid.nodeType !== 1) continue;
-        if (kid.hasAttribute('data-dt-target') || kid.hasAttribute('data-dt-ui')) continue;
+        if (kid.hasAttribute('data-dt-target') || kid.hasAttribute('data-dt-ui') || kid.hasAttribute('data-dt-dir')) continue;
         var tag = tagOf(kid);
         if (NON_TEXT_TAGS[tag]) continue;
         if (tag === 'BR') {
@@ -1695,13 +1715,16 @@
       'box-sizing: border-box',
       'width: auto',
       'max-width: 100%',
-      // 行内译文必须单独给左边距，否则会和原文粘成 "TUTORIALS教程"
-      inline ? 'margin: 0 0 0 0.45em' : 'margin: 0.3em 0 0',
+      // 行内译文用逻辑边距：RTL 目标语言下与开始侧（右侧）留出间隔
+      inline ? 'margin: 0; margin-inline-start: 0.45em' : 'margin: 0.3em 0 0',
       'transform: none',
       'filter: none',
       'z-index: auto'
     ].join('; ') + ';';
     copyTypography(node, styleOf(sourceEl));
+    // 目标语言方向独立于原网页；inline 译文不强行改对齐，块级译文用 target 方向的 start，
+    // 源段落居中 / 两端对齐时保留（applyTargetNode 会写 inline !important）。
+    if (DT.direction) DT.direction.applyTargetNode(node, sourceEl, lang, inline);
     // CJK 大标题与紧行高的局部归一化：只加类名，字号仍用 em 跟原站响应式变化
     var layout = DT.translationLayout(
       text,
@@ -1729,6 +1752,43 @@
       node.style.whiteSpace = narrow ? 'pre' : 'pre-line';
     }
     return node;
+  }
+
+
+  // 仅译文：完整正文块可以整体改方向；部分 / 共享容器只包住我们写入的文本节点。
+  function directionMeta(unit) {
+    return DT.direction && unit ? DT.direction.targetMeta(unit) : null;
+  }
+
+  function applyBlockDirection(unit, meta, ops) {
+    if (!meta || !meta.mismatch || !unit || !unit.el || !ops) return;
+    setAttr(unit.el, 'dir', meta.target, ops);
+    setStyle(unit.el, 'direction', meta.target, ops);
+    setStyle(unit.el, 'text-align', meta.align, ops);
+  }
+
+  // 局部方向隔离：把一个已写入译文的文本节点移进 inline 隔离壳。
+  // 只移动文本节点本身（身份不变），壳和移动都进 RenderTransaction；不在链接内部创建。
+  function isolateTextNode(node, meta, ops) {
+    if (!node || !meta || !meta.mismatch || !node.parentNode || !/\S/.test(node.nodeValue || '')) return null;
+    var parent = node.parentNode;
+    if (parent.closest && parent.closest('a, [data-dt-dir]')) return null;
+    var span = document.createElement('span');
+    span.className = 'dt-dir';
+    span.setAttribute('data-dt-dir', 'wrap');
+    span.setAttribute('dir', meta.target);
+    if (meta.lang) span.setAttribute('lang', meta.lang);
+    try {
+      span.style.setProperty('direction', meta.target, 'important');
+      span.style.setProperty('unicode-bidi', 'isolate', 'important');
+      span.style.setProperty('display', 'inline');
+    } catch (err) {
+      /* style API 不可用时仍靠 dir 属性 */
+    }
+    insertNode(span, parent, node, ops);
+    moveNode(node, span, null, ops);
+    ownNodes.add(node);
+    return span;
   }
 
   // cite：带文献引用的段落用了哪种落点（exact / sentence / failed-only / dropped；双语的 fallback-dual 仅用于非正文定位，见 injectCited）
@@ -1831,6 +1891,14 @@
     else parent.appendChild(node);
   }
 
+  function moveNode(node, parent, before, ops) {
+    var fromParent = node.parentNode;
+    var fromBefore = node.nextSibling;
+    txPush({ op: 'move', node: node, fromParent: fromParent, fromBefore: fromBefore, toParent: parent, toBefore: before || null }, ops);
+    if (before && before.parentNode === parent) parent.insertBefore(node, before);
+    else parent.appendChild(node);
+  }
+
   function undoOps(ops) {
     for (var i = (ops || []).length - 1; i >= 0; i -= 1) {
       var op = ops[i];
@@ -1838,6 +1906,11 @@
       try {
         if (op.op === 'insert') {
           if (op.node && op.node.parentNode) op.node.parentNode.removeChild(op.node);
+        } else if (op.op === 'move') {
+          if (op.node && op.node.parentNode === op.toParent && op.fromParent) {
+            if (op.fromBefore && op.fromBefore.parentNode === op.fromParent) op.fromParent.insertBefore(op.node, op.fromBefore);
+            else op.fromParent.appendChild(op.node);
+          }
         } else if (op.op === 'text') {
           // 只撤销仍是我们写入的值：站点后来改过的节点保持站点的新内容
           if (op.node && op.node.nodeValue === op.after) {
@@ -2088,6 +2161,7 @@
   // 不再把整个容器的所有译文 append 到末尾。独占元素的段落仍追加到元素内部末尾。
   // cited（可选）：带文献引用的段落（injectCited），译文里放回引用副本
   function injectDual(unit, text, lang, area, cited) {
+    if (DT.debugStats) DT.debugStats.injectDualCount += 1;
     var sourceEl = unit.el;
     var node = makeNode(sourceEl, text, lang, !unit.whole);
     if (cited) text = fillCited(node, unit, cited);
@@ -2247,6 +2321,13 @@
     ops.forEach(function (op) {
       if (op.op === 'text') saved.push({ node: op.node, value: op.before, wrote: op.after });
     });
+    var dmeta = directionMeta(unit);
+    if (unit.whole) applyBlockDirection(unit, dmeta, ops);
+    else if (dmeta && dmeta.mismatch) {
+      saved.forEach(function (one) {
+        if (one && /\S/.test(one.wrote || '')) isolateTextNode(one.node, dmeta, ops);
+      });
+    }
     var item = {
       el: unit.el,
       nodes: saved,
@@ -2334,6 +2415,13 @@
       if (hasKeep) hideKept(unit, ops);
     }
 
+    var dmeta = directionMeta(unit);
+    if (unit.whole) applyBlockDirection(unit, dmeta, ops);
+    else if (dmeta && dmeta.mismatch) {
+      saved.forEach(function (one) {
+        if (one && /\S/.test(one.wrote || '')) isolateTextNode(one.node, dmeta, ops);
+      });
+    }
     var srcLines = DT.splitLines(unit.text);
     var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: srcLines, aligned: true };
     DT.replaced.push(item);
@@ -2699,6 +2787,10 @@
       });
     });
 
+    var dmeta = directionMeta(unit);
+    var isolate = !!(dmeta && dmeta.mismatch);
+    // 完整独占段落可改整块方向；部分 / 共享容器只包住新文本，不动父级。
+    if (unit.whole) applyBlockDirection(unit, dmeta, ops);
     var inserted = [];
     // pre-wrap 的边界是文本节点里的 \n，没有现成的 <br> 可当锚点：先放一个只含换行的文本节点。
     // 它进事务、参与还原；之后的译文段插在它前后，硬换行和缩进都保留。
@@ -2717,10 +2809,22 @@
     function put(text, slot) {
       if (!text || !slot || !slot.parent) return;
       var node = document.createTextNode(text);
-      insertNode(node, slot.parent, slot.before, ops);
+      if (isolate) {
+        // 混合段落不整体改父元素方向：每段新译文单独放进 inline 隔离壳，
+        // 原始 RTL 引用 / 链接 / Ruby 保持自己的方向。
+        var span = document.createElement('span');
+        span.className = 'dt-dir';
+        DT.direction.applyTargetNode(span, unit.el, dmeta.lang, true);
+        span.setAttribute('data-dt-dir', 'wrap');
+        span.appendChild(node);
+        insertNode(span, slot.parent, slot.before, ops);
+        inserted.push(span);
+      } else {
+        insertNode(node, slot.parent, slot.before, ops);
+        inserted.push(node);
+      }
       nodeUnit.set(node, unit);
       ownNodes.add(node);
-      inserted.push(node);
     }
     // 第 0 段在序列第一个之前；第 n 段紧跟在第 n-1 个之后
     put(texts[0], seq[0].beforeSlot);
@@ -3111,6 +3215,7 @@
     // 收集和注入对这一段的看法不一致：调用方会把它记成已处理，这里留下原因方便查
     if (refused) return injectOutcome(unit, false, 'already-rendered', refused);
 
+    if (DT.direction && !unit.sourceDir) unit.sourceDir = DT.direction.sourceDir(unit.el, unit.text);
     var area = unit.area || (unit.area = DT.areaOf(unit.el));
     // 用户可以选择"界面也保留原文"：那样连导航/按钮都不替换，全都追加
     var allowChromeReplace = !(DT.state.config && DT.state.config.chromeBilingual);
@@ -3128,6 +3233,13 @@
     if (!cited && replaceMode && area === 'content' && hasUnsafeInlineLink(unit)) {
       var outerLink = unit.el.closest && unit.el.closest('a');
       if (outerLink && outerLink !== unit.el) return injectOutcome(unit, false, 'unsafe-structure', 'inside-ancestor-link');
+      if (DT.state.mode === 'translation') {
+        // 仅译文绝不因为链接结构退回双语：能在采集阶段识别的链接已经是 cited；
+        // 剩下无法安全拆分的段落保持原文并明确失败，等站点/结构变化后再重试。
+        unit.linkFallback = 'failed';
+        if (DT.debugStats) DT.debugStats.linkFallbackCount += 1;
+        return injectOutcome(unit, false, 'unsafe-structure', 'unsafe-inline-link');
+      }
       unit.linkFallback = 'dual';
       replaceMode = false;
     }
@@ -3341,6 +3453,7 @@
   // 对外：还原原文。逆序回放 RenderTransaction：
   // 只撤销仍是我们写入的值 / 仍是我们的节点；站点已经改过 / 删除的，保留站点的新状态。
   DT.restore = function () {
+    if (DT.debugStats) DT.debugStats.restoreCount += 1;
     if (DT.shadow && DT.shadow.reset) DT.shadow.reset();
     for (var i = tx.length - 1; i >= 0; i -= 1) {
       if (!tx[i].done) undoOps([tx[i]]);
@@ -3367,6 +3480,15 @@
       hidden[h].removeAttribute('data-dt-rt-hidden');
       hidden[h].removeAttribute('data-dt-keep-hidden');
       if (hidden[h].style && hidden[h].style.display === 'none') hidden[h].style.display = '';
+    }
+
+    // 兜底：局部方向壳的记录丢了也要把原文本节点放回原位，再移除壳
+    var dirWraps = queryAllDeep('[data-dt-dir="wrap"]');
+    for (var dw = 0; dw < dirWraps.length; dw += 1) {
+      var wrap = dirWraps[dw];
+      if (!wrap.parentNode) continue;
+      while (wrap.firstChild) wrap.parentNode.insertBefore(wrap.firstChild, wrap);
+      wrap.remove();
     }
 
     // 移除追加的译文节点

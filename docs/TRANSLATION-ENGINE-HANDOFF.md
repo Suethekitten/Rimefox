@@ -214,6 +214,10 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 - **只改本段落的行**：段落之间的空行是别人的锚点，绝不折叠。
 - 混合行内内容（文献引用、图表链接、普通链接、提及、notranslate、Ruby 夹在正文里）：原子原地不动，原子外的文字清空后，译文作为新文本节点插在原子之间、永远不进链接（`injectMixed`：词级 / 句级 / 漏标记按原句恢复，`<br>` 与 pre-wrap 的 `\n` 分行逐行对齐）；Ruby 整体当原子，中文不写进 rt/rp；结构不支持或行数对不上时保持原文并写明注入结果，仅译文不降级双语。见 [HANDOFF §5.2.1](../HANDOFF.md) 的「文献引用」与「注入结果分类」。
 - 普通行内链接：内容区域里只要普通文字和链接混排，链接就作为原子，中文正文写在链接外；整段链接 / 导航 / 按钮保持原行为。普通链接文字默认保留，图表 / 补充材料等可靠标签本地化。`@username` 提及链接作为保留区，用户名链接保持原样。
+- **稳定正文 / 无双语回退**：仅译文下 `hasUnsafeInlineLink` 不再设置 `linkFallback='dual'`；无法安全重建时保持原文并报 `unsafe-structure`。`[8]` / `［9］` 等本地数字引用链接、上标数字链接和参考文献目标数字链接进入 `keep`，普通 “section 1” 数字锚点不误判。
+- **上下文防抖**：医学文档快照从 `DT.replacedOf(el).src` 读原文，只有网站自身的标题 / 章节 mutation 才 `contextChanged`；own 译文、方向壳和移动的原文本不触发补扫 / startOver。`DT.debugStats` 记录 startOver / restore / contextChanged / incremental / injectDual / linkFallback 计数，便于本地复现，不输出正文。
+- **双向排版**：`content/direction.js` 从目标 BCP 47 语言和原始 DOM 的 `dir` / computed `direction` / 文档语言判断方向。双语译文节点独立设置 `dir` / `lang` / inline direction + `unicode-bidi:isolate`；完整仅译文块用事务改父块方向，部分 / 共享容器把写入的文本节点移进 `data-dt-dir="wrap"` 隔离壳（`move` + `insert` 事务）。混合段落的每段新译文单独隔离，引用 / 链接 / Ruby 原子不改。块方向、文本节点移动、壳都由 RenderTransaction 还原；不能对 html/body/article 全局写 direction。
+
 - **安全落点**：在清空原文之前规划引用原子边界，保留共享上标父级中的编号与分隔符。`safeSlot` 跨出链接、SUP/SUB 与已确认引用的 CSS 上标包装链；隐藏的辅助标签不混入引用组可见数字判定。译文不能留在上标、相对定位或 transform 的特殊上下文中；普通小字本身不是引用证据，不用 CSS 强制归一化掩盖结构错误。pre-wrap 新建换行也使用同一安全锚点。布局、节点身份和精确撤销回归在 `selftest/inline-layout.js`，用 `node tools/e2e-inline-layout.mjs` 执行真实无头 Chrome 的视口/缩放矩阵。
 - 所有写入走事务；`DT.replaced` 兼容视图记录 `{el, nodes, collapsed, src, lines, aligned}`。
 

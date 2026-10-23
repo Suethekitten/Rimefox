@@ -3,7 +3,7 @@
   "default_locale": "zh_CN",
   "name": "__MSG_extensionName__",
   "short_name": "凛狐",
-  "version": "0.11.4",
+  "version": "0.11.5",
   "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "114",
   "permissions": [
@@ -55,6 +55,7 @@
       "js": [
         "content/core.js",
         "content/units.js",
+        "content/direction.js",
         "content/dom.js",
         "content/shadow.js",
         "content/adapters/bilibili-comments.js",

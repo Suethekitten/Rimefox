@@ -16,8 +16,9 @@
   color: inherit !important;
   line-height: inherit !important;
   letter-spacing: inherit !important;
-  text-align: inherit !important;
+  text-align: start !important;
   text-indent: 0 !important;
+  unicode-bidi: isolate;
   text-transform: inherit !important;
   white-space: normal !important;
   word-break: inherit !important;
@@ -37,7 +38,8 @@
 
 .dt-target.dt-inline {
   display: inline !important;
-  margin: 0 0 0 0.28em;
+  margin: 0;
+  margin-inline-start: 0.28em;
 }
 
 /* 窄容器（图标菜单、竖排侧栏）里长译文不能一个字一行：类名优先级高于基础规则 */
