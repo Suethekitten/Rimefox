@@ -332,7 +332,7 @@ ${templateOf('tpl-chinagp')}
 <p id="bold-start"><strong>한국어 문장의 일부만 강조된 부분</strong> 나머지 기사 본문은 일반 굵기로 이어집니다. 같은 문장 안에서 강조가 끝나야 합니다.</p>
 <p id="font-foreign" style="font-family:'AppleMyungjo',serif;font-size:18px;font-weight:400;line-height:1.7;color:rgb(20,30,40)">한국어 본문은 한글 전용 명조체로 표시되지만 중국어 번역은 글자마다 다른 대체 글꼴로 섞여 보입니다.</p>
 <p id="font-native" style="font-family:'PingFang SC',sans-serif;font-size:17px">한국어 본문이 이미 중국어 글꼴을 포함한 경우에는 글꼴을 바꾸지 않습니다.</p>
-<h2 id="font-heading" style="font-family:'AppleMyungjo',serif">굵은 제목은 번역해도 제목 글꼴을 유지합니다</h2>
+<h2 id="font-heading" style="font-family:'AppleMyungjo',serif;font-size:40px">굵은 제목은 번역해도 제목 글꼴을 유지합니다</h2>
 <p id="font-emphasis" style="font-family:'AppleMyungjo',serif"><strong>이 문장 전체가 의도적으로 강조된 안내입니다.</strong></p>
 <p id="bold-mid">앞부분은 일반 본문이고 <strong>중간의 중요한 표현</strong> 뒤로 다시 일반 본문이 이어지는 문장입니다.</p>
 <p id="bold-end">마지막에만 <strong>강조된 표현</strong></p>
@@ -1044,8 +1044,8 @@ async function koreanBoldChecks() {
   })()`);
   const loaded = await contentEval(t, "({ version: window.__DT.VERSION, styleBoundaryAware: window.__DT.styleBoundaryAware, inspect: typeof window.__DT.inspectTextStyle })");
   check('实际加载的扩展脚本：0.11.6 且包含样式边界修复 / 诊断器', loaded.version === '0.11.6' && loaded.styleBoundaryAware === 1 && loaded.inspect === 'function', JSON.stringify(loaded));
-  const fontApi = await contentEval(t, "(function(){var f=window.__DT.fonts;return {zh:!!f.stackFor('zh-CN','chosun-myeongjo, serif'),tw:!!f.stackFor('zh-TW','chosun-myeongjo, serif'),ja:!!f.stackFor('ja','Noto Sans KR'),ko:!!f.stackFor('ko','PingFang SC, sans-serif'),native:!!f.stackFor('zh-CN','PingFang SC, sans-serif'),sc:!f.stackFor('zh-CN','NotoSansSC, sans-serif'),krBold:!!f.stackFor('zh-CN','NotoSansKR-Bold, sans-serif'),generic:!!f.stackFor('zh-CN','Georgia, serif')};})()");
-  check('目标语言字体：中简 / 中繁 / 日 / 韩档案与兼容性判定可扩展', fontApi.zh && fontApi.tw && fontApi.ja && fontApi.ko && fontApi.sc && fontApi.krBold && !fontApi.native && !fontApi.generic, JSON.stringify(fontApi));
+  const fontApi = await contentEval(t, "(function(){var f=window.__DT.fonts;var el=document.getElementById('font-foreign');return {zh:!!f.stackFor('zh-CN','chosun-myeongjo, serif'),tw:!!f.stackFor('zh-TW','chosun-myeongjo, serif'),ja:!!f.stackFor('ja','Noto Sans KR'),ko:!!f.stackFor('ko','PingFang SC, sans-serif'),native:!!f.stackFor('zh-CN','PingFang SC, sans-serif'),sc:!f.stackFor('zh-CN','NotoSansSC, sans-serif'),krBold:!!f.stackFor('zh-CN','NotoSansKR-Bold, sans-serif'),generic:!!f.stackFor('zh-CN','Georgia, serif'),dual:f.policy({mode:'dual',target:'zh-CN',sourceElement:el}).adapt,translation:f.policy({mode:'translation',target:'zh-CN',sourceElement:el}).adapt};})()");
+  check('目标语言字体：中简 / 中繁 / 日 / 韩档案与兼容性判定可扩展', fontApi.zh && fontApi.tw && fontApi.ja && fontApi.ko && fontApi.sc && fontApi.krBold && !fontApi.native && !fontApi.generic && !fontApi.dual && fontApi.translation, JSON.stringify(fontApi));
   const futureFont = await contentEval(t, "(function(){var f=window.__DT.fonts;var ok=f.register('th',{compatible:/thai/i,foreign:/myeongjo/i,stack:'\"Noto Sans Thai\", sans-serif'});return {ok:ok,stack:!!f.stackFor('th-TH','chosun-myeongjo, serif')};})()");
   check('目标语言字体：register 接口可扩展其他文字系统', futureFont.ok && futureFont.stack, JSON.stringify(futureFont));
   const inspect = await contentEval(t, "window.__DT.inspectTextStyle('译:', 12)");
@@ -1080,8 +1080,29 @@ async function koreanBoldChecks() {
   await until(() => pageEval(t, "return !!document.querySelector('#bold-start .dt-target')"), 20000);
   const dual = await pageEval(t, "var n=document.querySelector('#bold-start .dt-target'); var c=getComputedStyle(n); return { weight:parseInt(c.fontWeight,10), sourceWeight:parseInt(getComputedStyle(document.querySelector('#bold-start strong')).fontWeight,10) };");
   check('韩文双语：目标译文保持正文基准字重，原文强调仍保留', dual.weight < 600 && dual.sourceWeight >= 600, JSON.stringify(dual));
-  const dualFont = await pageEval(t, "return (function(){var p=document.getElementById('font-foreign');var t=p.querySelector('.dt-target');var pc=getComputedStyle(p);var tc=t?getComputedStyle(t):null;return {wrappers:p.querySelectorAll('.dt-font:not([data-dt-target])').length,sourceFamily:pc.fontFamily,targetFamily:tc&&tc.fontFamily,sourceWeight:pc.fontWeight,targetWeight:tc&&tc.fontWeight};})()");
-  check('韩文双语：只适配目标译文，不改原文韩文字体', dualFont.wrappers === 0 && /AppleMyungjo/.test(dualFont.sourceFamily) && /PingFang SC|Microsoft YaHei|Noto Sans CJK SC/.test(dualFont.targetFamily) && dualFont.sourceWeight === '400' && dualFont.targetWeight === '400', JSON.stringify(dualFont));
+  const dualFont = await pageEval(t, "return (function(){var p=document.getElementById('font-foreign');var t=p.querySelector('.dt-target');var pc=getComputedStyle(p);var tc=t?getComputedStyle(t):null;return {wrappers:p.querySelectorAll('.dt-font:not([data-dt-target])').length,sourceFamily:pc.fontFamily,targetFamily:tc&&tc.fontFamily,sourceWeight:pc.fontWeight,targetWeight:tc&&tc.fontWeight,sourceSize:pc.fontSize,targetSize:tc&&tc.fontSize,sourceLine:pc.lineHeight,targetLine:tc&&tc.lineHeight};})()");
+  check('韩文双语：恢复原站字体策略，不把仅译文字体壳塞进双语目标', dualFont.wrappers === 0 && /AppleMyungjo/.test(dualFont.sourceFamily) && /AppleMyungjo/.test(dualFont.targetFamily) && dualFont.sourceWeight === '400' && dualFont.targetWeight === '400' && dualFont.sourceSize === dualFont.targetSize && dualFont.sourceLine === dualFont.targetLine, JSON.stringify(dualFont));
+  const dualHeading = await pageEval(t, "return (function(){var h=document.getElementById('font-heading');var t=h.querySelector('.dt-target');var hc=getComputedStyle(h);var tc=t?getComputedStyle(t):null;return {sourceSize:hc.fontSize,targetSize:tc&&tc.fontSize,sourceLine:hc.lineHeight,targetLine:tc&&tc.lineHeight,heading:!!t&&t.classList.contains('dt-cjk-heading'),family:tc&&tc.fontFamily};})()");
+  check('韩文双语：CJK 大标题缩放和响应式行高仍生效', dualHeading.sourceSize === '40px' && dualHeading.targetSize === '32px' && dualHeading.heading && /AppleMyungjo/.test(dualHeading.family), JSON.stringify(dualHeading));
+  await pageEval(t, "document.documentElement.setAttribute('data-dt-typo','on');document.documentElement.style.setProperty('--dt-font-scale','1.25');document.documentElement.style.setProperty('--dt-line-height','2');return true;");
+  await sleep(100);
+  const typo = await pageEval(t, "var p=document.getElementById('font-foreign');var t=p.querySelector('.dt-target');var c=t?getComputedStyle(t):null;return {size:c&&c.fontSize,line:c&&c.lineHeight,family:c&&c.fontFamily};");
+  check('韩文双语：用户自定义译文字号 / 行高仍覆盖目标译文', typo.size === '22.5px' && typo.line === '45px' && /AppleMyungjo/.test(typo.family), JSON.stringify(typo));
+  await pageEval(t, "document.documentElement.removeAttribute('data-dt-typo');document.documentElement.style.removeProperty('--dt-font-scale');document.documentElement.style.removeProperty('--dt-line-height');return true;");
+
+  // 模式热切换完整链路：双语开启 -> 仅译文 -> 双语 -> 关闭。
+  await patchConfig({ mode: 'translation' });
+  await until(() => pageEval(t, "return !!document.querySelector('#font-foreign[data-dt-replaced]') && !document.querySelector('#font-foreign .dt-target')"), 20000);
+  await settled(t);
+  const hotOnly = await pageEval(t, "return (function(){var p=document.getElementById('font-foreign');var f=p.querySelector('.dt-font');var c=getComputedStyle(p);var fc=f?getComputedStyle(f):null;return {targets:p.querySelectorAll('.dt-target').length,fonts:p.querySelectorAll('.dt-font').length,sourceFamily:c.fontFamily,targetFamily:fc&&fc.fontFamily,size:fc&&fc.fontSize,line:fc&&fc.lineHeight};})()");
+  check('韩文模式热切换：双语 -> 仅译文不残留双语节点，字体壳生效', hotOnly.targets === 0 && hotOnly.fonts > 0 && /PingFang SC|Microsoft YaHei|Noto Sans CJK SC/.test(hotOnly.targetFamily) && /AppleMyungjo/.test(hotOnly.sourceFamily), JSON.stringify(hotOnly));
+
+  await patchConfig({ mode: 'dual' });
+  await until(() => pageEval(t, "return !!document.querySelector('#font-foreign .dt-target') && !document.querySelector('#font-foreign .dt-font')"), 20000);
+  await settled(t);
+  const hotDual = await pageEval(t, "return (function(){var p=document.getElementById('font-foreign');var t=p.querySelector('.dt-target');var c=getComputedStyle(p);var tc=t?getComputedStyle(t):null;return {targets:p.querySelectorAll('.dt-target').length,fonts:p.querySelectorAll('.dt-font').length,sourceFamily:c.fontFamily,targetFamily:tc&&tc.fontFamily,size:tc&&tc.fontSize,sourceSize:c.fontSize};})()");
+  check('韩文模式热切换：仅译文 -> 双语恢复原站字体和字号', hotDual.targets > 0 && hotDual.fonts === 0 && /AppleMyungjo/.test(hotDual.targetFamily) && hotDual.size === hotDual.sourceSize, JSON.stringify(hotDual));
+
   await tabMsg(t.tabId, { type: 'dt:toggle' });
 
   await patchConfig({ mode: 'translation' });
@@ -1090,6 +1111,8 @@ async function koreanBoldChecks() {
   const again = await pageEval(t, "return (function(){var el=document.getElementById('bold-start'); var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT); for(var n=w.nextNode();n;n=w.nextNode()){ if(/\\S/.test(n.nodeValue)){ return parseInt(getComputedStyle(n.parentElement).fontWeight,10); } } return 0;})()");
   check('韩文仅译文：还原后再次翻译仍不随机加粗', again > 0 && again < 600, 'weight=' + again);
   await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const finalClean = await pageEval(t, "return {fonts:document.querySelectorAll('.dt-font,[data-dt-font]').length,replaced:document.querySelectorAll('[data-dt-replaced]').length,targets:document.querySelectorAll('[data-dt-target]').length,family:getComputedStyle(document.getElementById('font-foreign')).fontFamily};");
+  check('韩文模式循环：关闭后字体壳 / 标记归零，原文韩文字体恢复', finalClean.fonts === 0 && finalClean.replaced === 0 && finalClean.targets === 0 && /AppleMyungjo/.test(finalClean.family), JSON.stringify(finalClean));
   await patchConfig({ targetLang: 'zh-CN', mode: 'dual', dockEnabled: false });
 }
 
@@ -2249,7 +2272,20 @@ async function chosunLiveChecks(url) {
   check('真实朝鲜日报：关闭翻译后字体壳移除、韩文字体恢复', restored.fonts === 0 && restored.replaced === 0 && restored.targets === 0 && /chosun|myeongjo/i.test(restored.family), JSON.stringify(restored));
   const shots = ['chosun-01-korean-source.png', 'chosun-02-chinese-adapted.png', 'chosun-03-restored.png'].map((one) => path.join(shotDir, one));
   check('真实朝鲜日报：字体 A/B 截图已生成（原文 / 中文适配 / 关闭还原）', shots.every((one) => fs.existsSync(one) && fs.statSync(one).size > 1000), JSON.stringify(shots.map((one) => path.basename(one))));
-  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', dockEnabled: false });
+
+  await patchConfig({ mode: 'dual' });
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return !!document.querySelector('.article-body__content-text .dt-target')"), 20000);
+  await settled(t);
+  const dual = await pageEval(t, "return (function(){var p=document.querySelector('.article-body__content-text');var target=p.querySelector('.dt-target');var pc=getComputedStyle(p);var tc=target?getComputedStyle(target):null;return {family:tc&&tc.fontFamily,sourceFamily:pc.fontFamily,size:tc&&tc.fontSize,sourceSize:pc.fontSize,line:tc&&tc.lineHeight,sourceLine:pc.lineHeight,fonts:p.querySelectorAll('.dt-font').length,targets:document.querySelectorAll('.dt-target').length};})()");
+  check('真实朝鲜日报双语：保留原站字体和自适应字号 / 行高，不套仅译文字体壳', dual.fonts === 0 && /chosun|myeongjo/i.test(dual.family) && dual.family === dual.sourceFamily && dual.size === dual.sourceSize && dual.line === dual.sourceLine, JSON.stringify(dual));
+  const dualShot = path.join(shotDir, 'chosun-04-dual.png');
+  await captureScreenshot(t, dualShot, shotClip);
+  check('真实朝鲜日报：双语截图已生成', fs.existsSync(dualShot) && fs.statSync(dualShot).size > 1000, path.basename(dualShot));
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const dualRestored = await pageEval(t, "return {targets:document.querySelectorAll('[data-dt-target]').length,replaced:document.querySelectorAll('[data-dt-replaced]').length};");
+  check('真实朝鲜日报双语：关闭后无译文节点残留', dualRestored.targets === 0 && dualRestored.replaced === 0, JSON.stringify(dualRestored));
+  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', dockEnabled: false });
 }
 
 try {

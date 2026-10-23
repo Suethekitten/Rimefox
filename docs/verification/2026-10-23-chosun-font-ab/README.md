@@ -11,12 +11,14 @@
 | `chosun-01-korean-source.png` | 未翻译，原文 `chosun-myeongjo, serif` |
 | `chosun-02-chinese-adapted.png` | 仅译文，目标文字使用 `"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif` |
 | `chosun-03-restored.png` | 关闭翻译，字体壳移除，原文韩文字体恢复 |
+| `chosun-04-dual.png` | 双语模式，目标译文保留原站字体、字号和行高 |
 
 验收关注：
 
 - 中文译文的字重、字号、行高、颜色与原文正文一致；
 - 中文字形均匀，不再出现部分字粗、部分字细；
 - 标题、代码 / 公式、图标和真正的强调文本不被字体壳覆盖；
+- 仅译文使用目标语言字体壳；双语目标不套字体壳，保留原站字体和自适应字号 / 行高；
 - 关闭翻译后 `.dt-font`、`data-dt-replaced`、`data-dt-target` 均无残留。
 
 截图中的中文文本由本地假 API 统一填充，仅用于字体渲染 A/B，不代表真实译文内容。

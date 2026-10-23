@@ -770,7 +770,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 - **韩文随机加粗**：仅译文的 writeNodes 仍会优先复用第一个可写 TextNode。若该节点位于局部 strong / b / em / 粗体 span 内，完整译文会继承局部强调。新增 font-weight / font-style / font-family 样式边界：局部强调壳未覆盖整段时，在壳外创建 RenderTransaction 保护的 TextNode；整段强调壳或加粗标题保留原样式。
 - **字体族**：朝鲜日报等站点会用 NotoSansKR-Bold 等粗体字体族但 computed font-weight=400。styleOf 缓存之前漏掉 fontFamily，导致这一层无法识别；现在同时比较 fontWeight、fontStyle 和 bold/black/heavy 字体族。
-- **目标语言字体适配**：chrome 的 `DT.fonts` 按目标脚本注册字体栈（zh-CN / zh-TW / ja / ko，register 可扩展）；只有源字体命中其他文字系统的已知字体、且没有目标文字系统字体时才适配，不做站点 CSS 硬编码。目标文字用 inline `.dt-font` 壳（display:contents）承载 font-family；仅译文包原 TextNode，双语只改 .dt-target。标题、code/pre、公式、控件和兼容字体跳过；字号 / 字重 / 行高 / 颜色继承，字体壳 insert+moving 全进 RenderTransaction，isOwnNode 忽略 data-dt-font 防止 MutationObserver 重扫。
+- **目标语言字体适配**：chrome 的 `DT.fonts` 按目标脚本注册字体栈（zh-CN / zh-TW / ja / ko，register 可扩展）；只有源字体命中其他文字系统的已知字体、且没有目标文字系统字体时才适配，不做站点 CSS 硬编码。目标文字用 inline `.dt-font` 壳（display:contents）承载 font-family；只用于仅译文，包原 TextNode。双语显式走 `policy({mode:'dual'})`，不碰 .dt-target 的 font-family，保留原站字体、CJK 标题缩放、行高和自定义 CSS。标题、code/pre、公式、控件和兼容字体跳过；字号 / 字重 / 行高 / 颜色继承，字体壳 insert+moving 全进 RenderTransaction，isOwnNode 忽略 data-dt-font 防止 MutationObserver 重扫。
 - **多行 / 混合**：injectLines 对只被一行使用的行首节点做壳外迁移；injectMixed 的 put 经过 styleSafeSlot；pre-wrap、嵌套 strong/em、行内链接和引用均有本地 fixture。
 - **诊断**：DT.inspectTextStyle(needle) 返回实际 computed font-weight / font-size / font-family / font-style、从文本节点到正文容器的祖先链、写入前 DOM / 样式与当前 DOM；DT.diagnose 增加 styleBoundaryAware / styleInspector。真实朝鲜日报地址可通过 tools/e2e-extension.mjs --chosun-live 使用本地假翻译检查，不发真实付费请求。
 - **字体 A/B 截图**：`--chosun-live` 使用本地假 API 返回统一中文，生成 docs/verification/2026-10-23-chosun-font-ab/ 的原文 / 中文适配 / 关闭还原三张截图；断言中文目标字体栈、原文 chosun-myeongjo 保留、关闭后字体壳和标记归零。

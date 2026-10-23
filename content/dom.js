@@ -1769,6 +1769,24 @@
       return p.stack;
     }
 
+    function policy(opts) {
+      var args = opts || {};
+      var mode = args.mode || DT.state.mode || 'translation';
+      var lang = args.target || args.lang || DT.state.target;
+      var source = args.sourceElement || null;
+      var family = source ? familyOf(source) : (args.fontFamily || '');
+      var key = keyFor(lang);
+      if (mode !== 'translation') {
+        return { adapt: false, mode: mode, target: key, reason: 'dual-preserve-source' };
+      }
+      if (!key) return { adapt: false, mode: mode, target: '', reason: 'no-profile' };
+      if (!family) return { adapt: false, mode: mode, target: key, reason: 'no-family' };
+      if (!needs(lang, family)) {
+        return { adapt: false, mode: mode, target: key, reason: 'font-compatible' };
+      }
+      return { adapt: true, mode: mode, target: key, stack: profiles[key].stack, reason: 'target-font-needed' };
+    }
+
     function protectedEl(el) {
       if (!el || el.nodeType !== 1) return false;
       var tag = tagOf(el);
@@ -1778,10 +1796,12 @@
 
     function apply(node, lang, sourceEl) {
       if (!node || !sourceEl || !String(node.textContent || '').trim()) return false;
+      var decision = policy({ mode: DT.state.mode, target: lang, sourceElement: sourceEl });
+      if (!decision.adapt) return false;
       if (protectedEl(sourceEl)) return false;
       if (DT.areaOf && DT.areaOf(sourceEl) !== 'content') return false;
       var family = familyOf(sourceEl);
-      var stack = stackFor(lang, family);
+      var stack = decision.stack || stackFor(lang, family);
       if (!stack) return false;
       var key = keyFor(lang);
       node.setAttribute('data-dt-font', key);
@@ -1799,6 +1819,7 @@
       if (!node || node.nodeType !== 3 || !/\S/.test(node.nodeValue || '')) return null;
       var parent = node.parentNode;
       if (!parent || parent.nodeType !== 1 || !parent.parentNode) return null;
+      if (DT.state.mode === 'dual') return null;
       if (parent.closest && parent.closest('a, [data-dt-font], [data-dt-ui]')) return null;
       if (protectedEl(parent) || (unit && unit.el && protectedEl(unit.el))) return null;
       // 导航 / 按钮 / 输入框等控件的 direct text node 不要加 inline 壳，避免 flex 布局多一项。
@@ -1833,6 +1854,7 @@
       keyFor: keyFor,
       needs: needs,
       stackFor: stackFor,
+      policy: policy,
       apply: apply,
       wrapText: wrapText
     };
