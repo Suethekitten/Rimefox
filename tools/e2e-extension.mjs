@@ -67,13 +67,27 @@ async function until(fn, ms = 15000, step = 200) {
 // ---------------- 假接口 + 测试页 ----------------
 // 模型：每条译文 = '译:' + 原文（目标是繁體中文时 '繁:'）；单条带 CITE 回纯文本「巴黎是首都[1]。」，带 SPLIT 回拆开的两句。
 // 带 reasoning_effort 的请求回 400（OpenAI 官方非推理模型就是这样），用来看扩展会不会记住、不再发
-const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, aligned: 0, aozoraLive: false, sent: [], lastSystem: '', lastAlignedSystem: '' };
+const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, aligned: 0, aozoraLive: false, sent: [], lastSystem: '', lastAlignedSystem: '', keepSystem: '' };
 const OWID_ZH =
   '这9张图表展示了世界不同地区的数据。每张图表的横轴是平均收入（人均GDP），纵轴是生活在极端贫困中的人口比例。' +
   '每条轨迹的起点显示的是1820年的数据，它告诉我们，两个世纪前，无论人们身处世界何处，大多数人都生活在极端贫困之中。' +
   '11 自那时起，世界所有地区都实现了增长——商品和服务的生产增加了——生活在贫困中的人口比例下降了。';
 
+// 文献引用：Nature Medicine 那一段的真实 DOM，取自 selftest/index.html 的 tpl-nature-cite（只存一份）。
+// 页面放在和 nature.com 相同的路径上，两种 href（#ref-CR3 和 /articles/…#ref-CR1）都是本页锚点，能真实点击
+const NATURE_PATH = '/articles/s41591-022-01767-6';
+const NATURE_FIXTURE = (() => {
+  const html = fs.readFileSync(path.join(ROOT, 'selftest', 'index.html'), 'utf8');
+  const m = /<template id="tpl-nature-cite">([\s\S]*?)<\/template>/.exec(html);
+  if (!m) throw new Error('selftest/index.html 里找不到 tpl-nature-cite');
+  return m[1];
+})();
+
 const PAGES = {
+  [NATURE_PATH]: `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Nature citations</title>
+<style>.fx-nature sup{position:relative;top:-.375em;font-size:.75em;line-height:0;vertical-align:baseline}</style></head><body>
+${NATURE_FIXTURE}
+</body></html>`,
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
 <p id="p1">This is the first paragraph of the article with enough words to translate.</p>
@@ -158,6 +172,8 @@ const server = http.createServer((req, res) => {
       stats.requests += 1;
       stats.texts += texts.length;
       stats.sent.push(...texts);
+      // 带保留标记（<kN>）的那一批的系统提示词：文献引用检查要看它，不能拿最后一批
+      if (texts.some((one) => /<k\d+>[\s\S]*?<\/k\d+>/.test(String(one)))) stats.keepSystem = String(body.messages[0].content || '');
       if (!stats.firstOk) stats.firstOk = Date.now();
       let content;
       const sys = String(body.messages[0].content || '');
@@ -518,6 +534,70 @@ async function articleChecks() {
 // ---------------- 设置页 ----------------
 
 // ---------------- 0.9.1 段落单元 / Ruby / 悬停 ----------------
+// 文献引用：上标引用当保留区。双语译文里放上标副本（可点击），仅译文原地不动，关闭翻译逐字还原
+async function citationChecks() {
+  console.log('\n[文献引用（Nature 上标）]');
+  const cites = ['1,2', '3,4,5', '6,7,8,9', '7,10', '11,12,13,14'];
+  const t = await openTab(ORIGIN + NATURE_PATH);
+  const before = await pageEval(t, "return document.querySelector('.fx-nature').innerHTML");
+  const originalSups = await pageEval(t, "return Array.from(document.querySelectorAll('.fx-nature p sup')).map((s) => s.outerHTML)");
+  const sentBefore = stats.sent.length;
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(t, "return document.querySelectorAll('.fx-nature p [data-dt-target] sup').length === 5"), 20000);
+  await settled(t);
+  const sent = stats.sent.slice(sentBefore).join('\n');
+  check('请求：引用编号带 <kN> 标记随整句送翻，书目 title 不进请求', sent.includes('diseases<k1>1,2</k1>.') && sent.includes('significance<k2>3,4,5</k2>,') && !/Shendure|ebi\.ac\.uk/.test(sent), sent.slice(0, 160));
+  check('请求：带标记的批次提示词要求不另写 / 合并 / 删引用编号', stats.keepSystem.includes('不要自己另写、合并或删掉引用编号'), stats.keepSystem ? '' : '没有带标记的请求');
+  const dual = await pageEval(
+    t,
+    `const p = document.querySelector('.fx-nature p');
+    const target = p.querySelector('[data-dt-target]');
+    const clones = Array.from(target.querySelectorAll('sup'));
+    const originals = Array.from(p.querySelectorAll('sup')).filter((s) => !target.contains(s));
+    const hrefs = (list) => list.map((s) => Array.from(s.querySelectorAll('a')).map((a) => a.getAttribute('href')).join(' '));
+    const ids = Array.from(document.querySelectorAll('[id]')).map((n) => n.id);
+    return {
+      texts: clones.map((s) => s.textContent),
+      sameLinks: JSON.stringify(hrefs(clones)) === JSON.stringify(hrefs(originals)),
+      cloneIds: target.querySelectorAll('[id]').length,
+      dupIds: ids.length - new Set(ids).size,
+      superscript: getComputedStyle(clones[0]).top === getComputedStyle(originals[0]).top,
+      originals: originals.map((s) => s.outerHTML),
+      head: target.textContent.slice(0, 12)
+    };`
+  );
+  check('双语：译文里 5 组引用都是上标链接副本、顺序和编号不变', !!ready && JSON.stringify(dual.texts) === JSON.stringify(cites), JSON.stringify(dual.texts));
+  check('双语：副本的链接和原上标一致、上标样式一致、没有重复 id', dual.sameLinks && dual.cloneIds === 0 && dual.dupIds === 0 && dual.superscript, JSON.stringify({ sameLinks: dual.sameLinks, cloneIds: dual.cloneIds, dupIds: dual.dupIds, sup: dual.superscript }));
+  check('双语：原文段落的上标没被动过', JSON.stringify(dual.originals) === JSON.stringify(originalSups), '');
+  const jump = await pageEval(
+    t,
+    `const link = document.querySelector('.fx-nature p [data-dt-target] a[href$="#ref-CR1"]');
+    if (!link) return { hash: 'no-link' };
+    link.click();
+    return { hash: location.hash, still: document.querySelectorAll('.fx-nature p [data-dt-target]').length };`
+  );
+  check('双语：点译文里的引用跳到参考文献（同页，不重新加载）', jump.hash === '#ref-CR1' && jump.still === 1, JSON.stringify(jump));
+
+  await tabMsg(t.tabId, { type: 'dt:setMode', mode: 'translation' });
+  await until(() => pageEval(t, "return !!document.querySelector('.fx-nature p[data-dt-replaced]')"), 20000);
+  await settled(t);
+  const only = await pageEval(
+    t,
+    `const p = document.querySelector('.fx-nature p');
+    const sups = Array.from(p.querySelectorAll('sup'));
+    const link = p.querySelector('a[href="#ref-CR3"]');
+    if (link) link.click();
+    return { sups: sups.map((s) => s.outerHTML), target: !!p.querySelector('[data-dt-target]'), text: p.textContent.slice(0, 12), hash: location.hash, after: sups[0].nextSibling ? sups[0].nextSibling.nodeValue.slice(0, 8) : '' };`
+  );
+  check('仅译文：5 组上标链接原地不动（id / href / 编号都在），没有另插译文块', JSON.stringify(only.sups) === JSON.stringify(originalSups) && !only.target, '');
+  check('仅译文：译文写在引用前后（句末引用后面接下一句的译文）', only.text.startsWith('译:') && only.after.replace(/\s+/g, '').startsWith('.译:'), JSON.stringify({ text: only.text, after: only.after }));
+  check('仅译文：点原上标照常跳到参考文献', only.hash === '#ref-CR3', only.hash);
+
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const after = await until(() => pageEval(t, "return document.querySelector('[data-dt-target],[data-dt-replaced]') ? '' : document.querySelector('.fx-nature').innerHTML"), 8000);
+  check('关闭翻译后 DOM 逐字还原', after === before, after === before ? '' : String(after || '').slice(0, 120));
+}
+
 async function paragraphChecks() {
   console.log('\n[段落单元 / Ruby]');
 
@@ -1232,6 +1312,7 @@ try {
   } else if (!flag('--youtube-only')) {
     await articleChecks();
     await paragraphChecks();
+    await citationChecks();
     await languageChecks();
     await localeChecks();
     await dockChecks();

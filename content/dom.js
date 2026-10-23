@@ -323,17 +323,96 @@
     return typeof cls === 'string' && /(^|\s)(notranslate|no-translate)(\s|$)/.test(cls);
   }
 
-  // node 在 root 里所属的最外层保留元素（root 自己不算：它被保护的话根本不会收集）
+  // ---------------- 文献引用：上标里指向参考文献的链接 ----------------
+  // Nature / Springer：<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>（每个编号一个链接，
+  // 逗号是上标里的文本节点，完整书目只在 title 属性里）。以前它们和正文一起拼进句子：「…diseases1,2.」原样送翻，
+  // 仅译文把译文整句写进第一个文本节点、清空链接里的数字，上标和跳转都没了；双语译文里只剩普通数字。
+  // 现在把它当保留区：编号随句子送翻、标记原样回来，页面上的上标链接本身永远不写；双语译文里放它的副本。
+  // 只认「<sup> + 可见文字只有编号和分隔符 + 编号都在链接里 + 每个链接都指向文献锚点」：
+  // 数学指数 x<sup>2</sup>、10<sup>−6</sup>、化学式 H<sub>2</sub>O、序数 1<sup>st</sup>、普通链接都不满足
+  var CITE_TEXT = /^[\s[(]*\d{1,4}(?:\s*[,，;；–—−-]\s*\d{1,4})*[\s\])]*$/;
+  // 链接自己说明是引用：DPUB-ARIA 角色，或 data-test / data-track-action / aria-label / class 里的字样
+  var CITE_HINT = /citation|reference|footnote|biblio|noteref|\bcite\b|\bxref\b|fn-?ref/i;
+  var citeMemo = null; // 一次 collect 内缓存（同一个上标里每个文本节点都会问一遍）
+
+  function citeLink(a, sup) {
+    var href = a.getAttribute('href') || '';
+    var hash = href.indexOf('#');
+    if (hash < 0 || hash === href.length - 1) return false;
+    var role = String(a.getAttribute('role') || '').toLowerCase();
+    if (role === 'doc-biblioref' || role === 'doc-noteref') return true;
+    var said = [
+      a.getAttribute('data-test'),
+      a.getAttribute('data-track-action'),
+      a.getAttribute('aria-label'),
+      typeof a.className === 'string' ? a.className : '',
+      typeof sup.className === 'string' ? sup.className : ''
+    ].join(' ');
+    if (CITE_HINT.test(said)) return true;
+    // 没有字样：必须指向本页（同一路径）里真实存在的锚点（Wikipedia 的 #cite_note-3、Markdown 脚注的 #fn1）
+    if (hash > 0) {
+      var url = null;
+      try {
+        url = new URL(href, document.baseURI);
+      } catch (err) {
+        return false;
+      }
+      if (url.origin !== location.origin || url.pathname !== location.pathname) return false;
+    }
+    var id = href.slice(hash + 1);
+    try {
+      id = decodeURIComponent(id);
+    } catch (err) {
+      /* 不是合法的转义：按原样找 */
+    }
+    return !!document.getElementById(id);
+  }
+
+  function isCitationEl(el) {
+    if (!el || el.nodeType !== 1 || tagOf(el) !== 'SUP') return false;
+    if (citeMemo && citeMemo.has(el)) return citeMemo.get(el);
+    var yes = false;
+    var links = el.getElementsByTagName('a');
+    if (links.length && CITE_TEXT.test(el.textContent || '')) {
+      yes = true;
+      // 编号都在链接里：上标里夹着链接之外的数字（「see 3」）不算
+      var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (var t = walker.nextNode(); t && yes; t = walker.nextNode()) {
+        if (/\d/.test(t.nodeValue) && !(t.parentNode && t.parentNode.closest && t.parentNode.closest('a'))) yes = false;
+      }
+      for (var i = 0; yes && i < links.length; i += 1) yes = citeLink(links[i], el);
+    }
+    if (citeMemo) citeMemo.set(el, yes);
+    return yes;
+  }
+
+  // node 在 root 里所属的最外层保留元素（root 自己不算：它被保护的话根本不会收集）。
+  // 文献引用也是保留区：编号不翻、页面上的上标链接不写
   function keepElOf(node, root) {
     var found = null;
     for (var cur = node.parentNode; cur && cur !== root && cur.nodeType === 1; cur = cur.parentNode) {
-      if (isProtectedEl(cur)) found = cur;
+      if (isProtectedEl(cur) || isCitationEl(cur)) found = cur;
     }
     return found;
   }
 
+  function hasCitationInside(el) {
+    var sups = el.getElementsByTagName ? el.getElementsByTagName('sup') : [];
+    for (var i = 0; i < sups.length; i += 1) {
+      if (isCitationEl(sups[i])) return true;
+    }
+    return false;
+  }
+
   function hasKeepInside(el) {
-    return !!(el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR));
+    if (el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR)) return true;
+    return hasCitationInside(el);
+  }
+
+  function hasCitation(unit) {
+    return (unit.keep || []).some(function (k) {
+      return k.cite;
+    });
   }
 
   // own 单元 / 局部段落（ownTokens / flowTokens）里，只因「保留」才被 isSkipped 跳过的直接子元素：
@@ -376,6 +455,7 @@
     }
     out.forEach(function (k) {
       k.text = text.slice(k.start, k.end);
+      k.cite = isCitationEl(k.el);
     });
     return out;
   }
@@ -1253,6 +1333,7 @@
     if (!start) return out;
     collectAccept = accept || null;
     scanStyles = new WeakMap();
+    citeMemo = new WeakMap();
     try {
       walk(start, out);
     } catch (err) {
@@ -1260,6 +1341,7 @@
     } finally {
       collectAccept = null;
       scanStyles = null;
+      citeMemo = null;
     }
     DT.lastCollectFull = out.length >= MAX_UNITS;
     DT.log('collect units:', out.length);
@@ -1352,9 +1434,10 @@
     return node;
   }
 
-  function record(where, node, sourceEl, text, area) {
+  // cite：带文献引用的段落用了哪种落点（exact / sentence / fallback-dual / dropped，见 injectCited）
+  function record(where, node, sourceEl, text, area, cite) {
     try {
-      DT.placements.push({
+      var entry = {
         tag: sourceEl.tagName,
         cls: shortCls(sourceEl.className),
         where: where,
@@ -1362,7 +1445,9 @@
         span: !!node && node.tagName === 'SPAN',
         mode: DT.state.mode,
         text: previewText(text)
-      });
+      };
+      if (cite) entry.cite = cite;
+      DT.placements.push(entry);
       if (DT.placements.length > 300) DT.placements.shift();
     } catch (err) {
       /* 诊断记录失败不影响注入 */
@@ -1691,9 +1776,11 @@
   // ---------------- 双语：插入段落锚点 ----------------
   // 共用容器的段落插在分隔 <br> 之前（P1 → 译文1 → 空行 → P2 → 译文2），
   // 不再把整个容器的所有译文 append 到末尾。独占元素的段落仍追加到元素内部末尾。
-  function injectDual(unit, text, lang, area) {
+  // cited（可选）：带文献引用的段落（injectCited），译文里放回引用副本
+  function injectDual(unit, text, lang, area, cited) {
     var sourceEl = unit.el;
     var node = makeNode(sourceEl, text, lang, !unit.whole);
+    if (cited) text = fillCited(node, unit, cited);
     node.setAttribute('data-dt-unit', unit.id);
     registerTarget(node, unit.id);
     nodeUnit.set(node, unit);
@@ -1713,7 +1800,7 @@
     unit.renderedText = text;
     pushRendered({ unit: unit, mode: 'dual', node: node, ops: ops, saved: [] });
     linkUnit(unit);
-    record(unit.anchor ? 'before' : 'inside', node, sourceEl, text, area);
+    record(unit.anchor ? 'before' : 'inside', node, sourceEl, text, area, unit.citeMode);
     return true;
   }
 
@@ -1951,7 +2038,7 @@
     fillSnapshot(unit); // 快照改成"替换后的源文本"，下次 sourceChangedSnapshot 不会误报
     pushRendered({ unit: unit, mode: 'replace', ops: ops, saved: saved, collapsed: [], replaced: item });
     linkUnit(unit);
-    record('replace', null, unit.el, text, area);
+    record('replace', null, unit.el, text, area, unit.citeMode);
     return true;
   }
 
@@ -1990,6 +2077,104 @@
       setText(nodes[i], wrote, ops);
       saved.push({ node: nodes[i], value: before, wrote: wrote });
     }
+  }
+
+  // ---------------- 带文献引用的段落 ----------------
+  // 仅译文：页面上的上标链接原地不动（它的文本节点永远不写），译文按落点切成 N+1 段写在它们前后（keepPlan）。
+  //   落点先用模型留下的标记位置（词级）；模型换了引用的先后，挪到各自那一句的句末（句级，units.keepPlacement）。
+  //   定不下来 —— 标记丢了、挪完仍对不上、分行 / 注音段落、两个引用之间没有文本节点可写 —— 安全降级成双语：
+  //   原段落连同引用原样保留，译文另起一块。不按原文字符偏移硬插，也不把引用挪进别的句子。
+  // 双语：译文里按标记位置放上标的副本（双语译文顺序随意，不受页面顺序限制）
+  function injectCited(unit, marks, plain, lang, area, replaceMode) {
+    if (replaceMode) {
+      var single = (unit.groups.filled || []).length < 2 && !(unit.ruby && unit.ruby.length);
+      var place = single ? DT.units.keepPlacement(marks.stripped, marks.at) : null;
+      var segs = place ? citeSegs(unit, marks.stripped, place.at) : null;
+      if (segs && keepPlan(unit, segs)) {
+        unit.citeMode = place.snapped ? 'sentence' : 'exact';
+        return injectReplace(unit, citeRendered(unit, segs), area, segs);
+      }
+      unit.citeMode = 'fallback-dual';
+    }
+    return injectDual(unit, plain, lang, area, marks);
+  }
+
+  // 两个引用在原文里隔着别的字、译文里却紧挨着：中间补一个逗号，免得「¹,²」和「³」读成「1,23」
+  function citeSeparator(unit, a, b) {
+    var ka = unit.keep[a];
+    var kb = unit.keep[b];
+    if (!ka || !kb || !ka.cite || !kb.cite) return '';
+    var lo = Math.min(ka.end, kb.end);
+    var hi = Math.max(ka.start, kb.start);
+    return /\S/.test(unit.text.slice(lo, hi)) ? ',' : '';
+  }
+
+  // 落点 → keepPlan 要的 N+1 段译文（按页面顺序）
+  function citeSegs(unit, stripped, at) {
+    var segs = [];
+    var from = 0;
+    for (var i = 0; i < at.length; i += 1) {
+      var seg = stripped.slice(from, at[i]);
+      if (i > 0 && !/\S/.test(seg)) seg += citeSeparator(unit, i - 1, i);
+      segs.push(seg);
+      from = at[i];
+    }
+    segs.push(stripped.slice(from));
+    return segs;
+  }
+
+  // 页面上实际显示的译文（各段 + 原地的引用编号）：悬停对照和 renderedText 都按它算
+  function citeRendered(unit, segs) {
+    var out = segs[0] || '';
+    for (var i = 0; i < unit.keep.length; i += 1) out += unit.keep[i].text + (segs[i + 1] || '');
+    return out;
+  }
+
+  // 上标引用的副本：href / 上标样式 / aria-label / title 照旧，点了照样跳到参考文献；
+  // 去掉 id（页面上不能有重复 id，参考文献里的返回链接仍指向原上标）
+  function citeClone(el) {
+    var copy = el.cloneNode(true);
+    var all = [copy].concat(Array.prototype.slice.call(copy.querySelectorAll('*')));
+    all.forEach(function (node) {
+      node.removeAttribute('id');
+      Array.prototype.slice.call(node.attributes).forEach(function (attr) {
+        if (/^data-dt-/.test(attr.name)) node.removeAttribute(attr.name);
+      });
+    });
+    copy.setAttribute('data-dt-cite', '1');
+    return copy;
+  }
+
+  // 双语译文节点里按标记位置放回引用副本，notranslate 的保留区照旧放原文文字。
+  // 有引用的标记丢了：一个副本都不放（原段落里的引用完好，不在译文里猜位置），译文只留文字
+  function fillCited(node, unit, marks) {
+    var keep = unit.keep;
+    var citesOk = keep.every(function (k, i) {
+      return !k.cite || marks.at[i] >= 0;
+    });
+    var items = [];
+    keep.forEach(function (k, i) {
+      if (marks.at[i] < 0 || (k.cite && !citesOk)) return;
+      items.push({ at: marks.at[i], k: k, i: i });
+    });
+    items.sort(function (a, b) {
+      return a.at - b.at || a.i - b.i;
+    });
+    node.textContent = '';
+    var pos = 0;
+    var prev = -1;
+    items.forEach(function (item) {
+      var seg = marks.stripped.slice(pos, item.at);
+      if (prev >= 0 && !/\S/.test(seg)) seg += citeSeparator(unit, prev, item.i);
+      if (seg) node.appendChild(document.createTextNode(seg));
+      node.appendChild(item.k.cite ? citeClone(item.k.el) : document.createTextNode(item.k.text));
+      pos = item.at;
+      prev = item.i;
+    });
+    var tail = marks.stripped.slice(pos);
+    if (tail) node.appendChild(document.createTextNode(tail));
+    if (!unit.citeMode) unit.citeMode = citesOk ? 'exact' : 'dropped';
+    return node.textContent;
   }
 
   // 含振假名的段落（仅译文模式）：不把中文写进 ruby/rb/rt/rp。
@@ -2236,7 +2421,9 @@
     if (!unit || !unit.el || !unit.el.isConnected) return false;
     // 保留区：text 可以带 <kN> 标记（模型原样回来的），也可以不带（按原文逐字找位置）
     var segs = null;
+    var cited = null; // 文献引用：每个保留区在译文里的落点（见 injectCited）
     if (text && unit.keep && unit.keep.length) {
+      if (hasCitation(unit)) cited = DT.units.keepMarks(text, unit.keep, unit.text);
       var kept = DT.units.keepParse(text, unit.keep, unit.text);
       text = kept.text;
       segs = kept.segs;
@@ -2271,6 +2458,7 @@
       // 3) 控件 / 导航里的界面文字
       (allowChromeReplace && area !== 'content');
 
+    if (cited) return injectCited(unit, cited, text, lang, area, replaceMode);
     if (replaceMode) {
       if (unit.ruby && unit.ruby.length) return injectRuby(unit, text, lang, area);
       return injectReplace(unit, text, area, segs);

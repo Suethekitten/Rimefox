@@ -226,6 +226,10 @@ t('保留标记：只有本批带成对 <kN> 标记才加说明，其它提示�
       assert.ok(marked.startsWith(plain));
       assert.ok(marked.includes('<k1>…</k1>'));
       assert.ok(marked.includes('不翻译、不改写、不拆开'));
+      // 文献引用也走保留标记：要求紧跟所引词句、不许模型自己编 / 合并 / 删引用编号
+      assert.ok(marked.includes('文献引用编号'));
+      assert.ok(marked.includes('不要自己另写、合并或删掉引用编号'));
+      assert.ok(!plain.includes('文献引用编号'), '没有标记的批次提示词不能多出引用说明');
       assert.equal(marked.includes('parts 的 t 里同样保留这些标记'), align);
     });
   });

@@ -176,14 +176,25 @@
 
   // ---------------- 文本映射：单元文本偏移 ↔ DOM Range ----------------
 
-  // 单元里的译文节点（双语 / Ruby 安全替换）
+  // 单元里的译文节点（双语 / Ruby 安全替换）。通常只有一个文本节点；
+  // 带文献引用的双语译文里夹着上标副本（文字 + <sup><a>1</a>,<a>2</a></sup> + 文字），按阅读顺序取所有文本节点
   function mapFromNode(node) {
-    var value = node ? String(node.nodeValue == null ? node.textContent : node.nodeValue) : '';
+    if (!node) return { text: '', chars: [] };
+    var list = [];
+    if (node.nodeType === 3) {
+      list.push(node);
+    } else {
+      var walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      for (var t = walker.nextNode(); t; t = walker.nextNode()) list.push(t);
+    }
+    var text = '';
     var chars = [];
-    var textNode = node && node.nodeType === 3 ? node : node && node.firstChild;
-    if (!textNode || textNode.nodeType !== 3) return { text: value, chars: [] };
-    for (var i = 0; i < textNode.nodeValue.length; i += 1) chars.push({ node: textNode, off: i });
-    return { text: textNode.nodeValue, chars: chars };
+    list.forEach(function (one) {
+      var value = String(one.nodeValue || '');
+      for (var i = 0; i < value.length; i += 1) chars.push({ node: one, off: i });
+      text += value;
+    });
+    return { text: text, chars: chars };
   }
 
   // 仅译文模式：译文按行写回原来的文本节点。按行读出当前值（去掉行首缩进，和写回时加上的对齐），

@@ -77,13 +77,17 @@ const BAD_EN_VALUE =
 // 同一目标语言下正常的英文缓存：不能被上面的定向失效连累
 const GOOD_EN_SRC = 'Aligned English cache source fifteen';
 const GOOD_EN_VALUE = 'The cached English translation is still valid, and it should stay.';
+// 文献引用改成保留区之前，旧版本把引用编号压平进译文写进了缓存（缓存键是送翻文本，没有 <kN> 标记）
+const CITE_FLAT_SRC = 'Variants associated with common complex human diseases1,2. 〔cite〕';
+const CITE_FLAT_VALUE = 'Variants linked to common complex human diseases1,2 (old flattened cache).';
 await sessionArea.set({
   'dt.cache.v1': {
     entries: [
       [makeKey(scope, LEGACY_SRC), LEGACY_BAD],
       [makeKey(scope, LEAKY_SRC), '{"translation": "Let\'s go."}'],
       [makeKey(scope, BAD_EN_SRC), BAD_EN_VALUE],
-      [makeKey(scope, GOOD_EN_SRC), GOOD_EN_VALUE]
+      [makeKey(scope, GOOD_EN_SRC), GOOD_EN_VALUE],
+      [makeKey(scope, CITE_FLAT_SRC), CITE_FLAT_VALUE]
     ]
   }
 });
@@ -361,6 +365,23 @@ await t('保留标记：带 <k1> 的批次提示词加说明，回包原样带�
   assert.equal(res.results[0], 'Installiere <k1>Rimefox</k1> from the store 〔keep〕');
   await translate(['A line without keep marks 〔keep b〕']);
   assert.doesNotMatch(lastSystem, /保留标记/, '没有标记就不该多出保留说明');
+});
+
+// 文献引用（Nature 上标）：带 <kN> 标记的送翻文本和旧版本压平的原文是两个缓存键。
+// 旧的压平译文不会被带标记的段落命中，也不需要清空缓存 —— 旧条目原样留着，随容量淘汰
+await t('文献引用：带标记的段落不命中旧的压平缓存，旧条目不被清空', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => one.replace('Variants associated with', 'Variants linked to')));
+  const marked = 'Variants associated with common complex human diseases<k1>1,2</k1>. 〔cite〕';
+  calls = [];
+  const fresh = await translate([marked]);
+  assert.equal(calls.length, 1, '带标记的文本要真的去问模型，不能拿旧的压平译文');
+  assert.equal(fresh.cached, 0);
+  assert.equal(fresh.results[0], 'Variants linked to common complex human diseases<k1>1,2</k1>. 〔cite〕');
+  assert.match(lastSystem, /文献引用编号/, '带标记的批次提示词要提到引用编号');
+  calls = [];
+  const old = await translate([CITE_FLAT_SRC]);
+  assert.equal(calls.length, 0, '旧条目还在：没有被全局清空');
+  assert.equal(old.results[0], CITE_FLAT_VALUE);
 });
 
 // 输入框翻译（0.9.0）：目标语言 'auto' 跟随页面，且不读不写缓存

@@ -825,6 +825,98 @@
     var s = String(text == null ? '' : text);
     var count = keep ? keep.length : 0;
     if (!count) return { text: s, segs: null };
+    var drops = keepDrops(s, count, source);
+    var plain = '';
+    var gap = '';
+    var gaps = [];
+    var order = [];
+    var at = 0;
+    drops.forEach(function (d) {
+      if (d.start < at) return; // 落在另一对标记里面
+      var between = s.slice(at, d.start);
+      plain += between;
+      gap += between;
+      if (d.id) {
+        plain += keep[d.id - 1].text;
+        gaps.push(gap);
+        gap = '';
+        order.push(d.id);
+      }
+      at = d.end;
+    });
+    plain += s.slice(at);
+    gaps.push(gap + s.slice(at));
+    var inOrder = order.length === count;
+    for (var i = 0; inOrder && i < order.length; i += 1) inOrder = order[i] === i + 1;
+    return { text: plain, segs: inOrder ? gaps : keepLocate(plain, keep) };
+  };
+
+  // 文献引用（dom.js 的 isCitationEl）用：每个保留区在译文里落在哪。
+  //   stripped：去掉所有标记、连同标记里的内容 —— 引用编号不进译文文字，由页面上的上标链接（或它的副本）占位
+  //   at[i]：第 i 个保留区在 stripped 里的位置，模型没留这个标记是 -1。
+  // 同一个编号出现多次只认第一次，后面的连同内容一起去掉（模型抄重了，页面上不能出现两次）。
+  // 不做「按原文逐字找」：引用只是几个数字，译文里本来就可能有同样的数字，找到的未必是它
+  U.keepMarks = function (text, keep, source) {
+    var s = String(text == null ? '' : text);
+    var count = keep ? keep.length : 0;
+    var at = [];
+    for (var i = 0; i < count; i += 1) at.push(-1);
+    if (!count) return { stripped: s, at: at };
+    var out = '';
+    var pos = 0;
+    keepDrops(s, count, source).forEach(function (d) {
+      if (d.start < pos) return;
+      out += s.slice(pos, d.start);
+      if (d.id && at[d.id - 1] < 0) at[d.id - 1] = out.length;
+      pos = d.end;
+    });
+    out += s.slice(pos);
+    return { stripped: out, at: at };
+  };
+
+  // 译文里位置 at 所在那一句的句末（句末标点和收尾引号之前）：模型换了引用的先后顺序时，
+  // 仅译文模式没法把页面上的上标挪来挪去，退一步只保证引用还在它所属的那一句里。
+  // 「疾病。」→ 落在「。」之前；「(PRS).」→ 落在「.」之前（括号是正文）。句子之间的空白算前一句
+  var SENT_TAIL = /[。．.！!？?；;…]+["'”’」』]*\s*$/;
+  U.sentenceEndAt = function (text, at) {
+    var s = String(text == null ? '' : text);
+    var spans = U.sentencesOf(s);
+    var pick = null;
+    for (var i = 0; i < spans.length; i += 1) {
+      if (spans[i][0] > at) break;
+      pick = spans[i];
+    }
+    if (!pick) pick = spans[0];
+    if (!pick) return Math.max(0, Math.min(at, s.length));
+    var body = s.slice(pick[0], pick[1]);
+    var m = SENT_TAIL.exec(body);
+    return m ? pick[0] + m.index : pick[1];
+  };
+
+  // 仅译文原地写回时各个引用的落点（按页面顺序）。标记都在、先后和页面一致 → 原样用（词级位置）；
+  // 先后被模型换了 → 每个挪到它所在那一句的句末，挪完先后一致就用（句级位置）；
+  // 有标记丢了、或挪完仍然对不上 → null，调用方安全降级（不能把引用塞进别的句子）
+  U.keepPlacement = function (stripped, at) {
+    var list = at || [];
+    if (!list.length) return null;
+    var i;
+    for (i = 0; i < list.length; i += 1) {
+      if (!(list[i] >= 0)) return null;
+    }
+    var ordered = true;
+    for (i = 1; ordered && i < list.length; i += 1) ordered = list[i] >= list[i - 1];
+    if (ordered) return { at: list.slice(), snapped: false };
+    var snapped = list.map(function (one) {
+      return U.sentenceEndAt(stripped, one);
+    });
+    for (i = 1; i < snapped.length; i += 1) {
+      if (snapped[i] < snapped[i - 1]) return null;
+    }
+    return { at: snapped, snapped: true };
+  };
+
+  // 译文里的 <kN> 标记 → 按位置排好的 [{ start, end, id }]：id 0 是要去掉的散标记（模型编的编号、没配对的半个）
+  function keepDrops(s, count, source) {
     var pairs = [];
     var cuts = [];
     var open = null;
@@ -851,7 +943,7 @@
       }
     }
     if (open) cuts.push(open);
-    var drops = pairs
+    return pairs
       .map(function (p) {
         return { start: p.start, end: p.end, id: p.id };
       })
@@ -863,30 +955,7 @@
       .sort(function (a, b) {
         return a.start - b.start;
       });
-    var plain = '';
-    var gap = '';
-    var gaps = [];
-    var order = [];
-    var at = 0;
-    drops.forEach(function (d) {
-      if (d.start < at) return; // 落在另一对标记里面
-      var between = s.slice(at, d.start);
-      plain += between;
-      gap += between;
-      if (d.id) {
-        plain += keep[d.id - 1].text;
-        gaps.push(gap);
-        gap = '';
-        order.push(d.id);
-      }
-      at = d.end;
-    });
-    plain += s.slice(at);
-    gaps.push(gap + s.slice(at));
-    var inOrder = order.length === count;
-    for (var i = 0; inOrder && i < order.length; i += 1) inOrder = order[i] === i + 1;
-    return { text: plain, segs: inOrder ? gaps : keepLocate(plain, keep) };
-  };
+  }
 
   // ---------------- 5. 签名 / 工具 ----------------
   // 源文本签名：SPA 路由切换、动态更新后判断「这个段落是不是原来那段」。

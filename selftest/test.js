@@ -2354,6 +2354,327 @@
     });
   });
 
+  // ---------------- 文献引用（Nature 上标）：保留区 + 双语副本 + 仅译文原地写回 ----------------
+  // 夹具 tpl-nature-cite 是 nature.com 上这一段的真实 DOM。译文是人写的、带模型应当留下的 <kN> 标记
+  var NATURE_ZH =
+    '全基因组关联研究（GWAS）已经发现了数千个与一系列常见复杂人类疾病显著相关的基因组变异<k1>1,2</k1>。' +
+    '鉴于单个常见变异带来的风险通常小到可以忽略，研究者把全基因组的风险等位基因汇总成遗传风险评分，用一个数值衡量已知常见变异对某一性状的遗传关联。' +
+    '尽管最早的遗传评分只包含达到全基因组显著性的变异<k2>3,4,5</k2>，近来计算和方法上的进展已经利用越来越大的 GWAS 中全部变异的汇总统计量来计算多基因风险评分（PRS）<k3>6,7,8,9</k3>。' +
+    '对某些疾病而言，处于分布上尾的 PRS 所对应的风险，与既定临床风险因素以及单基因病相关遗传变异带来的风险相当<k4>7,10</k4>。' +
+    '虽然 PRS 的权重通常来自对现患病例与对照的横断面 GWAS，后续研究已经证明它们可以用来估计新发疾病的风险<k5>11,12,13,14</k5>。';
+  var NATURE_CITES = ['1,2', '3,4,5', '6,7,8,9', '7,10', '11,12,13,14'];
+  // 模型把第三句的两个分句调换了先后：<k3> 跑到了 <k2> 前面
+  var NATURE_ZH_SWAP = NATURE_ZH.replace(
+    '尽管最早的遗传评分只包含达到全基因组显著性的变异<k2>3,4,5</k2>，近来计算和方法上的进展已经利用越来越大的 GWAS 中全部变异的汇总统计量来计算多基因风险评分（PRS）<k3>6,7,8,9</k3>。',
+    '近来计算和方法上的进展已经利用越来越大的 GWAS 中全部变异的汇总统计量来计算多基因风险评分（PRS）<k3>6,7,8,9</k3>，尽管最早的遗传评分只包含达到全基因组显著性的变异<k2>3,4,5</k2>。'
+  );
+
+  function stripMarks(s) {
+    return String(s).replace(/<\/?k\d+>/g, '');
+  }
+  function supsOf(el, skip) {
+    return Array.prototype.filter.call(el.querySelectorAll('sup'), function (s) {
+      return !(skip && skip.contains(s));
+    });
+  }
+  function linksOf(sups) {
+    return sups.map(function (s) {
+      return Array.prototype.map.call(s.querySelectorAll('a'), function (a) {
+        return a.getAttribute('href');
+      }).join(' ');
+    });
+  }
+  function lastCite() {
+    var last = DT.placements[DT.placements.length - 1];
+    return last ? last.cite || '' : '';
+  }
+  // 点一下同页锚点链接：看地址栏的 # 跳没跳；点完把 # 和滚动位置放回去，不影响后面的用例
+  function clickHash(link) {
+    var hash = location.hash;
+    var y = window.scrollY;
+    link.click();
+    var got = location.hash;
+    history.replaceState(null, '', location.pathname + location.search + hash);
+    window.scrollTo(0, y);
+    return got;
+  }
+
+  check('文献引用·收集：Nature 段落 5 组上标引用随整句送翻，编号进 <kN> 标记，书目 title / URL 不进正文', function () {
+    return withTemplate('tpl-nature-cite', 'dual', function (box) {
+      var p = box.querySelector('.fx-nature p');
+      var units = DT.collect(p);
+      if (units.length !== 1) return '应是一个整段单元：' + units.length;
+      var u = units[0];
+      var r = eq(
+        (u.keep || []).map(function (k) { return [k.text, !!k.cite]; }),
+        NATURE_CITES.map(function (c) { return [c, true]; })
+      );
+      if (r !== true) return '保留区：' + r;
+      if (u.text !== DT.normalizeText(p.textContent)) return '送翻原文和页面文字对不上';
+      if (u.wire.indexOf('diseases<k1>1,2</k1>. Given') < 0) return '句末引用的标记不对：' + u.wire.slice(0, 200);
+      if (u.wire.indexOf('significance<k2>3,4,5</k2>, recent') < 0) return '句中引用的标记不对';
+      if (u.wire.indexOf('(PRS)<k3>6,7,8,9</k3>. For') < 0) return '括号后的引用标记不对';
+      if (/Shendure|Genomic medicine|ebi\.ac\.uk|ref-CR/.test(u.wire)) return '书目 title / URL / 锚点进了送翻文本';
+      return u.sentences.length === 5 ? true : '句子数应是 5：' + u.sentences.length;
+    });
+  });
+
+  check('文献引用·双语：译文里按标记放上标副本（链接、上标样式照旧，无重复 id），点击跳到参考文献，原文不动，还原逐字一致', function () {
+    return withTemplate('tpl-nature-cite', 'dual', function (box) {
+      var p = box.querySelector('.fx-nature p');
+      var before = box.innerHTML;
+      var original = supsOf(p).map(function (s) { return s.outerHTML; });
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, NATURE_ZH, 'zh-CN')) return 'inject 返回 false';
+      var target = p.querySelector('[data-dt-target]');
+      if (!target) return '没有译文节点';
+      var clones = supsOf(target);
+      var r = eq(clones.map(function (s) { return s.textContent; }), NATURE_CITES);
+      if (r !== true) return '副本：' + r;
+      r = eq(linksOf(clones), linksOf(supsOf(p, target)));
+      if (r !== true) return '副本的链接不对：' + r;
+      if (target.querySelector('[id]')) return '副本里还留着 id';
+      var ids = Array.prototype.map.call(document.querySelectorAll('[id]'), function (n) { return n.id; });
+      if (new Set(ids).size !== ids.length) return '页面上出现重复 id';
+      if (target.textContent !== stripMarks(NATURE_ZH)) return '译文文字不对：' + target.textContent.slice(0, 80);
+      var cs = getComputedStyle(clones[0]);
+      if (cs.top !== getComputedStyle(supsOf(p, target)[0]).top || parseFloat(cs.fontSize) >= parseFloat(getComputedStyle(target).fontSize)) {
+        return '副本没有上标样式：top ' + cs.top + ' / ' + cs.fontSize;
+      }
+      r = eq(supsOf(p, target).map(function (s) { return s.outerHTML; }), original);
+      if (r !== true) return '原文的上标被改了';
+      if (lastCite() !== 'exact') return '落点应是 exact：' + lastCite();
+      // Nature 有两种 href：#ref-CR3 和 /articles/…#ref-CR1。后者在 file:// 自检页里会离开页面，只比 href（上面已比）
+      var link = clones[1].querySelector('a[href="#ref-CR3"]');
+      if (!link) return '副本里没有 #ref-CR3';
+      var got = clickHash(link);
+      if (got !== '#ref-CR3') return '点击副本没有跳到参考文献：' + got;
+      DT.restore();
+      return box.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('文献引用·仅译文：上标链接原地不动（同一节点、id、href），译文按标记写在前后，句中 / 句末都对，点击照常，还原逐字一致', function () {
+    return withTemplate('tpl-nature-cite', 'translation', function (box) {
+      var p = box.querySelector('.fx-nature p');
+      var before = box.innerHTML;
+      var sups = supsOf(p);
+      var outer = sups.map(function (s) { return s.outerHTML; });
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, NATURE_ZH, 'zh-CN')) return 'inject 返回 false';
+      var now = supsOf(p);
+      if (now.length !== 5 || now.some(function (s, i) { return s !== sups[i] || s.outerHTML !== outer[i]; })) return '上标链接被改了 / 换了';
+      if (p.querySelector('[data-dt-target]')) return '仅译文不该另插译文块';
+      if (DT.normalizeText(p.textContent) !== DT.normalizeText(stripMarks(NATURE_ZH))) return '页面上的译文不对：' + p.textContent.slice(0, 120);
+      var after1 = sups[0].nextSibling ? sups[0].nextSibling.nodeValue : '';
+      if (after1.indexOf('。鉴于') !== 0) return '句末引用后面应接「。鉴于…」：' + after1.slice(0, 20);
+      var after2 = sups[1].nextSibling ? sups[1].nextSibling.nodeValue : '';
+      if (after2.indexOf('，近来') !== 0) return '句中引用后面应接「，近来…」：' + after2.slice(0, 20);
+      if (lastCite() !== 'exact') return '落点应是 exact：' + lastCite();
+      var got = clickHash(sups[1].querySelector('a[href="#ref-CR3"]'));
+      if (got !== '#ref-CR3') return '点击原上标没有跳到参考文献：' + got;
+      DT.restore();
+      return box.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('文献引用·仅译文：模型换了引用先后 → 两组都挪到所在那一句的句末（不进别的句子），中间补逗号，不丢不重', function () {
+    return withTemplate('tpl-nature-cite', 'translation', function (box) {
+      var p = box.querySelector('.fx-nature p');
+      var before = box.innerHTML;
+      var sups = supsOf(p);
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, NATURE_ZH_SWAP, 'zh-CN')) return 'inject 返回 false';
+      if (supsOf(p).length !== 5 || p.querySelector('[data-dt-target]')) return '上标数量不对 / 不该降级';
+      if (lastCite() !== 'sentence') return '落点应是 sentence：' + lastCite();
+      var shown = DT.normalizeText(p.textContent);
+      if (shown.indexOf('显著性的变异3,4,5,6,7,8,9。对某些疾病') < 0) return '两组引用没挪到第三句句末：' + shown.slice(90, 220);
+      if (sups[1].nextSibling.nodeValue !== ',') return '两组引用之间应补逗号：' + JSON.stringify(sups[1].nextSibling.nodeValue);
+      var count = NATURE_CITES.map(function (c) { return shown.split(c).length - 1; });
+      // 「7,10」里的 7 也会被「6,7,8,9」数到：只核对每组至少一次、总编号数不多
+      if (count.some(function (n) { return n < 1; })) return '有引用丢了：' + count;
+      if ((shown.match(/\d/g) || []).length !== (stripMarks(NATURE_ZH).match(/\d/g) || []).length) return '数字个数变了（引用重复或丢失）';
+      DT.restore();
+      return box.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('文献引用·模型丢了标记：仅译文降级成双语（原段落和引用原样保留），双语不放任何副本、不在译文里猜位置；都能还原', function () {
+    var drop = NATURE_ZH.replace('<k5>11,12,13,14</k5>', '');
+    var out = [];
+    ['translation', 'dual'].forEach(function (mode) {
+      out.push(
+        withTemplate('tpl-nature-cite', mode, function (box) {
+          var p = box.querySelector('.fx-nature p');
+          var before = box.innerHTML;
+          var originalText = DT.normalizeText(p.textContent);
+          var u = DT.collect(p)[0];
+          if (!DT.inject(u, drop, 'zh-CN')) return mode + '：inject 返回 false';
+          var target = p.querySelector('[data-dt-target]');
+          if (!target) return mode + '：应插入双语译文块';
+          if (supsOf(target).length) return mode + '：标记丢了不该放副本';
+          var rest = DT.normalizeText(Array.prototype.filter.call(p.childNodes, function (n) { return n !== target; }).map(function (n) { return n.textContent; }).join(''));
+          if (rest !== originalText) return mode + '：原段落被改了';
+          if (supsOf(p, target).length !== 5) return mode + '：原上标少了';
+          var want = mode === 'translation' ? 'fallback-dual' : 'dropped';
+          if (lastCite() !== want) return mode + '：落点应是 ' + want + '：' + lastCite();
+          DT.restore();
+          return box.innerHTML === before ? true : mode + '：还原后不一致';
+        })
+      );
+    });
+    return out.every(function (x) { return x === true; }) ? true : out.filter(function (x) { return x !== true; }).join('；');
+  });
+
+  check('文献引用·双语：模型改了标记里的编号、抄重了、编出新编号 → 副本只用原上标、各一次，编出来的编号不变成链接', function () {
+    return withTemplate('tpl-nature-cite', 'dual', function (box) {
+      var p = box.querySelector('.fx-nature p');
+      var messy = NATURE_ZH.replace('<k1>1,2</k1>', '<k1>1、2</k1>') + '另见<k1>1,2</k1>与<k6>99</k6>。';
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, messy, 'zh-CN')) return 'inject 返回 false';
+      var target = p.querySelector('[data-dt-target]');
+      var r = eq(supsOf(target).map(function (s) { return s.textContent; }), NATURE_CITES);
+      if (r !== true) return '副本：' + r;
+      if (target.textContent.indexOf('1、2') >= 0) return '模型改过的编号不该出现';
+      if (Array.prototype.some.call(target.querySelectorAll('a'), function (a) { return a.textContent === '99'; })) return '编出来的编号成了链接';
+      return target.textContent.indexOf('另见与99。') >= 0 ? true : '抄重的标记没去掉：' + target.textContent.slice(-20);
+    });
+  });
+
+  check('文献引用·长段落切分：切点不落在标记里，分片翻译拼回后双语 / 仅译文都完整保留 5 组引用，还原逐字一致', function () {
+    var out = [];
+    ['dual', 'translation'].forEach(function (mode) {
+      out.push(
+        withTemplate('tpl-nature-cite', mode, function (box) {
+          var p = box.querySelector('.fx-nature p');
+          var before = box.innerHTML;
+          var u = DT.collect(p)[0];
+          var parts = DT.splitLong(u.wire, 300);
+          if (parts.length < 3) return mode + '：应切成多片：' + parts.length;
+          var broken = parts.filter(function (part) {
+            var opens = (part.match(/<k(\d+)>/g) || []).map(function (m) { return m.replace(/\D/g, ''); });
+            var closes = (part.match(/<\/k(\d+)>/g) || []).map(function (m) { return m.replace(/\D/g, ''); });
+            return opens.join(',') !== closes.join(',');
+          });
+          if (broken.length) return mode + '：有一片把标记切开了：' + broken[0].slice(0, 60);
+          if (DT.joinSlots(parts, parts.seps) !== u.wire) return mode + '：切片拼不回原文';
+          var raw = DT.joinSlots(
+            parts.map(function (part) { return '译:' + part; }),
+            DT.translationSeps(parts.seps, 'zh-CN')
+          );
+          if (!DT.inject(u, raw, 'zh-CN')) return mode + '：inject 返回 false';
+          var target = p.querySelector('[data-dt-target]');
+          var shownSups = mode === 'dual' ? supsOf(target) : supsOf(p);
+          var r = eq(shownSups.map(function (s) { return s.textContent; }), NATURE_CITES);
+          if (r !== true) return mode + '：引用：' + r;
+          if (mode === 'translation' && (target || lastCite() !== 'exact')) return '仅译文应原地写回：' + lastCite();
+          DT.restore();
+          return box.innerHTML === before ? true : mode + '：还原后不一致';
+        })
+      );
+    });
+    return out.every(function (x) { return x === true; }) ? true : out.filter(function (x) { return x !== true; }).join('；');
+  });
+
+  check('文献引用·悬停对照（双语）：译文里夹着上标副本也能逐句对上，副本后面的句子照样高亮', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    var html = document.getElementById('tpl-nature-cite').innerHTML;
+    return withHoverFixture(html, function (box) {
+      var p = box.querySelector('.fx-nature p');
+      var u = DT.collect(p)[0];
+      var plain = stripMarks(NATURE_ZH);
+      var parts = NATURE_ZH.match(/[^。]+。/g).map(function (t) { return { n: 1, t: DT.keepText(u, t) }; });
+      var align = DT.units.alignmentOf(parts, plain, u.sentences.length);
+      if (!align) return '对齐没建起来';
+      if (!DT.inject(u, NATURE_ZH, 'zh-CN', align)) return 'inject 返回 false';
+      var target = p.querySelector('[data-dt-target]');
+      var clones = supsOf(target);
+      // 译文块在整段英文下面，可能超出无头窗口：在夹具盒子里滚到译文，再按坐标取字
+      target.scrollIntoView({ block: 'start' });
+      var node = clones[0].nextSibling; // 「。鉴于…」：第一个副本后面的文字
+      var pt = pointOf(node, '鉴于');
+      DT.hover.updateAt(pt.x, pt.y, target);
+      if (highlighted('dt-hover-target') !== '鉴于单个常见变异带来的风险通常小到可以忽略，研究者把全基因组的风险等位基因汇总成遗传风险评分，用一个数值衡量已知常见变异对某一性状的遗传关联。') {
+        return '副本后面的句子没对上：' + highlighted('dt-hover-target');
+      }
+      if (highlighted('dt-hover-src').indexOf('Given that the risk conferred') !== 0) return '原文高亮的不是第二句：' + highlighted('dt-hover-src').slice(0, 40);
+      node = clones[1].nextSibling; // 「，近来…」：第三句中间
+      pt = pointOf(node, '近来');
+      DT.hover.updateAt(pt.x, pt.y, target);
+      var hl = highlighted('dt-hover-target');
+      if (hl.indexOf('尽管最早的遗传评分') !== 0 || hl.indexOf('变异3,4,5，近来') < 0 || !/（PRS）6,7,8,9。$/.test(hl)) return '第三句（含两组副本）没整句高亮：' + hl;
+      return highlighted('dt-hover-src').indexOf('Although the earliest genetic scores') === 0 ? true : '原文没对上第三句';
+    }, 'max-height:100vh;overflow:auto');
+  });
+
+  check('文献引用·悬停对照（仅译文）：鼠标在两组引用之间的译文上 → 气泡是对应原句、高亮这一句', function () {
+    if (!window.Highlight || !CSS.highlights) return true;
+    var html = document.getElementById('tpl-nature-cite').innerHTML;
+    return withHoverFixture(html, function (box) {
+      var p = box.querySelector('.fx-nature p');
+      var prev = DT.state.mode;
+      DT.state.mode = 'translation';
+      try {
+        var u = DT.collect(p)[0];
+        var plain = stripMarks(NATURE_ZH);
+        var parts = NATURE_ZH.match(/[^。]+。/g).map(function (t) { return { n: 1, t: DT.keepText(u, t) }; });
+        if (!DT.inject(u, NATURE_ZH, 'zh-CN', DT.units.alignmentOf(parts, plain, u.sentences.length))) return 'inject 返回 false';
+      } finally {
+        DT.state.mode = prev;
+      }
+      var node = supsOf(p)[0].nextSibling;
+      var pt = pointOf(node, '鉴于');
+      DT.hover.updateAt(pt.x, pt.y, p);
+      var tip = document.querySelector('.dt-hover-tip');
+      var body = tip && !tip.hidden ? tip.querySelector('.dt-hover-body') : null;
+      if (!body || body.textContent.indexOf('Given that the risk conferred') !== 0) return '气泡不是第二句原文：' + (body ? body.textContent.slice(0, 40) : '没有气泡');
+      return highlighted('dt-hover-target').indexOf('鉴于单个常见变异') === 0 ? true : '高亮的不是这一句：' + highlighted('dt-hover-target');
+    });
+  });
+
+  check('文献引用·判定：数学指数、序数、化学式、站外链接上标、普通链接 / 数字 / 代码不当引用；Wikipedia 引注、Markdown 脚注照认', function () {
+    return withTemplate('tpl-cite-cases', 'translation', function (box) {
+      var neg = ['#neg-math', '#neg-ord', '#neg-ext', '#neg-link', '#neg-word'].map(function (sel) {
+        var u = DT.collect(box.querySelector(sel))[0];
+        if (!u) return sel + ':没收到';
+        return (u.keep || []).length + (u.wire ? ':wire' : '');
+      });
+      var r = eq(neg, ['0', '0', '0', '0', '0']);
+      if (r !== true) return '误判：' + r;
+      var pos = ['#pos-wiki', '#pos-md'].map(function (sel) {
+        var u = DT.collect(box.querySelector(sel))[0];
+        return u ? (u.keep || []).map(function (k) { return k.text + (k.cite ? '*' : ''); }).join(',') : sel + ':没收到';
+      });
+      r = eq(pos, ['[3]*', '1*']);
+      if (r !== true) return '漏判：' + r;
+      // 句末引注（Wikipedia：句号后面）也在它那一句里
+      var wiki = DT.collect(box.querySelector('#pos-wiki'))[0];
+      return wiki.wire === 'Paris is the capital of France.<k1>[3]</k1> It is also the largest city.' ? true : 'Wikipedia 引注标记不对：' + wiki.wire;
+    });
+  });
+
+  check('文献引用·纯函数：keepMarks 取落点（重复只认第一次）、sentenceEndAt 落在句末标点前、keepPlacement 换序挪句末 / 丢标记给 null', function () {
+    var keep = [{ text: '1,2' }, { text: '3' }];
+    var m = DT.units.keepMarks('甲<k1>1、2</k1>。乙<k2>3</k2>。丙<k1>1,2</k1>。', keep, 'A1,2. B3.');
+    var r = eq([m.stripped, m.at], ['甲。乙。丙。', [1, 3]]);
+    if (r !== true) return 'keepMarks：' + r;
+    r = eq(
+      [DT.units.sentenceEndAt('风险评分（PRS）。下一句。', 3), DT.units.sentenceEndAt('Scores (PRS). Next one.', 2), DT.units.sentenceEndAt('没有句号的一句', 2)],
+      [9, 12, 7]
+    );
+    if (r !== true) return 'sentenceEndAt：' + r;
+    r = eq(
+      [
+        DT.units.keepPlacement('甲乙。丙。', [1, 2]),
+        DT.units.keepPlacement('甲乙。丙。', [2, 1]),
+        DT.units.keepPlacement('甲。乙。', [3, 1]),
+        DT.units.keepPlacement('甲乙。丙。', [1, -1])
+      ],
+      [{ at: [1, 2], snapped: false }, { at: [2, 2], snapped: true }, null, null]
+    );
+    return r === true ? true : 'keepPlacement：' + r;
+  });
+
   // ---------------- 0.8.7 Pixiv 中译英换行 / 长段落切分 ----------------
   function withPixivZh(mode, fn) {
     var box = document.createElement('div');

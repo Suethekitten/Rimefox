@@ -202,6 +202,7 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
   结果：P1 → 译文1 → 分隔 <br> → P2 → 译文2 …（不是所有译文堆到容器末尾）
 - 译文节点始终带 `data-dt-target` / `data-dt-unit` / `data-dt-lang`；`makeNode` 负责排版继承、
   CJK 大标题、紧行高、窄容器、`dt-lines`（多行译文）。
+- 带文献引用的段落：译文节点里按标记位置放上标引用的副本（可点击、无 id），不是纯文本；做法与降级见 [HANDOFF §5.2.1](../HANDOFF.md) 的「文献引用」。
 - 同一个容器里多个 `[data-dt-target]` 是**正常**的。`main.js` 的 `cleanupDuplicateTargets` 只清理
   `data-dt-unit` 相同的克隆副本，不能按「同一父级只留一个」清理（0.9.1 的 E2E 抓到过这个回归）。
 
@@ -211,6 +212,7 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 - 多行段落：按行写回本段自己的行（`lineGroups` 选出的 `filled`），保留缩进、`<br>`、空行和行内元素。
   模型合并 / 拆分行时依次填写，多出的并进最后一行，多余的行清空并折叠它自己的换行；`aligned` 记录是否逐行对应。
 - **只改本段落的行**：段落之间的空行是别人的锚点，绝不折叠。
+- 带文献引用的段落：上标链接原地不动，译文按引用落点切开写在它们前后（词级 → 句级 → 降级成双语），见 [HANDOFF §5.2.1](../HANDOFF.md) 的「文献引用」。
 - 所有写入走事务；`DT.replaced` 兼容视图记录 `{el, nodes, collapsed, src, lines, aligned}`。
 
 ### 3.4 Ruby（仅译文模式）
@@ -293,12 +295,12 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 ## 7. 测试
 
 ```bash
-node --test test/*.test.mjs          # 24 个文件，CI 发版前同一条
+node --test test/*.test.mjs          # CI 发版前同一条
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp）
 # 自检页（本机 headless Chrome 需要 --no-sandbox）
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \
   --user-data-dir=/tmp/chrome-selftest --allow-file-access-from-files \
-  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 211 / 211
+  --virtual-time-budget=30000 --dump-dom "file://$PWD/selftest/index.html"   # 看 id="summary"：必须全部通过
 node tools/e2e-extension.mjs         # 真实 Chrome + 假 OpenAI 接口
 ```
 
