@@ -90,6 +90,7 @@
         node.hasAttribute('data-dt-target') ||
         node.hasAttribute('data-dt-ui') ||
         node.hasAttribute('data-dt-dir') ||
+        node.hasAttribute('data-dt-font') ||
         node.hasAttribute('data-dt-shadow-style')
       );
     }
@@ -1695,6 +1696,148 @@
     return d === 'inline' || d === 'inline-block' || d === 'inline-flex';
   }
 
+  // ---------------- 目标语言字体适配 ----------------
+  // 韩文/日文字体没有完整的中文字形时，浏览器会逐字回退到不同的中文字体：
+  // computed font-weight 仍是 400，笔画却深浅不一。只在“源字体明确属于另一种文字系统、
+  // 且没有目标文字系统字体”时，给译文单独加目标语言字体；不碰源元素本身的字体。
+  // 字体族按脚本注册，新增文字系统只需 register；不绑定任何站点。
+  DT.fonts = (function () {
+    var profiles = {
+      'zh-cn': {
+        compatible: /pingfang\s*sc|pingfangsc|microsoft\s*yahei|msyh|simsun|simhei|songti\s*sc|stson|noto\s+(sans|serif)\s+cjk\s+sc|noto\s+(sans|serif)\s+sc|notosanssc|notoserifsc|source\s+han\s+(sans|serif)\s+(sc|cn)|sourcehansc|dengxian|fangsong|kaiti|heiti/i,
+        foreign: /myeongjo|myungjo|batang|malgun|nanum|gulim|dotum|apple\s*sd\s*gothic|noto\s+(sans|serif)\s+cjk\s+kr|noto\s+(sans|serif)\s+kr|notosanskr|notoserifkr|source\s+han\s+(sans|serif)\s+kr|sourcehanskr|hiragino|yu\s*(gothic|mincho)|meiryo|ms\s*(pgothic|mincho)|noto\s+(sans|serif)\s+cjk\s+jp|noto\s+(sans|serif)\s+jp|notosansjp|notoserifjp|source\s+han\s+(sans|serif)\s+jp|sourcehansjp/i,
+        stack: '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif',
+        serif: '"Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", serif'
+      },
+      'zh-tw': {
+        compatible: /pingfang\s*tc|pingfangtc|microsoft\s*jhenghei|jhenghei|pmingliu|mingliu|songti\s*tc|noto\s+(sans|serif)\s+cjk\s+tc|noto\s+(sans|serif)\s+tc|notosanstc|notoseriftc|source\s+han\s+(sans|serif)\s+(tc|tw)|sourcehanstc/i,
+        foreign: /myeongjo|myungjo|batang|malgun|nanum|gulim|dotum|apple\s*sd\s*gothic|noto\s+(sans|serif)\s+cjk\s+kr|noto\s+(sans|serif)\s+kr|notosanskr|notoserifkr|source\s+han\s+(sans|serif)\s+kr|sourcehanskr|hiragino|yu\s*(gothic|mincho)|meiryo|ms\s*(pgothic|mincho)|noto\s+(sans|serif)\s+cjk\s+jp|noto\s+(sans|serif)\s+jp|notosansjp|notoserifjp|source\s+han\s+(sans|serif)\s+jp|sourcehansjp/i,
+        stack: '"PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif',
+        serif: '"Songti TC", "STSong", "PMingLiU", "Noto Serif CJK TC", serif'
+      },
+      ja: {
+        compatible: /hiragino|yu\s*(gothic|mincho)|meiryo|ms\s*(pgothic|mincho)|noto\s+(sans|serif)\s+cjk\s+jp|noto\s+(sans|serif)\s+jp|source\s+han\s+(sans|serif)\s+jp|takao|ipafont|ipaex/i,
+        foreign: /pingfang|microsoft\s*(yahei|jhenghei)|msyh|jhenghei|simsun|simhei|songti|noto\s+(sans|serif)\s+cjk\s+(sc|tc)|source\s+han\s+(sans|serif)\s+(sc|tc)|myeongjo|myungjo|batang|malgun|nanum|gulim|dotum|apple\s*sd\s*gothic|noto\s+(sans|serif)\s+cjk\s+kr|noto\s+(sans|serif)\s+kr|source\s+han\s+(sans|serif)\s+kr/i,
+        stack: '"Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans CJK JP", sans-serif',
+        serif: '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", serif'
+      },
+      ko: {
+        compatible: /apple\s*sd\s*gothic|malgun|gulim|dotum|batang|nanum|noto\s+(sans|serif)\s+cjk\s+kr|noto\s+(sans|serif)\s+kr|source\s+han\s+(sans|serif)\s+kr|myeongjo|myungjo|gothic/i,
+        foreign: /pingfang|microsoft\s*(yahei|jhenghei)|msyh|jhenghei|simsun|simhei|songti|noto\s+(sans|serif)\s+cjk\s+(sc|tc)|source\s+han\s+(sans|serif)\s+(sc|tc)|hiragino|yu\s*(gothic|mincho)|meiryo|ms\s*(pgothic|mincho)|noto\s+(sans|serif)\s+cjk\s+jp|source\s+han\s+(sans|serif)\s+jp/i,
+        stack: '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif',
+        serif: '"AppleMyungjo", "Batang", "Noto Serif CJK KR", serif'
+      }
+    };
+
+    function keyFor(lang) {
+      var s = String(lang || DT.state.target || '').toLowerCase().replace(/_/g, '-');
+      if (/^zh-(tw|hk|mo|hant)/.test(s)) return 'zh-tw';
+      if (/^zh/.test(s)) return 'zh-cn';
+      if (/^ja/.test(s)) return 'ja';
+      if (/^ko/.test(s)) return 'ko';
+      // 未来文字系统：优先完整 key，再退化到主语言标签（th-TH -> th）。
+      if (profiles[s]) return s;
+      var tag = s.split('-')[0];
+      return profiles[tag] ? tag : '';
+    }
+
+    function familyOf(el) {
+      if (!el || el.nodeType !== 1) return '';
+      var cs = styleOf(el);
+      if (cs && cs.fontFamily) return String(cs.fontFamily);
+      try {
+        return String(getComputedStyle(el).fontFamily || '');
+      } catch (err) {
+        return '';
+      }
+    }
+
+    function needs(lang, family) {
+      var key = keyFor(lang);
+      var p = key && profiles[key];
+      if (!p || !family) return false;
+      if (p.compatible.test(family)) return false;
+      return p.foreign.test(family);
+    }
+
+    function stackFor(lang, family) {
+      var key = keyFor(lang);
+      var p = key && profiles[key];
+      if (!p || !needs(key, family)) return '';
+      // 目标字体已按用户实测的跨文字系统字体栈落地；保留原字重/字号/行高/颜色，
+      // 不复制韩文字体的 serif 外观（很多韩文衬线字体没有完整中文字形，回退正是抖动来源）。
+      return p.stack;
+    }
+
+    function protectedEl(el) {
+      if (!el || el.nodeType !== 1) return false;
+      var tag = tagOf(el);
+      if (/^(H[1-6]|CODE|PRE|KBD|SAMP|VAR|MATH|SCRIPT|STYLE|TEXTAREA|INPUT|SELECT|BUTTON)$/.test(tag)) return true;
+      return !!(el.closest && el.closest('h1,h2,h3,h4,h5,h6,code,pre,kbd,samp,var,math,[role="math"],.katex,.MathJax,.mjx-container'));
+    }
+
+    function apply(node, lang, sourceEl) {
+      if (!node || !sourceEl || !String(node.textContent || '').trim()) return false;
+      if (protectedEl(sourceEl)) return false;
+      if (DT.areaOf && DT.areaOf(sourceEl) !== 'content') return false;
+      var family = familyOf(sourceEl);
+      var stack = stackFor(lang, family);
+      if (!stack) return false;
+      var key = keyFor(lang);
+      node.setAttribute('data-dt-font', key);
+      node.classList.add('dt-font');
+      try {
+        node.style.setProperty('font-family', stack, 'important');
+      } catch (err) {
+        node.style.fontFamily = stack;
+      }
+      return true;
+    }
+
+    // 仅译文里已写入的原文本节点：包一层只改字体族的 inline 壳；节点身份、字号、字重都继承。
+    function wrapText(node, unit, ops) {
+      if (!node || node.nodeType !== 3 || !/\S/.test(node.nodeValue || '')) return null;
+      var parent = node.parentNode;
+      if (!parent || parent.nodeType !== 1 || !parent.parentNode) return null;
+      if (parent.closest && parent.closest('a, [data-dt-font], [data-dt-ui]')) return null;
+      if (protectedEl(parent) || (unit && unit.el && protectedEl(unit.el))) return null;
+      // 导航 / 按钮 / 输入框等控件的 direct text node 不要加 inline 壳，避免 flex 布局多一项。
+      if (DT.areaOf && DT.areaOf(parent) !== 'content') return null;
+      var family = familyOf(parent);
+      var stack = stackFor(unit && unit.lang ? unit.lang : DT.state.target, family);
+      if (!stack) return null;
+      var span = document.createElement('span');
+      span.className = 'dt-font';
+      span.setAttribute('data-dt-font', keyFor(unit && unit.lang ? unit.lang : DT.state.target));
+      try {
+        span.style.setProperty('font-family', stack, 'important');
+        // 只承载字体族，不生成额外盒模型；包裹后不改变原行内 / 行布局。
+        span.style.setProperty('display', 'contents', 'important');
+      } catch (err) {
+        span.style.fontFamily = stack;
+        span.style.display = 'inline';
+      }
+      insertNode(span, parent, node, ops);
+      moveNode(node, span, null, ops);
+      ownNodes.add(span);
+      return span;
+    }
+
+    return {
+      profiles: profiles,
+      register: function (key, profile) {
+        if (!key || !profile || !profile.compatible || !profile.foreign || !profile.stack) return false;
+        profiles[String(key).toLowerCase()] = profile;
+        return true;
+      },
+      keyFor: keyFor,
+      needs: needs,
+      stackFor: stackFor,
+      apply: apply,
+      wrapText: wrapText
+    };
+  })();
+
   function makeNode(sourceEl, text, lang, forceBlock) {
     var inline = forceBlock ? false : isInlineLike(sourceEl);
     var cs = styleOf(sourceEl);
@@ -1723,6 +1866,8 @@
       'z-index: auto'
     ].join('; ') + ';';
     copyTypography(node, styleOf(sourceEl));
+    // 目标语言字体适配只作用于新译文节点；源元素字体不变。
+    if (DT.fonts) DT.fonts.apply(node, lang, sourceEl);
     // 目标语言方向独立于原网页；inline 译文不强行改对齐，块级译文用 target 方向的 start，
     // 源段落居中 / 两端对齐时保留（applyTargetNode 会写 inline !important）。
     if (DT.direction) DT.direction.applyTargetNode(node, sourceEl, lang, inline);
@@ -2344,6 +2489,7 @@
       insertNode(safeLine, boundary.parentNode, boundary, ops);
       ownNodes.add(safeLine);
       nodeUnit.set(safeLine, unit);
+      if (DT.fonts) DT.fonts.wrapText(safeLine, unit, ops);
       setText(headPiece.node, '', ops);
     }
     collapsed.forEach(function (br) {
@@ -2362,6 +2508,9 @@
         if (one && /\S/.test(one.wrote || '')) isolateTextNode(one.node, dmeta, ops);
       });
     }
+    saved.forEach(function (one) {
+      if (one && /\S/.test(one.wrote || '')) DT.fonts.wrapText(one.node, unit, ops);
+    });
     var item = {
       el: unit.el,
       nodes: saved,
@@ -2456,6 +2605,10 @@
         if (one && /\S/.test(one.wrote || '')) isolateTextNode(one.node, dmeta, ops);
       });
     }
+    // 方向壳之后再加目标语言字体壳，避免 isolateTextNode 把字体壳留在原地。
+    saved.forEach(function (one) {
+      if (one && /\S/.test(one.wrote || '')) DT.fonts.wrapText(one.node, unit, ops);
+    });
     var srcLines = DT.splitLines(unit.text);
     var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: srcLines, aligned: true };
     DT.replaced.push(item);
@@ -2617,6 +2770,7 @@
       var lead = first ? /^\s*/.exec(nodes[0].nodeValue)[0] : '';
       var wroteSafe = lead + (drop ? text : text);
       safeText.nodeValue = wroteSafe;
+      if (DT.fonts) DT.fonts.wrapText(safeText, unit, ops);
       for (var s = 0; s < nodes.length; s += 1) {
         var beforeSafe = nodes[s].nodeValue;
         setText(nodes[s], '', ops);
@@ -2999,6 +3153,23 @@
     for (var n = 1; n < texts.length; n += 1) put(texts[n], seq[n - 1].afterSlot);
     keep.forEach(function (k) {
       if (k.kind === 'xref' || k.kind === 'link') relabelAtom(k, ops, saved);
+    });
+    // 只给新插入的译文段加目标语言字体壳；原子链接 / 引用标签不动。
+    inserted.forEach(function (node) {
+      if (!node || !node.parentNode) return;
+      if (node.nodeType === 3) {
+        DT.fonts.wrapText(node, unit, ops);
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      var walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      var list = [];
+      for (var tn = walker.nextNode(); tn; tn = walker.nextNode()) {
+        if (/\S/.test(tn.nodeValue || '')) list.push(tn);
+      }
+      list.forEach(function (one) {
+        DT.fonts.wrapText(one, unit, ops);
+      });
     });
 
     var rendered = shownTextOf(unit.el);

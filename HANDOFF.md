@@ -353,6 +353,7 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
   第 i 行译文优先写进本行正文上下文。若行首第一个文本节点落在局部 <strong> / <b> / 粗体 span 里，
   且该强调壳没有覆盖整段，则在壳外插入事务保护的新文本节点承载这一行；局部强调不会扩大成整行 / 整段。
   整段都位于同一个强调壳（整段加粗公告、强调段落）或标题本身加粗时保留原样式。
+- **目标语言字体**：译文写入后按目标语言检查源 `font-family`；源字体明确属于其他文字系统（如韩文 myeongjo / 日文 mincho）且没有目标字体时，在译文文本外加 `span.dt-font`（`display:contents`，只设 font-family）并记录进 RenderTransaction。中文简繁、日文、韩文字体档案见 `DT.fonts`；`register` 可扩展其他文字系统。标题、code/pre、公式、控件和已经兼容的字体跳过；字号 / 字重 / 行高 / 颜色保持继承。
   `<br>`、空行、各行所在的元素都不动。模型改了行数时按顺序填，多出的并进最后一行，
   不够的把**本段自己的**空行 / 换行收起（`data-dt-collapsed`），**不折叠段落之间的空行**。
   单行段落仍走「整段写进第一个文本节点」。
@@ -551,6 +552,7 @@ node test/switch-geometry.test.mjs # 开关：设置页 / 弹窗共用一套几�
 ```
 node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 文献引用（Nature 上标，真实点击）/ 混合行内（Science 引用 + 图表链接）/ Shadow DOM 夹具 / 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
 node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
+node tools/e2e-extension.mjs --chosun-live  # 真实朝鲜日报正文的韩文→中文目标字体 A/B（本地假翻译，不发真实付费请求）
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
 node tools/e2e-extension.mjs --bilibili-live  # 真实 B 站视频页评论区验收（需要能上 bilibili.com；未登录只显示首屏，滚动 / 楼中楼会显示未验证）
 node tools/e2e-extension.mjs --headed --science-live  # 真实 Science Advances 论文页（Cloudflare 需要 headed；只验证引用识别 / 注入 / 还原，不调用真实模型）
@@ -768,9 +770,11 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 - **韩文随机加粗**：仅译文的 writeNodes 仍会优先复用第一个可写 TextNode。若该节点位于局部 strong / b / em / 粗体 span 内，完整译文会继承局部强调。新增 font-weight / font-style / font-family 样式边界：局部强调壳未覆盖整段时，在壳外创建 RenderTransaction 保护的 TextNode；整段强调壳或加粗标题保留原样式。
 - **字体族**：朝鲜日报等站点会用 NotoSansKR-Bold 等粗体字体族但 computed font-weight=400。styleOf 缓存之前漏掉 fontFamily，导致这一层无法识别；现在同时比较 fontWeight、fontStyle 和 bold/black/heavy 字体族。
+- **目标语言字体适配**：chrome 的 `DT.fonts` 按目标脚本注册字体栈（zh-CN / zh-TW / ja / ko，register 可扩展）；只有源字体命中其他文字系统的已知字体、且没有目标文字系统字体时才适配，不做站点 CSS 硬编码。目标文字用 inline `.dt-font` 壳（display:contents）承载 font-family；仅译文包原 TextNode，双语只改 .dt-target。标题、code/pre、公式、控件和兼容字体跳过；字号 / 字重 / 行高 / 颜色继承，字体壳 insert+moving 全进 RenderTransaction，isOwnNode 忽略 data-dt-font 防止 MutationObserver 重扫。
 - **多行 / 混合**：injectLines 对只被一行使用的行首节点做壳外迁移；injectMixed 的 put 经过 styleSafeSlot；pre-wrap、嵌套 strong/em、行内链接和引用均有本地 fixture。
 - **诊断**：DT.inspectTextStyle(needle) 返回实际 computed font-weight / font-size / font-family / font-style、从文本节点到正文容器的祖先链、写入前 DOM / 样式与当前 DOM；DT.diagnose 增加 styleBoundaryAware / styleInspector。真实朝鲜日报地址可通过 tools/e2e-extension.mjs --chosun-live 使用本地假翻译检查，不发真实付费请求。
-- **测试**：Node、自检、完整 E2E、真实朝鲜日报实时页面检查通过；compare 翻译前后字重和粗体字族，并覆盖还原 / 再次翻译。
+- **字体 A/B 截图**：`--chosun-live` 使用本地假 API 返回统一中文，生成 docs/verification/2026-10-23-chosun-font-ab/ 的原文 / 中文适配 / 关闭还原三张截图；断言中文目标字体栈、原文 chosun-myeongjo 保留、关闭后字体壳和标记归零。
+- **测试**：Node、自检、完整 E2E、真实朝鲜日报实时页面检查通过；compare 翻译前后字重、粗体字族和目标字体栈，并覆盖还原 / 再次翻译。
 
  ## 15. 专业翻译引擎
 
