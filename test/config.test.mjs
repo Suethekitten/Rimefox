@@ -13,6 +13,8 @@ import {
   providerChoices,
   mergeCustomProviderLists,
   resolveInputTarget,
+  professionalProfileFor,
+  normalizeProfessionalOptions,
   LANGUAGES
 } from '../lib/config.js';
 
@@ -68,7 +70,7 @@ t('旧结构字段被清掉', () => {
   assert.equal(next.engineConfig, undefined);
   assert.equal(next.engine, undefined);
   assert.equal(next._v, CONFIG_VERSION);
-  assert.equal(CONFIG_VERSION, 6);
+  assert.equal(CONFIG_VERSION, 7);
 });
 
 t('行为项原样保留', () => {
@@ -481,6 +483,52 @@ t('医学模式默认关闭，导入 true / false 都保留', () => {
   const base = { targetLang: 'zh-CN', theme: 'underline', mode: 'dual' };
   assert.equal(pickImportedConfig(envelope({ ...base, medicalMode: true })).config.medicalMode, true);
   assert.equal(pickImportedConfig(envelope({ ...base, medicalMode: false })).config.medicalMode, false);
+});
+
+t('专业配置迁移：旧医学开关保留，默认标准且不开额外复核', () => {
+  const old = { _v: 6, medicalMode: true, providerConfig: { deepseek: { apiKey: 'test-key', model: 'medical-model' } }, glossary: [{ source: 'trial', target: '试验' }], accentColor: 'jade', customPrompt: '保留原意' };
+  const next = migrateConfig(old);
+  assert.equal(next.professionalProfile, 'medical');
+  assert.equal(next.medicalMode, true);
+  assert.deepEqual(next.professionalOptions, { quality: 'balanced', subdomain: 'auto', maxReviewRequests: 1 });
+  assert.deepEqual(next.providerConfig, old.providerConfig);
+  assert.deepEqual(next.glossary, old.glossary);
+  assert.equal(next.accentColor, old.accentColor);
+  assert.equal(next.customPrompt, old.customPrompt);
+  assert.equal(migrateConfig({ _v: 6 }).professionalProfile, 'general');
+  assert.equal(mergeConfig(DEFAULTS, { _v: 6, medicalMode: true }).professionalProfile, 'medical');
+});
+
+t('专业配置兼容：显式 profile 优先；旧弹窗 medicalMode 能双向切换', () => {
+  const medical = mergeConfig(DEFAULTS, { professionalProfile: 'medical', medicalMode: false });
+  assert.equal(medical.medicalMode, true);
+  const general = mergeConfig(medical, { medicalMode: false });
+  assert.equal(general.professionalProfile, 'general');
+  assert.equal(mergeConfig(general, { medicalMode: true }).professionalProfile, 'medical');
+  assert.equal(mergeConfig(medical, { professionalProfile: 'general', medicalMode: true }).medicalMode, false);
+  assert.equal(professionalProfileFor({ professionalProfile: 'general', medicalMode: true }), 'general');
+});
+
+t('专业选项深合并和请求护栏：不丢子领域或质量偏好', () => {
+  const medical = mergeConfig(DEFAULTS, { professionalProfile: 'medical', professionalOptions: { quality: 'strict', subdomain: 'oncology', maxReviewRequests: 2 } });
+  const next = mergeConfig(medical, { professionalOptions: { maxReviewRequests: 0 } });
+  assert.deepEqual(next.professionalOptions, { quality: 'strict', subdomain: 'oncology', maxReviewRequests: 0 });
+  assert.deepEqual(normalizeProfessionalOptions({ quality: 'unknown', subdomain: '<script>', maxReviewRequests: 999 }), { quality: 'balanced', subdomain: 'auto', maxReviewRequests: 3 });
+  assert.equal(normalizeProfessionalOptions({ maxReviewRequests: -8 }).maxReviewRequests, 0);
+  assert.equal(normalizeProfessionalOptions({ maxReviewRequests: 2.9 }).maxReviewRequests, 2);
+});
+
+t('专业配置导入：旧/新格式与冲突兼容，错误策略不会落盘', () => {
+  const base = { targetLang: 'zh-CN', theme: 'underline', mode: 'dual' };
+  const legacy = pickImportedConfig(envelope({ ...base, medicalMode: true })).config;
+  assert.equal(legacy.professionalProfile, 'medical');
+  const source = { ...base, professionalProfile: 'general', medicalMode: true, professionalOptions: { quality: 'strict', subdomain: 'oncology', maxReviewRequests: 2 } };
+  const imported = pickImportedConfig(envelope(source));
+  assert.equal(imported.config.medicalMode, false);
+  assert.deepEqual(imported.config.professionalOptions, source.professionalOptions);
+  const bad = pickImportedConfig(envelope({ ...base, professionalProfile: 'legal', professionalOptions: { quality: 'always', subdomain: '<invalid>', maxReviewRequests: 4 } }));
+  ['professionalProfile', 'professionalOptions.quality', 'professionalOptions.subdomain', 'professionalOptions.maxReviewRequests'].forEach((key) => assert.ok(bad.rejected.includes(key), key));
+  assert.equal(bad.config.professionalOptions, undefined);
 });
 
 t('默认值：inputHotkey=alt+i、inputTargetLang=auto，且能通过导入校验', () => {

@@ -9,13 +9,10 @@ import {
   normalizeGlossary,
   createHitFingerprint,
   upsertGlossaryEntry,
-  GLOSSARY_MAX,
-  GLOSSARY_PROMPT_LIMIT
+  GLOSSARY_MAX
 } from './lib/glossary.js';
-import { MEDICAL_TERM_LIMIT } from './lib/medical/profile.js';
-// MV3 的 ServiceWorkerGlobalScope 禁止 dynamic import()（HTML 规范限制）；
-// 100 条术语、约 28KB 的静态模块直接随 worker 加载，关闭医学模式时只是不参与匹配。
-import { matchMedicalTerms, medicalFingerprintFor } from './lib/medical/terminology.js';
+import { createProfessionalEngine } from './lib/professional/engine.js';
+import { reviewHighRisk } from './lib/professional/review.js';
 import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
 import { resolveSiteRule, hostListed } from './lib/site-rules.js';
@@ -68,25 +65,14 @@ function sleep(ms) {
 }
 
 // style：趣味翻译风格（lib/config.js 的 STYLES），普通翻译为 'plain'
-async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked, align) {
+async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked, align, professional) {
   let attempt = 0;
   let lastErr = null;
   const temperature = temperatureFor(cfg, style);
   let mismatch = false;
   // 本批命中的用户术语（没命中就是空数组，提示词里不会多出术语段）
   const hits = matchGlossary(glossary, texts);
-  // 医学词库只填充用户术语剩下的预算；用户术语优先，不被医学词条挤掉。
-  let medical = null;
-  if (cfg.medicalMode === true) {
-    const remaining = Math.max(0, Math.min(MEDICAL_TERM_LIMIT, GLOSSARY_PROMPT_LIMIT - hits.length));
-    let medicalHits = [];
-    try {
-      medicalHits = matchMedicalTerms(texts, target, remaining, hits.map((one) => one.source));
-    } catch (err) {
-      medicalHits = [];
-    }
-    medical = { enabled: true, hits: medicalHits };
-  }
+  const professionalPrompt = professional.prompt(texts, hits);
   // 段落里有网页标明不翻译的内容（<kN> 保留标记）：提示词加一段「原样照抄」
   const keepMarked = hasKeepMarks(texts);
   while (attempt < 3 && !mismatch) {
@@ -107,7 +93,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
-          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align, keepMarked, medical) },
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align, keepMarked, professionalPrompt) },
           { role: 'user', content: JSON.stringify(texts) }
         ]
       });
@@ -160,12 +146,12 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
     let leftErr = null;
     let rightErr = null;
     try {
-      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked, align);
+      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked, align, professional);
     } catch (err) {
       leftErr = err;
     }
     try {
-      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked, align);
+      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked, align, professional);
     } catch (err) {
       rightErr = err;
     }
@@ -212,13 +198,18 @@ async function handleTranslate(msg, sender) {
   const target = msg.target === 'auto' ? resolveInputTarget(msg.target, msg.pageLang) : msg.target || cfg.targetLang;
   const style = styleById(msg.style).value; // 不认识的风格按普通翻译
   const glossary = normalizeGlossary(cfg.glossary);
-  const medicalOn = cfg.medicalMode === true;
+  const professional = createProfessionalEngine(cfg, {
+    target, style, documentContext: msg.documentContext,
+    excludeSources: new Set(glossary.map(one => one.source))
+  });
+  const reviewBudget = { remaining: Math.max(0, Math.min(3, Number(professional.options.maxReviewRequests) || 0)) };
   const rawTexts = Array.isArray(msg.texts) ? msg.texts : [];
   const texts = rawTexts.map((t) => (t == null ? '' : String(t)));
   const results = new Array(texts.length).fill(null);
   // 结构化句子对齐（可选）：整页翻译才请求；划词 / 输入框 / 字幕不传，行为与 0.9.0 一致
   const wantAlign = msg.align === true && !noCache;
   const alignments = new Array(texts.length).fill(null);
+  const validations = new Array(texts.length).fill(null);
 
   const active = activeConfig(cfg);
   if (!active.apiKey) {
@@ -235,14 +226,11 @@ async function handleTranslate(msg, sender) {
     prompt: promptFingerprint(cfg.customPrompt)
   };
   const hitPrint = createHitFingerprint(glossary);
-  const userSources = new Set(glossary.map((one) => one.source));
   const keys = new Map();
   const keyOf = (text) => {
     if (!keys.has(text)) {
-      // 医学模式：规则 + 词库版本 + 这段原文真正命中的医学术语（用户已覆盖的除外）。
-      // 关闭时 medical 为空，缓存键和旧版本逐字一致。
-      const medicalScope = medicalOn ? medicalFingerprintFor(text, target, userSources) : '';
-      keys.set(text, cache.makeKey({ ...scope, glossary: hitPrint(text), medical: medicalScope }, text));
+      // Profile hooks own terminology, context and quality identity. General preserves old keys.
+      keys.set(text, cache.makeKey({ ...scope, glossary: hitPrint(text), professional: professional.fingerprint(text) }, text));
     }
     return keys.get(text);
   };
@@ -291,6 +279,8 @@ async function handleTranslate(msg, sender) {
     if (hit !== undefined) {
       results[index] = hit;
       alignments[index] = hitAlign;
+      // String cache compatibility: deterministic reports can always be recomputed locally.
+      validations[index] = professional.validate(text, hit);
       cached += 1;
       usageStats.cacheHit();
     } else {
@@ -302,10 +292,11 @@ async function handleTranslate(msg, sender) {
   let firstError = null;
 
   // 这一条的结果定下来了：回填到它出现的所有位置；失败（null）时记下第一个原因
-  function fill(text, value, err, parts) {
+  function fill(text, value, err, parts, validation) {
     groups.get(text).forEach((index) => {
       results[index] = value;
       alignments[index] = parts || null;
+      validations[index] = validation || (typeof value === 'string' && value ? professional.validate(text, value) : null);
     });
     if (value === null && !firstError) firstError = err || new ApiError('翻译失败', 0, '');
   }
@@ -319,7 +310,7 @@ async function handleTranslate(msg, sender) {
     if (!running) return true;
     waits.push(
       running.then((done) => {
-        fill(text, done.value, done.error, done.parts);
+        fill(text, done.value, done.error, done.parts, done.validation);
       })
     );
     return false;
@@ -356,17 +347,17 @@ async function handleTranslate(msg, sender) {
       resolve = r;
     });
     inflight.set(key, running);
-    settles.set(text, (value, error, parts) => {
+    settles.set(text, (value, error, parts, validation) => {
       if (inflight.get(key) === running) inflight.delete(key);
-      resolve({ value, error, parts });
+      resolve({ value, error, parts, validation });
     });
   });
-  function settle(text, value, err, parts) {
-    fill(text, value, err, parts);
+  function settle(text, value, err, parts, validation) {
+    fill(text, value, err, parts, validation);
     const done = settles.get(text);
     if (done) {
       settles.delete(text);
-      done(value, value === null ? err || firstError : null, parts || null);
+      done(value, value === null ? err || firstError : null, parts || null, validation);
     }
   }
 
@@ -388,28 +379,69 @@ async function handleTranslate(msg, sender) {
   });
   if (current.length > 0) batches.push(current);
 
+  async function requestReview(source, translation, report) {
+    let reviewSource = source;
+    let reviewCandidate = translation;
+    let masked = null;
+    if (cfg.privacyEnabled === true) {
+      masked = maskTexts([source, translation], optionsFromConfig(cfg));
+      if (masked.rows.some(row => !row.ok)) throw new Error('review-privacy-mask-failed');
+      reviewSource = masked.rows[0].masked;
+      reviewCandidate = masked.rows[1].masked;
+    }
+    const hits = matchGlossary(glossary, [reviewSource]);
+    const meta = {};
+    try {
+      const raw = await chat({
+        ...active, temperature: 0, timeoutMs: Number(cfg.timeoutMs) || 60000,
+        thinkingMode: cfg.thinkingMode, thinkingExtra: cfg.thinkingExtra, maxHttpAttempts: 1,
+        maxTokens: Math.min(8000, 512 + reviewSource.length * 2), meta,
+        messages: [
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, !!masked, false, hasKeepMarks([reviewSource]), professional.prompt([reviewSource], hits)) +
+            '\n【定向质量复核】本轮输入是对象数组，每项含 source（原文）、translation（待复核译文）、risks（本地可疑项代码）。只返回与输入同序的 JSON 字符串数组。逐项对照原文核查数字、单位、引用标记、否定、条件、因果与结论强弱，仅在原文支持时纠正译文；疑点不等于事实，不得添加医学建议。保留所有隐私占位符和引用标记。本次模型复核不是专家审核。' },
+          { role: 'user', content: JSON.stringify([{ source: reviewSource, translation: reviewCandidate, risks: report.issues.map(issue => issue.code) }]) }
+        ]
+      });
+      const parsed = parseArray(raw, 1);
+      if (!parsed || typeof parsed[0] !== 'string') throw new Error('invalid-review-array');
+      let value = parsed[0];
+      if (masked) {
+        const tokens = [...new Set(masked.rows.flatMap(row => row.tokens))];
+        const restored = restoreText(value, tokens, masked.values);
+        if (!restored.ok) throw new Error('review-privacy-restore-failed');
+        value = restored.text;
+      }
+      return normalizeTranslationBreaks(source, value);
+    } finally {
+      if (meta.http) usageStats.request(meta.http);
+      (meta.usages || []).forEach(usage => usageStats.response(usage));
+      (meta.finishReasons || []).forEach(reason => usageStats.finish(reason));
+    }
+  }
+
   const runs = batches.map((payload) =>
     (async () => {
       await acquire();
       try {
         // 发出去的是脱敏后的文本；映射只在本地
         const wire = privacyRows ? payload.map((text) => privacyRows.get(text).masked) : payload;
-        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows, wantAlign);
+        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows, wantAlign, professional);
         if (!out || !out.texts) throw new ApiError('模型返回无法解析', 0, '');
-        payload.forEach((text, k) => {
+        for (let k = 0; k < payload.length; k += 1) {
+          const text = payload[k];
           let value = out.texts[k];
           let parts = (out.aligns && out.aligns[k]) || null;
           if (value === null) {
             // 拆批时一半失败：这一条按失败处理，另一半已经成功的照常写缓存
             settle(text, null, new ApiError('其中一部分译文失败，稍后重试', 0, ''));
-            return;
+            continue;
           }
           if (privacyRows) {
             const back = restoreText(String(value == null ? '' : value), privacyRows.get(text).tokens, privacyValues);
             if (!back.ok) {
               // 占位符丢失 / 被改写 / 对不上：这一段判失败，不输出半截译文，也不缓存
               settle(text, null, new ApiError('本地隐私保护无法还原这段译文，已跳过', 0, back.reason || ''));
-              return;
+              continue;
             }
             value = back.text;
             parts = null; // 脱敏还原会改变字符偏移，旧对齐不再可靠
@@ -421,10 +453,20 @@ async function handleTranslate(msg, sender) {
           // 写入前兜底：残留 JSON 包装 / 字段名 / 提示词原句 → 这一条按失败处理，不插进网页、不进缓存
           if (typeof value === 'string' && leaksWrapper(text, value)) {
             settle(text, null, new ApiError('模型返回的译文里混进了 JSON 格式，已丢弃', 0, ''));
-            return;
+            continue;
           }
           let result = '';
+          let validation = null;
           if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {
+            validation = professional.validate(text, value);
+            const reviewed = await reviewHighRisk({
+              engine: professional, source: text, translation: value, report: validation, budget: reviewBudget,
+              review: requestReview,
+              accept: candidate => !leaksWrapper(text, candidate) && !isRunaway(text, candidate) && !looksForeignForTarget(candidate, target)
+            });
+            value = reviewed.translation;
+            validation = reviewed.report;
+            if (reviewed.changed) parts = null; // A new translation invalidates the old model offsets.
             result = value;
             // 目标语言明显不符（例如英文目标却回了整段中文）：这次仍显示，但绝不写缓存 / 对齐旁路，
             // 免得一次模型抽风永久生效；下次请求会重新翻。不再追加请求，也就不会重复计费。
@@ -440,8 +482,8 @@ async function handleTranslate(msg, sender) {
           }
           // 否则：模型返回空（"EN"/"×" 这类不需要翻的），或译文长得离谱（见 isRunaway）：给 ''，
           // 和失败的 null 区分开，内容脚本据此记为"与原文相同"而不是失败。不进缓存，免得一次抽风永久生效。
-          settle(text, result, null, parts);
-        });
+          settle(text, result, null, parts, validation);
+        }
       } catch (err) {
         if (!firstError) firstError = err;
       } finally {
@@ -458,13 +500,14 @@ async function handleTranslate(msg, sender) {
 
   const failed = results.filter((r) => r === null).length;
   if (results.length && failed === results.length) {
-    return { ok: false, error: describeError(firstError), results, alignments };
+    return { ok: false, error: describeError(firstError), results, alignments, validations };
   }
 
   return {
     ok: true,
     results,
     alignments,
+    validations,
     failed,
     cached,
     error: firstError ? describeError(firstError) : ''

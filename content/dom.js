@@ -337,7 +337,7 @@
   // 现在把它当保留区：编号随句子送翻、标记原样回来，页面上的上标链接本身永远不写；双语译文里放它的副本。
   // 只认「<sup> + 可见文字只有编号和分隔符 + 编号都在链接里 + 每个链接都指向文献锚点」：
   // 数学指数 x<sup>2</sup>、10<sup>−6</sup>、化学式 H<sub>2</sub>O、序数 1<sup>st</sup>、普通链接都不满足
-  var CITE_TEXT = /^[\s[(]*\d{1,4}(?:\s*[,，;；–—−-]\s*\d{1,4})*[\s\])]*$/;
+  var CITE_TEXT = /^[\s[(]*\d{1,4}(?:\s*[,，;；/–—−-]\s*\d{1,4})*[\s\])]*$/;
   // 链接自己说明是引用：DPUB-ARIA 角色，或 data-test / data-track-action / aria-label / class 里的字样。
   // 用词边界避免 preference 里的 reference 误命中；reference anchor / citation-ref 这类带连字符的照样命中。
   var CITE_HINT = /(?:^|[\s_-])(citations?|references?|footnotes?|biblio(?:graphy|ref)?|noteref|cite|xref|fn-?ref)(?:[\s_-]|$)/i;
@@ -408,6 +408,21 @@
 
   var CITE_TAGS = { SUP: 1, SUB: 1, A: 1, SPAN: 1, CITE: 1, SMALL: 1, B: 1, I: 1, EM: 1, STRONG: 1 };
 
+  // 出版社可能在编号后加 display:none / hidden 的辅助标签。它们不是可见编号，
+  // 但必须连同原始包装原样保留；只在原始 textContent 不像编号时补做这一遍。
+  function visibleCitationNodes(el) {
+    var out = [];
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        if (node.nodeType === 3) return NodeFilter.FILTER_ACCEPT;
+        var style = getComputedStyle(node);
+        return node.hidden || style.display === 'none' || style.visibility === 'hidden' ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
+      }
+    });
+    for (var node = walker.nextNode(); node; node = walker.nextNode()) out.push(node);
+    return out;
+  }
+
   // 文献引用不再是「必须是 sup」：Science 用 <a role="doc-biblioref"><i>1</i></a> 直接夹在正文里，
   // 其他出版社用 span / cite / 单链接。判据是组合证据：
   //   数字编号格式 + 链接指向文献目标（或 role / 明确的 citation 字样）+ 数字都在链接里。
@@ -418,6 +433,13 @@
     var text = String(el.textContent || '');
     var tag = tagOf(el);
     var yes = false;
+    var visible = null;
+    var visibleSet = null;
+    if (!CITE_TEXT.test(text) && (tag === 'A' || el.getElementsByTagName('a').length)) {
+      visible = visibleCitationNodes(el);
+      visibleSet = new Set(visible);
+      text = visible.map(function (node) { return node.nodeValue; }).join('');
+    }
     if (CITE_TEXT.test(text)) {
       if (tag === 'A') {
         yes = citeLink(el, el);
@@ -428,6 +450,7 @@
           // 编号都在链接里：上标里夹着链接之外的数字（「see 3」）不算
           var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
           for (var t = walker.nextNode(); t && yes; t = walker.nextNode()) {
+            if (visibleSet && !visibleSet.has(t)) continue;
             if (/\d/.test(t.nodeValue) && !(t.parentNode && t.parentNode.closest && t.parentNode.closest('a'))) yes = false;
           }
           for (var i = 0; yes && i < links.length; i += 1) yes = citeLink(links[i], el);
@@ -2482,11 +2505,33 @@
     return { at: out, mode: 'sentence' };
   }
 
-  // 文字的落点不能在单元内部的链接里（混合段落里链接本身就是原子，正常不会出现；兜底再往外挪到链接外面）
-  function safeSlot(unit, node, after) {
+  // CSS 上标没有统一标签。只有「已经确认是引用的原子」才看排版证据；字号小本身不是引用证据。
+  // 普通 small / 普通链接仍留在原本的局部排版上下文。
+  function raisedCitationShell(el) {
+    var style = getComputedStyle(el);
+    if (style.verticalAlign === 'super' || style.verticalAlign === 'sub') return true;
+    if ((style.position === 'relative' || style.position === 'absolute') &&
+        (parseFloat(style.top) < 0 || parseFloat(style.bottom) > 0)) return true;
+    return style.transform && style.transform !== 'none';
+  }
+
+  // 引用原子的安全边界是整条特殊排版包装链，不能只跨出 A 后停在 SUP / CSS 上标里。
+  // 必须在清空原文前计算：isCitationEl 依赖原始数字 / 分隔符，写入后再判断会丢掉包装语义。
+  function safeSlot(unit, node, after, citation, memo) {
+    if (!node || !node.parentNode) return null;
     var cur = node;
     for (var p = cur.parentNode; p && p !== unit.el && p.nodeType === 1; p = p.parentNode) {
-      if (tagOf(p) === 'A') cur = p;
+      var tag = tagOf(p);
+      var special = false;
+      if (citation) {
+        if (memo && memo.has(p)) special = memo.get(p);
+        else {
+          special = isCitationEl(p) || raisedCitationShell(p);
+          if (memo) memo.set(p, special);
+        }
+      }
+      if (tag === 'A' || tag === 'SUP' || tag === 'SUB' ||
+          special) cur = p;
     }
     return { parent: cur.parentNode, before: after ? cur.nextSibling : cur };
   }
@@ -2605,7 +2650,7 @@
         seq.push(boundary);
       }
       keep.forEach(function (k, i) {
-        if (lineOf[i] === l) seq.push({ node: k.el, pos: at[i], keep: i });
+        if (lineOf[i] === l) seq.push({ node: k.el, pos: at[i], keep: i, cite: k.kind === 'cite' });
       });
     }
     var texts = [];
@@ -2618,6 +2663,25 @@
       from = Math.max(from, item.br || item.nl ? item.pos + 1 : item.pos);
     });
     texts.push(stripped.slice(from));
+
+    // 先计划、再写入。多个原子共享同一包装时，固定的 before 让外移后的文字仍按页面顺序追加。
+    var slotMemo = new Map();
+    var firstConnected = null;
+    var previousConnected = null;
+    for (var si = 0; si < seq.length; si += 1) {
+      if (seq[si].node.parentNode) { firstConnected = seq[si]; break; }
+    }
+    seq.forEach(function (item) {
+      if (!item.nl) {
+        item.beforeSlot = safeSlot(unit, item.node, false, item.cite, slotMemo);
+        item.afterSlot = safeSlot(unit, item.node, true, item.cite, slotMemo);
+        previousConnected = item;
+        return;
+      }
+      var anchor = previousConnected || firstConnected;
+      if (anchor) item.newlineSlot = safeSlot(unit, anchor.node, !!previousConnected, anchor.cite, slotMemo);
+      if (!item.newlineSlot) item.newlineSlot = { parent: unit.el, before: null };
+    });
 
     var ops = [];
     var saved = [];
@@ -2640,21 +2704,12 @@
     // 它进事务、参与还原；之后的译文段插在它前后，硬换行和缩进都保留。
     seq.forEach(function (item, n) {
       if (!item.nl) return;
-      var prev = n > 0 ? seq[n - 1] : null;
-      var next = n + 1 < seq.length ? seq[n + 1] : null;
-      var parent = null;
-      var before = null;
-      if (prev && prev.node && prev.node.parentNode) {
-        parent = prev.node.parentNode;
-        before = prev.node.nextSibling;
-      } else if (next && next.node && next.node.parentNode) {
-        parent = next.node.parentNode;
-        before = next.node;
-      } else if (unit.el) {
-        parent = unit.el;
-      }
-      if (!parent) return;
-      insertNode(item.node, parent, before, ops);
+      var slot = item.newlineSlot;
+      insertNode(item.node, slot.parent, slot.before, ops);
+      // 前一原子的后段必须在新换行之前；不能继续用原来包装之后的尾锚点。
+      if (n > 0) seq[n - 1].afterSlot = { parent: slot.parent, before: item.node };
+      item.beforeSlot = safeSlot(unit, item.node, false, false);
+      item.afterSlot = safeSlot(unit, item.node, true, false);
       nodeUnit.set(item.node, unit);
       ownNodes.add(item.node);
       inserted.push(item.node);
@@ -2668,8 +2723,8 @@
       inserted.push(node);
     }
     // 第 0 段在序列第一个之前；第 n 段紧跟在第 n-1 个之后
-    put(texts[0], safeSlot(unit, seq[0].node, false));
-    for (var n = 1; n < texts.length; n += 1) put(texts[n], safeSlot(unit, seq[n - 1].node, true));
+    put(texts[0], seq[0].beforeSlot);
+    for (var n = 1; n < texts.length; n += 1) put(texts[n], seq[n - 1].afterSlot);
     keep.forEach(function (k) {
       if (k.kind === 'xref' || k.kind === 'link') relabelAtom(k, ops, saved);
     });

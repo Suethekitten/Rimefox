@@ -570,8 +570,14 @@ if (!swTarget) throw new Error('找不到扩展的 service worker');
 const sw = await attach(swTarget.targetId);
 const swEval = (code) => evaluate(sw, '(async () => {' + code + '})()');
 const readConfig = () => swEval("return (await chrome.storage.local.get('config')).config;");
-const patchConfig = (patch) =>
-  swEval("const c = (await chrome.storage.local.get('config')).config; Object.assign(c, " + JSON.stringify(patch) + '); await chrome.storage.local.set({ config: c }); return true;');
+const patchConfig = (patch) => {
+  // This fixture writes storage directly; keep the v7 compatibility aliases coherent,
+  // as saveConfig does for the actual popup/options controls tested below.
+  const next = { ...patch };
+  if (next.professionalProfile === 'general' || next.professionalProfile === 'medical') next.medicalMode = next.professionalProfile === 'medical';
+  else if (typeof next.medicalMode === 'boolean') next.professionalProfile = next.medicalMode ? 'medical' : 'general';
+  return swEval("const c = (await chrome.storage.local.get('config')).config; Object.assign(c, " + JSON.stringify(next) + '); await chrome.storage.local.set({ config: c }); return true;');
+};
 
 await swEval(
   'await chrome.storage.local.set({ config: ' +
@@ -1144,6 +1150,23 @@ async function optionsChecks() {
   await evaluate(o, "document.getElementById('save').click(); true");
   await sleep(1000);
   check('设置页：关闭医学模式并保存', (await readConfig()).medicalMode === false, 'medicalMode=' + (await readConfig()).medicalMode);
+
+  const qualityUi = await evaluate(o, `(function(){
+    var select=document.getElementById('professionalQuality');
+    var limit=document.getElementById('professionalMaxReviewRequests');
+    var hint=document.getElementById('professionalStrictHint');
+    return {value:select&&select.value,values:select&&Array.from(select.options).map(x=>x.value),limit:limit&&limit.value,hint:hint&&hint.textContent};
+  })()`);
+  check('设置页：专业质量默认标准，严格模式明确额外费用和审核边界', qualityUi.value === 'balanced' && qualityUi.values.join(',') === 'fast,balanced,strict' && /API/.test(qualityUi.hint) && /费用|cost/i.test(qualityUi.hint) && /专家|expert/i.test(qualityUi.hint), JSON.stringify(qualityUi));
+  await evaluate(o, "document.getElementById('professionalQuality').value='strict';document.getElementById('professionalQuality').dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('professionalMaxReviewRequests').value='2';document.getElementById('professionalMaxReviewRequests').dispatchEvent(new Event('input',{bubbles:true}));true");
+  await until(() => evaluate(o, "!document.getElementById('save').disabled"));
+  await evaluate(o, "document.getElementById('save').click();true");
+  const strictConfig = await until(async () => { const cfg = await readConfig(); return cfg.professionalOptions?.quality === 'strict' && cfg.professionalOptions?.maxReviewRequests === 2 ? cfg : null; }, 5000);
+  check('设置页：严格策略和有限复核次数可保存', strictConfig?.professionalOptions?.quality === 'strict' && strictConfig?.professionalOptions?.maxReviewRequests === 2 && strictConfig?.professionalProfile === 'general', JSON.stringify(strictConfig?.professionalOptions));
+  await evaluate(o, "document.getElementById('professionalQuality').value='balanced';document.getElementById('professionalQuality').dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('professionalMaxReviewRequests').value='1';document.getElementById('professionalMaxReviewRequests').dispatchEvent(new Event('input',{bubbles:true}));true");
+  await until(() => evaluate(o, "!document.getElementById('save').disabled"));
+  await evaluate(o, "document.getElementById('save').click();true");
+  await sleep(800);
 
   const importFile = path.join(WORK, 'import.json');
   fs.writeFileSync(importFile, JSON.stringify({ app: 'rimefox', schema: 1, config: { targetLang: 'zh-CN', theme: 'underline', mode: 'dual', glossary: [{ source: 'Rimefox', target: '凛狐' }] } }));

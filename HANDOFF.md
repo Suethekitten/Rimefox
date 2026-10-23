@@ -57,7 +57,8 @@ edge-bilingual/
 ├── _locales/              manifest 文案（zh_CN / en）：名称、简介按浏览器界面语言显示
 ├── background.js          service worker：消息中枢、并发闸门、批处理、缓存、重试
 ├── lib/
-│   ├── config.js          配置默认值 + 存储读写 + 版本迁移（v6）
+│   ├── config.js          配置默认值 + 存储读写 + 版本迁移（v7）
+│   ├── professional/      专业 Registry、策略、上下文、本地校验与有限严格复核；医学适配现有 medical/
 │   ├── provider.js        接口门面：chat() / listModels()，按 engine 分发
 │   ├── engines/           各协议实现（openai / anthropic / gemini）
 │   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
@@ -144,7 +145,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
-| `translate` | `{texts: string[], target: string, style?: string, noCache?: boolean, pageLang?: string}` | `{ok, results: (string\|null)[], failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败。`target: 'auto'` = 跟随页面语言（配 `pageLang`，即 `<html lang>`，认不出来用英文）；`noCache: true` = 不读也不写三层缓存，输入框翻译用（草稿 / 私信不落盘）|
+| `translate` | `{texts: string[], target: string, style?: string, noCache?: boolean, pageLang?: string, documentContext?: object}` | `{ok, results: (string\|null)[], alignments, validations, failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败。`target: 'auto'` 跟随 `pageLang`；`noCache` 不读写缓存。可选专业上下文与质量结果见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
 | `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本）。`config.page` 是后台按发送方网址算好的 `{accent, customCss, typo, site, night, provider}`（自定义 CSS 已清洗、站点规则已匹配） |
 | `mode:set` | `{mode}` | `{ok}` | 悬浮入口切显示方式后记进配置；只接受 `dual` / `translation`，内容脚本改不了别的配置项 |
 | `hover:set` | `{value: boolean}` | `{ok, value}` / `{ok:false,error}` | 悬浮入口切悬停对照；只接受严格布尔值，内容脚本不能改其他配置项 |
@@ -613,10 +614,12 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 | `dockSide` | `right` | 悬浮入口位置：`right` / `left` |
 | `dockAutoHide` | true | 悬浮入口收起时半藏；贴边吸附时只露出半个小球 |
 | `customPrompt` | `''` | 追加到系统提示词末尾，进缓存指纹（改了旧译文失效） |
-| `medicalMode` | false | 医学专业模式：全局开关；追加医学规则和本批命中的已审核术语，缓存键单独带 `medical` 段。见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md) |
+| `professionalProfile` | `general` | 通用 / 医学专业策略；架构、质量与缓存规则见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
+| `professionalOptions` | 见配置默认值 | 质量等级、子领域与有限严格复核预算，见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
+| `medicalMode` | false | 医学开关的旧版兼容别名，与 `professionalProfile` 同步。|
 | `glossary` | `[]` | 术语表 `[{source, target, category?}]`，全局一份，命中才注入提示词；缓存键只带这段原文命中的术语的指纹（没命中是 `none`），加 / 改一条只让用到它的段落重翻。设置页可编辑 / CSV 导入导出，网页里划词气泡也能「加入术语表」（走后台 `glossary:add`）|
 | `debug` | false | 输出调试日志 |
-| `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |
+| `_v` | 7 | 配置版本（迁移逻辑在 `migrateConfig`） |
 
 ---
 
@@ -741,8 +744,6 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 - **悬浮入口首帧**：首次挂载 / body 重建 / 关闭后再打开时，host 先带 `data-init`（隐藏 + 禁 left/top 过渡）插入并强制布局；`render()` / `place()` 用真实尺寸、保存坐标、贴边和半隐藏状态算完最终位置后再撤掉 hidden，首帧不再从 (0,0) 飞过去。保存坐标越界由 `DT.dockPlace` clamp；body 直接子节点用轻量 MutationObserver 重挂，`pageshow` 再检查。正常拖拽 / 吸附 / 展开仍保留原过渡。
 - **已知限制**：模型把混合段落分行合并 / 拆开后行数对不上、或 Ruby / 链接结构无法安全重建时保持原文并报 invalid-placement / unsafe-structure（不退回双语，也不无限重试）；Ruby 混排时 `<ruby>` 整体保留、基字本身不翻译；混合段落里的普通链接默认保留原文字，只有图表 / 补充材料等可靠标签做本地化（任意链接文字翻译仍需链接级标记，ROADMAP P1-2）。
 
-## 15. 医学专业模式
+## 15. 专业翻译引擎
 
-- 全局开关 <code>medicalMode</code>，设置页 / 弹窗共用配置；默认关闭，旧配置由 <code>mergeConfig</code> 补 <code>false</code>，不升 <code>_v</code>。
-- 100 条核心词库（MIT 44 + Wikidata/P486 56），来源 / 许可见 [docs/MEDICAL-DATA-AUDIT.md](docs/MEDICAL-DATA-AUDIT.md)；实现、提示词、缓存隔离、测试和限制见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md)。
-- 关键坑：MV3 service worker **不能 <code>import()</code>**，词库必须静态 import；页面重建要比较 <code>DT.state.renderedMedical</code>，不能只比较上一次 <code>loadConfig</code>。
+专业策略通过静态 Registry 接入共用翻译管线，医学是首个实现；配置迁移、数据、上下文、质量与费用边界统一见 [专业引擎文档](docs/PROFESSIONAL-TRANSLATION.md)。当前本地实施与验收证据见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)。DOM 引用的插入安全独立于专业模式，见 [翻译引擎渲染契约](docs/TRANSLATION-ENGINE-HANDOFF.md#33-仅译文)。

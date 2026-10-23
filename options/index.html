@@ -193,6 +193,25 @@
               </span>
               <input id="medicalMode" type="checkbox" class="switch" />
             </label>
+            <label class="row stack" for="professionalQuality">
+              <span class="row-text">
+                <span class="row-title">专业翻译质量</span>
+                <span class="row-desc">快速：提示词与术语；标准：增加本地检查；严格：允许复核高风险片段。</span>
+              </span>
+              <select id="professionalQuality" aria-describedby="professionalStrictHint">
+                <option value="fast">快速</option>
+                <option value="balanced">标准（推荐）</option>
+                <option value="strict">严格</option>
+              </select>
+            </label>
+            <p id="professionalStrictHint" class="row-desc">严格模式默认关闭；复核会额外调用您配置的 API，增加 Token 用量与费用。模型复核不等于医学专家审核。</p>
+            <label class="row stack" for="professionalMaxReviewRequests">
+              <span class="row-text">
+                <span class="row-title">严格模式额外请求上限</span>
+                <span class="row-desc">每个翻译批次最多允许 0–3 次额外请求（含网络重试）；整页可能包含多个批次。0 表示不额外调用。快速与标准模式不增加复核请求。</span>
+              </span>
+              <input id="professionalMaxReviewRequests" type="number" min="0" max="3" step="1" value="1" />
+            </label>
           </div>
 
           <div class="card">

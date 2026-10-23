@@ -131,6 +131,154 @@
   // 以前每次都直接覆盖 DT.state，翻译中的页面不重建，同一页就混着双语和仅译文、或混着两种语言
   var cfgMode = null;
   var cfgTarget = null;
+  var contextDirty = true;
+  var renderedContextScopes = [];
+
+  // 内容脚本不能 import 配置模块。这两个纯函数与 lib/config.js 有差分测试。
+  function professionalProfileFor(cfg) {
+    var value = cfg || {};
+    if (value.professionalProfile === 'medical' || value.professionalProfile === 'general') return value.professionalProfile;
+    return value.medicalMode === true ? 'medical' : 'general';
+  }
+  function professionalOptions(value) {
+    var options = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    var requests = Number(options.maxReviewRequests === undefined ? 1 : options.maxReviewRequests);
+    return {
+      quality: ['fast', 'balanced', 'strict'].indexOf(options.quality) >= 0 ? options.quality : 'balanced',
+      subdomain: typeof options.subdomain === 'string' && /^[a-z][a-z0-9-]{0,39}$/.test(options.subdomain) ? options.subdomain : 'auto',
+      maxReviewRequests: isFinite(requests) ? Math.max(0, Math.min(3, Math.floor(requests))) : 1
+    };
+  }
+  function professionalStrategy(cfg) {
+    var options = professionalOptions(cfg && cfg.professionalOptions);
+    return JSON.stringify([professionalProfileFor(cfg), options.quality, options.subdomain, options.maxReviewRequests]);
+  }
+  function contextText(el, limit) {
+    if (!el) return '';
+    var replaced = DT.replacedOf && DT.replacedOf(el);
+    if (replaced && typeof replaced.src === 'string') return replaced.src.slice(0, limit);
+    var text = '';
+    function read(node) {
+      if (!node || text.length >= limit) return;
+      if (node.nodeType === 3) {
+        text += String(node.nodeValue || '').slice(0, limit - text.length);
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (node.hasAttribute && (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui') || node.getAttribute('aria-hidden') === 'true')) return;
+      var children = node.childNodes || [];
+      for (var i = 0; i < children.length && text.length < limit; i += 1) read(children[i]);
+    }
+    read(el);
+    return text.replace(/\s+/g, ' ').trim();
+  }
+  function contextRoot(el) {
+    return el && el.closest ? el.closest('article') || el.closest('main,[role="main"]') : null;
+  }
+  function pageContextRoot() {
+    if (!document.querySelectorAll) return null;
+    var articles = document.querySelectorAll('article');
+    if (articles.length === 1) return articles[0];
+    // 多论文列表不能把第一篇的章节标题当作整页的上下文。
+    return articles.length ? null : document.querySelector('main,[role="main"]') || document.body;
+  }
+  function documentSnapshot(root) {
+    var context = { title: String(document.title || '').replace(/\s+/g, ' ').trim().slice(0, 240), headings: [], abbreviations: {} };
+    var scope = root || pageContextRoot();
+    var headings = scope && scope.querySelectorAll ? scope.querySelectorAll('h1,h2,h3') : [];
+    var budget = 600;
+    for (var i = 0; i < headings.length && context.headings.length < 8 && budget > 0; i += 1) {
+      var heading = headings[i];
+      if (scope.tagName === 'ARTICLE' && contextRoot(heading) !== scope) continue;
+      if (heading.closest && heading.closest('nav,footer,aside,[data-dt-ui],[aria-hidden="true"]')) continue;
+      var text = contextText(heading, Math.min(120, budget));
+      if (text && context.headings.indexOf(text) < 0) {
+        context.headings.push(text);
+        budget -= text.length;
+      }
+    }
+    return context;
+  }
+  function documentFingerprint(context) {
+    return JSON.stringify([context.title, context.headings]);
+  }
+  function contextChanged(snapshot) {
+    if (DT.state.renderedContext !== undefined && DT.state.renderedContext !== documentFingerprint(snapshot)) return true;
+    for (var i = 0; i < renderedContextScopes.length; i += 1) {
+      var entry = renderedContextScopes[i];
+      if (entry.root.isConnected !== false && documentFingerprint(documentSnapshot(entry.root)) !== entry.key) return true;
+    }
+    return false;
+  }
+  function rememberContextScope(root, snapshot) {
+    if (!root) return;
+    for (var i = 0; i < renderedContextScopes.length; i += 1) if (renderedContextScopes[i].root === root) return;
+    renderedContextScopes.push({ root: root, key: documentFingerprint(snapshot) });
+    if (renderedContextScopes.length > 16) renderedContextScopes.shift();
+  }
+  // 保守的长名(ABC)识别：从缩写末尾反向匹配各字母，首字母必须在单词开头。
+  // 不猜测没有明确定义的缩写；定义只活在当前批次，不跨论文保存。
+  function abbreviationLongName(prefix, abbreviation) {
+    var chars = abbreviation.replace(/[^A-Z0-9]/g, '');
+    var words = prefix.replace(/^[\s\S]*[.;:!?\n]/, '').trim().split(/\s+/);
+    var candidate = words.slice(-Math.min(chars.length + 5, chars.length * 2)).join(' ');
+    var at = candidate.length - 1;
+    for (var ci = chars.length - 1; ci >= 0; ci -= 1) {
+      var letter = chars.charAt(ci).toLowerCase();
+      while (at >= 0 && (candidate.charAt(at).toLowerCase() !== letter || (ci === 0 && at > 0 && /[A-Za-z0-9]/.test(candidate.charAt(at - 1))))) at -= 1;
+      if (at < 0) return '';
+      if (ci) at -= 1;
+    }
+    var name = candidate.slice(at).trim();
+    return name.length > chars.length + 2 && name.length <= 120 && /[\s-]/.test(name) && /^[A-Za-z][A-Za-z0-9\s-]+$/.test(name) ? name : '';
+  }
+  function collectDocumentContext(units, snapshot) {
+    var items = units || [];
+    var root = null;
+    var mixed = false;
+    for (var ui = 0; ui < items.length; ui += 1) {
+      var current = contextRoot(items[ui].el);
+      if (ui && current !== root) mixed = true;
+      if (!ui) root = current;
+    }
+    var base = snapshot || documentSnapshot(mixed ? null : root);
+    var context = { title: base.title, headings: base.headings.slice(), abbreviations: {} };
+    if (mixed) {
+      context.headings = [];
+      return context;
+    }
+    var batchText = items.map(function (unit) { return String(unit.text || ''); }).join('\n');
+    var sources = [context.title].concat(context.headings);
+    var visited = [];
+    items.forEach(function (unit) {
+      sources.push(String(unit.text || '').slice(0, 2400));
+      // 只看相邻块，绝不读取 article/main/body 的全文。
+      [unit.el && unit.el.previousElementSibling, unit.el && unit.el.nextElementSibling].forEach(function (nearby) {
+        if (!nearby || nearby.tagName === 'ARTICLE' || nearby.tagName === 'MAIN' || nearby.tagName === 'BODY' || visited.indexOf(nearby) >= 0 || contextRoot(nearby) !== contextRoot(unit.el)) return;
+        if (nearby.querySelector && nearby.querySelector('article')) return;
+        visited.push(nearby);
+        sources.push(contextText(nearby, 600));
+      });
+    });
+    var definitions = Object.create(null);
+    sources.forEach(function (source) {
+      var re = /\(([A-Z][A-Z0-9-]{1,9})\)/g;
+      var match;
+      while ((match = re.exec(source))) {
+        var abbreviation = match[1];
+        if (!(new RegExp('(^|[^A-Za-z0-9])' + abbreviation + '([^A-Za-z0-9]|$)')).test(batchText)) continue;
+        var name = abbreviationLongName(source.slice(Math.max(0, match.index - 180), match.index), abbreviation);
+        if (!name) continue;
+        if (definitions[abbreviation] === undefined) definitions[abbreviation] = name;
+        else if (definitions[abbreviation].toLowerCase() !== name.toLowerCase()) definitions[abbreviation] = '';
+      }
+    });
+    Object.keys(definitions).sort().slice(0, 8).forEach(function (key) {
+      if (definitions[key]) context.abbreviations[key] = definitions[key];
+    });
+    return context;
+  }
+  DT.professionalContext = { collect: collectDocumentContext, snapshot: documentSnapshot, fingerprint: documentFingerprint, profile: professionalProfileFor, options: professionalOptions, strategy: professionalStrategy };
 
   async function loadConfig() {
     var rebuild = false;
@@ -159,10 +307,10 @@
         // 医学模式改变提示词和术语，已注入的普通译文不能继续冒充专业译文。
         // 比较「当前页面实际是用哪种模式翻的」而不是上一次 loadConfig：配置广播
         // 与启动/切换的先后顺序会影响后者，曾出现过开启后已翻段落不重建的情况。
-        var medical = res.config.medicalMode === true;
+        var medical = professionalProfileFor(res.config) === 'medical';
         DT.state.medicalMode = medical;
-        var renderedMedical = DT.state.renderedMedical;
-        if (renderedMedical !== undefined && renderedMedical !== medical) rebuild = true;
+        var strategy = professionalStrategy(res.config);
+        if (DT.state.renderedProfessional !== undefined && DT.state.renderedProfessional !== strategy) rebuild = true;
         DT.state.theme = (site && site.theme) || res.config.theme || 'underline';
       }
     } catch (err) {
@@ -188,6 +336,8 @@
       renderFailed: DT.state.renderFailed || 0,
       lastRenderError: DT.state.lastRenderError || '',
       lastError: DT.state.lastError || '',
+      qualityWarnings: DT.state.qualityWarnings || 0,
+      lastQualityWarning: DT.state.lastQualityWarning || '',
       busy: running
     };
   }
@@ -244,7 +394,10 @@
   async function translatePage(opts) {
     var options = opts || {};
     if (running || !DT.state.enabled) return;
-    DT.state.renderedMedical = DT.state.config && DT.state.config.medicalMode === true;
+    var medical = false;
+    var snapshot = null;
+    var scopeSnapshots = new WeakMap();
+    var contextKey = '';
     running = true;
     runId += 1;
     var myRun = runId;
@@ -263,6 +416,19 @@
 
     try {
       var cfg = DT.state.config || {};
+      // 先让已被站点改写的标题释放原文记录，再取当前上下文；所有 DOM 读取仍受本轮异常处理保护。
+      DT.releaseReplaced();
+      medical = professionalProfileFor(cfg) === 'medical';
+      snapshot = medical ? documentSnapshot() : null;
+      contextDirty = false;
+      contextKey = snapshot ? documentFingerprint(snapshot) : '';
+      if (medical && contextChanged(snapshot)) {
+        startOver();
+        return;
+      }
+      DT.state.renderedMedical = medical;
+      DT.state.renderedProfessional = professionalStrategy(cfg);
+      DT.state.renderedContext = contextKey;
       var target = DT.state.target;
       var maxUnit = Number(cfg.maxUnitChars) || 1200;
       // 日文页面翻成中文时，纯汉字短语（進捗状況 / 無料）会被 looksLikeTarget 当成"已是中文"跳过；
@@ -272,7 +438,6 @@
 
       // 仅译文 / 控件替换过的元素，如果站点又改了它的文字，先放回待翻译；
       // 被站点删除的节点（无限滚动 / SPA）连同事务记录一起释放
-      DT.releaseReplaced();
       if (DT.pruneDetached) DT.pruneDetached();
 
       if (options.reset) {
@@ -460,6 +625,10 @@
         var code = injected ? 'success' : outcome ? outcome.code : 'already-rendered';
         if (injected) {
           DT.state.translated += 1;
+          if (unit.qualityWarning) {
+            DT.state.qualityWarnings = (DT.state.qualityWarnings || 0) + 1;
+            DT.state.lastQualityWarning = unit.qualityWarning;
+          }
           dropUnitState(renderFails, unit);
         } else if (code === 'stale-generation' || unit.gen !== DT.generation) {
           // 旧代际的结果：那一轮已经作废，什么都不记
@@ -502,8 +671,23 @@
           // 按退避重发；同一段还在后台翻的话，重发的那次会等它的结果，不会再请求一次（见 background.js 的 inflight）
           var wantAlign = false;
           for (var ai = 0; ai < batch.length; ai += 1) if (batch[ai].align) wantAlign = true;
+          var message = { type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain', align: wantAlign };
+          if (medical) {
+            var batchUnits = batch.map(function (seg) { return { el: queue[seg.ui].el, text: seg.text }; });
+            var scope = contextRoot(batchUnits[0].el);
+            var scopedSnapshot = snapshot;
+            if (scope) {
+              scopedSnapshot = scopeSnapshots.get(scope);
+              if (!scopedSnapshot) {
+                scopedSnapshot = documentSnapshot(scope);
+                scopeSnapshots.set(scope, scopedSnapshot);
+              }
+              rememberContextScope(scope, scopedSnapshot);
+            }
+            message.documentContext = collectDocumentContext(batchUnits, scopedSnapshot);
+          }
           res = await DT.send(
-            { type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain', align: wantAlign },
+            message,
             190000
           );
         } catch (err) {
@@ -515,6 +699,15 @@
           return;
         }
         if (cancelled()) return; // 期间用户点了"还原"，或这一轮已被复位
+        if (medical && contextDirty) {
+          contextDirty = false;
+          DT.releaseReplaced();
+          scopeSnapshots = new WeakMap();
+          if (contextChanged(documentSnapshot())) {
+            startOver();
+            return;
+          }
+        }
         lastBeat = Date.now();
         if (!res || !res.results) {
           markFailed(batch);
@@ -527,6 +720,11 @@
         if (res.error) DT.state.lastError = res.error;
         batch.forEach(function (seg, k) {
           var value = res.results[k];
+          var validation = res.validations && res.validations[k];
+          if (validation && (validation.status === 'review' || validation.status === 'error')) {
+            var issues = validation.issues || [];
+            queue[seg.ui].qualityWarning = issues.length && issues[0].message ? String(issues[0].message) : '专业翻译结果需要审查';
+          }
           if (typeof value === 'string') {
             // '' = 模型返回空（原文本身是 "EN"/"×" 这种）：tryInject 里记为"同原文跳过"，不算失败
             queue[seg.ui].slots[seg.k] = value.trim();
@@ -629,6 +827,8 @@
     detectForeignTranslator();
     DT.state.total = 0;
     DT.state.translated = 0;
+    DT.state.qualityWarnings = 0;
+    DT.state.lastQualityWarning = '';
     resetFailures();
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
@@ -649,6 +849,11 @@
     DT.state.style = 'plain'; // 趣味翻译是一次性的：还原后回到普通翻译
     DT.send({ type: 'resume:set', value: false }).catch(function () {});
     DT.restore();
+    renderedContextScopes = [];
+    DT.state.renderedProfessional = undefined;
+    DT.state.renderedContext = undefined;
+    DT.state.qualityWarnings = 0;
+    DT.state.lastQualityWarning = '';
     settled = new WeakMap();
     churn = new WeakMap();
     renderFails = new WeakMap();
@@ -838,6 +1043,25 @@
     return false;
   }
 
+  function noteContextMutation(record) {
+    var target = record.target && (record.target.nodeType === 1 ? record.target : record.target.parentElement);
+    if (target && target.closest && target.closest('title,h1,h2,h3')) {
+      contextDirty = true;
+      return;
+    }
+    var lists = [record.addedNodes || [], record.removedNodes || []];
+    for (var li = 0; li < lists.length; li += 1) {
+      for (var ni = 0; ni < lists[li].length; ni += 1) {
+        var node = lists[li][ni];
+        if (node.nodeType !== 1 || isOwnNode(node)) continue;
+        if ((node.matches && node.matches('title,h1,h2,h3,article,main')) || (node.querySelector && node.querySelector('title,h1,h2,h3,article,main'))) {
+          contextDirty = true;
+          return;
+        }
+      }
+    }
+  }
+
   function startObserver() {
     if (observer) return;
     observer = new MutationObserver(function (records) {
@@ -851,14 +1075,16 @@
         // 忽略我们自己造成的变更：每插一批译文都会触发一次，
         // 不过滤的话每轮翻译结束后都要白跑一遍整页扫描
         if (target && target.nodeType === 1 && target.closest && target.closest('[data-dt-ui]')) continue;
-        if (record.type === 'childList' && record.addedNodes && record.addedNodes.length) {
-          cleanupDuplicateTargets(record.addedNodes);
-          if (!hasForeignNodes(record.addedNodes)) continue;
+        if (record.type === 'childList' && ((record.addedNodes && record.addedNodes.length) || (record.removedNodes && record.removedNodes.length))) {
+          cleanupDuplicateTargets(record.addedNodes || []);
+          if (!hasForeignNodes(record.addedNodes || []) && !hasForeignNodes(record.removedNodes || [])) continue;
+          noteContextMutation(record);
           scheduleIncremental();
           return;
         }
         if (record.type === 'characterData') {
           if (DT.isOwnWrite(target)) continue; // 仅译文模式原地替换文本
+          noteContextMutation(record);
           scheduleIncremental();
           return;
         }
@@ -895,6 +1121,9 @@
   // 中途重建：作废在途的一轮（它回来的结果会被丢弃），清空重来
   function startOver() {
     cancelRun();
+    DT.state.renderedProfessional = undefined;
+    DT.state.renderedContext = undefined;
+    renderedContextScopes = [];
     if (DT.hover) DT.hover.clear();
     DT.restore();
     settled = new WeakMap();
@@ -903,6 +1132,8 @@
     resetFailures();
     DT.state.total = 0;
     DT.state.translated = 0;
+    DT.state.qualityWarnings = 0;
+    DT.state.lastQualityWarning = '';
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
     DT.state.lastRenderError = '';
@@ -1061,6 +1292,12 @@
       var report;
       try {
         report = DT.diagnose(150);
+        report.professional = {
+          profile: professionalProfileFor(DT.state.config),
+          options: professionalOptions(DT.state.config && DT.state.config.professionalOptions),
+          qualityWarnings: DT.state.qualityWarnings || 0,
+          lastQualityWarning: DT.state.lastQualityWarning || ''
+        };
       } catch (err) {
         report = { error: String(err) };
       }

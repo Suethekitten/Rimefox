@@ -570,8 +570,9 @@ await t('目标语言隔离：同一原文 en 与 zh-CN 各自缓存，不串用
 
 // 医学专业模式：同一次请求内注入规则 / 术语，缓存与普通模式隔离，用户术语优先。
 async function setConfig(patch) {
-  const current = (await localArea.get('config')).config;
-  await localArea.set({ config: { ...current, ...patch } });
+  // Use the same compatibility adapter as the existing popup/options switch.
+  const { saveConfig } = await import('../lib/config.js');
+  await saveConfig(patch);
 }
 
 await t('医学模式：一次请求内加入规则和命中的医学词，不额外发请求', async () => {

@@ -1,0 +1,48 @@
+{
+  "method": "mock",
+  "provenance": "Rimefox 自拟医学论文风格微型样本。两列译文均为人工构造，包含预设错误，不来自模型调用或真实论文，不证明医学模式质量改善。",
+  "samples": [
+    {
+      "id": "trial-endpoint",
+      "subdomain": "oncology",
+      "source": "In a randomized controlled trial, progression-free survival was 12.5 months (95% CI, 10.2-14.8).",
+      "general": "在随机试验中，无进展生存期为12.5个月（95%置信区间为10.2～14.8）。",
+      "medical": "在随机对照试验中，无进展生存期为12.5个月（95%置信区间为10.2～14.8）。"
+    },
+    {
+      "id": "adverse-event-rate",
+      "subdomain": "pharmacology",
+      "source": "An adverse drug reaction was reported in 6.2% of participants.",
+      "general": "16.2%的受试者报告了药物不良反应。",
+      "medical": "6.2%的受试者报告了药物不良反应。"
+    },
+    {
+      "id": "causality",
+      "subdomain": "neurology",
+      "source": "The biomarker was associated with Alzheimer's disease; causality remains uncertain.",
+      "general": "该生物标志物导致阿尔茨海默病；因果关系仍不确定。",
+      "medical": "该生物标志物与阿尔茨海默病相关；因果关系仍不确定。"
+    },
+    {
+      "id": "dose-and-trial-id",
+      "subdomain": "pharmacology",
+      "source": "Participants in NCT12345678 received 5 mg/kg of the antibody.",
+      "general": "NCT12345679的受试者接受5克/千克抗体。",
+      "medical": "NCT12345678的受试者接受5毫克/千克抗体。"
+    },
+    {
+      "id": "statistical-conclusion",
+      "subdomain": "medical-statistics",
+      "source": "No significant difference in overall survival was found (p = 0.18).",
+      "general": "总生存期没有差异（p = 0.18）。",
+      "medical": "未发现总生存期存在显著差异（p = 0.18）。"
+    },
+    {
+      "id": "uncertainty",
+      "subdomain": "immunology",
+      "source": "The vaccine might reduce infection risk; the antibody response was measured at 28 days.",
+      "general": "该疫苗降低感染风险；在28天时测量了抗体反应。",
+      "medical": "该疫苗可能降低感染风险；在28天时测量了抗体反应。"
+    }
+  ]
+}

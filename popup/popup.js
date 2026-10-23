@@ -213,6 +213,10 @@ function render() {
     count = parts.join(' · ');
     if (status.failed && status.lastError) detail = t('失败原因：') + status.lastError;
   }
+  if (status.enabled && status.qualityWarnings) {
+    const warning = t('专业翻译有 ' + status.qualityWarnings + ' 段需要核对；请对照原文确认数值与结论。');
+    detail = detail ? detail + '\n' + warning : warning;
+  }
   paintStatus(title, count, detail);
 }
 

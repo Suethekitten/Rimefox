@@ -64,6 +64,12 @@
     })[0];
   }
 
+  check('JAMA 等价排版：引用祖先边界、真实字号与基线、原子组、事件与 ARIA、模式切换和 SPA 还原', function () {
+    var report = window.runInlineLayoutChecks();
+    var failed = report.checks.filter(function (item) { return !item.ok; });
+    return failed.length ? failed.map(function (item) { return item.name + ': ' + item.detail; }).join('；') : true;
+  });
+
   // ---------------- 文本工具 ----------------
   check('skipText: 纯数字跳过', function () {
     return DT.skipText('1234567890') === true ? true : '应跳过';

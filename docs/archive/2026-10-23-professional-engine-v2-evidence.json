@@ -1,0 +1,561 @@
+{
+  "date": "2026-10-23",
+  "baseCommit": "9bdb0fb7780603d5c0cfaf8069c9fce7004db142",
+  "scope": "Local equivalent DOM fixtures, headless Chrome; no live journal visits or paid model calls.",
+  "browser": "Chrome/156.0.8078.48",
+  "baseline": {
+    "failures": 46,
+    "selectedEvidence": [
+      {
+        "name": "sup",
+        "keep": [
+          {
+            "tag": "A",
+            "text": "9",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 25,
+            "height": 24
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 25,
+            "height": 24
+          }
+        ]
+      },
+      {
+        "name": "group",
+        "keep": [
+          {
+            "tag": "A",
+            "text": "9",
+            "kind": "cite"
+          },
+          {
+            "tag": "A",
+            "text": "11",
+            "kind": "cite"
+          },
+          {
+            "tag": "A",
+            "text": "12",
+            "kind": "cite"
+          },
+          {
+            "tag": "A",
+            "text": "17",
+            "kind": "cite"
+          },
+          {
+            "tag": "A",
+            "text": "13",
+            "kind": "cite"
+          },
+          {
+            "tag": "A",
+            "text": "14",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 191.96875,
+            "height": 24
+          },
+          {
+            "text": "译文后段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 191.96875,
+            "height": 24
+          },
+          {
+            "text": "译文后段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 191.96875,
+            "height": 24
+          },
+          {
+            "text": "译文后段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 191.96875,
+            "height": 24
+          },
+          {
+            "text": "译文后段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 191.96875,
+            "height": 24
+          },
+          {
+            "text": "译文后段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 191.96875,
+            "height": 24
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 191.96875,
+            "height": 24
+          }
+        ]
+      },
+      {
+        "name": "css-super",
+        "keep": [
+          {
+            "tag": "A",
+            "text": "21",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "SPAN",
+            "font": "13px",
+            "top": 303.640625,
+            "height": 18
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "SPAN",
+            "font": "13px",
+            "top": 303.640625,
+            "height": 18
+          }
+        ]
+      },
+      {
+        "name": "css-relative",
+        "keep": [
+          {
+            "tag": "A",
+            "text": "21",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "SPAN",
+            "font": "13px",
+            "top": 355.5,
+            "height": 18
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "SPAN",
+            "font": "13px",
+            "top": 355.5,
+            "height": 18
+          }
+        ]
+      },
+      {
+        "name": "css-transform",
+        "keep": [
+          {
+            "tag": "A",
+            "text": "21",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "SPAN",
+            "font": "13px",
+            "top": 409.296875,
+            "height": 18
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "SPAN",
+            "font": "13px",
+            "top": 409.296875,
+            "height": 18
+          }
+        ]
+      },
+      {
+        "name": "hidden-group",
+        "keep": [
+          {
+            "tag": "A",
+            "text": "9",
+            "kind": "cite"
+          },
+          {
+            "tag": "A",
+            "text": "11",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 511.296875,
+            "height": 24
+          },
+          {
+            "text": "译文后段",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 511.296875,
+            "height": 24
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "SUP",
+            "font": "16.6667px",
+            "top": 511.296875,
+            "height": 24
+          }
+        ]
+      }
+    ]
+  },
+  "current": {
+    "selectedEvidence": [
+      {
+        "name": "sup",
+        "keep": [
+          {
+            "tag": "SUP",
+            "text": "9",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "P",
+            "font": "20px",
+            "top": 29.65625,
+            "height": 28
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "P",
+            "font": "20px",
+            "top": 29.65625,
+            "height": 28
+          }
+        ]
+      },
+      {
+        "name": "group",
+        "keep": [
+          {
+            "tag": "SUP",
+            "text": "9–11,12–17,13/14",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "P",
+            "font": "20px",
+            "top": 196.625,
+            "height": 28
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "P",
+            "font": "20px",
+            "top": 196.625,
+            "height": 28
+          }
+        ]
+      },
+      {
+        "name": "css-super",
+        "keep": [
+          {
+            "tag": "SPAN",
+            "text": "21",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "P",
+            "font": "20px",
+            "top": 304.296875,
+            "height": 28
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "P",
+            "font": "20px",
+            "top": 304.296875,
+            "height": 28
+          }
+        ]
+      },
+      {
+        "name": "css-relative",
+        "keep": [
+          {
+            "tag": "SPAN",
+            "text": "21",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "P",
+            "font": "20px",
+            "top": 356.296875,
+            "height": 28
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "P",
+            "font": "20px",
+            "top": 356.296875,
+            "height": 28
+          }
+        ]
+      },
+      {
+        "name": "css-transform",
+        "keep": [
+          {
+            "tag": "SPAN",
+            "text": "21",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "P",
+            "font": "20px",
+            "top": 408.296875,
+            "height": 28
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "P",
+            "font": "20px",
+            "top": 408.296875,
+            "height": 28
+          }
+        ]
+      },
+      {
+        "name": "hidden-group",
+        "keep": [
+          {
+            "tag": "SUP",
+            "text": "9–11",
+            "kind": "cite"
+          }
+        ],
+        "font": "20px",
+        "inserted": [
+          {
+            "text": "译文前段",
+            "parent": "P",
+            "font": "20px",
+            "top": 515.953125,
+            "height": 28
+          },
+          {
+            "text": "译文后段正文。",
+            "parent": "P",
+            "font": "20px",
+            "top": 515.953125,
+            "height": 28
+          }
+        ]
+      }
+    ],
+    "scenarios": [
+      {
+        "width": 1000,
+        "zoom": 1,
+        "deviceScale": 1,
+        "pageScale": 1,
+        "passed": 254,
+        "total": 254
+      },
+      {
+        "width": 390,
+        "zoom": 1.25,
+        "deviceScale": 1.25,
+        "pageScale": 1,
+        "passed": 254,
+        "total": 254
+      },
+      {
+        "width": 1280,
+        "zoom": 1.75,
+        "deviceScale": 1.5,
+        "pageScale": 1.25,
+        "passed": 254,
+        "total": 254
+      }
+    ],
+    "selftest": {
+      "text": "247 / 247  全部通过",
+      "ok": true
+    }
+  },
+  "extensionE2E": {
+    "passed": 139,
+    "total": 139,
+    "method": "real extension + local fake API",
+    "command": "node tools/e2e-extension.mjs"
+  },
+  "node": {
+    "command": "node --test test/*.test.mjs",
+    "reportedTests": 47,
+    "failed": 0,
+    "sequentialFiles": "for f in test/*.test.mjs; do node \"$f\" || exit 1; done",
+    "sequentialExit": 0
+  },
+  "medicalEvaluation": {
+    "method": "mock",
+    "provenance": "Rimefox 自拟医学论文风格微型样本。两列译文均为人工构造，包含预设错误，不来自模型调用或真实论文，不证明医学模式质量改善。",
+    "limitation": "精确术语命中不等于译法唯一正确；规则未命中不等于医学语义正确。mock/local差异不证明真实模型或专业模式质量提升。",
+    "summary": {
+      "general": {
+        "samples": 6,
+        "expectedTerms": 10,
+        "exactTermMatches": 9,
+        "deterministicFlagged": 2,
+        "semanticFlagged": 3
+      },
+      "medical": {
+        "samples": 6,
+        "expectedTerms": 10,
+        "exactTermMatches": 10,
+        "deterministicFlagged": 0,
+        "semanticFlagged": 0
+      }
+    },
+    "details": [
+      {
+        "id": "trial-endpoint",
+        "mode": "general",
+        "status": "pass",
+        "codes": []
+      },
+      {
+        "id": "adverse-event-rate",
+        "mode": "general",
+        "status": "error",
+        "codes": [
+          "PERCENT_MISMATCH",
+          "NUMBER_MISMATCH"
+        ]
+      },
+      {
+        "id": "causality",
+        "mode": "general",
+        "status": "review",
+        "codes": [
+          "CAUSAL_STRENGTHENING_RISK"
+        ]
+      },
+      {
+        "id": "dose-and-trial-id",
+        "mode": "general",
+        "status": "error",
+        "codes": [
+          "RESEARCH_IDENTIFIER_MISMATCH",
+          "DOSE_UNIT_MISMATCH"
+        ]
+      },
+      {
+        "id": "statistical-conclusion",
+        "mode": "general",
+        "status": "review",
+        "codes": [
+          "STATISTICAL_STRENGTHENING_RISK"
+        ]
+      },
+      {
+        "id": "uncertainty",
+        "mode": "general",
+        "status": "review",
+        "codes": [
+          "UNCERTAINTY_RISK"
+        ]
+      },
+      {
+        "id": "trial-endpoint",
+        "mode": "medical",
+        "status": "pass",
+        "codes": []
+      },
+      {
+        "id": "adverse-event-rate",
+        "mode": "medical",
+        "status": "pass",
+        "codes": []
+      },
+      {
+        "id": "causality",
+        "mode": "medical",
+        "status": "pass",
+        "codes": []
+      },
+      {
+        "id": "dose-and-trial-id",
+        "mode": "medical",
+        "status": "pass",
+        "codes": []
+      },
+      {
+        "id": "statistical-conclusion",
+        "mode": "medical",
+        "status": "pass",
+        "codes": []
+      },
+      {
+        "id": "uncertainty",
+        "mode": "medical",
+        "status": "pass",
+        "codes": []
+      }
+    ]
+  }
+}

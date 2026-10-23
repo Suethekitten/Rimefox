@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { MEDICAL_TERMS, MEDICAL_LEXICON_VERSION } from '../lib/medical/data/en-zh-CN.js';
+import { MEDICAL_TERMS, MEDICAL_LEXICON_VERSION, MEDICAL_TERM_SCHEMA_VERSION } from '../lib/medical/data/en-zh-CN.js';
+import { auditMedicalTerms } from '../lib/medical/schema.js';
 import { MEDICAL_SOURCES } from '../lib/medical/sources.js';
 import {
   matchMedicalTerms,
@@ -38,8 +39,10 @@ await t('词库是 100 条审核条目，MIT 44 + Wikidata 56', () => {
   assert.equal(medicalStats().reviewedUpstream, 44);
   assert.equal(medicalStats().reviewed, 56);
   assert.equal(medicalStats().total, 100);
-  assert.equal(MEDICAL_LEXICON_VERSION, '1');
-  assert.equal(MEDICAL_PROFILE_VERSION, '1');
+  assert.equal(MEDICAL_LEXICON_VERSION, '2');
+  assert.equal(MEDICAL_PROFILE_VERSION, '2');
+  assert.equal(MEDICAL_TERM_SCHEMA_VERSION, '2');
+  assert.deepEqual(auditMedicalTerms(MEDICAL_TERMS), []);
 });
 await t('每条都有方向、领域、来源、审核状态和唯一英文源词', () => {
   const seen = new Set();
@@ -55,16 +58,32 @@ await t('每条都有方向、领域、来源、审核状态和唯一英文源�
     seen.add(key);
   }
 });
+await t('v2 schema 验证稳定身份、版本、学科及异常条目', () => {
+  assert.equal(new Set(MEDICAL_TERMS.map((x) => x.id)).size, MEDICAL_TERMS.length);
+  assert.ok(MEDICAL_TERMS.every((x) => x.domain === 'medical' && x.subdomain && x.version));
+  assert.ok(auditMedicalTerms([{ ...MEDICAL_TERMS[0], id: '', aliases: [''] }]).some((x) => x.code === 'missing_field'));
+  assert.ok(auditMedicalTerms([MEDICAL_TERMS[0], MEDICAL_TERMS[0]]).some((x) => x.code === 'duplicate_id'));
+  assert.ok(auditMedicalTerms([{ ...MEDICAL_TERMS[0], status: 'unreviewed' }]).some((x) => x.code === 'unreviewed'));
+  assert.ok(auditMedicalTerms([MEDICAL_TERMS[0], { ...MEDICAL_TERMS[1], aliases: [MEDICAL_TERMS[0].source] }]).some((x) => x.code === 'conflicting_match_name'));
+});
 await t('反向只来自 MIT 双向词表，Wikidata 不自动反转', () => {
   const reverse = MEDICAL_TERMS.filter((one) => one.reverse === true);
   assert.equal(reverse.length, 44);
   assert.ok(reverse.every((one) => one.status === 'reviewed-upstream'));
-  assert.equal(medicalStats().zhToEn, 44);
-  assert.equal(medicalStats().enToZh, 100);
+  assert.equal(medicalStats().zhToEn, 43);
+  assert.equal(medicalStats().enToZh, 99);
 });
 await t('不把高歧义单字/缩写当自动术语', () => {
   const banned = new Set(['lead', 'culture', 'lesion', 'positive', 'negative', 'significant', 'control', 'stroke', 'safety', 'OR', 'HR', 'RR', 'CI']);
   for (const one of MEDICAL_TERMS) assert.ok(!banned.has(one.source), 'ambiguous source: ' + one.source);
+});
+await t('审计发现适用含义不清的旧条目保留来源但隔离自动匹配', () => {
+  const term = MEDICAL_TERMS.find((x) => x.source === 'multivariate analysis');
+  assert.equal(term.matchEnabled, false);
+  assert.ok(term.contextHint);
+  assert.equal(medicalStats().disabled, 1);
+  assert.equal(matchMedicalTerms(['multivariate analysis'], 'zh-CN', 20).length, 0);
+  assert.equal(matchMedicalTerms(['多因素分析'], 'en', 20).length, 0);
 });
 await t('数据来源审计明确包含 / 排除，MIT 许可文件存在', () => {
   const included = MEDICAL_SOURCES.filter((one) => one.included).map((one) => one.id);
@@ -76,6 +95,12 @@ await t('数据来源审计明确包含 / 排除，MIT 许可文件存在', () =
 });
 
 console.log('\n[医学匹配]');
+await t('审核的英式拼写别名命中规范词，用户同名覆盖仍优先', () => {
+  const hits = matchMedicalTerms(['Randomised controlled trials measured tumour mutational burden.'], 'zh-CN', 20);
+  assert.ok(hits.some((x) => x.source === 'randomized controlled trial' && x.id && x.subdomain && x.version));
+  assert.ok(hits.some((x) => x.source === 'tumor mutational burden'));
+  assert.ok(!matchMedicalTerms(['randomised controlled trial'], 'zh-CN', 20, ['randomised controlled trial']).length);
+});
 await t('完整术语、大小写、单复数都能命中', () => {
   for (const text of [
     'The randomized controlled trial was positive.',
@@ -100,7 +125,7 @@ await t('中译英只使用 MIT 声明双向的术语', () => {
 await t('其他目标语言只返回规则方向，不注入英汉词条', () => {
   assert.equal(medicalDirectionFor('fr'), '');
   assert.deepEqual(matchMedicalTerms(['myocardial infarction'], 'fr', 20), []);
-  assert.equal(medicalFingerprintFor('myocardial infarction', 'fr', []), 'm1:1:rules');
+  assert.equal(medicalFingerprintFor('myocardial infarction', 'fr', []), 'm' + MEDICAL_PROFILE_VERSION + ':' + MEDICAL_LEXICON_VERSION + ':rules');
 });
 await t('用户术语可以排除同源医学词条（用户优先）', () => {
   const hits = matchMedicalTerms(['odds ratio and randomized controlled trial'], 'zh-CN', 20, [
@@ -125,8 +150,8 @@ await t('医学指纹随文本 / 用户覆盖变化，并带规则和词库版�
   assert.equal(a, b);
   assert.notEqual(a, c);
   assert.notEqual(a, d);
-  assert.ok(a.startsWith('m1:1:'));
-  assert.ok(c === 'm1:1:none');
+  assert.ok(a.startsWith('m' + MEDICAL_PROFILE_VERSION + ':' + MEDICAL_LEXICON_VERSION + ':'));
+  assert.ok(c === 'm' + MEDICAL_PROFILE_VERSION + ':' + MEDICAL_LEXICON_VERSION + ':none');
 });
 
 console.log('\n[提示词]');

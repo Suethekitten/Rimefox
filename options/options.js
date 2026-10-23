@@ -91,6 +91,8 @@ const fields = {
   subtitleTranslate: $('subtitleTranslate'),
   hoverCompare: $('hoverCompare'),
   medicalMode: $('medicalMode'),
+  professionalQuality: $('professionalQuality'),
+  professionalMaxReviewRequests: $('professionalMaxReviewRequests'),
   chromeBilingual: $('chromeBilingual'),
   uiTheme: $('uiTheme'),
   uiLang: $('uiLang'),
@@ -388,6 +390,8 @@ function applyConfig(cfg) {
   fields.subtitleTranslate.checked = cfg.subtitleTranslate === true;
   fields.hoverCompare.checked = cfg.hoverCompare !== false;
   fields.medicalMode.checked = cfg.medicalMode === true;
+  fields.professionalQuality.value = (cfg.professionalOptions || DEFAULTS.professionalOptions).quality;
+  fields.professionalMaxReviewRequests.value = (cfg.professionalOptions || DEFAULTS.professionalOptions).maxReviewRequests;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.uiTheme.value = cfg.uiTheme || 'auto';
   applyUiTheme(fields.uiTheme.value);
@@ -479,6 +483,12 @@ function readForm() {
     subtitleTranslate: fields.subtitleTranslate.checked,
     hoverCompare: fields.hoverCompare.checked,
     medicalMode: fields.medicalMode.checked,
+    professionalProfile: fields.medicalMode.checked ? 'medical' : 'general',
+    professionalOptions: {
+      quality: fields.professionalQuality.value,
+      subdomain: (currentCfg && currentCfg.professionalOptions && currentCfg.professionalOptions.subdomain) || 'auto',
+      maxReviewRequests: Math.max(0, Math.min(3, Math.floor(Number(fields.professionalMaxReviewRequests.value) || 0)))
+    },
     chromeBilingual: fields.chromeBilingual.checked,
     debug: fields.debug.checked,
     accentColor: fields.accentColor.value || 'violet',

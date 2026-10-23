@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { professionalProfileFor, normalizeProfessionalOptions } from '../lib/config.js';
 
 const root = new URL('..', import.meta.url);
 
@@ -20,6 +21,9 @@ function fakeElement() {
     },
     getAttribute(k) {
       return k in this.attrs ? this.attrs[k] : null;
+    },
+    hasAttribute(k) {
+      return k in this.attrs;
     },
     removeAttribute(k) {
       delete this.attrs[k];
@@ -37,7 +41,7 @@ function flush() {
 
 // 返回 { sent: 发给后台的消息, config: 后台给的配置（可改）, page: 页面上的 DT, message(): 模拟后台 / 弹窗发来的消息, rebuilds }
 // hooks（可选）：{ timers: [], listeners: {} } 收下计时器回调和 document 上的事件监听，测试自己决定何时触发
-async function boot({ iframe = false, resume = false, translateOnLoad = false, config = {}, hooks = null } = {}) {
+async function boot({ iframe = false, resume = false, translateOnLoad = false, config = {}, hooks = null, pageDocument = {} } = {}) {
   const sent = [];
   const page = { rebuilds: 0, listener: null };
   const cfg = { hasKey: true, targetLang: 'zh-CN', mode: 'dual', translateOnLoad, ...config };
@@ -56,6 +60,9 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
     setInterval: () => 0,
     requestAnimationFrame: () => 0,
     MutationObserver: class {
+      constructor(fn) {
+        if (hooks) (hooks.observers || (hooks.observers = [])).push(fn);
+      }
       observe() {}
     },
     navigator: { platform: 'MacIntel', userAgent: '' },
@@ -70,7 +77,8 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
       },
       getElementById: () => null,
       querySelector: () => null,
-      createElement: fakeElement
+      createElement: fakeElement,
+      ...pageDocument
     },
     chrome: {
       runtime: {
@@ -114,6 +122,7 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
     config: cfg,
     DT,
     page,
+    document: sandbox.document,
     async message(msg) {
       let reply;
       page.listener(msg, {}, (r) => {
@@ -227,6 +236,31 @@ await t('医学模式配置没变：不重复重建', async () => {
   assert.equal(c.page.rebuilds, 0);
 });
 
+await t('专业配置新字段：以实际渲染策略比较，质量/上限变化重建且同值不重建', async () => {
+  const c = await boot({ resume: true, config: { professionalProfile: 'medical', medicalMode: false, professionalOptions: { quality: 'balanced', subdomain: 'auto', maxReviewRequests: 1 } } });
+  assert.equal(c.DT.state.medicalMode, true, '显式 profile 优先于兼容字段');
+  c.config.professionalOptions = { quality: 'strict', subdomain: 'auto', maxReviewRequests: 1 };
+  await c.message({ type: 'dt:configChanged' });
+  assert.equal(c.page.rebuilds, 1);
+  await c.message({ type: 'dt:configChanged' });
+  assert.equal(c.page.rebuilds, 1, '相同策略不能重复取消在途请求');
+  c.config.professionalOptions.maxReviewRequests = 0;
+  await c.message({ type: 'dt:configChanged' });
+  assert.equal(c.page.rebuilds, 2);
+  c.config.professionalProfile = 'general';
+  await c.message({ type: 'dt:configChanged' });
+  assert.equal(c.page.rebuilds, 3);
+});
+
+await t('专业配置 ES5 与 ESM 规范化差分：旧值、冲突、坏值和额外请求边界一致', async () => {
+  const { DT } = await boot();
+  const configs = [{}, { medicalMode: true }, { professionalProfile: 'general', medicalMode: true }, { professionalProfile: 'medical', medicalMode: false }, { professionalProfile: 'legal', medicalMode: true }];
+  configs.forEach((cfg) => assert.equal(DT.professionalContext.profile(cfg), professionalProfileFor(cfg)));
+  [undefined, null, [], {}, { quality: 'fast', maxReviewRequests: 0 }, { quality: 'strict', subdomain: 'oncology', maxReviewRequests: 9 }, { quality: 'unknown', subdomain: '<script>', maxReviewRequests: -1 }, { maxReviewRequests: 2.8 }, { maxReviewRequests: '2' }, { maxReviewRequests: null }, { maxReviewRequests: undefined }, { maxReviewRequests: Infinity }].forEach((options) => {
+    assert.deepEqual(JSON.parse(JSON.stringify(DT.professionalContext.options(options))), normalizeProfessionalOptions(options));
+  });
+});
+
 await t('整页翻译：后台的 alignments 经 alignmentOf 校验后交给 DT.inject', async () => {
   const env = await boot({ config: { hoverCompare: true, lazy: false, skipSameLang: false } });
   const DT = env.DT;
@@ -257,6 +291,7 @@ await t('整页翻译：后台的 alignments 经 alignmentOf 校验后交给 DT.
     }
     if (msg.type === 'resume:get') return { ok: true, value: false };
     if (msg.type === 'translate') {
+      assert.equal(msg.documentContext, undefined, '普通模式不应发送专业文档上下文');
       assert.equal(msg.align, true, '多句段落应请求结构化对齐');
       return { ok: true, results: ['译:One.译:Two.'], alignments: [[{ n: 1, t: '译:One.' }, { n: 1, t: '译:Two.' }]] };
     }
@@ -509,6 +544,163 @@ await t('保留区：超长段落切片后，带标记的每一片都是成对�
   assert.equal(hasKeepMarks(marked), true, '这一片要能让后台认出成对标记');
   assert.equal(seen.length, 1);
   assert.ok(DT.units.keepParse(seen[0], keep, text).segs, '拼回来的译文要能按标记切开');
+});
+
+function contextElement(tag, text = '', children = []) {
+  const el = { ...fakeElement(), nodeType: 1, tagName: tag.toUpperCase(), isConnected: true };
+  el.childNodes = text ? [{ nodeType: 3, nodeValue: text, parentElement: el }] : children;
+  el.childNodes.forEach((child, index) => {
+    child.parentElement = el;
+    child.previousElementSibling = index ? el.childNodes[index - 1] : null;
+    child.nextElementSibling = el.childNodes[index + 1] || null;
+  });
+  el.matches = (selector) => selector.split(',').some((name) => name.trim().toUpperCase() === el.tagName);
+  el.closest = (selector) => {
+    for (let current = el; current; current = current.parentElement) if (current.matches && current.matches(selector)) return current;
+    return null;
+  };
+  el.querySelectorAll = (selector) => {
+    const out = [];
+    const visit = (parent) => (parent.childNodes || []).forEach((child) => {
+      if (child.nodeType !== 1) return;
+      if (child.matches(selector)) out.push(child);
+      visit(child);
+    });
+    visit(el);
+    return out;
+  };
+  el.querySelector = (selector) => el.querySelectorAll(selector)[0] || null;
+  el.getBoundingClientRect = () => ({ width: 300, height: 40, top: 0, bottom: 40 });
+  return el;
+}
+
+function contextFixture(definition = 'progression-free survival (PFS) and overall survival (OS).') {
+  const h1 = contextElement('h1', 'Oncology trial');
+  const h2 = contextElement('h2', 'Results');
+  const near = contextElement('p', definition);
+  const current = contextElement('p', 'PFS was assessed in 39 patients.');
+  const article = contextElement('article', '', [h1, h2, near, current]);
+  const body = contextElement('body', '', [article]);
+  const pageDocument = { title: '  Oncology   trial  ', querySelectorAll: body.querySelectorAll, querySelector: body.querySelector };
+  return { h1, h2, near, current, article, body, pageDocument };
+}
+
+await t('文档上下文只读标题、章节与相邻可靠定义，只发送批次实际使用的缩写', async () => {
+  const fixture = contextFixture();
+  Object.defineProperty(fixture.article, 'textContent', { get() { throw new Error('不能读取全文'); } });
+  const { DT } = await boot({ pageDocument: fixture.pageDocument });
+  const context = JSON.parse(JSON.stringify(DT.professionalContext.collect([{ el: fixture.current, text: 'PFS was assessed in 39 patients.' }])));
+  assert.equal(context.title, 'Oncology trial');
+  assert.deepEqual(context.headings, ['Oncology trial', 'Results']);
+  assert.deepEqual(context.abbreviations, { PFS: 'progression-free survival' });
+  assert.equal(JSON.stringify(context).includes('39 patients'), false, '正文不进入文档上下文');
+  assert.deepEqual(Object.keys(context).sort(), ['abbreviations', 'headings', 'title']);
+});
+
+await t('缩写定义不猜测、不跨论文保留，冲突定义和混合论文批次不注入', async () => {
+  const a = contextFixture('overall survival (OS); observation score (OS); unrelated phrase (PFS).');
+  const { DT } = await boot({ pageDocument: a.pageDocument });
+  const collect = DT.professionalContext.collect;
+  assert.deepEqual(JSON.parse(JSON.stringify(collect([{ el: a.current, text: 'OS and PFS were recorded.' }]).abbreviations)), {});
+  const b = contextFixture();
+  assert.equal(collect([{ el: b.current, text: 'PFS was recorded.' }]).abbreviations.PFS, 'progression-free survival');
+  const c = contextFixture('No abbreviation definition in this paper.');
+  assert.deepEqual(JSON.parse(JSON.stringify(collect([{ el: c.current, text: 'PFS was recorded.' }]).abbreviations)), {});
+  const mixed = collect([{ el: b.current, text: 'PFS was recorded.' }, { el: c.current, text: 'PFS has a different meaning.' }]);
+  assert.equal(mixed.headings.length, 0);
+  assert.equal(Object.keys(mixed.abbreviations).length, 0);
+});
+
+await t('文档上下文有预算，忽略扩展译文；仅译文标题从现有还原记录读原文', async () => {
+  const fixture = contextFixture();
+  const injected = contextElement('span', '不应进入提示词的标题译文');
+  injected.setAttribute('data-dt-target', '');
+  fixture.h1.childNodes.push(injected);
+  const { DT, document } = await boot({ pageDocument: fixture.pageDocument });
+  DT.replacedOf = (el) => el === fixture.h2 ? { src: 'Original results' } : null;
+  let snapshot = DT.professionalContext.snapshot();
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.headings)), ['Oncology trial', 'Original results']);
+  document.title = 'X'.repeat(1000);
+  fixture.article.childNodes = Array.from({ length: 50 }, (_, i) => contextElement('h2', `${i} ${'Section '.repeat(40)}`));
+  fixture.article.childNodes.forEach((el) => { el.parentElement = fixture.article; });
+  snapshot = DT.professionalContext.snapshot();
+  assert.equal(snapshot.title.length, 240);
+  assert.ok(snapshot.headings.length <= 8);
+  assert.ok(snapshot.headings.join('').length <= 600);
+});
+
+function installTranslationFixture(env, unit, reply) {
+  const injected = [];
+  env.DT.collectAll = () => [unit];
+  env.DT.inject = (item, text) => { injected.push(text); return true; };
+  env.DT.sourceChanged = () => false;
+  env.DT.isOwnWrite = () => false;
+  env.DT.send = async (msg) => {
+    if (msg.type === 'config:get') return { ok: true, config: env.config };
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') return reply(msg);
+    return { ok: true };
+  };
+  return injected;
+}
+
+await t('医学消息发送轻量上下文，疑点只计入状态，不自动修改模型译文', async () => {
+  const fixture = contextFixture();
+  const env = await boot({ config: { professionalProfile: 'medical', lazy: false, skipSameLang: false }, pageDocument: fixture.pageDocument });
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  let requested;
+  const injected = installTranslationFixture(env, unit, (msg) => {
+    requested = msg;
+    return { ok: true, results: ['39例患者接受了PFS评估。'], validations: [{ status: 'review', issues: [{ message: '数值对应关系需要审查' }] }] };
+  });
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(requested.documentContext.abbreviations.PFS, 'progression-free survival');
+  assert.deepEqual(injected, ['39例患者接受了PFS评估。']);
+  const status = await env.message({ type: 'dt:status' });
+  assert.equal(status.qualityWarnings, 1);
+  assert.equal(status.lastQualityWarning, '数值对应关系需要审查');
+});
+
+await t('在途翻译切换质量：旧策略回包作废，不混入新策略译文', async () => {
+  const fixture = contextFixture();
+  const env = await boot({ config: { professionalProfile: 'medical', professionalOptions: { quality: 'balanced' }, lazy: false, skipSameLang: false }, pageDocument: fixture.pageDocument });
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  let resolveOld;
+  let calls = 0;
+  const injected = installTranslationFixture(env, unit, () => {
+    calls += 1;
+    return calls === 1 ? new Promise((resolve) => { resolveOld = resolve; }) : { ok: true, results: ['严格策略译文。'] };
+  });
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(calls, 1);
+  env.config.professionalOptions = { quality: 'strict' };
+  await env.message({ type: 'dt:configChanged' });
+  resolveOld({ ok: true, results: ['过期的标准策略译文。'] });
+  await flush();
+  assert.deepEqual(injected, ['严格策略译文。']);
+  assert.equal(env.page.rebuilds, 1);
+});
+
+await t('在途翻译期间文档标题变化：丢弃旧上下文结果并重建', async () => {
+  const fixture = contextFixture();
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ config: { professionalProfile: 'medical', lazy: false, skipSameLang: false }, hooks, pageDocument: fixture.pageDocument });
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  let resolveOld;
+  const contexts = [];
+  const injected = installTranslationFixture(env, unit, (msg) => {
+    contexts.push(msg.documentContext.title);
+    return contexts.length === 1 ? new Promise((resolve) => { resolveOld = resolve; }) : { ok: true, results: ['新论文译文。'] };
+  });
+  await env.message({ type: 'dt:toggle' });
+  env.document.title = 'A different oncology paper';
+  const title = contextElement('title', env.document.title);
+  hooks.observers[0]([{ type: 'characterData', target: title.childNodes[0] }]);
+  resolveOld({ ok: true, results: ['旧论文译文。'] });
+  await flush();
+  assert.deepEqual(injected, ['新论文译文。']);
+  assert.deepEqual(contexts, ['Oncology trial', 'A different oncology paper']);
+  assert.equal(env.page.rebuilds, 1);
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
