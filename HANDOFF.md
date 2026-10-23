@@ -776,6 +776,14 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **字体 A/B 截图**：`--chosun-live` 使用本地假 API 返回统一中文，生成 docs/verification/2026-10-23-chosun-font-ab/ 的原文 / 中文适配 / 关闭还原三张截图；断言中文目标字体栈、原文 chosun-myeongjo 保留、关闭后字体壳和标记归零。
 - **测试**：Node、自检、完整 E2E、真实朝鲜日报实时页面检查通过；compare 翻译前后字重、粗体字族和目标字体栈，并覆盖还原 / 再次翻译。
 
+### 本次踩坑与心得
+
+- **computed font-weight 不等于肉眼字重**：韩文网页的 `font-weight:400` 仍可能因 `chosun-myeongjo` 缺少中文字形而逐字回退到不同中文字体；只看 weight 会把根因误判成 DOM 局部加粗。
+- **字体兼容和字号自适应是两件事**：目标文字系统字体解决字形回退；字号、行高、标题缩放和用户自定义排版仍由原 `.dt-target` 继承链负责，不能用一套全局字体覆盖同时接管两者。
+- **`font: inherit !important` 是简写**：它会同时设置 family / size / line-height 等；双语的旧行为依赖它和 `copyTypography`。给 `.dt-target` 再写内联 `font-family !important` 会改变双语字体质量，因此字体适配必须显式按渲染模式隔离。
+- **只包译文，不包原文**：仅译文用 `display:contents` 的 inline 字体壳，字符间距 / 行布局不新增盒子；标题、code/pre、公式、控件和已兼容字体跳过，字体壳 insert / move / 还原全部走 RenderTransaction。
+- **验收要看 computed + 截图 + 模式切换**：真实朝鲜日报用 `--chosun-live` 生成中文适配截图；双语用 `--dual-live` 与提交 `4c2784d` 同机位截图逐字节对比，并测试 双语 → 仅译文 → 双语 → 关闭 → 重新翻译，不能只看“翻译成功”或字符串断言。
+
  ## 15. 专业翻译引擎
 
 专业策略通过静态 Registry 接入共用翻译管线，医学是首个实现；配置迁移、数据、上下文、质量与费用边界统一见 [专业引擎文档](docs/PROFESSIONAL-TRANSLATION.md)。当前本地实施与验收证据见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)。DOM 引用的插入安全独立于专业模式，见 [翻译引擎渲染契约](docs/TRANSLATION-ENGINE-HANDOFF.md#33-仅译文)。
