@@ -4,6 +4,8 @@
 > 目录：`edge-bilingual/`（版本号看 `manifest.json`，本文不记）
 > 翻译引擎（收集 → 分段 → 批量 → 解析 → 缓存 → 注入 → 还原）的实现细节、0.8.7 的优化、外部项目参考（Wenyi / Agent Book Translate）与后续路线，
 > 单独写在 [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md)；改翻译链路前先读它。
+> 开放 Shadow DOM / B 站评论区适配、observer 生命周期、样式与还原细节，
+> 单独写在 [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md)；改 shadow 相关代码前先读它。
 > **最近一次结构性整理（2026-10-20）**：文档去重与代码去重，动了哪些文件、什么故意没动，见 [docs/archive/2026-10-20-docs-and-dedup.md](docs/archive/2026-10-20-docs-and-dedup.md)。
 
 ---
@@ -508,7 +510,7 @@ node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络
 node test/content-main.test.mjs # 内容脚本调度：自动翻译只在顶层页面、配置广播改模式 / 语言时整页重建、保留区送翻、注入被拒不再重发、长段落切片不切开保留区
 node test/sentence-align.test.mjs # 悬停对照的断句（缩写 / 脚注号 / 小写续接）与本地句子对齐：38 段人工语料每个句界都对
 node test/glass-dock.test.mjs # 液态玻璃：槽位几何 / 竖向槽位 / 橡皮筋 / 最近槽位 / 三通道滤镜
-node test/content-injection.test.mjs # 补注入清单与 manifest 完全一致（units / input 不漏、顺序不乱）
+node test/content-injection.test.mjs # 补注入清单与 manifest 完全一致（units / input / shadow / B 站适配器不漏、顺序不乱）
 node test/switch-geometry.test.mjs # 开关：设置页 / 弹窗共用一套几何变量，透镜尺寸 = 玻璃滤镜贴图尺寸，页面里没有第二份实现
 ```
 > 每个文件的条数以 `node --test` 的输出为准，本文不维护数字。
@@ -517,9 +519,10 @@ node test/switch-geometry.test.mjs # 开关：设置页 / 弹窗共用一套几�
 
 ### 7.1c 真实浏览器端到端检查（发版前）
 ```
-node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 文献引用（Nature 上标，真实点击）/ 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
+node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 文献引用（Nature 上标，真实点击）/ Shadow DOM 夹具 / 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
 node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
+node tools/e2e-extension.mjs --bilibili-live  # 真实 B 站视频页评论区验收（需要能上 bilibili.com；未登录只显示首屏，滚动 / 楼中楼会显示未验证）
 node tools/stability-audit.mjs                # 真实 Chrome 长文 / 大量段落 / 动态 / 内存基准（直接页面）
 ```
 真实 Chrome（`--browser` 或环境变量 `RIMEFOX_BROWSER` 可换成 Edge）+ CDP `Extensions.loadUnpacked` 加载工作树 + 本地假 OpenAI 兼容接口，不需要 API Key，不进 CI（要真实浏览器，YouTube 还要能上网）。
@@ -711,14 +714,15 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.10.1）
+## 14. 本版技术记录（0.10.2）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.10.0 的液态玻璃与补注入修复见提交 `9911f6f`、`3b86f72`；0.9.8 的容器形态 / 保留区边界见 `ccfceca` 与 §5.1、§5.2.1。
+> 0.9.8 的容器形态 / 保留区边界见 `ccfceca` 与 §5.1、§5.2.1；0.10.1 的文献引用与开关见 `70f04f7`、`49fec11`。Shadow DOM 的完整交接见 [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md)。
 
-- **文献引用（`70f04f7`）**：Nature Medicine 正文的 `<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>` 以前被 `tokensOf` 当普通行内文字拼进句子，「…diseases1,2.」整句送翻；仅译文把译文写进第一个文本节点、清空链接里的数字，上标和跳转都没了，模型写的数字留在正文；双语译文是纯文本。先查了 nature.com 的服务器 HTML 和浏览器里的实际 DOM（两者一致：每个编号一个链接，逗号是上标里的文本节点，书目只在 `title`），再按真实结构修。
-- **做法**：上标引用当保留区（`isCitationEl`，判定条件见 §5.2.1），复用 `<kN>` 标记、`keepPlan` 和事务还原，没有另起翻译流程。`units.js` 把 `keepParse` 的标记切分抽成 `keepDrops`（行为不变），新增 `keepMarks` / `sentenceEndAt` / `keepPlacement`；`dom.js` 新增 `injectCited`（仅译文：词级 → 句级 → 降级成双语；双语：上标副本 `citeClone`）；`hover.js` 的 `mapFromNode` 按阅读顺序取译文节点里所有文本节点；提示词只在带标记的批次多一句引用说明；诊断 `placements` 记 `cite` 落点。保留区原来的兜底（隐藏保留元素）不用在引用上。
-- **缓存**：缓存键是送翻文本，带标记的段落和旧版本压平引用的条目是两个键，旧条目不会被命中，不清用户缓存；`SCHEMA`、配置结构、`DT.tx` 语义都没变。受影响的只有带上标引用的段落（会按带标记的文本重新翻一次）。
-- **液态玻璃开关（`49fec11`）**：设置页 `input.switch` 和弹窗 `.mini-switch` 原来是两份实现，都按「内框 = width × height」写 `top/left: 2px` 和固定 translate 行程，但全局 `* { box-sizing: border-box }` 让 1px 描边吃掉了内框：透镜上 2px 下 0px、开状态贴住右边框；减少透明 / 关闭液态玻璃时透镜的 2px 描边按 content-box 撑大，比槽低、开状态冲出右边。现在 `lib/ui-tokens.css` 一份 `.switch`（弹窗加 `.switch-sm`），只认 `--switch-w / -h / -border / -pad / -knob-w`，行程 = 槽宽 − 透镜宽 − 2×（描边 + 内距）；外框和透镜尺寸不变（透镜 = `ensureGlassFilter` 贴图尺寸），四边内距相等，开 / 关只改 translate，按下只改 scale；`options.css` / `popup.css` 删掉各自的开关样式。见坑 44。
-- **测试**：自检新增文献引用一节（`tpl-nature-cite` 是 nature.com 该段的真实 DOM，2026-10-22 抓取；旧代码上全部失败，只换回旧 `hover.js` 时双语悬停那条失败）；`test/translate-pipeline.test.mjs` 加「旧压平缓存不命中、旧条目不清空」，`test/prompt.test.mjs` 加引用说明断言；新增 `test/switch-geometry.test.mjs`（透镜尺寸 = 滤镜贴图 = 排版滑块透镜，页面里没有第二份开关实现）；E2E 新增「文献引用（Nature 上标）」一节，页面放在与 nature.com 相同的路径，两种 `href` 都做真实点击，关闭后逐字还原。合并后 Node、自检、E2E 全部通过。
-- **已知 / 未验证**：真实模型能否原样照抄 `<kN>` 标记只用假模型测过（照抄不了会降级，不会丢引用）；没有带扩展在 nature.com 实页上用真实模型翻过；链接包在上标外面的写法、纯 CSS 上标仍按普通文字处理（§9）。开关在真实 1 倍屏和 Edge 上没看过。
+- **根因**：`content/dom.js` 的 `walk()` 只接受 Element（nodeType 1），`collectRoots()` 从 `body` 开始；`tokensOf` 只走 `childNodes`，不会进入宿主元素的 `shadowRoot`。`content/main.js` 的 document MutationObserver 也不会跨 shadow 边界。因此 B 站新版评论组件树对旧管线完全不可见；`DT.restore()` 里基于 `document.querySelectorAll` 的兜底同样穿不透 shadow root。
+- **通用层**：新增 `content/shadow.js`。`DT.collect()` 支持 ShadowRoot 根；`walk()` 遇到 open root 改走 `shadowRoot.children`，slot 只走 `assignedNodes({flatten:true})`，并用本轮 `walkSeen` WeakSet 去重。`DT.collectAll()` 在普通 roots 后追加适配器 `collectTargets()` 的内容根；`DT.restore()` 开头 `DT.shadow.reset()`，兜底清理改走 `DT.shadow.all()`。没有 monkey-patch `attachShadow`，closed root 直接按普通元素处理。
+- **B 站适配**：新增 `content/adapters/bilibili-comments.js`，只在 `*.bilibili.com` 或带 `data-dt-shadow-test` 的夹具启用 targets 模式。真实视频页已验证结构：`bili-comments.shadowRoot` → `#feed` → `bili-comment-thread-renderer.shadowRoot` → `bili-comment-renderer.shadowRoot` → `bili-rich-text.shadowRoot` → `#contents`。适配器从 feed 开始 BFS，只把 `#contents` 当内容根；昵称 / 时间 / 点赞 / 操作区 / 输入框 / “登录后查看”提示都不收集。楼中楼通过递归白名单组件找到，不依赖固定嵌套层级。
+- **监听 / 生命周期**：每个 `bili-comments` 只对 feed shadow root 建一个 Observer，不为每条评论或每个 thread 建；新一级评论 / 排序重建由 feed childList 触发，异步楼中楼由现有 click / scroll 补扫 + shadow 启用时额外 1.2s 延迟扫描接住。`prune()` 在每次 collect / pruneDetached / refreshStale 时断开已脱离的 root；B 站上限 200 个 root，通用 auto 默认 160。还原 / 关闭翻译时 `reset()` 断开全部 observer 并移除样式。
+- **样式 / 悬停 / 还原**：`content/styles/inject.css` 加入 `web_accessible_resources`，shadow 层只 fetch 一次，把 `html[...]` 转成 `:host-context(html[...])` 后用共享 Constructable Stylesheet 注入所有 root；不支持时每个 root 一个同内容 `<style>`，fetch 前有同步兜底。悬停事件用 `composedPath()[0]`，caret 拿不到内部文本节点时按整段高亮 / 整段原文气泡安全降级；宿主链只映射到评论正文宿主，不把整个 `bili-comments` 映射成第一条评论。所有注入仍走 `RenderTransaction`，还原沿用 `DT.restore()`。
+- **测试**：新增 B 站同构夹具和通用夹具，覆盖单层 / 多层 open root、closed root、slot 去重、一级评论、楼中楼、动态新增、异步回复、隐藏回复、排序重建、仅译文、链接保留、悬停、还原、observer 释放；Node 注入清单测试同时校验 shadow / adapter 与 manifest 顺序。全量 Node、自检页和 E2E 通过；真实 B 站结构及“中文评论 → 英文译文”已用本地假模型验证；真实未登录页只显示首屏，滚动加载和楼中楼展开未在登录态验证。
+- **已知 / 未验证**：见 [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md) §F。closed root、ShadowRoot 直接文本、slot 直接文本、iframe 内评论、自定义 CSS 进 shadow、跨 shadow 划词、番剧 / 专栏 / 动态页都未覆盖。

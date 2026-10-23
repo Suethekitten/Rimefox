@@ -61,6 +61,7 @@
 |---|---|
 | [HANDOFF.md](HANDOFF.md) | 开发交接：架构、消息协议、踩坑清单、调试与发版流程 |
 | [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md) | 翻译引擎：单元模型、渲染事务、句子对齐、接手指南 |
+| [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md) | 开放 Shadow DOM / Bilibili 评论区适配与后续站点接入 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 优先级、已完成 / 待办、明确不做的清单 |
 | [docs/UPGRADING.md](docs/UPGRADING.md) | 从旧版 DualTrans 升级与配置迁移 |
 | [docs/YOUTUBE.md](docs/YOUTUBE.md) | YouTube 字幕双语的限制、风险与隐私说明 |
@@ -75,6 +76,8 @@
 - Chrome 114+ / Edge 114+，Manifest V3
 - 视频字幕只支持 YouTube 的 CC 字幕轨道；画面硬字幕、PDF / EPUB、图片 OCR 不做
 - 行内标签（`<b>`、`<a>`）不保证保留；个别重前端站点需要在设置页写站点规则
+- 开放 Shadow DOM：已适配 B 站新版评论区正文；closed Shadow Root、shadow root 直接文本、iframe 内评论区暂不支持
+- B 站未登录时只展示首屏评论和“登录后查看”提示，滚动加载 / 楼中楼展开需要在登录态下验证
 
 完整清单见 [ROADMAP.md 的「已知限制」](docs/ROADMAP.md) 与 [HANDOFF.md 的「已知问题」](HANDOFF.md)。
 
