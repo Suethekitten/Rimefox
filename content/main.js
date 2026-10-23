@@ -152,6 +152,13 @@
             rebuild = true;
           }
         }
+        // 医学模式改变提示词和术语，已注入的普通译文不能继续冒充专业译文。
+        // 比较「当前页面实际是用哪种模式翻的」而不是上一次 loadConfig：配置广播
+        // 与启动/切换的先后顺序会影响后者，曾出现过开启后已翻段落不重建的情况。
+        var medical = res.config.medicalMode === true;
+        DT.state.medicalMode = medical;
+        var renderedMedical = DT.state.renderedMedical;
+        if (renderedMedical !== undefined && renderedMedical !== medical) rebuild = true;
         DT.state.theme = (site && site.theme) || res.config.theme || 'underline';
       }
     } catch (err) {
@@ -231,6 +238,7 @@
   async function translatePage(opts) {
     var options = opts || {};
     if (running || !DT.state.enabled) return;
+    DT.state.renderedMedical = DT.state.config && DT.state.config.medicalMode === true;
     running = true;
     runId += 1;
     var myRun = runId;

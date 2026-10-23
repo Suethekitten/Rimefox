@@ -476,6 +476,13 @@ t('液态玻璃默认开启，导入 true / false 都保留', () => {
   assert.equal(pickImportedConfig(envelope({ ...base, liquidGlass: false })).config.liquidGlass, false);
 });
 
+t('医学模式默认关闭，导入 true / false 都保留', () => {
+  assert.equal(DEFAULTS.medicalMode, false);
+  const base = { targetLang: 'zh-CN', theme: 'underline', mode: 'dual' };
+  assert.equal(pickImportedConfig(envelope({ ...base, medicalMode: true })).config.medicalMode, true);
+  assert.equal(pickImportedConfig(envelope({ ...base, medicalMode: false })).config.medicalMode, false);
+});
+
 t('默认值：inputHotkey=alt+i、inputTargetLang=auto，且能通过导入校验', () => {
   assert.equal(DEFAULTS.inputHotkey, 'alt+i');
   assert.equal(DEFAULTS.inputTargetLang, 'auto');

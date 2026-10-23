@@ -90,6 +90,7 @@ const fields = {
   privacyMaskUserName: $('privacyMaskUserName'),
   subtitleTranslate: $('subtitleTranslate'),
   hoverCompare: $('hoverCompare'),
+  medicalMode: $('medicalMode'),
   chromeBilingual: $('chromeBilingual'),
   uiTheme: $('uiTheme'),
   uiLang: $('uiLang'),
@@ -386,6 +387,7 @@ function applyConfig(cfg) {
   fields.privacyMaskUserName.checked = cfg.privacyMaskUserName === true;
   fields.subtitleTranslate.checked = cfg.subtitleTranslate === true;
   fields.hoverCompare.checked = cfg.hoverCompare !== false;
+  fields.medicalMode.checked = cfg.medicalMode === true;
   fields.chromeBilingual.checked = !!cfg.chromeBilingual;
   fields.uiTheme.value = cfg.uiTheme || 'auto';
   applyUiTheme(fields.uiTheme.value);
@@ -476,6 +478,7 @@ function readForm() {
     privacyMaskUserName: fields.privacyMaskUserName.checked,
     subtitleTranslate: fields.subtitleTranslate.checked,
     hoverCompare: fields.hoverCompare.checked,
+    medicalMode: fields.medicalMode.checked,
     chromeBilingual: fields.chromeBilingual.checked,
     debug: fields.debug.checked,
     accentColor: fields.accentColor.value || 'violet',

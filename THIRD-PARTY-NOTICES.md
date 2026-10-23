@@ -104,6 +104,22 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Medical terminology / translation rules
+
+- 项目：**medical-literature-translation**（Claude Skill，不是 Hugging Face 数据集）— <https://github.com/qitong/medical-literature-translation>
+- 作者：Qitong Hu
+- 版本：`11c9604e758fe9bbcfc25ca90e14ae1a2d1c5176`（2026-08-27）
+- 许可证：MIT，Copyright (c) 2026 Qitong Hu
+- 许可证全文：[licenses/qitong-medical-literature-MIT.txt](licenses/qitong-medical-literature-MIT.txt)
+- 实际复用：`references/glossary.md` 的 44 条中英双向术语（3 条含多译法 / DNT 的条目未纳入）与 `references/translation-conventions.md` 中适合浏览器实时翻译的规则，改编为 `lib/medical/data/en-zh-CN.js` 和 `lib/medical/profile.js`；未引入 Python Skill、脚本运行时或上游仓库代码。
+
+### 数据来源说明
+
+- **Wikidata**：主命名空间结构化数据为 CC0 1.0；本项目的 56 条常见医学概念使用 Wikidata 中文标签 + P486（MeSH descriptor ID）锁定概念，并做了人工简繁 / 术语规范化。Wikidata 标签不是官方医学译名，详见 [docs/MEDICAL-DATA-AUDIT.md](docs/MEDICAL-DATA-AUDIT.md)。
+- **MeSH**：只使用 P486 概念 ID 作为交叉引用，**没有打包 MeSH 数据文件**；MeSH 英文数据如未来直接使用，需按 NLM 条款署名 “Courtesy of the National Library of Medicine” 且不得暗示 NLM 背书。
+- **AIX-Text/TerminologyDataset**：数据集卡声称 MIT，但仓库没有 LICENSE 文件，且内容可追溯到第三方索引 / 标准；**没有打包任何条目**，只作为候选审计对象。详见审计文档。
+- **HPO / UMLS**：本轮未使用。
+
 ## 凛狐自身的第三方依赖
 
 扩展运行时不依赖任何 npm 包、CDN 脚本或远程模型；打包产物只含仓库内的原生 HTML / CSS / JS / PNG。开发期的 Node 只用于本地测试脚本，不进入发布包。

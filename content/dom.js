@@ -338,9 +338,40 @@
   // 只认「<sup> + 可见文字只有编号和分隔符 + 编号都在链接里 + 每个链接都指向文献锚点」：
   // 数学指数 x<sup>2</sup>、10<sup>−6</sup>、化学式 H<sub>2</sub>O、序数 1<sup>st</sup>、普通链接都不满足
   var CITE_TEXT = /^[\s[(]*\d{1,4}(?:\s*[,，;；–—−-]\s*\d{1,4})*[\s\])]*$/;
-  // 链接自己说明是引用：DPUB-ARIA 角色，或 data-test / data-track-action / aria-label / class 里的字样
-  var CITE_HINT = /citation|reference|footnote|biblio|noteref|\bcite\b|\bxref\b|fn-?ref/i;
+  // 链接自己说明是引用：DPUB-ARIA 角色，或 data-test / data-track-action / aria-label / class 里的字样。
+  // 用词边界避免 preference 里的 reference 误命中；reference anchor / citation-ref 这类带连字符的照样命中。
+  var CITE_HINT = /(?:^|[\s_-])(citations?|references?|footnotes?|biblio(?:graphy|ref)?|noteref|cite|xref|fn-?ref)(?:[\s_-]|$)/i;
   var citeMemo = null; // 一次 collect 内缓存（同一个上标里每个文本节点都会问一遍）
+
+  // 用户名提及：链接文字本身就是 @handle。它不是正文里可翻译的普通链接，
+  // 而是实体身份；当保留区处理，避免译文把整个 @user 链接范围吞掉。
+  function isMentionEl(el) {
+    if (!el || el.nodeType !== 1 || tagOf(el) !== 'A') return false;
+    var href = el.getAttribute('href') || '';
+    if (!href || /^(mailto|tel|javascript):/i.test(href)) return false;
+    var text = String(el.textContent || '').replace(/\s+/g, ' ').trim();
+    return /^@[^\s@]{1,64}$/.test(text);
+  }
+
+  // 弱证据链接（没有 role / citation 字样）要确认目标真的像参考文献，而不是章节 / 图表 / 普通页面锚点。
+  function looksLikeReferenceTarget(target) {
+    if (!target || target.nodeType !== 1) return false;
+    var role = String(target.getAttribute('role') || '').toLowerCase();
+    if (role === 'doc-biblioentry' || role === 'doc-endnote' || role === 'doc-footnote') return true;
+    var id = String(target.id || '');
+    var parent = target.parentElement;
+    // 有些出版社的参考文献项只有 `<li id="B1">`，没有 role / class；用「列表项 + 年份」弱证据补上，普通目录项不误判。
+    if (tagOf(target) === 'LI' && parent && /^(OL|UL)$/.test(parent.tagName) && /(?:19|20)\d{2}/.test(target.textContent || '')) return true;
+    if (/(^|[-_])(ref|bib|cite|note|fn|reference|biblio)(\d|[-_]|$)/i.test(id)) return true;
+    if (/^core-r\d/i.test(id)) return true;
+    var cls = typeof target.className === 'string' ? target.className : '';
+    if (CITE_HINT.test(cls)) return true;
+    if (parent) {
+      var pc = typeof parent.className === 'string' ? parent.className : '';
+      if (CITE_HINT.test(pc)) return true;
+    }
+    return false;
+  }
 
   function citeLink(a, sup) {
     var href = a.getAttribute('href') || '';
@@ -372,22 +403,45 @@
     } catch (err) {
       /* 不是合法的转义：按原样找 */
     }
-    return !!document.getElementById(id);
+    return looksLikeReferenceTarget(document.getElementById(id));
   }
 
+  var CITE_TAGS = { SUP: 1, SUB: 1, A: 1, SPAN: 1, CITE: 1, SMALL: 1, B: 1, I: 1, EM: 1, STRONG: 1 };
+
+  // 文献引用不再是「必须是 sup」：Science 用 <a role="doc-biblioref"><i>1</i></a> 直接夹在正文里，
+  // 其他出版社用 span / cite / 单链接。判据是组合证据：
+  //   数字编号格式 + 链接指向文献目标（或 role / 明确的 citation 字样）+ 数字都在链接里。
+  // 单个普通链接、数学 sup、图表锚点、站外链接不满足；没有链接的 sup / citation span 必须同时有强提示。
   function isCitationEl(el) {
-    if (!el || el.nodeType !== 1 || tagOf(el) !== 'SUP') return false;
+    if (!el || el.nodeType !== 1 || !CITE_TAGS[tagOf(el)]) return false;
     if (citeMemo && citeMemo.has(el)) return citeMemo.get(el);
+    var text = String(el.textContent || '');
+    var tag = tagOf(el);
     var yes = false;
-    var links = el.getElementsByTagName('a');
-    if (links.length && CITE_TEXT.test(el.textContent || '')) {
-      yes = true;
-      // 编号都在链接里：上标里夹着链接之外的数字（「see 3」）不算
-      var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-      for (var t = walker.nextNode(); t && yes; t = walker.nextNode()) {
-        if (/\d/.test(t.nodeValue) && !(t.parentNode && t.parentNode.closest && t.parentNode.closest('a'))) yes = false;
+    if (CITE_TEXT.test(text)) {
+      if (tag === 'A') {
+        yes = citeLink(el, el);
+      } else {
+        var links = el.getElementsByTagName('a');
+        if (links.length) {
+          yes = true;
+          // 编号都在链接里：上标里夹着链接之外的数字（「see 3」）不算
+          var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          for (var t = walker.nextNode(); t && yes; t = walker.nextNode()) {
+            if (/\d/.test(t.nodeValue) && !(t.parentNode && t.parentNode.closest && t.parentNode.closest('a'))) yes = false;
+          }
+          for (var i = 0; yes && i < links.length; i += 1) yes = citeLink(links[i], el);
+        } else {
+          // 没有可点的链接时只接受强提示 + 上标 / citation 容器，避免把 <span>2</span> 当引用
+          var said = [
+            el.getAttribute('role'),
+            el.getAttribute('aria-label'),
+            el.getAttribute('data-test'),
+            typeof el.className === 'string' ? el.className : ''
+          ].join(' ');
+          yes = (tag === 'SUP' || tag === 'CITE' || tag === 'SPAN') && CITE_HINT.test(said);
+        }
       }
-      for (var i = 0; yes && i < links.length; i += 1) yes = citeLink(links[i], el);
     }
     if (citeMemo) citeMemo.set(el, yes);
     return yes;
@@ -398,28 +452,68 @@
   function keepElOf(node, root) {
     var found = null;
     for (var cur = node.parentNode; cur && cur !== root && cur.nodeType === 1; cur = cur.parentNode) {
-      if (isProtectedEl(cur) || isCitationEl(cur)) found = cur;
+      if (isProtectedEl(cur) || isCitationEl(cur) || isMentionEl(cur)) found = cur;
     }
     return found;
   }
 
   function hasCitationInside(el) {
-    var sups = el.getElementsByTagName ? el.getElementsByTagName('sup') : [];
-    for (var i = 0; i < sups.length; i += 1) {
-      if (isCitationEl(sups[i])) return true;
+    if (!el.querySelectorAll) return false;
+    var nodes = el.querySelectorAll('sup,a,[role="doc-biblioref"],[role="doc-noteref"],.citation,.reference');
+    for (var i = 0; i < nodes.length; i += 1) {
+      if (isCitationEl(nodes[i])) return true;
+    }
+    return false;
+  }
+
+  function hasMentionInside(el) {
+    if (!el.querySelectorAll) return false;
+    var links = el.querySelectorAll('a');
+    for (var i = 0; i < links.length; i += 1) {
+      if (isMentionEl(links[i])) return true;
     }
     return false;
   }
 
   function hasKeepInside(el) {
     if (el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR)) return true;
-    return hasCitationInside(el);
+    return hasMentionInside(el) || hasCitationInside(el);
   }
 
   function hasCitation(unit) {
     return (unit.keep || []).some(function (k) {
       return k.cite;
     });
+  }
+
+  // 译文整体写回第一个文本节点时，如果第一个节点在普通 <a> 里，整段译文会继承链接。
+  // 这里只在真正有风险时返回 true：有可翻译的普通链接，且不是「整段就是一个链接」；
+  // 用户名提及 / 文献引用已经在 unit.keep 里，会被跳过。
+  function hasUnsafeInlineLink(unit) {
+    var nodes = contentNodes(unit);
+    var links = new Set();
+    var generic = new Set();
+    var nonLink = false;
+    var ancestor = false;
+    for (var i = 0; i < nodes.length; i += 1) {
+      var node = nodes[i];
+      var a = node.parentElement && node.parentElement.closest ? node.parentElement.closest('a') : null;
+      if (!a) {
+        nonLink = true;
+        continue;
+      }
+      links.add(a);
+      if (keepIndexOf(unit, a) >= 0) continue; // 提及 / 引用 / notranslate 链接不在这里处理
+      if (a !== unit.el && a.contains(unit.el)) {
+        ancestor = true;
+        continue;
+      }
+      generic.add(a);
+    }
+    if (!generic.size) return false;
+    if (ancestor) return true;
+    if (nonLink) return true;
+    return links.size > 1;
   }
 
   // own 单元 / 局部段落（ownTokens / flowTokens）里，只因「保留」才被 isSkipped 跳过的直接子元素：
@@ -2473,6 +2567,8 @@
     }
     var unit = isUnit ? unitOrEl : legacyUnit(unitOrEl, ownOrAlign && ownOrAlign.parts ? false : ownOrAlign);
     if (!unit || !unit.el || !unit.el.isConnected) return false;
+    // 根节点本身就是文献引用 / 用户名提及（独立链接或 citation span）：没有可安全改写的正文，原样保留。
+    if (!(unit.keep && unit.keep.length) && (isCitationEl(unit.el) || isMentionEl(unit.el))) return false;
     // 保留区：text 可以带 <kN> 标记（模型原样回来的），也可以不带（按原文逐字找位置）
     var segs = null;
     var cited = null; // 文献引用：每个保留区在译文里的落点（见 injectCited）
@@ -2512,6 +2608,17 @@
       // 3) 控件 / 导航里的界面文字
       (allowChromeReplace && area !== 'content');
 
+    // 普通行内链接不能因为写回第一个文本节点而吞掉整段译文 / 把链接扩到整段。
+    // 无法安全原地切分时降级成双语：原段落（含链接）不动，译文另起一块；链接祖先包裹正文时宁可不写。
+    if (replaceMode && area === 'content' && hasUnsafeInlineLink(unit)) {
+      var outerLink = unit.el.closest && unit.el.closest('a');
+      if (outerLink && outerLink !== unit.el) {
+        DT.log('link boundary: refuse in-place write inside ancestor link', previewText(unit.text));
+        return false;
+      }
+      unit.linkFallback = 'dual';
+      replaceMode = false;
+    }
     if (cited) return injectCited(unit, cited, text, lang, area, replaceMode);
     if (replaceMode) {
       if (unit.ruby && unit.ruby.length) return injectRuby(unit, text, lang, area);

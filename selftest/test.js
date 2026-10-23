@@ -2675,6 +2675,182 @@
     return r === true ? true : 'keepPlacement：' + r;
   });
 
+  // ---------------- 通用文献引用（Science 非 sup 结构）与行内链接边界 ----------------
+  function textNodesIn(root) {
+    var out = [];
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (var n = walker.nextNode(); n; n = walker.nextNode()) if (/\S/.test(n.nodeValue)) out.push(n);
+    return out;
+  }
+
+  function textOfLinks(root) {
+    return Array.prototype.map.call(root.querySelectorAll('a'), function (a) { return a.textContent; });
+  }
+
+  function textOutsideLinks(root, needle) {
+    return textNodesIn(root).some(function (n) {
+      return n.nodeValue.indexOf(needle) >= 0 && !(n.parentElement && n.parentElement.closest('a'));
+    });
+  }
+
+  function textInsideLinks(root, needle) {
+    return textNodesIn(root).some(function (n) {
+      return n.nodeValue.indexOf(needle) >= 0 && n.parentElement && n.parentElement.closest('a');
+    });
+  }
+
+  check('文献引用·Science Advances：没有 sup、引用在 <a role="doc-biblioref"><i>1</i></a> 里也能识别成一组保留区，编号不混进正文', function () {
+    return withTemplate('tpl-science-cite', 'dual', function (box) {
+      var p = box.querySelector('#sci-sec-1 [role="paragraph"]');
+      var units = DT.collect(p);
+      if (units.length !== 1) return '应是一个整段单元：' + units.length;
+      var u = units[0];
+      var r = eq((u.keep || []).map(function (k) { return [k.text, !!k.cite]; }), [['1', true], ['3', true]]);
+      if (r !== true) return 'Science 引用保留区：' + r;
+      if (u.wire.indexOf('(<k1>1</k1>–<k2>3</k2>)') < 0) return 'Science 引用标记不对：' + u.wire.slice(0, 240);
+      if (/core-collateral|data-xml-rid|role="doc-biblioref"/.test(u.wire)) return 'Science 引用 URL / 属性进了送翻文本';
+      return true;
+    });
+  });
+
+  check('文献引用·Science Advances：仅译文保留原链接、点击跳转；双语副本无 id、可点击；还原逐字一致', function () {
+    var out = [];
+    ['dual', 'translation'].forEach(function (mode) {
+      out.push(
+        withTemplate('tpl-science-cite', mode, function (box) {
+          var p = box.querySelector('#sci-sec-1 [role="paragraph"]');
+          var before = box.innerHTML;
+          var sourceLinks = Array.prototype.slice.call(p.querySelectorAll('a[role="doc-biblioref"]'));
+          var u = DT.collect(p)[0];
+          var zh = '水凝胶为研究细胞提供了特殊材料环境，可作为细胞外基质模拟物，并以受控方式递送治疗药物（<k1>1</k1>–<k2>3</k2>）。';
+          if (!DT.inject(u, zh, 'zh-CN')) return mode + '：inject 返回 false';
+          var target = p.querySelector('[data-dt-target]');
+          var links = mode === 'dual' ? (target ? Array.prototype.slice.call(target.querySelectorAll('a')) : []) : sourceLinks;
+          if (mode === 'dual') {
+            if (!target || links.length !== 2) return '双语：副本缺失：' + links.length;
+            if (target.querySelector('[id]')) return '双语：副本里还留着 id';
+            if (links[0].getAttribute('href') !== '#core-collateral-R1') return '双语：副本 href 不对：' + links[0].getAttribute('href');
+            var got = clickHash(links[0]);
+            if (got !== '#core-collateral-R1') return '双语：点击副本没跳转：' + got;
+          } else {
+            if (target) return '仅译文：不该另插译文块';
+            var now = Array.prototype.slice.call(p.querySelectorAll('a[role="doc-biblioref"]'));
+            if (now.length !== 2) return '仅译文：链接数变了：' + now.length;
+            for (var i = 0; i < now.length; i += 1) {
+              if (now[i] !== sourceLinks[i] || now[i].getAttribute('href') !== sourceLinks[i].getAttribute('href')) return '仅译文：原链接被换了';
+            }
+            var got2 = clickHash(now[0]);
+            if (got2 !== '#core-collateral-R1') return '仅译文：点击原链接没跳转：' + got2;
+          }
+          DT.restore();
+          return box.innerHTML === before ? true : mode + '：还原后不一致';
+        })
+      );
+    });
+    return out.every(function (x) { return x === true; }) ? true : out.filter(function (x) { return x !== true; }).join('；');
+  });
+
+  check('文献引用·通用判定：数字普通锚点 / 图表锚点 / 站外数字链接不误判；citation span、方括号链接、无链接 sup 能认', function () {
+    return withTemplate('tpl-science-cite', 'translation', function (box) {
+      var neg = ['#sci-neg-section', '#sci-neg-fig', '#sci-neg-ext'].map(function (sel) {
+        var u = DT.collect(box.querySelector(sel))[0];
+        if (!u) return sel + ':没收到';
+        return (u.keep || []).length;
+      });
+      var r = eq(neg, [0, 0, 0]);
+      if (r !== true) return '误判：' + r;
+      var pos = ['#sci-pos-span', '#sci-pos-bracket', '#sci-pos-nolink', '#sci-pos-missing'].map(function (sel) {
+        var u = DT.collect(box.querySelector(sel))[0];
+        return u ? (u.keep || []).map(function (k) { return k.text + (k.cite ? '*' : ''); }).join(',') : sel + ':没收到';
+      });
+      return eq(pos, ['[1]*', '[1,2]*', '1,2*', '1*']) === true ? true : '漏判：' + pos;
+    });
+  });
+
+  check('行内链接·仅译文：@username 用户名链接保持原样，后面的译文不落进 <a>；多个链接 / 嵌套 span / 空文本节点同样安全', function () {
+    var cases = [
+      ['#link-start', '@alice', 'ALICE 回复：这很重要。'],
+      ['#link-mid', '@alice', '感谢 ALICE 解释这个问题。'],
+      ['#link-multi', '@a', '你好 ALICE，请问 BOB 这件事。'],
+      ['#link-nested', '@a', '你好 ALICE，请问 BOB 这件事。'],
+      ['#link-empty', '@a', '开始 ALICE 边界后的文字。'],
+      ['#link-strong', '@a', 'ALICE 回复：这很重要。'],
+      ['#link-youtube', '@a', 'ALICE 回复：这很重要。']
+    ];
+    var errors = [];
+    cases.forEach(function (item) {
+      withTemplate('tpl-link-boundary', 'translation', function (box) {
+        var p = box.querySelector(item[0]);
+        var link = p.querySelector('a');
+        var href = link.getAttribute('href');
+        var u = DT.collect(p)[0];
+        if (!u) { errors.push(item[0] + ':没收到单元'); return; }
+        if (!DT.inject(u, item[2], 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
+        if (link.textContent !== item[1]) errors.push(item[0] + ':链接文字被改成了 ' + JSON.stringify(link.textContent));
+        if (link.getAttribute('href') !== href) errors.push(item[0] + ':href 被改');
+        if (textInsideLinks(p, 'ALICE')) errors.push(item[0] + ':译文落进了链接');
+        if (!textOutsideLinks(p, 'ALICE')) errors.push(item[0] + ':链接外没有译文');
+        var target = p.querySelector('[data-dt-target]');
+        if (target && link.contains(target)) errors.push(item[0] + ':译文块在链接里');
+        if (clickHash(link) !== href) errors.push(item[0] + ':原链接不能点击');
+        DT.restore();
+      });
+    });
+    return errors.length ? errors.join('；') : true;
+  });
+
+  check('行内链接·普通链接：混合段落只改普通文本，链接仍在原范围；整段就是链接时允许原地翻译但仍可点击', function () {
+    var errors = [];
+    [['#link-end', 'this paper', '阅读这篇论文了解更多。'], ['#link-late', 'paper', '更多内容在论文里。']].forEach(function (item) {
+      withTemplate('tpl-link-boundary', 'translation', function (box) {
+        var p = box.querySelector(item[0]);
+        var link = p.querySelector('a');
+        var href = link.getAttribute('href');
+        var u = DT.collect(p)[0];
+        if (!DT.inject(u, item[2], 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
+        if (link.textContent !== item[1]) errors.push(item[0] + ':普通链接文字被吞 / 改了：' + JSON.stringify(link.textContent));
+        if (textInsideLinks(p, '阅读') || textInsideLinks(p, '更多')) errors.push(item[0] + ':译文落进普通链接');
+        if (!textOutsideLinks(p, '阅读') && !textOutsideLinks(p, '更多')) errors.push(item[0] + ':链接外没有译文');
+        if (clickHash(link) !== href) errors.push(item[0] + ':普通链接不能点击');
+        var target = p.querySelector('[data-dt-target]');
+        if (target && link.contains(target)) errors.push(item[0] + ':译文块进了链接');
+        DT.restore();
+      });
+    });
+    withTemplate('tpl-link-boundary', 'translation', function (box) {
+      var p = box.querySelector('#link-whole');
+      var link = p.querySelector('a');
+      var href = link.getAttribute('href');
+      var u = DT.collect(p)[0];
+      if (!DT.inject(u, '立即阅读这篇论文。', 'zh-CN')) { errors.push('整段链接：inject false'); return; }
+      if (link.textContent !== '立即阅读这篇论文。') errors.push('整段链接：链接文字没有翻译：' + link.textContent);
+      if (clickHash(link) !== href) errors.push('整段链接：翻译后不能点击');
+      DT.restore();
+    });
+    return errors.length ? errors.join('；') : true;
+  });
+
+  check('行内链接·双语：原文链接不动，译文块在链接外；还原后原文逐字一致', function () {
+    var errors = [];
+    [['#link-start', 'ALICE 回复：这很重要。'], ['#link-end', '阅读这篇论文了解更多。']].forEach(function (item) {
+      withTemplate('tpl-link-boundary', 'dual', function (box) {
+        var p = box.querySelector(item[0]);
+        var before = box.innerHTML;
+        var link = p.querySelector('a');
+        var u = DT.collect(p)[0];
+        if (!DT.inject(u, item[1], 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
+        var target = p.querySelector('[data-dt-target]');
+        if (!target) errors.push(item[0] + ':没有译文块');
+        if (target && link.contains(target)) errors.push(item[0] + ':译文块进了链接');
+        if (link.textContent.indexOf('@') < 0 && item[0] === '#link-start') errors.push(item[0] + ':原用户名被改');
+        if (clickHash(link) !== link.getAttribute('href')) errors.push(item[0] + ':原文链接不能点击');
+        DT.restore();
+        if (box.innerHTML !== before) errors.push(item[0] + ':还原不一致');
+      });
+    });
+    return errors.length ? errors.join('；') : true;
+  });
+
   // ---------------- 0.8.7 Pixiv 中译英换行 / 长段落切分 ----------------
   function withPixivZh(mode, fn) {
     var box = document.createElement('div');
@@ -3575,12 +3751,15 @@
           if (DT.wireText(flow) !== 'Use <k1>--force</k1> with the <k2>Rimefox</k2> CLI carefully.') return '送翻文本：' + DT.wireText(flow);
           if (!DT.inject(flow, reply, 'zh-CN')) return 'inject 返回 false';
           if (outer.querySelector('code').textContent !== '--force' || outer.querySelector('.notranslate:not(code)').textContent !== 'Rimefox') return '保留元素被改：' + outer.innerHTML;
+          var target = outer.querySelector('[data-dt-target]');
+          if (!target || target.textContent !== '小心地将 --force 与 Rimefox 命令行一起使用。') return '译文节点：' + (target && target.textContent);
+          if (target.nextSibling !== outer.querySelector('div')) return '译文没插在块级子元素前';
+          if (target.closest('a')) return '译文块落进了链接';
           if (modes[i] === 'translation') {
-            if (outer.textContent !== '小心地将 --force 与 Rimefox 命令行一起使用。Block child text here.') return '页面文字：' + outer.textContent;
-          } else {
-            var target = outer.querySelector('[data-dt-target]');
-            if (!target || target.textContent !== '小心地将 --force 与 Rimefox 命令行一起使用。') return '译文节点：' + (target && target.textContent);
-            if (target.nextSibling !== outer.querySelector('div')) return '双语译文没插在块级子元素前';
+            // 混合链接不再为了仅译文而清空链接文字；保守降级成双语，原文链接保持可点。
+            var a = outer.querySelector('a');
+            if (!a || a.textContent.indexOf('Rimefox') < 0 || a.getAttribute('href') !== '#f') return '原链接被吞：' + (a && a.textContent);
+            if (outer.textContent.indexOf('Use ') !== 0) return '原文字丢失：' + outer.textContent;
           }
           DT.restore();
           return outer.innerHTML === before ? true : '还原不一致：' + outer.innerHTML;

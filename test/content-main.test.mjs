@@ -204,6 +204,29 @@ await t('没开翻译时改配置：只更新状态，不重建', async () => {
 });
 
 
+await t('翻译中别处开启医学模式：本页整页重建，按新配置重新翻译', async () => {
+  const c = await boot({ resume: true, config: { medicalMode: false } });
+  assert.equal(c.DT.state.enabled, true);
+  const before = c.page.rebuilds;
+  c.config.medicalMode = true;
+  await c.message({ type: 'dt:configChanged' });
+  assert.equal(c.page.rebuilds, before + 1, '不重建的话普通译文会继续冒充专业译文');
+});
+
+await t('翻译中关闭医学模式：同样整页重建，恢复普通译文', async () => {
+  const c = await boot({ resume: true, config: { medicalMode: true } });
+  const before = c.page.rebuilds;
+  c.config.medicalMode = false;
+  await c.message({ type: 'dt:configChanged' });
+  assert.equal(c.page.rebuilds, before + 1, '关闭也要重建，不能继续显示专业译文');
+});
+
+await t('医学模式配置没变：不重复重建', async () => {
+  const c = await boot({ resume: true, config: { medicalMode: true } });
+  await c.message({ type: 'dt:configChanged' });
+  assert.equal(c.page.rebuilds, 0);
+});
+
 await t('整页翻译：后台的 alignments 经 alignmentOf 校验后交给 DT.inject', async () => {
   const env = await boot({ config: { hoverCompare: true, lazy: false, skipSameLang: false } });
   const DT = env.DT;

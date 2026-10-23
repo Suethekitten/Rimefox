@@ -567,5 +567,67 @@ await t('目标语言隔离：同一原文 en 与 zh-CN 各自缓存，不串用
   assert.equal(enAgain.results[0], 'This is the English translation.');
 });
 
+
+// 医学专业模式：同一次请求内注入规则 / 术语，缓存与普通模式隔离，用户术语优先。
+async function setConfig(patch) {
+  const current = (await localArea.get('config')).config;
+  await localArea.set({ config: { ...current, ...patch } });
+}
+
+await t('医学模式：一次请求内加入规则和命中的医学词，不额外发请求', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  await setConfig({ medicalMode: true, glossary: [] });
+  calls = [];
+  const src = '总生存期延长，且未增加严重不良事件。〔medical-prompt〕';
+  const res = await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(res.ok, true);
+  assert.equal(calls.length, 1, '医学模式不能增加 API 请求');
+  assert.ok(lastSystem.includes('医学专业翻译要求'), lastSystem.slice(0, 200));
+  assert.ok(lastSystem.includes('总生存期 → overall survival'), '应注入 zh→en 医学术语');
+  assert.ok(lastSystem.includes('唯一目标语言：English (en)'));
+});
+
+await t('医学模式：普通缓存和医学缓存隔离，关闭后仍命中旧普通缓存', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const src = 'Cache isolation source 〔medical-cache〕';
+  await setConfig({ medicalMode: false, glossary: [] });
+  calls = [];
+  await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 1);
+
+  await setConfig({ medicalMode: true });
+  calls = [];
+  const medical = await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 1, '医学模式应使用自己的缓存键');
+  assert.equal(medical.cached, 0);
+
+  await setConfig({ medicalMode: false });
+  calls = [];
+  const normal = await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 0, '关闭医学模式后普通缓存仍应存在');
+  assert.equal(normal.cached, 1);
+
+  await setConfig({ medicalMode: true });
+  calls = [];
+  const medicalAgain = await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 0, '重新开启医学模式应命中医学缓存');
+  assert.equal(medicalAgain.cached, 1);
+});
+
+await t('医学模式：用户术语优先，冲突的医学词不再注入', async () => {
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  await setConfig({
+    medicalMode: true,
+    glossary: [{ source: '总生存期', target: '用户自定义生存期' }]
+  });
+  calls = [];
+  const src = '总生存期是主要终点。 〔medical-user-priority〕';
+  await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 1);
+  assert.ok(lastSystem.includes('用户自定义生存期'));
+  assert.ok(!lastSystem.includes('总生存期 → overall survival'));
+  await setConfig({ medicalMode: false, glossary: [] });
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

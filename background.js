@@ -9,8 +9,13 @@ import {
   normalizeGlossary,
   createHitFingerprint,
   upsertGlossaryEntry,
-  GLOSSARY_MAX
+  GLOSSARY_MAX,
+  GLOSSARY_PROMPT_LIMIT
 } from './lib/glossary.js';
+import { MEDICAL_TERM_LIMIT } from './lib/medical/profile.js';
+// MV3 的 ServiceWorkerGlobalScope 禁止 dynamic import()（HTML 规范限制）；
+// 100 条术语、约 28KB 的静态模块直接随 worker 加载，关闭医学模式时只是不参与匹配。
+import { matchMedicalTerms, medicalFingerprintFor } from './lib/medical/terminology.js';
 import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
 import { resolveSiteRule, hostListed } from './lib/site-rules.js';
@@ -68,8 +73,20 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
   let lastErr = null;
   const temperature = temperatureFor(cfg, style);
   let mismatch = false;
-  // 本批命中的术语（没命中就是空数组，提示词里不会多出术语段）
+  // 本批命中的用户术语（没命中就是空数组，提示词里不会多出术语段）
   const hits = matchGlossary(glossary, texts);
+  // 医学词库只填充用户术语剩下的预算；用户术语优先，不被医学词条挤掉。
+  let medical = null;
+  if (cfg.medicalMode === true) {
+    const remaining = Math.max(0, Math.min(MEDICAL_TERM_LIMIT, GLOSSARY_PROMPT_LIMIT - hits.length));
+    let medicalHits = [];
+    try {
+      medicalHits = matchMedicalTerms(texts, target, remaining, hits.map((one) => one.source));
+    } catch (err) {
+      medicalHits = [];
+    }
+    medical = { enabled: true, hits: medicalHits };
+  }
   // 段落里有网页标明不翻译的内容（<kN> 保留标记）：提示词加一段「原样照抄」
   const keepMarked = hasKeepMarks(texts);
   while (attempt < 3 && !mismatch) {
@@ -90,7 +107,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
-          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align, keepMarked) },
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align, keepMarked, medical) },
           { role: 'user', content: JSON.stringify(texts) }
         ]
       });
@@ -195,6 +212,7 @@ async function handleTranslate(msg, sender) {
   const target = msg.target === 'auto' ? resolveInputTarget(msg.target, msg.pageLang) : msg.target || cfg.targetLang;
   const style = styleById(msg.style).value; // 不认识的风格按普通翻译
   const glossary = normalizeGlossary(cfg.glossary);
+  const medicalOn = cfg.medicalMode === true;
   const rawTexts = Array.isArray(msg.texts) ? msg.texts : [];
   const texts = rawTexts.map((t) => (t == null ? '' : String(t)));
   const results = new Array(texts.length).fill(null);
@@ -217,9 +235,15 @@ async function handleTranslate(msg, sender) {
     prompt: promptFingerprint(cfg.customPrompt)
   };
   const hitPrint = createHitFingerprint(glossary);
+  const userSources = new Set(glossary.map((one) => one.source));
   const keys = new Map();
   const keyOf = (text) => {
-    if (!keys.has(text)) keys.set(text, cache.makeKey({ ...scope, glossary: hitPrint(text) }, text));
+    if (!keys.has(text)) {
+      // 医学模式：规则 + 词库版本 + 这段原文真正命中的医学术语（用户已覆盖的除外）。
+      // 关闭时 medical 为空，缓存键和旧版本逐字一致。
+      const medicalScope = medicalOn ? medicalFingerprintFor(text, target, userSources) : '';
+      keys.set(text, cache.makeKey({ ...scope, glossary: hitPrint(text), medical: medicalScope }, text));
+    }
     return keys.get(text);
   };
 

@@ -381,10 +381,9 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
   否则「Install `<span class="notranslate">`Rimefox`</span>` today.」只送「Install today.」、仅译文时整句写在 span 前面；
   隐藏 / `display:none`、块级或打断文字流（`breaksFlow`）的保留元素，以及因别的原因跳过的子元素（已翻过 `data-dt-src`、译文 / 界面节点、`PRE` / `IMG` 等跳过类标签、可编辑）仍不收。
   文字流里带 notranslate 的行内 `<code>`（GitHub）、行内子元素里嵌的保留元素同样按保留区处理。整段只剩保留内容的段落不收。
-- **文献引用**（`isCitationEl`）：Nature / Springer 的 `<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>`（每个编号一个链接，逗号是上标里的文本节点，完整书目只在 `title` 属性）、
-  Wikipedia 引注 `sup.reference`、Markdown 脚注（`role="doc-noteref"`）也是保留区，编号随整句送翻（`<kN>`）。判定只认：`<sup>` + 可见文字只有编号和分隔符（`1,2`、`3–5`、`[3]`）
-  + 数字都在链接里 + 每个链接都有 `#片段`，并且链接自己说明是引用（DPUB 角色，`data-test` / `data-track-action` / `aria-label` / class 含 citation、reference、footnote 等字样），
-  或者指向本页（同一路径）真实存在的锚点。数学指数、序数、化学式（`<sub>`）、站外链接、链接包在上标外面（`<a><sup>2</sup></a>`）都不算。
+- **文献引用**（`isCitationEl`）：Nature / Springer 的 `<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>`；Science / Atypon 的 `<a role="doc-biblioref" href="#core-collateral-R1"><i>1</i></a>–<a …>`（没有 sup，直接夹在正文里，目标在 `div.citations`）；Wikipedia `sup.reference`、Markdown 脚注（`role="doc-noteref"`）、带 citation / reference 语义的 span、无链接但带强提示的 `<sup>` 也是保留区。
+  判定是组合证据：候选行内元素 + 可见文字只有编号和分隔符（`1,2`、`3–5`、`[3]`）+ 数字都在链接里 + 每个链接有 DPUB 角色 / citation 字样，或指向本页且目标真的像参考文献（`li`、`doc-biblioentry`、`#ref/#bib/#cite/#fn`、reference / biblio class 等）。数学指数、序数、化学式（`<sub>`）、图表 / 章节锚点、站外链接、普通数字链接、链接包在上标外面（`<a><sup>2</sup></a>`）都不算。
+  行内链接边界：普通混合链接无法安全原地切分时，仅译文降级成双语（原段落 / 链接不动，译文另起一块）；`@username` 提及链接作为保留区，链接文字和点击范围保持原样。实现位置：`content/dom.js` 的 `isCitationEl` / `isMentionEl` / `looksLikeReferenceTarget` / `hasUnsafeInlineLink` / `DT.inject`。
   渲染走 `injectCited`：先用 `DT.units.keepMarks` 取每个标记在「去掉标记和标记内容」的译文里的落点（同号重复只认第一次；不按原文逐字找 —— 引用只是几个数字，译文里本来就可能有同样的数字）。
   仅译文：上标链接原地不动，文本节点永远不写。落点先后与页面一致 → 词级写回（`keepPlan`）；模型换了先后 → `keepPlacement` 把每个挪到所在那一句的句末标点前（`sentenceEndAt`），挪完一致就句级写回；
   两组在原文里隔着字、译文里挨着 → 中间补一个逗号。标记丢了 / 挪完仍对不上 / 分行或 Ruby 段落 / 两个引用之间没有文本节点可写 → 降级成双语：原段落和引用原样保留，译文另起一块；
@@ -523,6 +522,9 @@ node tools/e2e-extension.mjs                                                  # 
 node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
 node tools/e2e-extension.mjs --bilibili-live  # 真实 B 站视频页评论区验收（需要能上 bilibili.com；未登录只显示首屏，滚动 / 楼中楼会显示未验证）
+node tools/e2e-extension.mjs --headed --science-live  # 真实 Science Advances 论文页（Cloudflare 需要 headed；只验证引用识别 / 注入 / 还原，不调用真实模型）
+node tools/e2e-extension.mjs --selftest-only  # 只跑离线自检页
+node tools/e2e-extension.mjs --medical-only   # 只跑弹窗 + 医学专业模式
 node tools/stability-audit.mjs                # 真实 Chrome 长文 / 大量段落 / 动态 / 内存基准（直接页面）
 ```
 真实 Chrome（`--browser` 或环境变量 `RIMEFOX_BROWSER` 可换成 Edge）+ CDP `Extensions.loadUnpacked` 加载工作树 + 本地假 OpenAI 兼容接口，不需要 API Key，不进 CI（要真实浏览器，YouTube 还要能上网）。
@@ -601,6 +603,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 | `dockSide` | `right` | 悬浮入口位置：`right` / `left` |
 | `dockAutoHide` | true | 悬浮入口收起时半藏；贴边吸附时只露出半个小球 |
 | `customPrompt` | `''` | 追加到系统提示词末尾，进缓存指纹（改了旧译文失效） |
+| `medicalMode` | false | 医学专业模式：全局开关；追加医学规则和本批命中的已审核术语，缓存键单独带 `medical` 段。见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md) |
 | `glossary` | `[]` | 术语表 `[{source, target, category?}]`，全局一份，命中才注入提示词；缓存键只带这段原文命中的术语的指纹（没命中是 `none`），加 / 改一条只让用到它的段落重翻。设置页可编辑 / CSV 导入导出，网页里划词气泡也能「加入术语表」（走后台 `glossary:add`）|
 | `debug` | false | 输出调试日志 |
 | `_v` | 6 | 配置版本（迁移逻辑在 `migrateConfig`） |
@@ -626,7 +629,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 13. **真实网站覆盖**：0.9.2 只对青空文库《罗生门》做了真实页面验收；Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，不能当成已验证
 13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
 14. **目标语言校验是保守的定向失效**：只覆盖「英文等拉丁字母目标却整段回中日韩正文」这种高置信度情况；短文本、专名 / 术语清单不做自动失效，旧缓存里的这类条目可能保留，重新翻译即可覆盖；中文 / 日文目标方向没有做自动校验
-15. **文献引用只认 `<sup>` 包着链接的写法**：链接包在上标外面（`<a href="#n2"><sup>2</sup></a>`）、没有链接的纯上标数字、用 CSS 而不是 `<sup>` 做的上标都按普通文字处理；模型换了引用先后时仅译文只保证引用还在所属那一句（挪到句末），做不到词级；真实模型能否原样照抄 `<kN>` 标记只用假模型验证过（照抄不了会降级成双语，不会丢引用）
+15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仍无法保证所有未知出版社结构；真实模型能否原样照抄 `<kN>` 标记、仅译文能否总能安全原地落点，只用假模型 / 夹具验证过（落点不安全会降级成双语，不丢引用）。
 
 ---
 
@@ -714,15 +717,19 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.10.2）
+## 14. 本版技术记录（0.11.0）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.9.8 的容器形态 / 保留区边界见 `ccfceca` 与 §5.1、§5.2.1；0.10.1 的文献引用与开关见 `70f04f7`、`49fec11`。Shadow DOM 的完整交接见 [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md)。
+> 0.10.2 的 Shadow DOM / B 站评论区见 [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md)；医学模式的完整交接见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md)，词库来源与许可见 [docs/MEDICAL-DATA-AUDIT.md](docs/MEDICAL-DATA-AUDIT.md)。
 
-- **根因**：`content/dom.js` 的 `walk()` 只接受 Element（nodeType 1），`collectRoots()` 从 `body` 开始；`tokensOf` 只走 `childNodes`，不会进入宿主元素的 `shadowRoot`。`content/main.js` 的 document MutationObserver 也不会跨 shadow 边界。因此 B 站新版评论组件树对旧管线完全不可见；`DT.restore()` 里基于 `document.querySelectorAll` 的兜底同样穿不透 shadow root。
-- **通用层**：新增 `content/shadow.js`。`DT.collect()` 支持 ShadowRoot 根；`walk()` 遇到 open root 改走 `shadowRoot.children`，slot 只走 `assignedNodes({flatten:true})`，并用本轮 `walkSeen` WeakSet 去重。`DT.collectAll()` 在普通 roots 后追加适配器 `collectTargets()` 的内容根；`DT.restore()` 开头 `DT.shadow.reset()`，兜底清理改走 `DT.shadow.all()`。没有 monkey-patch `attachShadow`，closed root 直接按普通元素处理。
-- **B 站适配**：新增 `content/adapters/bilibili-comments.js`，只在 `*.bilibili.com` 或带 `data-dt-shadow-test` 的夹具启用 targets 模式。真实视频页已验证结构：`bili-comments.shadowRoot` → `#feed` → `bili-comment-thread-renderer.shadowRoot` → `bili-comment-renderer.shadowRoot` → `bili-rich-text.shadowRoot` → `#contents`。适配器从 feed 开始 BFS，只把 `#contents` 当内容根；昵称 / 时间 / 点赞 / 操作区 / 输入框 / “登录后查看”提示都不收集。楼中楼通过递归白名单组件找到，不依赖固定嵌套层级。
-- **监听 / 生命周期**：每个 `bili-comments` 只对 feed shadow root 建一个 Observer，不为每条评论或每个 thread 建；新一级评论 / 排序重建由 feed childList 触发，异步楼中楼由现有 click / scroll 补扫 + shadow 启用时额外 1.2s 延迟扫描接住。`prune()` 在每次 collect / pruneDetached / refreshStale 时断开已脱离的 root；B 站上限 200 个 root，通用 auto 默认 160。还原 / 关闭翻译时 `reset()` 断开全部 observer 并移除样式。
-- **样式 / 悬停 / 还原**：`content/styles/inject.css` 加入 `web_accessible_resources`，shadow 层只 fetch 一次，把 `html[...]` 转成 `:host-context(html[...])` 后用共享 Constructable Stylesheet 注入所有 root；不支持时每个 root 一个同内容 `<style>`，fetch 前有同步兜底。悬停事件用 `composedPath()[0]`，caret 拿不到内部文本节点时按整段高亮 / 整段原文气泡安全降级；宿主链只映射到评论正文宿主，不把整个 `bili-comments` 映射成第一条评论。所有注入仍走 `RenderTransaction`，还原沿用 `DT.restore()`。
-- **测试**：新增 B 站同构夹具和通用夹具，覆盖单层 / 多层 open root、closed root、slot 去重、一级评论、楼中楼、动态新增、异步回复、隐藏回复、排序重建、仅译文、链接保留、悬停、还原、observer 释放；Node 注入清单测试同时校验 shadow / adapter 与 manifest 顺序。全量 Node、自检页和 E2E 通过；真实 B 站结构及“中文评论 → 英文译文”已用本地假模型验证；真实未登录页只显示首屏，滚动加载和楼中楼展开未在登录态验证。
-- **已知 / 未验证**：见 [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md) §F。closed root、ShadowRoot 直接文本、slot 直接文本、iframe 内评论、自定义 CSS 进 shadow、跨 shadow 划词、番剧 / 专栏 / 动态页都未覆盖。
+- **医学专业模式**：新增全局 `medicalMode`（默认关闭，设置页 / 弹窗共用）；100 条审核术语，来源 MIT 词表 + Wikidata/P486，AIX-Text 因许可证缺口未打包；医学规则和本批命中术语进入提示词，用户术语优先且最多 20 条总预算；缓存键只在开启时追加 `medical` 段，普通缓存和旧缓存键不变；MV3 service worker 禁止 dynamic import，词库改为静态 import。
+- **通用学术引用**：`isCitationEl` 不再只认 `sup`；Science / Atypon 的 `a[role=doc-biblioref]`、citation span、无链接强提示上标、编号组都可识别；弱证据链接必须指向本页且目标像参考文献（列表项 + 年份 / `ref` / `bib` / `cite` / `fn` / reference class 等）；数学、序数、化学式、图表 / 章节锚点、站外数字链接保留为普通文本。
+- **行内链接边界**：`@username` 提及链接作为保留区；普通混合行内链接无法安全原地切分时不把整段译文写进 `<a>`，仅译文降级成双语，原链接和点击范围不变；整段原文就是链接时允许原地翻译。
+- **测试**：新增 Science 真页夹具 / 实站 headed 检查、Nature / Wikipedia / Markdown 回归、引用反例、`yt-attributed-string` 风格的 @ 提及夹具、普通混合链接 / 整段链接 / 双语 / 还原测试；完整 Node、自检页、Chrome E2E 通过。
+- **未验证**：真实 YouTube 评论在自动化 Chrome 中没有加载出评论项，未做实站评论验收；Springer / Wiley / Elsevier / PLOS / PMC / arXiv 未逐站验证；真实付费模型对大量 `<kN>` 标记的遵守率仍只由假模型 / 夹具覆盖。
+
+## 15. 医学专业模式
+
+- 全局开关 <code>medicalMode</code>，设置页 / 弹窗共用配置；默认关闭，旧配置由 <code>mergeConfig</code> 补 <code>false</code>，不升 <code>_v</code>。
+- 100 条核心词库（MIT 44 + Wikidata/P486 56），来源 / 许可见 [docs/MEDICAL-DATA-AUDIT.md](docs/MEDICAL-DATA-AUDIT.md)；实现、提示词、缓存隔离、测试和限制见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md)。
+- 关键坑：MV3 service worker **不能 <code>import()</code>**，词库必须静态 import；页面重建要比较 <code>DT.state.renderedMedical</code>，不能只比较上一次 <code>loadConfig</code>。

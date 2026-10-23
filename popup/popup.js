@@ -31,6 +31,8 @@ const el = {
   styleSelect: document.getElementById('styleSelect'),
   target: document.getElementById('target'),
   hoverCompare: document.getElementById('hoverCompare'),
+  medicalMode: document.getElementById('medicalMode'),
+  medicalRow: document.getElementById('medicalRow'),
   stat: document.getElementById('stat'),
   meta: document.getElementById('meta'),
   statusBox: document.getElementById('statusBox'),
@@ -124,6 +126,7 @@ function renderKbd() {
 // 状态卡：标题（未开启 / 翻译中… / 已译 N 段）+ 右侧计数胶囊 + 详情（提示、失败原因）
 function render() {
   el.ver.textContent = 'v' + (chrome.runtime.getManifest().version || '0.1.0');
+  renderMedical();
   renderState();
   renderKbd();
   renderQuickTarget();
@@ -373,6 +376,14 @@ function renderHover() {
   el.hoverRow.title = label;
 }
 
+function renderMedical() {
+  if (!el.medicalMode) return;
+  el.medicalMode.checked = currentCfg.medicalMode === true;
+  const label = t('医学专业模式：优先使用已审核的医学术语；保留剂量、统计结果和临床结论');
+  el.medicalMode.setAttribute('aria-label', t('医学专业模式'));
+  if (el.medicalRow) el.medicalRow.title = label;
+}
+
 function renderNight() {
   const host = tabHostname();
   el.nightRow.hidden = !host || !supported;
@@ -400,6 +411,22 @@ el.hoverCompare.addEventListener('change', async () => {
   currentCfg = saved;
   rememberSaved(saved);
   renderHover();
+});
+
+el.medicalMode.addEventListener('change', async () => {
+  var wanted = el.medicalMode.checked;
+  el.medicalMode.disabled = true;
+  var saved = await saveAndRemember({ medicalMode: wanted });
+  el.medicalMode.disabled = false;
+  if (!saved) {
+    el.medicalMode.checked = currentCfg.medicalMode === true;
+    el.stat.textContent = t('设置保存失败，请重试');
+    setTimeout(function () { renderMedical(); }, 1800);
+    return;
+  }
+  currentCfg = saved;
+  rememberSaved(saved);
+  renderMedical();
 });
 
 el.nightSite.addEventListener('change', async () => {
@@ -458,6 +485,7 @@ function onConfigElsewhere(next) {
   renderMeta();
   renderNight();
   renderHover();
+  renderMedical();
 }
 
 async function init() {
@@ -506,6 +534,7 @@ async function init() {
   renderThemeToggle();
   renderNight();
   renderHover();
+  renderMedical();
   // 底部工具坞：折射滤镜 / 透镜动效复用 Liquid Glass Slider（Sak，MIT）。
   // 设置里关掉「液态玻璃」时这里不会挂载，CSS 还原成普通图标栏。
   syncGlassDock();

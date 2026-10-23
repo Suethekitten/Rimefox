@@ -37,6 +37,9 @@ const LIVE_AOZORA = flag('--aozora-live')
   : '';
 const VERBOSE = flag('--verbose');
 const SHADOW_ONLY = flag('--shadow-only');
+const MEDICAL_ONLY = flag('--medical-only');
+const SELFTEST_ONLY = flag('--selftest-only');
+const SCIENCE_LIVE = flag('--science-live');
 const BILIBILI_LIVE = flag('--bilibili-live')
   ? (() => {
       const arg = option('--bilibili-live');
@@ -74,7 +77,7 @@ async function until(fn, ms = 15000, step = 200) {
 // ---------------- 假接口 + 测试页 ----------------
 // 模型：每条译文 = '译:' + 原文（目标是繁體中文时 '繁:'）；单条带 CITE 回纯文本「巴黎是首都[1]。」，带 SPLIT 回拆开的两句。
 // 带 reasoning_effort 的请求回 400（OpenAI 官方非推理模型就是这样），用来看扩展会不会记住、不再发
-const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, aligned: 0, aozoraLive: false, sent: [], lastSystem: '', lastAlignedSystem: '', keepSystem: '' };
+const stats = { requests: 0, texts: 0, withEffort: 0, lateRejected: 0, firstOk: 0, aligned: 0, aozoraLive: false, sent: [], systems: [], lastSystem: '', lastAlignedSystem: '', keepSystem: '' };
 const OWID_ZH =
   '这9张图表展示了世界不同地区的数据。每张图表的横轴是平均收入（人均GDP），纵轴是生活在极端贫困中的人口比例。' +
   '每条轨迹的起点显示的是1820年的数据，它告诉我们，两个世纪前，无论人们身处世界何处，大多数人都生活在极端贫困之中。' +
@@ -87,6 +90,18 @@ const NATURE_FIXTURE = (() => {
   const html = fs.readFileSync(path.join(ROOT, 'selftest', 'index.html'), 'utf8');
   const m = /<template id="tpl-nature-cite">([\s\S]*?)<\/template>/.exec(html);
   if (!m) throw new Error('selftest/index.html 里找不到 tpl-nature-cite');
+  return m[1];
+})();
+const SCIENCE_FIXTURE = (() => {
+  const html = fs.readFileSync(path.join(ROOT, 'selftest', 'index.html'), 'utf8');
+  const m = /<template id="tpl-science-cite">([\s\S]*?)<\/template>/.exec(html);
+  if (!m) throw new Error('selftest/index.html 里找不到 tpl-science-cite');
+  return m[1];
+})();
+const LINK_FIXTURE = (() => {
+  const html = fs.readFileSync(path.join(ROOT, 'selftest', 'index.html'), 'utf8');
+  const m = /<template id="tpl-link-boundary">([\s\S]*?)<\/template>/.exec(html);
+  if (!m) throw new Error('selftest/index.html 里找不到 tpl-link-boundary');
   return m[1];
 })();
 
@@ -289,6 +304,15 @@ const PAGES = {
 <style>.fx-nature sup{position:relative;top:-.375em;font-size:.75em;line-height:0;vertical-align:baseline}</style></head><body>
 ${NATURE_FIXTURE}
 </body></html>`,
+  '/science-cite.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Science citations</title></head><body>
+${SCIENCE_FIXTURE}
+</body></html>`,
+  '/inline-links.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Inline links</title></head><body>
+${LINK_FIXTURE}
+</body></html>`,
+  '/medical.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Medical</title></head><body>
+<p id="med">An odds ratio of 2.1 (95% CI 1.2–3.4) was reported in the randomized controlled trial.</p>
+</body></html>`,
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
 <p id="p1">This is the first paragraph of the article with enough words to translate.</p>
@@ -361,6 +385,7 @@ const server = http.createServer((req, res) => {
       const body = JSON.parse(raw);
       const headers = { 'content-type': 'application/json' };
       stats.lastSystem = String((body.messages && body.messages[0] && body.messages[0].content) || '');
+      stats.systems.push(stats.lastSystem);
       if (body.reasoning_effort !== undefined) {
         stats.withEffort += 1;
         // 已经有请求去掉参数重发成功过（后台一定收到过 400）之后还带着参数来：记忆没生效
@@ -957,6 +982,26 @@ async function liveAozoraChecks(url) {
   console.log('  诊断与截图已保存：' + outDir);
 }
 
+
+async function popupChecks() {
+  console.log('\n[弹窗]');
+  await patchConfig({ medicalMode: false, glossary: [] });
+  const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/popup/index.html' });
+  const pop = await attach(targetId);
+  await until(() => evaluate(pop, "!!document.getElementById('medicalMode')"));
+  await sleep(400);
+  const off = await evaluate(pop, "!document.getElementById('medicalMode').checked");
+  check('弹窗：医学专业模式存在且默认关闭', off === true);
+
+  await evaluate(pop, "document.getElementById('medicalMode').click(); true");
+  const on = await until(async () => ((await readConfig()).medicalMode === true ? 'on' : null), 5000);
+  check('弹窗：打开医学模式并写入全局配置', on === 'on');
+  await evaluate(pop, "document.getElementById('medicalMode').click(); true");
+  const offAgain = await until(async () => ((await readConfig()).medicalMode === false ? 'off' : null), 5000);
+  check('弹窗：关闭医学模式并写入全局配置', offAgain === 'off');
+  await send('Target.closeTarget', { targetId }, pop);
+}
+
 async function optionsChecks() {
   console.log('\n[设置页]');
   const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
@@ -980,6 +1025,19 @@ async function optionsChecks() {
     !afterDelete.providerConfig['custom:2'] && !JSON.stringify(afterDelete).includes('sk-two-secret') && !afterDelete.customProviders.some((p) => p.id === 'custom:2'),
     Object.keys(afterDelete.providerConfig).join(',')
   );
+
+  const medDefault = await evaluate(o, "!!document.getElementById('medicalMode') && !document.getElementById('medicalMode').checked");
+  check('设置页：医学专业模式存在且默认关闭', medDefault === true);
+  const medClicked = await evaluate(o, "(function(){var m=document.getElementById('medicalMode');m.click();return {checked:m.checked,disabled:m.disabled};})()");
+  await evaluate(o, "document.getElementById('save').click(); true");
+  await sleep(1000);
+  const medConfig = await readConfig();
+  check('设置页：打开医学模式并保存', medConfig.medicalMode === true, JSON.stringify({ clicked: medClicked, config: medConfig.medicalMode, save: await evaluate(o, "document.getElementById('saveResult').textContent") }));
+  await sleep(400);
+  await evaluate(o, "(function(){var m=document.getElementById('medicalMode');m.checked=false;m.dispatchEvent(new Event('change',{bubbles:true}));return m.checked;})()");
+  await evaluate(o, "document.getElementById('save').click(); true");
+  await sleep(1000);
+  check('设置页：关闭医学模式并保存', (await readConfig()).medicalMode === false, 'medicalMode=' + (await readConfig()).medicalMode);
 
   const importFile = path.join(WORK, 'import.json');
   fs.writeFileSync(importFile, JSON.stringify({ app: 'rimefox', schema: 1, config: { targetLang: 'zh-CN', theme: 'underline', mode: 'dual', glossary: [{ source: 'Rimefox', target: '凛狐' }] } }));
@@ -1315,6 +1373,140 @@ async function shadowChecks() {
   const shadowOff = await contentEval(normal, 'window.__DT.shadow.active()');
   check('普通网页：不启用 Shadow DOM，收集无额外遍历', shadowOff === false && typeof normalMs === 'number' && normalMs < 50, JSON.stringify({ active: shadowOff, ms: normalMs }));
   await tabMsg(normal.tabId, { type: 'dt:toggle' });
+}
+
+
+// ---------------- 医学专业模式 ----------------
+async function medicalChecks() {
+  console.log('\n[医学专业模式]');
+  await patchConfig({ targetLang: 'zh-CN', medicalMode: false, glossary: [] });
+  const tab = await openTab(ORIGIN + '/medical.html');
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(tab, "return !!document.querySelector('#med [data-dt-target]')"), 20000);
+  await settled(tab);
+  const normalSystem = stats.lastSystem;
+  const normalRequests = stats.requests;
+  const normalSent = stats.sent.length;
+  check('默认关闭：提示词不带医学规则', !String(normalSystem).includes('医学专业翻译要求'));
+
+  await patchConfig({ medicalMode: true });
+  const findMedSystem = () => {
+    for (let i = stats.systems.length - 1; i >= 0; i -= 1) {
+      const one = String(stats.systems[i] || '');
+      if (one.includes('医学专业翻译要求') && one.includes('odds ratio → 比值比')) return one;
+    }
+    return null;
+  };
+  let medSystem = await until(findMedSystem, 8000);
+  if (!medSystem) {
+    await tabMsg(tab.tabId, { type: 'dt:retranslate' });
+    medSystem = await until(findMedSystem, 20000);
+  }
+  await settled(tab);
+  const medState = await contentEval(tab, "({enabled: __DT.state.enabled, medical: __DT.state.config && __DT.state.config.medicalMode, target: __DT.state.target})");
+  check('开启医学模式：已翻译页面按新配置重建并注入医学规则', !!medSystem && medSystem.includes('odds ratio → 比值比'), JSON.stringify({ config: (await readConfig()).medicalMode, state: medState, sent: stats.sent.slice(normalSent), systems: stats.systems.map((s) => (String(s).includes('医学专业翻译要求') ? 'MED' : 'norm')), term: !!medSystem && medSystem.includes('odds ratio → 比值比') }));
+  check('医学模式不增加请求：普通 / 专业各一次', stats.requests === normalRequests + 1, normalRequests + ' -> ' + stats.requests);
+
+  const medRequests = stats.requests;
+  await patchConfig({ medicalMode: false });
+  await settled(tab);
+  await sleep(600);
+  check('关闭医学模式：普通缓存仍命中，不重复请求', stats.requests === medRequests, medRequests + ' -> ' + stats.requests);
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await patchConfig({ medicalMode: false, glossary: [] });
+}
+
+
+
+async function inlineLinkChecks() {
+  console.log('\n[行内链接边界]');
+  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false });
+  const tab = await openTab(ORIGIN + '/inline-links.html');
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(tab, 'return document.querySelector("#link-start").textContent.indexOf("译:") >= 0'), 20000);
+  await settled(tab);
+  const info = await pageEval(tab, `
+    var p = document.querySelector('#link-start');
+    var a = p.querySelector('a');
+    var target = p.querySelector('[data-dt-target]');
+    var g = document.querySelector('#link-end');
+    var ga = g.querySelector('a');
+    var gt = g.querySelector('[data-dt-target]');
+    var w = document.querySelector('#link-whole a');
+    var y = document.querySelector('#link-youtube a');
+    return {
+      mention: a.textContent,
+      mentionTargetInLink: !!target && !!target.closest('a'),
+      generic: ga.textContent,
+      genericTarget: !!gt,
+      genericTargetInLink: !!gt && !!gt.closest('a'),
+      whole: w.textContent,
+      yt: y.textContent,
+      ytTargetInLink: !!(document.querySelector('#link-youtube [data-dt-target]') && document.querySelector('#link-youtube [data-dt-target]').closest('a'))
+    };
+  `);
+  check('行内链接·@ 提及：用户名链接文字不变，后面译文不在链接里', info.mention === '@alice' && !info.mentionTargetInLink && info.yt === '@a' && !info.ytTargetInLink, JSON.stringify(info));
+  check('行内链接·普通链接：链接文字不被吞，译文块在链接外', info.generic === 'this paper' && info.genericTarget && !info.genericTargetInLink, JSON.stringify(info));
+  check('行内链接·整段链接：允许原地翻译，链接仍可点', info.whole.indexOf('译:') === 0, JSON.stringify(info));
+  await patchConfig({ mode: 'dual' });
+  await until(() => pageEval(tab, 'return document.querySelectorAll("#link-mid [data-dt-target]").length === 1'), 20000);
+  const dual = await pageEval(tab, `
+    var p = document.querySelector('#link-mid');
+    var a = p.querySelector('a');
+    var t = p.querySelector('[data-dt-target]');
+    return { text: a.textContent, targetInLink: !!t && !!t.closest('a') };
+  `);
+  check('行内链接·双语：原文链接不动，译文块不在链接里', dual.text === '@alice' && !dual.targetInLink, JSON.stringify(dual));
+}
+
+// ---------------- Science Advances 真实页面 ----------------
+// Cloudflare 会挡无头模式；用 --headed --science-live 跑。用真实页面的正文段落验证引用识别，
+// 不调用真实模型：构造一段带保留标记的译文，在页面里注入 / 还原。
+async function scienceLiveChecks(url = 'https://www.science.org/doi/10.1126/sciadv.adx3472') {
+  console.log('\n[Science 真实页面]');
+  const tab = await openTab(url);
+  await until(() => contentEval(tab, "!!window.__DT && !!document.querySelector('[role=paragraph] a[role=doc-biblioref]')"), 45000);
+  const found = await contentEval(tab, `(function () {
+    var p = Array.prototype.find.call(document.querySelectorAll('[role="paragraph"]'), function (el) {
+      return el.querySelector('a[role="doc-biblioref"]');
+    });
+    if (!p) return { ok: false, why: '没有带 doc-biblioref 的段落' };
+    var units = window.__DT.collect(p);
+    var u = units[0];
+    if (!u) return { ok: false, why: '没有收集到单元' };
+    return {
+      ok: true,
+      text: u.text.slice(0, 120),
+      keep: (u.keep || []).map(function (k) { return { text: k.text, cite: !!k.cite, href: k.el && k.el.getAttribute ? k.el.getAttribute('href') : '' }; }),
+      wire: u.wire.slice(0, 300),
+      anchors: p.querySelectorAll('a[role="doc-biblioref"]').length
+    };
+  })()`);
+  check('Science 实页：引用链接被识别成保留区', found.ok && found.keep.length >= 2 && found.keep.every((k) => k.cite), JSON.stringify(found));
+  check('Science 实页：编号进标记，锚点 / 属性不进送翻正文', found.ok && found.wire.indexOf('<k1>') >= 0 && !/core-collateral|doc-biblioref/.test(found.wire), found.ok ? found.wire : found.why);
+  const injected = await contentEval(tab, `(function () {
+    var p = Array.prototype.find.call(document.querySelectorAll('[role="paragraph"]'), function (el) { return el.querySelector('a[role="doc-biblioref"]'); });
+    var u = window.__DT.collect(p)[0];
+    var mode = window.__DT.state.mode;
+    window.__DT.state.mode = 'translation';
+    var before = p.innerHTML;
+    var links = Array.prototype.slice.call(p.querySelectorAll('a[role="doc-biblioref"]'));
+    var ok = window.__DT.inject(u, '水凝胶为研究细胞提供了特殊材料环境，可作为细胞外基质模拟物（<k1>1</k1>–<k2>3</k2>）。', 'zh-CN');
+    var after = Array.prototype.slice.call(p.querySelectorAll('a[role="doc-biblioref"]'));
+    var target = p.querySelector('[data-dt-target]');
+    var result = {
+      ok: ok,
+      sourceIntact: links.length === after.length && links.every(function (a, i) { return a === after[i] && a.getAttribute('href') === links[i].getAttribute('href'); }),
+      targetInsideLink: !!target && !!target.closest('a'),
+      targetCount: p.querySelectorAll('[data-dt-target]').length
+    };
+    window.__DT.restore();
+    window.__DT.state.mode = mode;
+    result.restored = p.innerHTML === before;
+    return result;
+  })()`);
+  // 真实首段有 9 组引用；演示译文只带 2 组标记时，代码会安全降级成双语块而不是硬写。
+  check('Science 实页：仅译文保留原引用链接、点击目标不变，无法安全落点时降级且完整还原', injected.ok && injected.sourceIntact && !injected.targetInsideLink && injected.targetCount <= 1 && injected.restored, JSON.stringify(injected));
 }
 
 // ---------------- 自检页 ----------------
@@ -1697,7 +1889,14 @@ async function dockChecks() {
 }
 
 try {
-  if (SHADOW_ONLY) {
+  if (SCIENCE_LIVE) {
+    await scienceLiveChecks();
+  } else if (SELFTEST_ONLY) {
+    await selftestChecks();
+  } else if (MEDICAL_ONLY) {
+    await popupChecks();
+    await medicalChecks();
+  } else if (SHADOW_ONLY) {
     await shadowChecks();
   } else if (BILIBILI_LIVE) {
     await liveBilibiliChecks(BILIBILI_LIVE);
@@ -1707,6 +1906,8 @@ try {
     await articleChecks();
     await paragraphChecks();
     await citationChecks();
+    await scienceLiveChecks(ORIGIN + '/science-cite.html');
+    await inlineLinkChecks();
     await languageChecks();
     await localeChecks();
     await dockChecks();
@@ -1715,6 +1916,8 @@ try {
     await optionsChecks();
     await selftestChecks();
     await inputChecks();
+    await popupChecks();
+    await medicalChecks();
     await shadowChecks();
   }
   if (YOUTUBE) await youtubeChecks(YOUTUBE);

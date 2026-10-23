@@ -26,6 +26,7 @@
 - **YouTube 字幕双语** —— 打开 CC 时显示「原文 + 译文」（非官方功能，默认关闭）
 - **可选隐私保护** —— 发请求前在本地把邮箱、电话、身份证号、银行卡号换成占位符，译文回来后还原（默认关闭）
 - **术语表与提示词** —— 指定词条必须怎么翻，追加自己的措辞要求；还能把当前页改写成文言文 / 猫娘口吻
+- **医学专业模式** —— 全局开关，优先使用已审核的医学 / 临床研究术语，保留剂量、统计结果和临床结论（默认关闭）
 - **外观可调** —— 浅色 / 深夜配色、强调色、液态玻璃（导航 / 滑块 / 开关）、译文字号与行高、深色网页适配、站点规则、网页夜间模式（Beta）、译文自定义 CSS
 - **中英文界面** —— 设置页与弹窗支持中文 / English
 - **零构建** —— 不需要 npm、webpack 或编译步骤，直接加载本目录即可
@@ -62,6 +63,7 @@
 | [HANDOFF.md](HANDOFF.md) | 开发交接：架构、消息协议、踩坑清单、调试与发版流程 |
 | [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md) | 翻译引擎：单元模型、渲染事务、句子对齐、接手指南 |
 | [docs/SHADOW-DOM-ADAPTER.md](docs/SHADOW-DOM-ADAPTER.md) | 开放 Shadow DOM / Bilibili 评论区适配与后续站点接入 |
+| [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md) | 医学专业模式：开关、词库来源、提示词、缓存隔离、测试与限制 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 优先级、已完成 / 待办、明确不做的清单 |
 | [docs/UPGRADING.md](docs/UPGRADING.md) | 从旧版 DualTrans 升级与配置迁移 |
 | [docs/YOUTUBE.md](docs/YOUTUBE.md) | YouTube 字幕双语的限制、风险与隐私说明 |

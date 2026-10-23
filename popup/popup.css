@@ -735,6 +735,11 @@ kbd {
   pointer-events: none;
 }
 
+/* 医学专业模式独占一行：它是全局配置，不和单页磁贴挤成半格 */
+.medical-tile {
+  margin-top: 6px;
+}
+
 /* 开关：.switch.switch-sm 的样式在 lib/ui-tokens.css（与设置页共用一套几何，紧凑尺寸），透镜滤镜是 20 × 14 的 mini-slider */
 
 /* ---------------- 6. 随手翻译：聚焦展开抽屉 ----------------
