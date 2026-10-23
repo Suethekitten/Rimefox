@@ -500,15 +500,23 @@
   // 混合段落里的普通链接：段落里已经有文献引用 / 图表链接时，普通链接也当原子保留（文字原样、仍可点击），
   // 译文写在它外面 —— 中文正文不会落进 <a>、也不会让链接扩到整句
   function isPlainLinkEl(el) {
-    return !!el && el.nodeType === 1 && tagOf(el) === 'A' && el.hasAttribute('href');
+    if (!el || el.nodeType !== 1 || tagOf(el) !== 'A' || !el.hasAttribute('href')) return false;
+    // 上标 / 下标里的链接通常是引注、脚注或数学标记，交给 citation / xref 判定，不算普通正文链接。
+    if (el.closest && el.closest('sup,sub')) return false;
+    // 纯数字 / 符号锚点多半是页内数学、脚注或站点控件，不把整段它当普通链接；交给原有路径。
+    var text = String(el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!text || /^[\d\s.,;:!?()[\]{}<>/\\|~@#$%^&*_+=\-–—]+$/.test(text)) return false;
+    // 链接里嵌 notranslate 时由 notranslate 保护，不能再把整条链接当普通原子。
+    if (el.querySelector && el.querySelector(KEEP_SELECTOR)) return false;
+    return true;
   }
 
   // node 在 root 里所属的最外层保留元素（root 自己不算：它被保护的话根本不会收集）。
   // 文献引用 / 图表链接也是保留区：编号和链接不翻、页面上的节点不写。withLinks：混合段落，普通链接也算
-  function keepElOf(node, root, withLinks) {
+  function keepElOf(node, root, withLinks, withRuby) {
     var found = null;
     for (var cur = node.parentNode; cur && cur !== root && cur.nodeType === 1; cur = cur.parentNode) {
-      if (isProtectedEl(cur) || isCitationEl(cur) || isMentionEl(cur) || isXrefEl(cur) || (withLinks && isPlainLinkEl(cur))) found = cur;
+      if (isProtectedEl(cur) || isCitationEl(cur) || isMentionEl(cur) || isXrefEl(cur) || (withLinks && isPlainLinkEl(cur)) || (withRuby && tagOf(cur) === 'RUBY')) found = cur;
     }
     return found;
   }
@@ -519,12 +527,17 @@
     if (isCitationEl(el)) return 'cite';
     if (isMentionEl(el)) return 'mention';
     if (isXrefEl(el)) return 'xref';
+    if (tagOf(el) === 'RUBY') return 'ruby';
     return 'link';
   }
 
   // 结构性原子：引用 / 图表链接 / 混合段落里的普通链接。带这些的单元走混合行内渲染（injectCited）
   function isStructKeep(k) {
     return !!k && (k.kind === 'cite' || k.kind === 'xref' || k.kind === 'link');
+  }
+
+  function isRubyKeep(k) {
+    return !!k && k.kind === 'ruby';
   }
 
   function hasCitationInside(el) {
@@ -554,7 +567,40 @@
     return false;
   }
 
+  // 普通正文里「文字 + 行内链接」的混合段落：链接也当原子保护。
+  // 整段就是一个链接（导航 / 按钮 / 纯链接卡片）不在这里处理；控件 / 导航交给 areaOf。
+  function hasMixedPlainLinkInside(el) {
+    if (!el || !el.querySelectorAll || !el.querySelector('a[href]')) return false;
+    if (DT.areaOf(el) !== 'content') return false;
+    // 有块级子元素的容器走 flowTokens / 分段收集，不能把里面的链接提前当整段原子。
+    if (el.querySelector(BLOCK_SELECTOR)) return false;
+    var links = el.querySelectorAll('a[href]');
+    var got = false;
+    var i;
+    for (i = 0; i < links.length; i += 1) {
+      var a = links[i];
+      if (!isPlainLinkEl(a)) continue;
+      if (isProtectedEl(a) || isCitationEl(a) || isXrefEl(a) || isMentionEl(a)) continue;
+      got = true;
+      break;
+    }
+    if (!got) return false;
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (var t = walker.nextNode(); t; t = walker.nextNode()) {
+      if (!/\S/.test(t.nodeValue || '')) continue;
+      var parent = t.parentElement;
+      if (!(parent && parent.closest && parent.closest('a'))) return true;
+    }
+    return false;
+  }
+
+  function hasRubyInside(el) {
+    return !!(el.querySelector && el.querySelector('ruby'));
+  }
+
   function hasKeepInside(el) {
+    // 普通链接混合段落要先于 notranslate / mention / cite 判断，避免同一段还有别的保留区时漏掉普通链接。
+    if (hasMixedPlainLinkInside(el)) return 'links';
     if (el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR)) return true;
     return hasMentionInside(el) || hasCitationInside(el) || hasXrefInside(el);
   }
@@ -611,13 +657,15 @@
 
   // 段落文本里属于保留元素的字符范围：[{ start, end, text, el, kind, cite }]，按出现顺序；换行处断开。
   // 第一遍不含普通链接；段落里出现了文献引用 / 图表链接（混合段落），再按「普通链接也算」收一遍
-  function keepRangesOf(el, chars, text) {
-    var out = keepScan(el, chars, text, false);
-    if (out.some(function (k) { return k.kind === 'cite' || k.kind === 'xref'; })) out = keepScan(el, chars, text, true);
+  function keepRangesOf(el, chars, text, links) {
+    var out = keepScan(el, chars, text, false, false);
+    var withLinks = !!links || out.some(function (k) { return k.kind === 'cite' || k.kind === 'xref'; });
+    var withRuby = withLinks && hasRubyInside(el);
+    if (withLinks) out = keepScan(el, chars, text, true, withRuby);
     return out;
   }
 
-  function keepScan(el, chars, text, withLinks) {
+  function keepScan(el, chars, text, withLinks, withRuby) {
     var out = [];
     var cur = null;
     var owner = new Map();
@@ -628,7 +676,7 @@
         cur = null; // 换行
         continue;
       }
-      if (!owner.has(c.node)) owner.set(c.node, keepElOf(c.node, el, withLinks));
+      if (!owner.has(c.node)) owner.set(c.node, keepElOf(c.node, el, withLinks, withRuby));
       var keepEl = owner.get(c.node);
       if (!keepEl) {
         cur = null;
@@ -658,7 +706,7 @@
   // 给单元挂上保留区；整段只剩保留内容（没有可翻的字）返回 false。
   // inside：hasKeepInside(el) 的结果，同一容器的各段共用（每段都 querySelector 一遍，长容器会变成 O(n²)）
   function attachKeep(unit, el, inside) {
-    unit.keep = inside ? keepRangesOf(el, unit.map.chars, unit.text) : [];
+    unit.keep = inside ? keepRangesOf(el, unit.map.chars, unit.text, inside === 'links') : [];
     if (!unit.keep.length) return true;
     var rest = '';
     var at = 0;
@@ -2443,9 +2491,29 @@
     return { parent: cur.parentNode, before: after ? cur.nextSibling : cur };
   }
 
-  // 图表链接的可见标签换成「图 1」：只在标签只有一个文本节点时写，写进事务、还原时放回 Fig. 1
-  function relabelXref(k, ops, saved) {
-    var label = xrefLabel(k.text, DT.state.target);
+  // 普通链接里可以可靠本地化的「补充材料」类标签；其余链接文字（身份 / 专名 / 任意正文）保持原样。
+  // 只对中文目标、只写唯一可见文本节点，href / 事件 / 节点身份都不动。
+  var LINK_ZH_LABEL = [
+    [/^(?:supplementary|supplement)\s+(\d+)$/i, '补充材料 $1'],
+    [/^(?:supplementary|supplement)\s+material$/i, '补充材料'],
+    [/^(?:supplementary|supplement)\s+data$/i, '补充数据'],
+    [/^(?:supplementary|supplement)\s+information$/i, '补充信息'],
+    [/^data\s+(S?\d+[A-Za-z]?)$/i, '数据 $1']
+  ];
+  function linkLabel(text, target) {
+    var t = String(target || '');
+    if (t.indexOf('zh') !== 0) return '';
+    var s = DT.normalizeText(text || '');
+    for (var i = 0; i < LINK_ZH_LABEL.length; i += 1) {
+      var m = LINK_ZH_LABEL[i][0].exec(s);
+      if (m) return LINK_ZH_LABEL[i][1].replace('$1', m[1] || '');
+    }
+    return '';
+  }
+
+  // 图表链接 / 补充材料普通链接的可见标签本地化：只写唯一文本节点，进事务，还原时放回原文
+  function relabelAtom(k, ops, saved) {
+    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.target) : '';
     if (!label || label === k.text) return k.text;
     var texts = [];
     var walker = document.createTreeWalker(k.el, NodeFilter.SHOW_TEXT);
@@ -2463,6 +2531,7 @@
     return label;
   }
 
+
   // 页面上实际显示的文字（单元里所有文本节点按阅读顺序）：和悬停的 mapFromNode(unit.el) 一致
   function shownTextOf(el) {
     var out = '';
@@ -2474,12 +2543,12 @@
   function injectMixed(unit, marks, area) {
     var keep = unit.keep || [];
     if (!keep.length) return failInject(unit, 'unsafe-structure', 'no-atoms');
-    if (unit.ruby && unit.ruby.length) return failInject(unit, 'unsafe-structure', 'ruby');
+    if (unit.ruby && unit.ruby.length && !keep.some(isRubyKeep)) return failInject(unit, 'unsafe-structure', 'ruby');
     var groups = (unit.groups && unit.groups.filled) || [];
     var multi = groups.length > 1;
-    // 分行段落：第 2 行起每行要以 <br> 开头（pre-wrap 文本节点里的 \n 中间没法插节点）
+    // 分行段落：第 2 行起要有 <br>，或行首是文本节点里的真实 \n（pre-wrap）。
     for (var g = 1; g < groups.length; g += 1) {
-      if (!groups[g].br) return failInject(unit, 'unsafe-structure', 'pre-wrap-lines');
+      if (!groups[g].br && !groups[g].nl) return failInject(unit, 'unsafe-structure', 'line-boundary');
     }
     var fixed = recoverXrefMarks(unit, marks);
     var stripped = fixed.stripped;
@@ -2529,7 +2598,12 @@
     // 页面顺序的落点序列：第 l 行开头的 <br>，再是这一行的原子
     var seq = [];
     for (l = 0; l < groups.length || l < 1; l += 1) {
-      if (l > 0) seq.push({ node: groups[l].br, pos: dstOff[l] - 1, br: true });
+      if (l > 0) {
+        var boundary = groups[l].br
+          ? { node: groups[l].br, pos: dstOff[l] - 1, br: true }
+          : { node: document.createTextNode('\n'), nl: true, pos: dstOff[l] - 1 };
+        seq.push(boundary);
+      }
       keep.forEach(function (k, i) {
         if (lineOf[i] === l) seq.push({ node: k.el, pos: at[i], keep: i });
       });
@@ -2541,7 +2615,7 @@
       var prev = n > 0 ? seq[n - 1] : null;
       if (prev && prev.keep != null && item.keep != null && !/\S/.test(seg)) seg += citeSeparator(unit, prev.keep, item.keep);
       texts.push(seg);
-      from = Math.max(from, item.br ? item.pos + 1 : item.pos);
+      from = Math.max(from, item.br || item.nl ? item.pos + 1 : item.pos);
     });
     texts.push(stripped.slice(from));
 
@@ -2562,6 +2636,29 @@
     });
 
     var inserted = [];
+    // pre-wrap 的边界是文本节点里的 \n，没有现成的 <br> 可当锚点：先放一个只含换行的文本节点。
+    // 它进事务、参与还原；之后的译文段插在它前后，硬换行和缩进都保留。
+    seq.forEach(function (item, n) {
+      if (!item.nl) return;
+      var prev = n > 0 ? seq[n - 1] : null;
+      var next = n + 1 < seq.length ? seq[n + 1] : null;
+      var parent = null;
+      var before = null;
+      if (prev && prev.node && prev.node.parentNode) {
+        parent = prev.node.parentNode;
+        before = prev.node.nextSibling;
+      } else if (next && next.node && next.node.parentNode) {
+        parent = next.node.parentNode;
+        before = next.node;
+      } else if (unit.el) {
+        parent = unit.el;
+      }
+      if (!parent) return;
+      insertNode(item.node, parent, before, ops);
+      nodeUnit.set(item.node, unit);
+      ownNodes.add(item.node);
+      inserted.push(item.node);
+    });
     function put(text, slot) {
       if (!text || !slot || !slot.parent) return;
       var node = document.createTextNode(text);
@@ -2574,7 +2671,7 @@
     put(texts[0], safeSlot(unit, seq[0].node, false));
     for (var n = 1; n < texts.length; n += 1) put(texts[n], safeSlot(unit, seq[n - 1].node, true));
     keep.forEach(function (k) {
-      if (k.kind === 'xref') relabelXref(k, ops, saved);
+      if (k.kind === 'xref' || k.kind === 'link') relabelAtom(k, ops, saved);
     });
 
     var rendered = shownTextOf(unit.el);
@@ -2615,7 +2712,7 @@
   // 原子的副本：图表链接的标签按 xrefLabel 换成「图 1」（只有一个文本节点时）
   function atomClone(k) {
     var copy = citeClone(k.el);
-    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : '';
+    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.target) : '';
     if (label) {
       var texts = [];
       var walker = document.createTreeWalker(copy, NodeFilter.SHOW_TEXT);

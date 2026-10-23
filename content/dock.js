@@ -24,6 +24,7 @@
   var closeTimer = 0;
   var tipTimer = 0;
   var attrObserver = null;
+  var bodyObserver = null;
 
   var ICONS = {
     // 文 / A：开关翻译
@@ -43,6 +44,8 @@
   var CSS = [
     // 只有小球和展开后的面板接收鼠标：收起时看不见的面板区域不能挡住网页
     ':host{all:initial;position:fixed;z-index:2147483644;left:0;top:0;pointer-events:none;transition:left .16s ease,top .16s ease}',
+    // 首次挂载先把 host 藏起来并禁用位移过渡；等实际尺寸 / 保存坐标 / 贴边状态都算好再显示，避免从左上角飞过去。
+    ':host([data-init]){visibility:hidden!important;transition:none!important}',
     ':host([data-drag]){transition:none}',
     ':host([hidden]){display:none!important}',
     '@media print{:host{display:none!important}}',
@@ -300,6 +303,9 @@
       attributeFilter: ['data-dt', 'data-dt-mode', 'data-dt-scheme', 'data-dt-night']
     });
     document.addEventListener('fullscreenchange', render);
+    window.addEventListener('pageshow', function () {
+      if (cfg().dockEnabled === true) mount();
+    });
   }
 
   // ---------------- 位置与拖拽（0.9.3） ----------------
@@ -627,16 +633,49 @@
     }
   }
 
+  // body 被 SPA 整个替换 / 清空时把宿主重新挂回去；这里只观察 html 和 body 的直接子节点，
+  // 不开 subtree，避免在全站长文上每次改字都跑回调。
+  function watchBody() {
+    if (bodyObserver) bodyObserver.disconnect();
+    if (!window.MutationObserver) return;
+    bodyObserver = new MutationObserver(function () {
+      if (!host || cfg().dockEnabled !== true) return;
+      var parent = document.body || document.documentElement;
+      if (parent && host.parentNode !== parent) mount();
+    });
+    if (document.body) bodyObserver.observe(document.body, { childList: true });
+    if (document.documentElement) bodyObserver.observe(document.documentElement, { childList: true });
+  }
+
   function mount() {
-    if (!host) build();
+    if (!host) {
+      build();
+      watchBody();
+    }
     var parent = document.body || document.documentElement;
-    // 有的单页应用会整个换掉 body：重新挂回去
-    if (host.parentNode !== parent) parent.appendChild(host);
+    if (!parent) return;
+    // 首次挂载 / body 重建 / 从关闭再打开：先藏起来，量到真实尺寸并算好坐标后再显示。
+    var first = host.parentNode !== parent;
+    if (first) {
+      host.setAttribute('data-init', '');
+      parent.appendChild(host);
+      // 强制同步布局，让 viewOf() 拿到真实宽高；否则会按兜底尺寸算一次，首帧再跳。
+      host.getBoundingClientRect();
+      dock.getBoundingClientRect();
+    }
     render();
+    if (first) {
+      // render -> place 已经在 data-init 下写好最终 left/top / data-side / data-snapped；
+      // 同一个任务里撤掉隐藏，浏览器第一次绘制就是最终位置，且没有 left/top 过渡。
+      host.getBoundingClientRect();
+      host.removeAttribute('data-init');
+      watchBody();
+    }
   }
 
   function unmount() {
     if (host && host.parentNode) host.parentNode.removeChild(host);
+    if (host) host.removeAttribute('data-init');
     setOpen(false);
   }
 

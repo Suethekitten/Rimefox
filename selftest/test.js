@@ -2650,7 +2650,7 @@
         if (!u) return sel + ':没收到';
         return (u.keep || []).length + (u.wire ? ':wire' : '');
       });
-      var r = eq(neg, ['0', '0', '0', '0', '0']);
+      var r = eq(neg, ['0', '0', '0', '1:wire', '0']);
       if (r !== true) return '误判：' + r;
       var pos = ['#pos-wiki', '#pos-md'].map(function (sel) {
         var u = DT.collect(box.querySelector(sel))[0];
@@ -3093,16 +3093,93 @@
     });
   });
 
-  check('混合行内·结构不支持（注音 + 引用）：保持原文、不退回双语，注入结果明确是 unsafe-structure', function () {
+  check('混合行内·pre-wrap：文本节点里的 \n 硬换行与链接 / 引用一起保留，按行重建，无双语回退', function () {
+    return withTemplate('tpl-science-mixed', 'translation', function (box) {
+      var p = box.querySelector('#sci-prewrap');
+      var before = p.innerHTML;
+      var links = Array.prototype.slice.call(p.querySelectorAll('a'));
+      var u = DT.collect(p)[0];
+      if (!u) return '没收到单元';
+      if ((u.groups.filled || []).length !== 2) return '行数不是 2：' + (u.groups.filled || []).length;
+      if (!DT.inject(u, '第一行链接（<k1>Fig. 1</k1>）。\n第二行引用（<k2>13</k2>）。', 'zh-CN')) return 'inject 失败：' + JSON.stringify(u.injectResult);
+      if (p.querySelector('[data-dt-target]')) return '不该退回双语';
+      if (p.textContent.indexOf('\n') < 0) return '硬换行丢了：' + JSON.stringify(p.textContent);
+      var lines = p.textContent.split('\n');
+      if (lines.length !== 2) return '行数不对：' + JSON.stringify(lines);
+      if (DT.normalizeText(lines[0]).indexOf('第一行链接') < 0 || DT.normalizeText(lines[1]).indexOf('第二行引用') < 0) return '行内容不对：' + JSON.stringify(lines);
+      var now = Array.prototype.slice.call(p.querySelectorAll('a'));
+      if (now.length !== links.length || now.some(function (a, i) { return a !== links[i]; })) return '链接节点被换';
+      if (now[0].textContent !== '图 1' || now[1].textContent !== '13') return '链接标签不对：' + now.map(function (a) { return a.textContent; });
+      if (clickHash(now[0]) !== '#F1' || clickHash(now[1]) !== '#core-collateral-R13') return '链接不能点击';
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('混合行内·注音 + 普通链接：注音和补充材料链接都保留，链接标签本地化，中文不写进 rt', function () {
+    return withTemplate('tpl-science-mixed', 'translation', function (box) {
+      var p = box.querySelector('#sci-ruby-link');
+      var before = p.innerHTML;
+      var link = p.querySelector('#ruby-supp-link');
+      var href = link.getAttribute('href');
+      var u = DT.collect(p)[0];
+      if (!u || !u.keep || !u.keep.some(function (k) { return k.kind === 'ruby'; }) || !u.keep.some(function (k) { return k.kind === 'link'; })) return '收集原子不对：' + JSON.stringify(u && u.keep);
+      if (!DT.inject(u, '关于汉字<k1>暮方</k1>的<k2>Supplement 3</k2>。', 'zh-CN')) return 'inject 失败：' + JSON.stringify(u.injectResult);
+      if (p.querySelector('[data-dt-target]')) return '不该退回双语';
+      if (p.querySelector('rt').textContent !== 'くれがた') return '注音被改';
+      if (p.querySelector('#ruby-supp-link') !== link || link.getAttribute('href') !== href || link.textContent !== '补充材料 3') return '链接被改：' + link.textContent;
+      if (/[\u4e00-\u9fff]/.test(p.querySelector('rt').textContent)) return '中文写进 rt';
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
+    });
+  });
+
+  check('混合行内·PMC 普通补充材料链接：仅译文不再双回退，链接保留并本地化成「补充材料 3」', function () {
+    return withTemplate('tpl-pmc', 'translation', function (box) {
+      var p = box.querySelector('#pmc-ae');
+      var before = p.innerHTML;
+      var link = p.querySelector('#pmc-supp-link');
+      var href = link.getAttribute('href');
+      var facts = linkFacts(p);
+      var u = DT.collect(p)[0];
+      if (!u || !u.keep || u.keep.length !== 1) return '普通链接没被收集成原子：' + (u && u.keep && u.keep.length);
+      if (u.keep[0].kind !== 'link') return '原子类型不是 link：' + u.keep[0].kind;
+      if (!DT.inject(u, '免疫相关不良事件发生在 39 例（24.2%）伊沃西单抗组和 25 例（15.2%）化疗组。严重不良事件分别发生在 22 例（13.7%）和 15 例（9.1%）（见<k1>Supplement 3</k1>）。', 'zh-CN')) return 'inject 失败：' + JSON.stringify(u.injectResult);
+      if (u.injectResult.code !== 'success') return '结果不是 success：' + JSON.stringify(u.injectResult);
+      if (p.querySelector('[data-dt-target]')) return '仅译文不该退回双语';
+      if (p.querySelector('#pmc-supp-link') !== link) return '链接节点被换了';
+      if (link.getAttribute('href') !== href || link.textContent !== '补充材料 3') return '链接文字 / href 不对：' + link.textContent;
+      if (clickHash(link) !== href) return '补充材料链接不能点击';
+      if (textInsideLinks(p, '免疫')) return '中文正文落进了链接';
+      var shown = DT.normalizeText(p.textContent);
+      if (shown.indexOf('39 例（24.2%）') < 0 || shown.indexOf('22 例（13.7%）') < 0) return '数字 / 百分比变了：' + shown;
+      if (englishOutsideLinks(p).length) return '链接外还有英文正文：' + englishOutsideLinks(p).join(' | ');
+      DT.restore();
+      if (p.innerHTML !== before) return '还原后不一致';
+      return eq(linkFacts(p), facts) === true ? true : '还原后链接属性不一致';
+    });
+  });
+
+  check('混合行内·注音 + 引用：注音节点保留，普通正文与引用在它周围重建，中文不写进 rt/rp', function () {
     return withTemplate('tpl-science-mixed', 'translation', function (box) {
       var p = box.querySelector('#sci-ruby');
       var before = p.innerHTML;
+      var rubies = Array.prototype.slice.call(p.querySelectorAll('ruby'));
+      var rt = p.querySelector('rt');
+      var cite = p.querySelector('a[role="doc-biblioref"]');
+      var href = cite.getAttribute('href');
       var u = DT.collect(p)[0];
       if (!u) return '没收到单元';
-      if (DT.inject(u, '关于汉字暮方的研究（<k1>13</k1>）存在。', 'zh-CN')) return '注音段落不该原地重建';
-      if (!u.injectResult || u.injectResult.code !== 'unsafe-structure') return '结果分类不对：' + JSON.stringify(u.injectResult);
+      if (!u.keep.some(function (k) { return k.kind === 'ruby'; })) return 'Ruby 没被当成结构保留区：' + JSON.stringify(u.keep);
+      if (!DT.inject(u, '关于汉字<k1>暮方</k1>的研究（<k2>13</k2>）存在。', 'zh-CN')) return 'inject 失败：' + JSON.stringify(u.injectResult);
       if (p.querySelector('[data-dt-target]')) return '不该退回双语';
-      return p.innerHTML === before ? true : '失败时原段落被改了';
+      if (p.querySelectorAll('ruby').length !== rubies.length) return 'Ruby 节点数量变了';
+      if (p.querySelector('rt').textContent !== 'くれがた') return '注音被改：' + p.querySelector('rt').textContent;
+      if (/[\u4e00-\u9fff]/.test(p.querySelector('rt').textContent)) return '中文写进了 rt';
+      if (p.querySelector('a[role="doc-biblioref"]') !== cite || cite.getAttribute('href') !== href) return '引用节点 / href 被改';
+      if (p.querySelector('[data-dt-hover]')) return '不该留下悬停标记';
+      DT.restore();
+      return p.innerHTML === before ? true : '还原后不一致';
     });
   });
 
@@ -3165,6 +3242,30 @@
       if (link.textContent !== '立即阅读这篇论文。') errors.push('整段链接：链接文字没有翻译：' + link.textContent);
       if (clickHash(link) !== href) errors.push('整段链接：翻译后不能点击');
       DT.restore();
+    });
+    return errors.length ? errors.join('；') : true;
+  });
+
+  check('行内链接·普通链接边界：段首 / 多个 / 相邻 / 嵌套 span 都走结构化仅译文，不退回双语', function () {
+    var errors = [];
+    ['#link-plain-start', '#link-plain-multi', '#link-adjacent', '#link-nested-plain'].forEach(function (sel) {
+      withTemplate('tpl-link-boundary', 'translation', function (box) {
+        var p = box.querySelector(sel);
+        var before = p.innerHTML;
+        var links = Array.prototype.slice.call(p.querySelectorAll('a'));
+        var hrefs = links.map(function (a) { return a.getAttribute('href'); });
+        var u = DT.collect(p)[0];
+        if (!u) { errors.push(sel + '：没收到单元'); return; }
+        if (!DT.inject(u, '这是重要结果。', 'zh-CN')) { errors.push(sel + '：inject 失败 ' + JSON.stringify(u.injectResult)); return; }
+        if (p.querySelector('[data-dt-target]')) errors.push(sel + '：退回了双语');
+        var now = Array.prototype.slice.call(p.querySelectorAll('a'));
+        if (now.length !== links.length || now.some(function (a, i) { return a !== links[i]; })) errors.push(sel + '：链接节点变了');
+        if (now.map(function (a) { return a.getAttribute('href'); }).join('|') !== hrefs.join('|')) errors.push(sel + '：href 变了');
+        if (!textOutsideLinks(p, '重要结果')) errors.push(sel + '：链接外没有中文');
+        if (textInsideLinks(p, '重要结果')) errors.push(sel + '：中文落进链接');
+        DT.restore();
+        if (p.innerHTML !== before) errors.push(sel + '：还原不一致');
+      });
     });
     return errors.length ? errors.join('；') : true;
   });
@@ -3554,6 +3655,34 @@
       return b.dataset.act;
     });
     return eq(acts, ['toggle', 'mode', 'hover', 'selection', 'pin', 'provider', 'ball']);
+  });
+
+  check('悬浮入口·首帧：初始坐标直接落在安全位置，无左上角过渡；后续移动仍有正常动画', function () {
+    // 从关闭到打开：同一个任务里完成隐藏、布局、定位、显示，同步检查首帧。
+    emitConfig({ dockEnabled: false, page: {} });
+    var vw = document.documentElement.clientWidth || window.innerWidth || 800;
+    var vh = document.documentElement.clientHeight || window.innerHeight || 600;
+    // 保存坐标故意超出视口：初始化应先 clamp，再显示。
+    emitConfig({ dockEnabled: true, dockAutoHide: true, dockSide: 'right', dockPos: { x: vw + 500, y: vh + 500 }, page: {} });
+    var host = DT.dock.host();
+    if (!host || !host.isConnected) return '没有挂载';
+    var rect = host.getBoundingClientRect();
+    var left = parseFloat(host.style.left);
+    var top = parseFloat(host.style.top);
+    if (host.hasAttribute('data-init')) return '初始隐藏标记没有撤掉';
+    if (!isFinite(left) || !isFinite(top) || Math.abs(rect.left - left) > 1 || Math.abs(rect.top - top) > 1) {
+      return '首帧矩形不是最终坐标：style=' + left + ',' + top + ' rect=' + rect.left + ',' + rect.top;
+    }
+    if (left === 0 || top === 0) return '保存坐标越界时仍先落在左上角';
+    if (getComputedStyle(host).transitionProperty.indexOf('left') < 0) return '初始化后没有恢复 left/top 过渡';
+    var initial = host.getAnimations().filter(function (a) { return a.transitionProperty === 'left' || a.transitionProperty === 'top'; });
+    if (initial.length) return '首帧仍触发了位置过渡：' + initial.map(function (a) { return a.transitionProperty; }).join(',');
+    // 后续配置移动仍走 left/top 过渡（不能为了首帧全局删掉动画）。
+    emitConfig({ dockEnabled: true, dockAutoHide: true, dockSide: 'right', dockPos: { x: Math.round(vw / 2), y: 120 }, page: {} });
+    var tr = getComputedStyle(host).transitionProperty;
+    if (tr.indexOf('left') < 0 || tr.indexOf('top') < 0) return '后续 left/top 过渡被删：' + tr;
+    emitConfig({ dockEnabled: false, page: {} });
+    return true;
   });
 
   check('悬浮入口：左右位置、自动隐藏、界面语言跟着配置走', function () {

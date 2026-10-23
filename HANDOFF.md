@@ -384,15 +384,14 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
 - **文献引用**（`isCitationEl`）：Nature / Springer 的 `<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>`；Science / Atypon 的 `<a role="doc-biblioref" href="#core-collateral-R1"><i>1</i></a>–<a …>`（没有 sup，直接夹在正文里，目标在 `div.citations`）；Wikipedia `sup.reference`、Markdown 脚注（`role="doc-noteref"`）、带 citation / reference 语义的 span、无链接但带强提示的 `<sup>` 也是保留区。
   判定是组合证据：候选行内元素 + 可见文字只有编号和分隔符（`1,2`、`3–5`、`[3]`）+ 数字都在链接里 + 每个链接有 DPUB 角色 / citation 字样，或指向本页且目标真的像参考文献（`li`、`doc-biblioentry`、`#ref/#bib/#cite/#fn`、reference / biblio class 等）。数学指数、序数、化学式（`<sub>`）、图表 / 章节锚点、站外链接、普通数字链接、链接包在上标外面（`<a><sup>2</sup></a>`）都不算。
   **图表交叉引用**（`isXrefEl`）：指向本页锚点、可见文字是图表标签的链接（Fig. 1、Figs. 2 and 3、Fig. 1, A and B、Table S1、Eq. 4、Movie S2、Supplementary Fig. 3）也是保留区（`kind: 'xref'`）；裸数字链接、站外链接、普通文字链接不算。
-  **混合段落**：有文献引用或图表链接的段落里，普通链接也当原子（`keepRangesOf` 收第二遍，`kind: 'link'`：文字原样、仍可点击、链接范围不变），@提及（`kind: 'mention'`）、notranslate（`kind: 'protect'`）照旧。
-  只有普通链接、没有引用 / 图表链接的段落仍按旧规则：普通混合链接无法安全原地切分时降级双语（§9）。实现位置：`content/dom.js` 的 `isCitationEl` / `isMentionEl` / `isXrefEl` / `keepRangesOf` / `injectMixed` / `DT.inject`。
+  **混合段落**：内容区域里「普通文字 + 一个或多个行内链接」现在也统一走混合行内渲染，不再要求段落先有引用 / 图表链接；普通链接当原子（`kind: 'link'`：节点身份 / href / 事件监听不变，文字默认原样，补充材料标签可靠时本地化），@提及（`kind: 'mention'`）、notranslate（`kind: 'protect'`）照旧。整段就是一个链接（导航 / 按钮 / 纯链接卡片）或有块级子元素的容器不在这里处理，交给 `areaOf` / `flowTokens` / 原有 `injectReplace`。实现位置：`content/dom.js` 的 `hasMixedPlainLinkInside` / `isPlainLinkEl` / `keepRangesOf` / `injectMixed` / `DT.inject`。
   渲染走 `injectCited`：先用 `DT.units.keepMarks` 取每个标记在「去掉标记和标记内容」的译文里的落点（同号重复只认第一次；不按原文逐字找 —— 引用只是几个数字，译文里本来就可能有同样的数字）。
   **仅译文**（`injectMixed`，混合行内安全渲染，取代 0.11.1 的 `injectCitedOnly`）：DOM 结构和可翻译文字分开 —— 原子（引用、图表链接、混合段落里的普通链接、提及、notranslate）原地不动，节点身份 / href / id / 事件监听都不变；
   原子之外的文字节点（含空白）全部清空，译文按原子的落点切成 N+1 段，作为新文本节点插在原子之间；新节点永远不进单元内部的链接（`safeSlot`），中文正文不会继承超链接。不移动原有节点，所有改动走 RenderTransaction。
   落点：先后与页面一致 → 词级；模型换了先后 → `keepPlacement` 挪到所在那一句的句末标点前（`sentenceEndAt`）；模型漏了标记 → 按原文所在句映射到译文句末（`atomPlacement`）；
-  图表链接的标记丢了 → 按它的标签（Fig. 1 / 图 1）在译文里唯一定位、从正文里去掉（`recoverXrefMarks`）。`<br>` 分行的段落逐行对齐（第 2 行起以 `<br>` 开头、译文行数一致）。
-  图表链接的可见标签在中文目标下按 `xrefLabel` 写成「图 1 / 表 1 / 式 1」（只对「标签 + 单个编号」、标签只有一个文本节点时；进事务，还原放回 Fig. 1），对应不上就保留原标签。
-  两组引用在原文里隔着字、译文里挨着 → 中间补一个逗号。结构不支持（注音、pre-wrap 文本里的换行）或落点定不下来（行数对不上）时保持原文、注入结果写明原因，**不会降级成双语**；只有用户选择双语模式才走 `injectDual`。
+  图表链接的标记丢了 → 按它的标签（Fig. 1 / 图 1）在译文里唯一定位、从正文里去掉（`recoverXrefMarks`）。`<br>` 分行或 `white-space: pre-wrap` 文本节点里的 `\n` 都逐行对齐（第 2 行起以 `<br>` 或新建的换行文本节点为边界，译文行数一致）。
+  图表链接的可见标签在中文目标下按 `xrefLabel` 写成「图 1 / 表 1 / 式 1」；补充材料标签按 `linkLabel` 把 Supplement 3 写成「补充材料 3」（只对可靠标签、标签只有一个文本节点时；进事务，还原放回原文），对应不上就保留原标签。
+  两组引用在原文里隔着字、译文里挨着 → 中间补一个逗号。注音元素（`kind: 'ruby'`）作为原子保留，周围正文照常翻译；模型把分行合并 / 拆开或落点定不下来时保持原文、注入结果写明原因，**不会降级成双语**；只有用户选择双语模式才走 `injectDual`。
   不藏引用（藏 = 丢引用），也不往别的句子里硬插。
   双语：译文节点按落点插原子的副本（`atomClone` / `citeClone`：去掉 `id` 和 `data-dt-*`，`href` / 上标样式 / `aria-label` / `title` 照旧，点了跳到参考文献 / 图表，参考文献里的返回链接仍指向原上标；图表链接副本的标签同样按 `xrefLabel` 写；副本带 `data-dt-cite`），
   notranslate / 提及照旧放原文文字；有结构性原子（引用 / 图表链接 / 混合段落普通链接）的标记丢了就一个副本都不放（原段落里的都完好）。悬停的 `mapFromNode` 按阅读顺序取译文节点里的所有文本节点。
@@ -636,11 +635,11 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 9. **网页夜间模式是反色实现**：`filter: invert(1) hue-rotate(180deg)` + 媒体元素反向回正；画布绘制的界面、CSS 背景图、自带深色主题的网站可能显示异常，所以默认关闭、只对名单里的网站生效。
 10. **置顶小窗依赖浏览器能力**：Document Picture-in-Picture 需要 Chrome 116+；退回的 `window.open` 小窗不会置顶，网页设置了 COOP 等隔离或拦截弹窗时打不开（会提示）。
 11. ~~振假名会混进原文 / 仅译文残留假名~~（0.9.2 已在真实青空文库《罗生门》验证：29 段、双语逐段、仅译文 0 个可见 `rt`、关闭后逐字恢复；Pixiv 真实注音页仍只有 fixture）
-12. **Ruby 段落仅译文用独立译文容器**：为了不把整句中文写进 `<ruby>`，含注音的段落不再按基字逐词替换，局部排版可能与原页略有差异；竖排（縦書き）/ `writing-mode: vertical-*` 未验证
+12. **Ruby 段落仅译文**：普通 Ruby 段落仍用独立译文容器（`injectRuby`）；Ruby 与引用 / 链接混排时把 `<ruby>` 整体当原子保留、周围正文重建，Ruby 基字本身不翻译，局部排版可能略有差异；竖排（縦書き）/ `writing-mode: vertical-*` 未验证
 13. **真实网站覆盖**：0.9.2 只对青空文库《罗生门》做了真实页面验收；Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，不能当成已验证
 13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
 14. **目标语言校验是保守的定向失效**：只覆盖「英文等拉丁字母目标却整段回中日韩正文」这种高置信度情况；短文本、专名 / 术语清单不做自动失效，旧缓存里的这类条目可能保留，重新翻译即可覆盖；中文 / 日文目标方向没有做自动校验
-15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式保留原文引用节点并重建文本节点；引用和图表链接、普通链接混排的段落走混合行内渲染，原地翻成译文。仍不支持原地重建的：注音 + 引用 / 图表链接、pre-wrap 文本里换行的混合段落、模型把分行合并 / 拆开的混合段落（保持原文，注入结果写明原因，不退回双语）。只有普通链接、没有引用 / 图表链接的段落在仅译文下仍降级成双语（让链接文字也翻译需要链接级标记，见 ROADMAP P1-2）；混合段落里的普通链接保留原文字。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
+15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式保留原文引用节点并重建文本节点；普通链接混合段落、注音 + 引用 / 链接、pre-wrap 文本里的硬换行都走混合行内渲染，原地翻成译文。仍不支持原地重建的：模型把分行合并 / 拆开后行数对不上、或结构确实无法安全重建（保持原文，注入结果写明原因，不退回双语）。混合段落里的普通链接默认保留原文字，只有图表 / 补充材料等可靠标签做本地化（任意链接文字翻译仍需链接级标记，见 ROADMAP P1-2）。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
 
 ---
 
@@ -683,6 +682,7 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
   - 网页内：划词气泡和「译」按钮在网页 DOM 里只能用行内样式，配色走 `selection.js` 的 `paletteOf()`（深色网页 / 夜间模式换深色玻璃）；e2e 依赖 `span[aria-label="加入术语表"]` 和按钮文字「保存 / 覆盖」，别改；页面级 `scroll` 捕获监听要忽略 `[data-dt-ui]` 里的滚动（`input.select()` 会横向滚动）。悬浮入口小球的状态点读 `DT.control.status()`（开着翻译时 700ms 一次）。
 - **扩展页面的样式只用 `lib/ui-tokens.css` 的变量**（`--bg-canvas / --bg-card / --bg-subtle / --bg-elevated`、`--text-1/2/3`、`--accent` 及其派生 `--accent-hover / -soft / -ring / -border / -grad / -fill`、`--r-lg / -md / -sm`、`--shadow-card / -raise / -pop`、`--font-mono`）。不要在页面里另写一套深色变量：深色、自定义强调色、减少透明、关闭阴影都只改 ui-tokens.css。页面里的 `--bg / --card / --line / --muted …` 只是旧名别名。多层阴影里的「空阴影」写 `0 0 #0000`，不能写 `none`（整条声明会失效）；最低 Chrome 114，不能用 `light-dark()`
 - **我们加到网页上的界面**（悬浮入口、置顶小窗、气泡、提示条）都带 `data-dt-ui`，切分 / 观察器 / 点击补扫都会跳过；大块界面放进 closed Shadow DOM，不受网页样式影响。文案用 `DT.uiText(zh, en)` 跟随界面语言
+- **悬浮入口首帧**：首次挂载 / body 重建 / 关闭后再打开时，host 先带 `data-init`（`visibility:hidden` + `transition:none`）插入，强制布局拿到真实宽高，由 `render()` / `place()` 写入最终坐标、贴边和半隐藏状态后再撤掉 `data-init`；保存坐标越界由 `DT.dockPlace` 直接 clamp。body 直接子节点用轻量 MutationObserver 监听并重挂，不观察整棵子树；正常拖拽 / 吸附 / 展开仍走原来的 left/top 与 transform 过渡
 - **配置变了要跟着变的模块**用 `DT.onConfig(fn)` 订阅（外观、站点规则、悬浮入口），`main.js` 的 `loadConfig` 读完后统一 `DT.emitConfig`
 - **调度用的纯函数放 `core.js`，挂成 `DT.*`**（自检页能直接测）。约定：不读 `window`、不调 `getBoundingClientRect`、不碰 DOM 状态，矩形/时间等全部由调用方传参。现有：`distanceOf` / `nearView` / `batchLimits` / `nextRetry` / `joinSlots` / `matchesHotkey` / `keyFromCode` / `isEditableTarget`
 
@@ -728,17 +728,18 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.11.2）
+## 14. 本版技术记录（0.11.3）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.11.1 的仅译文引用重建见提交 `e508c49`；0.11.0 的医学专业模式见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md) 与 §15，引用识别 / 链接边界见 §5.2.1。
+> 0.11.2 的 Atypon 引用 / 图表链接混排见提交 `1cb7fa0`；0.11.1 的仅译文引用重建见 `e508c49`；0.11.0 的医学专业模式见 [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md) 与 §15，引用识别 / 链接边界见 §5.2.1。
 
 - **问题**：Science Advances 论文仅译文时，相邻段落已翻成中文，带多个文献引用和 Fig. 1 图表链接的段落却整段保持英文。本地等价夹具复现的触发条件：图表链接 `<a href="#F1">Fig. 1</a>` 不是保留区，`hasUnsafeInlineLink` 把它当成「普通行内链接 + 链接外还有正文」，`injectCitedOnly` 直接返回 false；同一段把 Fig. 1 换成纯文字即可原地翻译。只有图表链接的段落在仅译文下则退回双语。`main.js` 的 `tryInject` 又把注入失败记成 skipped + settled，之后再也不重试。
-- **混合行内安全渲染**（`content/dom.js`，见 §5.2.1）：`isXrefEl` 把指向本页锚点、可见文字是图表标签的链接当保留区；保留区带 `kind`（protect / cite / mention / xref / link），有引用或图表链接的段落里普通链接也当原子。`injectMixed` 取代 `injectCitedOnly`：原子原地不动（不移动、不改属性），原子外的文字清空，译文作为新文本节点插在原子之间、永远不进单元内部的链接；落点词级 → 句级 → 按原句恢复，图表链接漏标记按标签唯一定位；`<br>` 分行逐行对齐；中文目标下图表标签写成「图 1 / 表 1 / 式 1」（可靠对应才写）。双语里引用 / 图表链接 / 混合段落普通链接都放可点击副本。
+- **混合行内安全渲染**（`content/dom.js`，见 §5.2.1）：`isXrefEl` 把指向本页锚点、可见文字是图表标签的链接当保留区；保留区带 `kind`（protect / cite / mention / xref / link / ruby）。内容区域里只要同时有普通文字和行内链接，普通链接也当原子（不再要求先有引用 / 图表链接；整段链接、导航和有小块的容器除外）。`injectMixed` 取代 `injectCitedOnly`：原子原地不动（不移动、不改属性），原子外的文字清空，译文作为新文本节点插在原子之间、永远不进单元内部的链接；落点词级 → 句级 → 按原句恢复，图表链接漏标记按标签唯一定位；`<br>` 和 pre-wrap 文本节点里的 `\n` 分行逐行对齐；中文目标下图表标签写成「图 1 / 表 1 / 式 1」、补充材料链接写成「补充材料 3」（可靠对应才写）；Ruby 元素整体作为原子保留，不把中文写进 rt/rp。双语里引用 / 图表链接 / 混合段落普通链接都放可点击副本。
 - **注入结果分类**：`DT.inject` 写 `unit.injectResult`（success / already-rendered / not-applicable / empty / stale-generation / stale-source / unsafe-structure / invalid-placement），新增 `DT.unitStamp`。`tryInject` 把 unsafe-structure / invalid-placement 记进 `renderFails` 和 `DT.state.renderFailed` / `lastRenderError`（进 `dt:status`），不算跳过、不记已处理；源文本和 DOM 状态都没变就不再收、不再请求，页面变了才重收（后台缓存里有译文）。`DT.releaseReplaced` 补上 `cited` 记录（以前站点改写后不放回）。
 - **缓存 / 提示词**：不改 `SCHEMA` / 配置结构 / `DT.tx` 语义。带图表链接或混合普通链接的段落，送翻文本多了 `<kN>` 标记，会按新文本翻译一次，旧缓存不清；提示词的保留标记说明点名「图表编号、链接文字」，只在本批带标记时出现。
-- **测试**：自检新增 `tpl-science-mixed`（结构照 0.11.0 抓取的真实 Atypon 写法；首句取自用户报告，其余为等价文字）与混合行内用例：整段原地翻译、链接节点 / 属性不变、「图 1」与点击、嵌套父节点、图表链接紧挨引用、只有图表链接、`<br>` 分行、丢图表标记、引用 + 普通链接、注音失败分类、切换模式 / 撤销 / 重翻 / 站点改写后重翻（旧代码上失败）；`test/content-main.test.mjs` 新增「模型已给译文、DOM 注入失败不算跳过 / 页面没变不重发」；E2E 新增混合行内一节（本地页面）。合并后 Node、自检、E2E 全部通过；用户已在真实 Science 页面验收。
-- **已知限制**：注音 / pre-wrap 分行 / 模型合并或拆开分行的混合段落保持原文并报 unsafe-structure / invalid-placement；只有普通链接的段落仅译文仍降级双语（链接文字翻译需要链接级标记，ROADMAP P1-2）；混合段落里的普通链接保留原文字（§9）。
+- **测试**：自检新增 `tpl-science-mixed`（结构照 0.11.0 抓取的真实 Atypon 写法；首句取自用户报告，其余为等价文字）、`tpl-pmc`（PMC 等价不良事件段落 + 普通补充材料链接）与混合行内用例：整段原地翻译、链接节点 / 属性不变、「图 1」/「补充材料 3」与点击、嵌套父节点、图表链接紧挨引用、只有图表链接、`<br>` 与 pre-wrap 换行、丢图表标记、引用 + 普通链接、注音 + 引用 / 链接、切换模式 / 撤销 / 重翻 / 站点改写后重翻；`test/content-main.test.mjs` 新增「模型已给译文、DOM 注入失败不算跳过 / 页面没变不重发」；E2E 新增混合行内和 PMC 本地页面。合并后 Node、自检、E2E 全部通过；真实网站效果待用户验收。
+- **悬浮入口首帧**：首次挂载 / body 重建 / 关闭后再打开时，host 先带 `data-init`（隐藏 + 禁 left/top 过渡）插入并强制布局；`render()` / `place()` 用真实尺寸、保存坐标、贴边和半隐藏状态算完最终位置后再撤掉 hidden，首帧不再从 (0,0) 飞过去。保存坐标越界由 `DT.dockPlace` clamp；body 直接子节点用轻量 MutationObserver 重挂，`pageshow` 再检查。正常拖拽 / 吸附 / 展开仍保留原过渡。
+- **已知限制**：模型把混合段落分行合并 / 拆开后行数对不上、或 Ruby / 链接结构无法安全重建时保持原文并报 invalid-placement / unsafe-structure（不退回双语，也不无限重试）；Ruby 混排时 `<ruby>` 整体保留、基字本身不翻译；混合段落里的普通链接默认保留原文字，只有图表 / 补充材料等可靠标签做本地化（任意链接文字翻译仍需链接级标记，ROADMAP P1-2）。
 
 ## 15. 医学专业模式
 

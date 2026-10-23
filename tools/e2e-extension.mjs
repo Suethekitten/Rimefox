@@ -319,6 +319,9 @@ ${SCIENCE_FIXTURE}
   '/science-mixed.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Science mixed inline</title></head><body>
 ${templateOf('tpl-science-mixed')}
 </body></html>`,
+  '/pmc.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>PMC adverse events</title></head><body>
+${templateOf('tpl-pmc')}
+</body></html>`,
   '/inline-links.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Inline links</title></head><body>
 ${LINK_FIXTURE}
 </body></html>`,
@@ -885,13 +888,46 @@ async function scienceMixedChecks() {
   check('仅译文：引用和图表链接是原来的节点（href / id / role 不变），图表标签写成「图 1」，译文在链接外', JSON.stringify(only.facts) === JSON.stringify(linksBefore) && JSON.stringify(only.labels) === JSON.stringify(labels) && only.prefixed, JSON.stringify(only.labels));
   check('仅译文：点「图 1」跳到图表', only.hash === '#F1', only.hash);
   const status = await tabMsg(t.tabId, { type: 'dt:status' });
-  check('注入失败分类：注音 + 引用段落记成注入失败（不是跳过 / 已处理），原因写明', !!status && status.renderFailed === 1 && /unsafe-structure: ruby/.test(status.lastRenderError || ''), JSON.stringify(status && { renderFailed: status.renderFailed, lastRenderError: status.lastRenderError, skipped: status.skipped }));
-  const rubyKept = await pageEval(t, "const p = document.getElementById('sci-ruby'); return !p.querySelector('[data-dt-target]') && p.textContent.indexOf('漢字の') === 0");
-  check('注入失败分类：结构不支持的段落保持原文，不退回双语', rubyKept === true, String(rubyKept));
+  check('注音 + 引用段落已成功重建，不再记成注入失败', !!status && status.renderFailed === 0 && !/unsafe-structure: ruby/.test(status.lastRenderError || ''), JSON.stringify(status && { renderFailed: status.renderFailed, lastRenderError: status.lastRenderError, skipped: status.skipped }));
+  const rubyMixed = await pageEval(t, "const p = document.getElementById('sci-ruby'); const rt = p.querySelector('rt'); return { rendered: p.hasAttribute('data-dt-replaced'), target: !!p.querySelector('[data-dt-target]'), rt: rt && rt.textContent, ruby: !!p.querySelector('ruby'), link: !!p.querySelector('a[role=\"doc-biblioref\"]'), chineseRt: !!(rt && /[\u4e00-\u9fff]/.test(rt.textContent)) };");
+  check('注音 + 引用：注音节点和引用保留，普通正文原地重建，中文不写进 rt', !!rubyMixed && rubyMixed.rendered && !rubyMixed.target && rubyMixed.ruby && rubyMixed.rt === 'くれがた' && !rubyMixed.chineseRt && rubyMixed.link, JSON.stringify(rubyMixed));
+  const prewrap = await pageEval(t, "const p = document.getElementById('sci-prewrap'); const a = p.querySelectorAll('a'); return { rendered: p.hasAttribute('data-dt-replaced'), target: !!p.querySelector('[data-dt-target]'), newline: p.textContent.indexOf('\\n') >= 0, links: Array.from(a).map((x) => x.textContent), hrefs: Array.from(a).map((x) => x.getAttribute('href')) };");
+  check('pre-wrap：文本节点里的硬换行保留，链接仍可点击且不退回双语', !!prewrap && prewrap.rendered && !prewrap.target && prewrap.newline && prewrap.links.length === 2 && prewrap.links[0] === '图 1' && prewrap.hrefs[0] === '#F1', JSON.stringify(prewrap));
 
   await tabMsg(t.tabId, { type: 'dt:toggle' });
   const after = await until(() => pageEval(t, "return document.querySelector('[data-dt-target],[data-dt-replaced]') ? '' : document.querySelector('.fx-science').innerHTML"), 8000);
   check('关闭翻译后 DOM 逐字还原', after === before, after === before ? '' : String(after || '').slice(0, 120));
+}
+
+
+// PMC 等价夹具：只有普通补充材料链接的段落，仅译文仍应原地翻译而不是双语回退
+async function pmcChecks() {
+  console.log('\n[PMC 普通补充材料链接]');
+  await patchConfig({ targetLang: 'zh-CN', lazy: false, hoverCompare: false });
+  const t = await openTab(ORIGIN + '/pmc.html');
+  const before = await pageEval(t, "return document.querySelector('#pmc-ae').innerHTML");
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return !!document.querySelector('#pmc-ae [data-dt-target]')"), 20000);
+  await tabMsg(t.tabId, { type: 'dt:setMode', mode: 'translation' });
+  const ready = await until(() => pageEval(t, "return !!document.querySelector('#pmc-ae[data-dt-replaced]')"), 20000);
+  await settled(t);
+  const out = await pageEval(
+    t,
+    `const p = document.getElementById('pmc-ae');
+    const a = p.querySelector('#pmc-supp-link');
+    return {
+      ready: p.hasAttribute('data-dt-replaced'),
+      dual: !!p.querySelector('[data-dt-target]'),
+      label: a && a.textContent,
+      href: a && a.getAttribute('href'),
+      same: a === document.querySelector('#pmc-supp-link'),
+      text: p.textContent.slice(0, 120)
+    };`
+  );
+  check('PMC 普通链接：仅译文原地翻译、没有双语回退，链接标签和 href 保留', !!ready && !!out && out.ready && !out.dual && out.same && out.label === '补充材料 3' && out.href === '#pmc-supp-3', JSON.stringify(out));
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const after = await until(() => pageEval(t, "return document.querySelector('[data-dt-target],[data-dt-replaced]') ? '' : document.querySelector('#pmc-ae').innerHTML"), 8000);
+  check('PMC 普通链接：关闭翻译后原文逐字还原', after === before, after === before ? '' : String(after || '').slice(0, 120));
 }
 
 async function paragraphChecks() {
@@ -1516,7 +1552,7 @@ async function inlineLinkChecks() {
     };
   `);
   check('行内链接·@ 提及：用户名链接文字不变，后面译文不在链接里', info.mention === '@alice' && !info.mentionTargetInLink && info.yt === '@a' && !info.ytTargetInLink, JSON.stringify(info));
-  check('行内链接·普通链接：链接文字不被吞，译文块在链接外', info.generic === 'this paper' && info.genericTarget && !info.genericTargetInLink, JSON.stringify(info));
+  check('行内链接·普通链接：链接文字不被吞，仅译文原地替换且不退回双语', info.generic === 'this paper' && !info.genericTarget && !info.genericTargetInLink, JSON.stringify(info));
   check('行内链接·整段链接：允许原地翻译，链接仍可点', info.whole.indexOf('译:') === 0, JSON.stringify(info));
   await patchConfig({ mode: 'dual' });
   await until(() => pageEval(tab, 'return document.querySelectorAll("#link-mid [data-dt-target]").length === 1'), 20000);
@@ -1979,6 +2015,7 @@ try {
     await scienceLiveChecks(ORIGIN + '/science-cite.html');
     await inlineLinkChecks();
     await scienceMixedChecks();
+    await pmcChecks();
     await languageChecks();
     await localeChecks();
     await dockChecks();
