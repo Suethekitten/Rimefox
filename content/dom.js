@@ -2192,6 +2192,16 @@
     return piece.node.nodeValue.slice(piece.start, piece.end);
   }
 
+  function lineHeadPiece(group, kept) {
+    var pieces = kept
+      ? group.pieces.filter(function (p) { return !kept(p.node); })
+      : group.pieces;
+    for (var i = 0; i < pieces.length; i += 1) {
+      if (/\S/.test(pieceText(pieces[i]))) return pieces[i];
+    }
+    return null;
+  }
+
   // 一行译文写进这一行：第一个有字的片段换成「原来的行首缩进 + 译文」，同一行后面的片段清空
   // （行内的 <b> / <a> 和以前一样不保留格式，但只影响这一行）
   // kept(node)：保留区的文本节点，不写也不清空。这一行没有可写的片段时返回 false
@@ -2291,6 +2301,13 @@
       : null;
     var shown = new Set();
     var written = assign.join('\n');
+    // 记录每行首节点；若它只被这一行使用且落在局部强调壳里，写完后再把行文本挪到壳外。
+    var lineHeads = new Map();
+    for (var lh = 0; lh < n && lh < assign.length; lh += 1) {
+      var hp = lineHeadPiece(sel[lh], kept);
+      if (!hp || isDropcapNode(hp.node)) continue;
+      lineHeads.set(hp.node, (lineHeads.get(hp.node) || 0) + 1);
+    }
     // 这一行上的保留元素留着不藏。written：保留内容已经原样出现在写进去的译文里的，照样藏（免得重复）
     function showKept(group, written) {
       group.pieces.forEach(function (p) {
@@ -2312,6 +2329,21 @@
     });
     // 同一文本节点上的多行 edit 必须一次性从后往前写：逐行写会让后一行的偏移失效
     if (edits.length) applyEditsTx(edits, ops);
+    // 多行段落同样不能把整行译文留在 <strong> / 粗体 span 里。
+    // 只处理只被一行使用的首节点；共享节点（pre-wrap 里多行同一 TextNode）保持原逻辑，避免搬走别行。
+    for (var lm = 0; lm < n && lm < assign.length; lm += 1) {
+      var headPiece = lineHeadPiece(sel[lm], kept);
+      if (!headPiece || lineHeads.get(headPiece.node) !== 1 || isDropcapNode(headPiece.node)) continue;
+      var boundary = styleBoundaryFor(headPiece.node, unit);
+      if (!boundary || styleBoundaryIsWhole(unit, boundary) || !boundary.parentNode) continue;
+      var lineValue = headPiece.node.nodeValue;
+      if (!/\S/.test(lineValue || '')) continue;
+      var safeLine = document.createTextNode(lineValue);
+      insertNode(safeLine, boundary.parentNode, boundary, ops);
+      ownNodes.add(safeLine);
+      nodeUnit.set(safeLine, unit);
+      setText(headPiece.node, '', ops);
+    }
     collapsed.forEach(function (br) {
       setAttr(br, 'data-dt-collapsed', '1', ops);
     });
@@ -2404,14 +2436,14 @@
     var plan = hasKeep ? keepPlan(unit, segs) : null;
     if (plan) {
       plan.forEach(function (gap, g) {
-        writeNodes(gap.nodes, gap.text, g === 0, ops, saved);
+        writeNodes(unit, gap.nodes, gap.text, g === 0, ops, saved);
       });
     } else {
       var nodes = contentNodes(unit).filter(function (node) {
         return !hasKeep || keepIndexOf(unit, node) < 0;
       });
       if (!nodes.length) return false;
-      writeNodes(nodes, text, true, ops, saved);
+      writeNodes(unit, nodes, text, true, ops, saved);
       if (hasKeep) hideKept(unit, ops);
     }
 
@@ -2440,8 +2472,61 @@
     return true;
   }
 
-  // 一段译文写进一串文本节点：写进第一个（first 时保留它的行首缩进），其余清空。
-  function writeNodes(nodes, text, first, ops, saved) {
+  // 行内样式边界：只把 font-weight / font-style 的变化当成强调边界。
+  // 字号变化（首字下沉、CSS 上标）不在这里处理，避免把正常 dropcap 当成粗体污染。
+  function inlineStyleSignature(el) {
+    var cs = styleOf(el);
+    if (!cs) return null;
+    return { weight: String(cs.fontWeight || ''), style: String(cs.fontStyle || '') };
+  }
+
+  function styleDiffers(el, base) {
+    if (!base) return false;
+    var sig = inlineStyleSignature(el);
+    if (!sig) return false;
+    return sig.weight !== base.weight || sig.style !== base.style;
+  }
+
+  // 从文本节点往上找 unit.el 以下最外层的局部强调壳（strong / b / em / 粗体 span）。
+  // 不把 unit.el 自己的基准样式算成污染：整段加粗的标题 / 公告仍应继承。
+  function styleBoundaryFor(node, unit) {
+    var base = inlineStyleSignature(unit.el);
+    if (!base) return null;
+    var boundary = null;
+    var cur = node && node.parentNode;
+    while (cur && cur !== unit.el && cur.nodeType === 1) {
+      if (styleDiffers(cur, base)) boundary = cur;
+      cur = cur.parentNode;
+    }
+    return boundary;
+  }
+
+  // 局部强调壳是否只覆盖了正文的一部分。全部覆盖时视为整段强调，保留样式。
+  function styleBoundaryIsWhole(unit, boundary) {
+    if (!boundary) return false;
+    var all = contentNodes(unit);
+    if (!all.length) return true;
+    return all.every(function (node) { return boundary.contains(node); });
+  }
+
+  // 仅译文：把译文放到正文排版上下文，而不是复用局部 <strong> / 粗体 span 里的第一个文本节点。
+  // 返回 { parent, before }；不需要逃出时返回原 slot。
+  function styleSafeSlot(unit, slot) {
+    if (!slot || !slot.parent) return slot;
+    if (slot.parent === unit.el) return slot;
+    var base = inlineStyleSignature(unit.el);
+    var boundary = null;
+    var cur = slot.parent;
+    while (cur && cur !== unit.el && cur.nodeType === 1) {
+      if (styleDiffers(cur, base)) boundary = cur;
+      cur = cur.parentNode;
+    }
+    if (!boundary || styleBoundaryIsWhole(unit, boundary) || !boundary.parentNode) return slot;
+    return { parent: boundary.parentNode, before: boundary };
+  }
+
+  // 一段译文写进一串文本节点：优先写进正文上下文；局部强调壳不承载整段译文。
+  function writeNodes(unit, nodes, text, first, ops, saved) {
     if (!nodes.length) return;
     // 首字下沉：首字放进下沉节点，其余放进后面的正文节点。
     // 否则整段中文都会挤进 71.5px 的 "N" 里（Aeon 仅译文模式实例）。
@@ -2466,6 +2551,28 @@
       }
     }
 
+    // 整段译文不能因为第一个文本节点碰巧在 <strong> / 粗体 span 里而全部加粗。
+    // 局部强调壳只覆盖正文的一部分时，在壳外创建一个安全文本节点承载完整译文；
+    // 整段都在同一个强调壳里（公告 / 强调段落）时保留原行为。
+    var styleBoundary = drop ? null : styleBoundaryFor(nodes[0], unit);
+    var safeText = null;
+    if (styleBoundary && !styleBoundaryIsWhole(unit, styleBoundary) && styleBoundary.parentNode) {
+      safeText = document.createTextNode('');
+      insertNode(safeText, styleBoundary.parentNode, styleBoundary, ops);
+      ownNodes.add(safeText);
+      nodeUnit.set(safeText, unit);
+    }
+    if (safeText) {
+      var lead = first ? /^\s*/.exec(nodes[0].nodeValue)[0] : '';
+      var wroteSafe = lead + (drop ? text : text);
+      safeText.nodeValue = wroteSafe;
+      for (var s = 0; s < nodes.length; s += 1) {
+        var beforeSafe = nodes[s].nodeValue;
+        setText(nodes[s], '', ops);
+        saved.push({ node: nodes[s], value: beforeSafe, wrote: '' });
+      }
+      return;
+    }
     for (var i = 0; i < nodes.length; i += 1) {
       var wrote;
       if (drop) wrote = i === 0 ? head : i === restIndex ? tail : '';
@@ -2808,6 +2915,7 @@
     });
     function put(text, slot) {
       if (!text || !slot || !slot.parent) return;
+      slot = styleSafeSlot(unit, slot);
       var node = document.createTextNode(text);
       if (isolate) {
         // 混合段落不整体改父元素方向：每段新译文单独放进 inline 隔离壳，

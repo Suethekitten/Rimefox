@@ -322,6 +322,19 @@ ${templateOf('tpl-science-mixed')}
   '/chinagp.html': `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>中国全科医学 RichHTML</title></head><body>
 ${templateOf('tpl-chinagp')}
 </body></html>`,
+  '/korean-bold.html': `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>Korean style boundaries</title></head><body style="font:16px/1.7 sans-serif;max-width:760px;margin:30px">
+<p id="bold-start"><strong>한국어 문장의 일부만 강조된 부분</strong> 나머지 기사 본문은 일반 굵기로 이어집니다. 같은 문장 안에서 강조가 끝나야 합니다.</p>
+<p id="bold-mid">앞부분은 일반 본문이고 <strong>중간의 중요한 표현</strong> 뒤로 다시 일반 본문이 이어지는 문장입니다.</p>
+<p id="bold-end">마지막에만 <strong>강조된 표현</strong></p>
+<p id="bold-span"><span style="font-weight:700">굵은 span으로 시작하는 문장</span> 뒤에는 일반 텍스트가 이어집니다.</p>
+<p id="bold-b"><b>굵은 b로 시작하는 문장</b> 뒤에는 일반 텍스트가 이어집니다.</p>
+<p id="bold-em"><em>기울임 강조</em>와 <i>다른 기울임</i>이 섞인 일반 문장입니다. 번역은 일반 굵기여야 합니다.</p>
+<p id="whole-strong"><strong>이 문단 전체가 의도적으로 강조된 안내 문구입니다.</strong></p>
+<h2 id="whole-heading"><strong>전체가 굵은 제목</strong></h2>
+<p id="multi-bold"><strong>첫 번째 줄 강조</strong><br>두 번째 줄은 일반 본문입니다.<br><strong>세 번째 줄 강조</strong> 뒤에 일반 텍스트.</p>
+<p id="link-strong">본문 중간에 <strong>강조</strong>와 <a href="#ref-1">[1]</a> 인용이 같이 있습니다.</p>
+<div id="ref-1">Reference one.</div>
+</body></html>`,
   '/direction.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Bidirectional layout</title></head><body>
 ${templateOf('tpl-direction')}
 </body></html>`,
@@ -989,6 +1002,51 @@ async function chinagpChecks() {
   await tabMsg(t.tabId, { type: 'dt:toggle' });
   await until(() => pageEval(t, "return !document.querySelector('[data-dt-target],[data-dt-replaced]')"), 10000);
   await patchConfig({ targetLang: 'zh-CN', mode: 'dual', professionalProfile: 'general', medicalMode: false, professionalOptions: { quality: 'balanced', subdomain: 'auto', maxReviewRequests: 1 } });
+}
+
+
+async function koreanBoldChecks() {
+  console.log('\n[韩文样式边界]');
+  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false, dockEnabled: false });
+  const t = await openTab(ORIGIN + '/korean-bold.html');
+  const before = await pageEval(t, "return { start: document.getElementById('bold-start').innerHTML, whole: document.getElementById('whole-strong').innerHTML };");
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return !!document.querySelector('#bold-start[data-dt-replaced]') && !!document.querySelector('#whole-heading[data-dt-replaced]')"), 20000);
+  await settled(t);
+  const styles = await pageEval(t, `return (function(){
+    function info(id){
+      var el=document.getElementById(id); if(!el) return null;
+      var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT); var node=null;
+      for(var n=w.nextNode();n;n=w.nextNode()){ if(/\\S/.test(n.nodeValue)){ node=n; break; } }
+      if(!node) return { text:'', weight:0, style:'', parent:'' };
+      var parent=node.parentElement || el; var cs=getComputedStyle(parent);
+      return { text:node.nodeValue.slice(0,30), weight:parseInt(cs.fontWeight,10), style:cs.fontStyle, parent:parent.tagName };
+    }
+    return { start: info('bold-start'), mid: info('bold-mid'), end: info('bold-end'), span: info('bold-span'), b: info('bold-b'), em: info('bold-em'), multi: info('multi-bold'), whole: info('whole-strong'), heading: info('whole-heading'), link: info('link-strong'), linkCount: document.querySelectorAll('#link-strong a[href="#ref-1"]').length };
+  })()`);
+  function normal(x){ return x && x.weight > 0 && x.weight < 600; }
+  check('韩文仅译文：段首局部 strong / b / 粗体 span 不会让整段译文变粗', normal(styles.start) && normal(styles.span) && normal(styles.b) && styles.em && styles.em.style === 'normal', JSON.stringify(styles));
+  check('韩文仅译文：中间 / 段末强调、链接引用不会污染整段字重', normal(styles.mid) && normal(styles.end) && normal(styles.link) && styles.linkCount === 1, JSON.stringify(styles));
+  check('韩文仅译文：多行段落第一行局部 strong 也不污染整行', normal(styles.multi), JSON.stringify(styles.multi));
+  check('韩文仅译文：整段加粗公告和整段加粗标题继续保持粗体', styles.whole && styles.whole.weight >= 600 && styles.heading && styles.heading.weight >= 600, JSON.stringify({ whole: styles.whole, heading: styles.heading }));
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  const restored = await pageEval(t, "return { start: document.getElementById('bold-start').innerHTML, whole: document.getElementById('whole-strong').innerHTML };");
+  check('韩文仅译文：关闭翻译后逐字恢复原文和强调结构', restored.start === before.start && restored.whole === before.whole, JSON.stringify({ before, restored }));
+
+  await patchConfig({ mode: 'dual' });
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return !!document.querySelector('#bold-start .dt-target')"), 20000);
+  const dual = await pageEval(t, "var n=document.querySelector('#bold-start .dt-target'); var c=getComputedStyle(n); return { weight:parseInt(c.fontWeight,10), sourceWeight:parseInt(getComputedStyle(document.querySelector('#bold-start strong')).fontWeight,10) };");
+  check('韩文双语：目标译文保持正文基准字重，原文强调仍保留', dual.weight < 600 && dual.sourceWeight >= 600, JSON.stringify(dual));
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+
+  await patchConfig({ mode: 'translation' });
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return !!document.querySelector('#bold-start[data-dt-replaced]')"), 20000);
+  const again = await pageEval(t, "return (function(){var el=document.getElementById('bold-start'); var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT); for(var n=w.nextNode();n;n=w.nextNode()){ if(/\\S/.test(n.nodeValue)){ return parseInt(getComputedStyle(n.parentElement).fontWeight,10); } } return 0;})()");
+  check('韩文仅译文：还原后再次翻译仍不随机加粗', again > 0 && again < 600, 'weight=' + again);
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', dockEnabled: false });
 }
 
 async function directionChecks() {
@@ -2129,6 +2187,7 @@ try {
     await scienceMixedChecks();
     await pmcChecks();
     await chinagpChecks();
+    await koreanBoldChecks();
     await directionChecks();
     await languageChecks();
     await localeChecks();
