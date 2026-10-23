@@ -40,6 +40,13 @@ const SHADOW_ONLY = flag('--shadow-only');
 const MEDICAL_ONLY = flag('--medical-only');
 const SELFTEST_ONLY = flag('--selftest-only');
 const SCIENCE_LIVE = flag('--science-live');
+const DUAL_LIVE = flag('--dual-live')
+  ? (() => {
+      const arg = option('--dual-live');
+      return arg && !arg.startsWith('--') ? arg : 'https://www.chosun.com/economy/industry-company/2026/10/23/ZWDCNVYTJ5AJ3OEPV2PTABG5WA/';
+    })()
+  : '';
+const DUAL_LABEL = option('--label') || 'current';
 const CHOSUN_LIVE = flag('--chosun-live')
   ? (() => {
       const arg = option('--chosun-live');
@@ -2234,6 +2241,27 @@ async function dockChecks() {
 }
 
 
+
+async function dualLiveChecks(url) {
+  console.log('\n[双语字体基线] ' + DUAL_LABEL);
+  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', lazy: false, hoverCompare: false, dockEnabled: false, translateOnLoad: false });
+  const t = await openTab(url);
+  await until(() => pageEval(t, "return document.querySelectorAll('.article-body__content-text').length >= 5"), 30000);
+  await sleep(1000);
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return !!document.querySelector('.article-body__content-text .dt-target')"), 30000);
+  await settled(t);
+  const info = await pageEval(t, "return (function(){var p=document.querySelector('.article-body__content-text');var target=p.querySelector('.dt-target');var pc=getComputedStyle(p);var tc=target?getComputedStyle(target):null;return {family:tc&&tc.fontFamily,sourceFamily:pc.fontFamily,weight:tc&&tc.fontWeight,sourceWeight:pc.fontWeight,size:tc&&tc.fontSize,sourceSize:pc.fontSize,line:tc&&tc.lineHeight,sourceLine:pc.lineHeight,fonts:p.querySelectorAll('.dt-font').length,targets:document.querySelectorAll('.dt-target').length};})()");
+  const outDir = path.join(process.cwd(), 'docs', 'verification', '2026-10-23-chosun-font-ab');
+  const clip = await pageEval(t, "return (function(){var p=document.querySelector('.article-body__content-text');var r=p.getBoundingClientRect();return {x:0,y:Math.max(0,Math.floor(r.top+window.scrollY)-12),width:Math.min(window.innerWidth,860),height:620,scale:1};})()");
+  const file = path.join(outDir, 'chosun-dual-' + DUAL_LABEL + '.png');
+  await captureScreenshot(t, file, clip);
+  check('双语基线：' + DUAL_LABEL + ' 保留原站字体、字重、字号、行高', !!info.family && info.family === info.sourceFamily && info.weight === info.sourceWeight && info.size === info.sourceSize && info.line === info.sourceLine && info.fonts === 0, JSON.stringify(info));
+  check('双语基线：' + DUAL_LABEL + ' 截图生成', fs.existsSync(file) && fs.statSync(file).size > 1000, path.basename(file));
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await patchConfig({ mode: 'dual', dockEnabled: false });
+}
+
 async function chosunLiveChecks(url) {
   console.log('\n[朝鲜日报真实页面样式]');
   stats.chosunLive = true;
@@ -2289,7 +2317,9 @@ async function chosunLiveChecks(url) {
 }
 
 try {
-  if (CHOSUN_LIVE) {
+  if (DUAL_LIVE) {
+    await dualLiveChecks(DUAL_LIVE);
+  } else if (CHOSUN_LIVE) {
     await chosunLiveChecks(CHOSUN_LIVE);
   } else if (SCIENCE_LIVE) {
     await scienceLiveChecks();

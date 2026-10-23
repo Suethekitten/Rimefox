@@ -1860,7 +1860,7 @@
     };
   })();
 
-  function makeNode(sourceEl, text, lang, forceBlock) {
+  function makeNode(sourceEl, text, lang, forceBlock, renderMode) {
     var inline = forceBlock ? false : isInlineLike(sourceEl);
     var cs = styleOf(sourceEl);
     // 窄容器（图标菜单、竖排侧栏）里长译文会一个字一行，强制不换行
@@ -1888,8 +1888,9 @@
       'z-index: auto'
     ].join('; ') + ';';
     copyTypography(node, styleOf(sourceEl));
-    // 目标语言字体适配只作用于新译文节点；源元素字体不变。
-    if (DT.fonts) DT.fonts.apply(node, lang, sourceEl);
+    // 目标语言字体适配只作用于仅译文的独立译文节点；双语走 4c2784d 的
+    // copyTypography + .dt-target { font: inherit } 原路径，不进入字体策略。
+    if (DT.fonts && (renderMode || DT.state.mode) === 'translation') DT.fonts.apply(node, lang, sourceEl);
     // 目标语言方向独立于原网页；inline 译文不强行改对齐，块级译文用 target 方向的 start，
     // 源段落居中 / 两端对齐时保留（applyTargetNode 会写 inline !important）。
     if (DT.direction) DT.direction.applyTargetNode(node, sourceEl, lang, inline);
@@ -2331,7 +2332,7 @@
   function injectDual(unit, text, lang, area, cited) {
     if (DT.debugStats) DT.debugStats.injectDualCount += 1;
     var sourceEl = unit.el;
-    var node = makeNode(sourceEl, text, lang, !unit.whole);
+    var node = makeNode(sourceEl, text, lang, !unit.whole, 'dual');
     if (cited) text = fillCited(node, unit, cited);
     node.setAttribute('data-dt-unit', unit.id);
     registerTarget(node, unit.id);
@@ -3300,7 +3301,7 @@
       setStyle(node, 'display', 'none', ops);
       setAttr(node, 'data-dt-rt-hidden', '1', ops);
     });
-    var target = makeNode(unit.el, text, lang, true);
+    var target = makeNode(unit.el, text, lang, true, 'translation');
     target.setAttribute('data-dt-unit', unit.id);
     registerTarget(target, unit.id);
     nodeUnit.set(target, unit);
