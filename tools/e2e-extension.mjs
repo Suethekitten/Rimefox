@@ -40,6 +40,12 @@ const SHADOW_ONLY = flag('--shadow-only');
 const MEDICAL_ONLY = flag('--medical-only');
 const SELFTEST_ONLY = flag('--selftest-only');
 const SCIENCE_LIVE = flag('--science-live');
+const CHOSUN_LIVE = flag('--chosun-live')
+  ? (() => {
+      const arg = option('--chosun-live');
+      return arg && !arg.startsWith('--') ? arg : 'https://www.chosun.com/economy/industry-company/2026/10/23/ZWDCNVYTJ5AJ3OEPV2PTABG5WA/';
+    })()
+  : '';
 const BILIBILI_LIVE = flag('--bilibili-live')
   ? (() => {
       const arg = option('--bilibili-live');
@@ -328,6 +334,7 @@ ${templateOf('tpl-chinagp')}
 <p id="bold-end">마지막에만 <strong>강조된 표현</strong></p>
 <p id="bold-span"><span style="font-weight:700">굵은 span으로 시작하는 문장</span> 뒤에는 일반 텍스트가 이어집니다.</p>
 <p id="bold-medium"><span style="font-weight:500">중간 굵기 span으로 시작하는 문장</span> 뒤에는 일반 텍스트가 이어집니다.</p>
+<p id="bold-family"><span style="font-family:'Arial Black',sans-serif">굵은 글꼴 family로 시작하는 문장</span> 뒤에는 일반 텍스트가 이어집니다.</p>
 <p id="bold-b"><b>굵은 b로 시작하는 문장</b> 뒤에는 일반 텍스트가 이어집니다.</p>
 <p id="bold-em"><em>기울임 강조</em>와 <i>다른 기울임</i>이 섞인 일반 문장입니다. 번역은 일반 굵기여야 합니다.</p>
 <p id="whole-strong"><strong>이 문단 전체가 의도적으로 강조된 안내 문구입니다.</strong></p>
@@ -1025,9 +1032,9 @@ async function koreanBoldChecks() {
       for(var n=w.nextNode();n;n=w.nextNode()){ if(/\\S/.test(n.nodeValue)){ node=n; break; } }
       if(!node) return { text:'', weight:0, style:'', parent:'' };
       var parent=node.parentElement || el; var cs=getComputedStyle(parent);
-      return { text:node.nodeValue.slice(0,30), weight:parseInt(cs.fontWeight,10), style:cs.fontStyle, parent:parent.tagName };
+      return { text:node.nodeValue.slice(0,30), weight:parseInt(cs.fontWeight,10), style:cs.fontStyle, family:cs.fontFamily, parent:parent.tagName };
     }
-    return { start: info('bold-start'), mid: info('bold-mid'), end: info('bold-end'), span: info('bold-span'), b: info('bold-b'), medium: info('bold-medium'), em: info('bold-em'), multi: info('multi-bold'), nested: info('nested-bold'), prewrap: info('prewrap'), whole: info('whole-strong'), heading: info('whole-heading'), link: info('link-strong'), linkCount: document.querySelectorAll('#link-strong a[href="#ref-1"]').length };
+    return { start: info('bold-start'), mid: info('bold-mid'), end: info('bold-end'), span: info('bold-span'), b: info('bold-b'), medium: info('bold-medium'), family: info('bold-family'), em: info('bold-em'), multi: info('multi-bold'), nested: info('nested-bold'), prewrap: info('prewrap'), whole: info('whole-strong'), heading: info('whole-heading'), link: info('link-strong'), linkCount: document.querySelectorAll('#link-strong a[href="#ref-1"]').length };
   })()`);
   const loaded = await contentEval(t, "({ version: window.__DT.VERSION, styleBoundaryAware: window.__DT.styleBoundaryAware, inspect: typeof window.__DT.inspectTextStyle })");
   check('实际加载的扩展脚本：0.11.5 且包含样式边界修复 / 诊断器', loaded.version === '0.11.5' && loaded.styleBoundaryAware === 1 && loaded.inspect === 'function', JSON.stringify(loaded));
@@ -1035,7 +1042,7 @@ async function koreanBoldChecks() {
   const affected = (inspect.matches || []).find(function (m) { return m.before && m.before.sourceHtml && m.before.sourceHtml.indexOf('<strong>') >= 0 && m.style && parseInt(m.style.fontWeight, 10) < 600; });
   check('样式诊断：记录写入前 DOM / 祖先链 / computed font-weight，并显示局部强调未污染整段', !!affected && affected.before.chain.some(function (x) { return x && parseInt(x.fontWeight, 10) >= 600; }) && affected.afterHtml.indexOf('strong') >= 0, JSON.stringify(affected && { parent: affected.parent, before: affected.before.chain[0], after: affected.chain[0] }));
   function normal(x){ return x && x.weight > 0 && x.weight < 600; }
-  check('韩文仅译文：段首局部 strong / b / 粗体 span 不会让整段译文变粗', normal(styles.start) && normal(styles.span) && normal(styles.b) && normal(styles.medium) && styles.em && styles.em.style === 'normal', JSON.stringify(styles));
+  check('韩文仅译文：段首局部 strong / b / 粗体 span 不会让整段译文变粗', normal(styles.start) && normal(styles.span) && normal(styles.b) && normal(styles.medium) && normal(styles.family) && styles.family.family.indexOf('Arial Black') < 0 && styles.em && styles.em.style === 'normal', JSON.stringify(styles));
   check('韩文仅译文：中间 / 段末强调、链接引用不会污染整段字重', normal(styles.mid) && normal(styles.end) && normal(styles.link) && styles.linkCount === 1, JSON.stringify(styles));
   check('韩文仅译文：多行段落第一行局部 strong 也不污染整行', normal(styles.multi), JSON.stringify(styles.multi));
   check('韩文仅译文：嵌套 strong/em 与 pre-wrap 局部强调仍保持正文基准字重', normal(styles.nested) && normal(styles.prewrap), JSON.stringify({ nested: styles.nested, prewrap: styles.prewrap }));
@@ -2175,8 +2182,37 @@ async function dockChecks() {
   await sleep(300);
 }
 
+
+async function chosunLiveChecks(url) {
+  console.log('\n[朝鲜日报真实页面样式]');
+  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false, dockEnabled: false, translateOnLoad: false });
+  const t = await openTab(url);
+  await until(() => contentEval(t, '!!(window.__DT && window.__DT.styleBoundaryAware)'), 20000);
+  await sleep(1500);
+  const before = await pageEval(t, "return Array.from(document.querySelectorAll('.article-body__content-text')).map((p)=>{var c=getComputedStyle(p);return {cls:p.className,weight:parseInt(c.fontWeight,10),family:c.fontFamily,text:p.textContent.slice(0,40)};});");
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(t, "return !!document.querySelector('.article-body__content-text[data-dt-replaced]')"), 30000);
+  await settled(t);
+  const after = await pageEval(t, "return Array.from(document.querySelectorAll('.article-body__content-text')).map((p)=>{var w=document.createTreeWalker(p,NodeFilter.SHOW_TEXT);var nodes=[];for(var n=w.nextNode();n;n=w.nextNode()){if(n.nodeValue.trim()){var pe=n.parentElement||p;nodes.push({text:n.nodeValue.slice(0,24),weight:parseInt(getComputedStyle(pe).fontWeight,10),family:getComputedStyle(pe).fontFamily,tag:pe.tagName,cls:pe.className});}}return {cls:p.className,replaced:p.hasAttribute('data-dt-replaced'),nodes:nodes};});");
+  const bad = [];
+  const boldFamily = (f) => /bold|black|heavy|semibold|demi/i.test(String(f || ''));
+  for (let i = 0; i < Math.min(before.length, after.length); i += 1) {
+    if (!after[i] || !after[i].replaced) continue;
+    const sourceBold = before[i].weight >= 600 || boldFamily(before[i].family);
+    const afterBold = after[i].nodes.some((n) => n.weight >= 600 || boldFamily(n.family));
+    if (!sourceBold && afterBold) bad.push({ index: i, before: before[i], after: after[i] });
+  }
+  check('真实朝鲜日报：正文段落翻译后不出现新的粗体字重或粗体字族', before.length > 0 && after.length === before.length && bad.length === 0, JSON.stringify({ count: before.length, bad: bad.slice(0, 4) }));
+  const inspect = await contentEval(t, "window.__DT.inspectTextStyle('译:', 3)");
+  check('真实朝鲜日报：诊断器可读取正文 computed 样式', inspect && inspect.matches && inspect.matches.length > 0 && inspect.matches[0].style, JSON.stringify(inspect && { matched: inspect.matches.length, first: inspect.matches[0] && inspect.matches[0].style }));
+  await tabMsg(t.tabId, { type: 'dt:toggle' });
+  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', dockEnabled: false });
+}
+
 try {
-  if (SCIENCE_LIVE) {
+  if (CHOSUN_LIVE) {
+    await chosunLiveChecks(CHOSUN_LIVE);
+  } else if (SCIENCE_LIVE) {
     await scienceLiveChecks();
   } else if (SELFTEST_ONLY) {
     await selftestChecks();

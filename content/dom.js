@@ -183,6 +183,7 @@
           lineHeight: cs.lineHeight,
           fontWeight: cs.fontWeight,
           fontStyle: cs.fontStyle,
+          fontFamily: cs.fontFamily,
           letterSpacing: cs.letterSpacing,
           textTransform: cs.textTransform,
           color: cs.color,
@@ -2480,14 +2481,17 @@
   function inlineStyleSignature(el) {
     var cs = styleOf(el);
     if (!cs) return null;
-    return { weight: String(cs.fontWeight || ''), style: String(cs.fontStyle || '') };
+    return { weight: String(cs.fontWeight || ''), style: String(cs.fontStyle || ''), family: String(cs.fontFamily || '') };
   }
 
   function styleDiffers(el, base) {
     if (!base) return false;
     var sig = inlineStyleSignature(el);
     if (!sig) return false;
-    return sig.weight !== base.weight || sig.style !== base.style;
+    if (sig.weight !== base.weight || sig.style !== base.style) return true;
+    // 有些站点的“粗体”是字体族本身（NotoSansKR-Bold / Arial Black），computed font-weight 仍是 400。
+    // 只把明确 bold/black/heavy 的局部字体族当强调边界，普通 serif/sans 切换不处理。
+    return sig.family !== base.family && /bold|black|heavy|semibold|demi/i.test(sig.family);
   }
 
   // 从文本节点往上找 unit.el 以下最外层的局部强调壳（strong / b / em / 粗体 span）。
@@ -3436,6 +3440,8 @@
     var slot = (cfg.providerConfig || {})[cur] || {};
     var report = {
       version: DT.VERSION,
+      styleBoundaryAware: DT.styleBoundaryAware || 0,
+      styleInspector: typeof DT.inspectTextStyle,
       url: location.href,
       target: DT.state.target,
       mode: DT.state.mode,
