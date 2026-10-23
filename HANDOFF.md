@@ -572,6 +572,16 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 页面控制台也能取：`copy(JSON.stringify(__DT_LAST_DIAG))`
 
+### 7.2b 局部文字样式诊断（韩文随机加粗）
+
+对异常中文文字，在页面控制台执行：
+
+```js
+copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
+```
+
+返回每个命中文本节点的实际 `getComputedStyle()`（font-weight / font-size / font-family / font-style / line-height）、祖先链（STRONG / B / SPAN / class / style）、所在翻译单元、**写入前**的 DOM 摘要与祖先链，以及当前 DOM。`__DT.styleBoundaryAware === 1` 表示加载的是含样式边界修复的 0.11.5 脚本；如果为 undefined，说明 Chrome 仍加载旧扩展实例，需要重新加载本地扩展或刷新扩展页。
+
 ### 7.3 日志
 - 设置页勾选「输出调试日志」→ 网页 Console 过滤 `[凛狐]`
 - API 报错原文：`chrome://extensions/`（Edge：`edge://extensions/`）→ 卡片 →「Service Worker」→ 控制台

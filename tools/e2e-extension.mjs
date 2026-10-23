@@ -332,6 +332,10 @@ ${templateOf('tpl-chinagp')}
 <p id="whole-strong"><strong>이 문단 전체가 의도적으로 강조된 안내 문구입니다.</strong></p>
 <h2 id="whole-heading"><strong>전체가 굵은 제목</strong></h2>
 <p id="multi-bold"><strong>첫 번째 줄 강조</strong><br>두 번째 줄은 일반 본문입니다.<br><strong>세 번째 줄 강조</strong> 뒤에 일반 텍스트.</p>
+<p id="nested-bold"><strong><em>중첩 strong em 강조</em> 뒤쪽 strong</strong> 일반 꼬리 텍스트</p>
+<p id="prewrap" style="white-space:pre-wrap"><strong>pre-wrap 첫 줄 강조</strong>
+일반 둘째 줄 텍스트
+셋째 줄도 일반 텍스트</p>
 <p id="link-strong">본문 중간에 <strong>강조</strong>와 <a href="#ref-1">[1]</a> 인용이 같이 있습니다.</p>
 <div id="ref-1">Reference one.</div>
 </body></html>`,
@@ -1022,12 +1026,18 @@ async function koreanBoldChecks() {
       var parent=node.parentElement || el; var cs=getComputedStyle(parent);
       return { text:node.nodeValue.slice(0,30), weight:parseInt(cs.fontWeight,10), style:cs.fontStyle, parent:parent.tagName };
     }
-    return { start: info('bold-start'), mid: info('bold-mid'), end: info('bold-end'), span: info('bold-span'), b: info('bold-b'), em: info('bold-em'), multi: info('multi-bold'), whole: info('whole-strong'), heading: info('whole-heading'), link: info('link-strong'), linkCount: document.querySelectorAll('#link-strong a[href="#ref-1"]').length };
+    return { start: info('bold-start'), mid: info('bold-mid'), end: info('bold-end'), span: info('bold-span'), b: info('bold-b'), em: info('bold-em'), multi: info('multi-bold'), nested: info('nested-bold'), prewrap: info('prewrap'), whole: info('whole-strong'), heading: info('whole-heading'), link: info('link-strong'), linkCount: document.querySelectorAll('#link-strong a[href="#ref-1"]').length };
   })()`);
+  const loaded = await contentEval(t, "({ version: window.__DT.VERSION, styleBoundaryAware: window.__DT.styleBoundaryAware, inspect: typeof window.__DT.inspectTextStyle })");
+  check('实际加载的扩展脚本：0.11.5 且包含样式边界修复 / 诊断器', loaded.version === '0.11.5' && loaded.styleBoundaryAware === 1 && loaded.inspect === 'function', JSON.stringify(loaded));
+  const inspect = await contentEval(t, "window.__DT.inspectTextStyle('译:', 12)");
+  const affected = (inspect.matches || []).find(function (m) { return m.before && m.before.sourceHtml && m.before.sourceHtml.indexOf('<strong>') >= 0 && m.style && parseInt(m.style.fontWeight, 10) < 600; });
+  check('样式诊断：记录写入前 DOM / 祖先链 / computed font-weight，并显示局部强调未污染整段', !!affected && affected.before.chain.some(function (x) { return x && parseInt(x.fontWeight, 10) >= 600; }) && affected.afterHtml.indexOf('strong') >= 0, JSON.stringify(affected && { parent: affected.parent, before: affected.before.chain[0], after: affected.chain[0] }));
   function normal(x){ return x && x.weight > 0 && x.weight < 600; }
   check('韩文仅译文：段首局部 strong / b / 粗体 span 不会让整段译文变粗', normal(styles.start) && normal(styles.span) && normal(styles.b) && styles.em && styles.em.style === 'normal', JSON.stringify(styles));
   check('韩文仅译文：中间 / 段末强调、链接引用不会污染整段字重', normal(styles.mid) && normal(styles.end) && normal(styles.link) && styles.linkCount === 1, JSON.stringify(styles));
   check('韩文仅译文：多行段落第一行局部 strong 也不污染整行', normal(styles.multi), JSON.stringify(styles.multi));
+  check('韩文仅译文：嵌套 strong/em 与 pre-wrap 局部强调仍保持正文基准字重', normal(styles.nested) && normal(styles.prewrap), JSON.stringify({ nested: styles.nested, prewrap: styles.prewrap }));
   check('韩文仅译文：整段加粗公告和整段加粗标题继续保持粗体', styles.whole && styles.whole.weight >= 600 && styles.heading && styles.heading.weight >= 600, JSON.stringify({ whole: styles.whole, heading: styles.heading }));
   await tabMsg(t.tabId, { type: 'dt:toggle' });
   const restored = await pageEval(t, "return { start: document.getElementById('bold-start').innerHTML, whole: document.getElementById('whole-strong').innerHTML };");

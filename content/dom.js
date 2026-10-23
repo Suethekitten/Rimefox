@@ -2306,6 +2306,7 @@
     for (var lh = 0; lh < n && lh < assign.length; lh += 1) {
       var hp = lineHeadPiece(sel[lh], kept);
       if (!hp || isDropcapNode(hp.node)) continue;
+      captureUnitStyleBefore(unit, hp.node);
       lineHeads.set(hp.node, (lineHeads.get(hp.node) || 0) + 1);
     }
     // 这一行上的保留元素留着不藏。written：保留内容已经原样出现在写进去的译文里的，照样藏（免得重复）
@@ -2472,6 +2473,8 @@
     return true;
   }
 
+  DT.styleBoundaryAware = 1;
+
   // 行内样式边界：只把 font-weight / font-style 的变化当成强调边界。
   // 字号变化（首字下沉、CSS 上标）不在这里处理，避免把正常 dropcap 当成粗体污染。
   function inlineStyleSignature(el) {
@@ -2525,9 +2528,53 @@
     return { parent: boundary.parentNode, before: boundary };
   }
 
+  // 可选诊断：记录译文写入前的局部样式、祖先链和 DOM 结构；不参与渲染。
+  function diagnosticStyle(el) {
+    if (!el || el.nodeType !== 1) return null;
+    var cs;
+    try { cs = getComputedStyle(el); } catch (err) { cs = null; }
+    if (!cs) return { tag: el.tagName, id: el.id || '', cls: String(el.className || ''), style: el.getAttribute('style') || '' };
+    return {
+      tag: el.tagName,
+      id: el.id || '',
+      cls: String(el.className || ''),
+      style: el.getAttribute('style') || '',
+      fontWeight: cs.fontWeight,
+      fontStyle: cs.fontStyle,
+      fontSize: cs.fontSize,
+      fontFamily: cs.fontFamily,
+      lineHeight: cs.lineHeight,
+      color: cs.color,
+      dataDt: el.getAttribute('data-dt-src') ? 'src' : el.getAttribute('data-dt-replaced') ? 'replaced' : el.getAttribute('data-dt-dir') ? 'dir' : ''
+    };
+  }
+
+  function diagnosticChain(node, max) {
+    var out = [];
+    var cur = node && node.parentNode;
+    while (cur && out.length < (max || 18)) {
+      out.push(diagnosticStyle(cur));
+      if (cur === document.body || cur === document.documentElement) break;
+      cur = cur.parentNode;
+    }
+    return out;
+  }
+
+  function captureUnitStyleBefore(unit, node) {
+    if (!unit || unit.styleEvidence || !node) return;
+    unit.styleEvidence = {
+      sourceText: previewText(unit.text),
+      sourceHtml: unit.el && unit.el.outerHTML ? unit.el.outerHTML.slice(0, 5000) : '',
+      firstText: previewText(node.nodeValue),
+      chain: diagnosticChain(node, 18),
+      capturedAt: Date.now()
+    };
+  }
+
   // 一段译文写进一串文本节点：优先写进正文上下文；局部强调壳不承载整段译文。
   function writeNodes(unit, nodes, text, first, ops, saved) {
     if (!nodes.length) return;
+    captureUnitStyleBefore(unit, nodes[0]);
     // 首字下沉：首字放进下沉节点，其余放进后面的正文节点。
     // 否则整段中文都会挤进 71.5px 的 "N" 里（Aeon 仅译文模式实例）。
     var drop = first && nodes.length > 1 && isDropcapNode(nodes[0]) ? nodes[0] : null;
@@ -2881,6 +2928,15 @@
     var ops = [];
     var saved = [];
     var seen = new Set();
+    // 混合段落同样记录写入前样式，供诊断区分源站强调 / 注入污染。
+    var firstMixed = null;
+    groups.forEach(function (group) {
+      if (firstMixed) return;
+      (group.pieces || []).forEach(function (piece) {
+        if (!firstMixed && /\S/.test(pieceText(piece))) firstMixed = piece.node;
+      });
+    });
+    captureUnitStyleBefore(unit, firstMixed);
     // 原子之外的文字节点全部清空（含空白节点：中文译文里不该夹着原来的空格）
     groups.concat((unit.groups && unit.groups.tail) || []).forEach(function (group) {
       (group.pieces || []).forEach(function (piece) {
@@ -3500,6 +3556,56 @@
     };
     report.placements = (DT.placements || []).slice(-80);
     return report;
+  };
+
+  // 可选局部样式诊断：在控制台执行 __DT.inspectTextStyle('异常中文')。
+  // 返回命中文本节点的实际 computed style、祖先链、写入前快照和当前 DOM 摘要。
+  DT.inspectTextStyle = function (needle, limit) {
+    var max = Math.max(1, Math.min(50, Number(limit) || 20));
+    var wanted = typeof needle === 'string' ? needle : '';
+    var direct = needle && needle.nodeType === 3 ? needle : null;
+    var matches = [];
+    function record(node) {
+      if (matches.length >= max || !node || node.nodeType !== 3) return;
+      if (direct ? node !== direct : (wanted && String(node.nodeValue).indexOf(wanted) < 0)) return;
+      if (!direct && !/\S/.test(node.nodeValue)) return;
+      var parent = node.parentElement;
+      var unit = nodeUnit.get(node);
+      if (!unit && parent && parent.closest) {
+        var box = parent.closest('[data-dt-replaced]');
+        var rec = box ? DT.replacedOf(box) : null;
+        unit = rec && rec.unit;
+      }
+      var before = unit && unit.styleEvidence ? unit.styleEvidence : null;
+      var range = document.createRange();
+      range.selectNodeContents(node);
+      var rect = range.getBoundingClientRect();
+      matches.push({
+        text: previewText(node.nodeValue),
+        fullText: String(node.nodeValue).slice(0, 300),
+        parent: diagnosticStyle(parent),
+        style: parent ? diagnosticStyle(parent) : null,
+        rect: { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) },
+        chain: diagnosticChain(node, 20),
+        before: before,
+        afterHtml: unit && unit.el && unit.el.outerHTML ? unit.el.outerHTML.slice(0, 5000) : (parent && parent.outerHTML ? parent.outerHTML.slice(0, 5000) : ''),
+        unit: unit ? {
+          mode: unit.renderMode || '',
+          whole: !!unit.whole,
+          src: previewText(unit.text)
+        } : null
+      });
+    }
+    var walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+    for (var n = direct || walker.nextNode(); n; n = direct ? null : walker.nextNode()) record(n);
+    return {
+      version: DT.VERSION,
+      url: location.href,
+      mode: DT.state.mode,
+      target: DT.state.target,
+      needle: wanted || (direct ? '[TextNode]' : ''),
+      matches: matches
+    };
   };
 
   // 对外：SPA 路由切换后的"体检"。
