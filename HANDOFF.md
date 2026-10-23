@@ -711,16 +711,14 @@ YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按�
 
 ---
 
-## 14. 本版技术记录（0.10.0）
+## 14. 本版技术记录（0.10.1）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.9.8 的容器形态 / 保留区边界见提交 `ccfceca`、`6989cd2` 与 §5.1、§5.2.1。
+> 0.10.0 的液态玻璃与补注入修复见提交 `9911f6f`、`3b86f72`；0.9.8 的容器形态 / 保留区边界见 `ccfceca` 与 §5.1、§5.2.1。
 
-- **来源**：弹窗底部 5 宫格动作栏和设置页左侧导航接入 Sak（@Saknutella）的 [Liquid Glass Slider](https://github.com/Saknutella/liquid-glass-slider)（MIT）。复用它的位移贴图 + 三通道色散、每实例滤镜重建与弹簧积分。上游是单选导航：设置页保留「当前分组」语义，弹窗是命令栏，所以没有常驻选中项，透镜跟随 hover / 键盘焦点；拖动只拉伸，不提交命令。
-- **文件**：新增 `lib/liquid-glass/geometry.js`（纯函数）、`filter.js`（SVG 滤镜字符串）、`material.js`（DOM 接入 + 降级，支持只给透镜建滤镜，并新增 `ensureGlassFilter` 给开关 / 滑块共用固定尺寸滤镜）、`dock.js`（弹窗工具坞）、`nav.js`（竖向导航）；重写 `popup/popup.css` 第 7 节和开关小滑块；`popup/index.html` 底部加 `#glassDock` 与 `role="toolbar"`；`options/index.html` 加 `#settingsNav` 与「液态玻璃」开关；`options/options.css` 加竖向导轨 / 透镜 / 关闭态 / 开关小滑块 / 排版滑块透镜；`options/appearance-ui.js` 给字号 / 行高 / 间距滑块加透镜和强调色填充；`options/options.js` 挂载 / 销毁导航透镜并跟随滚动高亮；`lib/config.js` 加 `liquidGlass: true`；`lib/ui-appearance.js` / `ui-theme-boot.js` 写 `data-liquid-glass`；`lib/i18n.js` 加「快捷操作」「液态玻璃」。
-- **注入修复**：`background.js` 的 `ensureInjected` 补上 `content/units.js` 和 `content/input.js`，与 manifest 的 content_scripts 顺序一致。之前页面已经在跑、后台补注入时 `hover.js` 取不到 `DT.units`，会抛 `Cannot read properties of undefined (reading 'sentencesOf')`；`hover.js` 也加了防御，`DT.units` 缺失时直接返回。新增 `test/content-injection.test.mjs` 校验两份清单逐项一致，避免以后再漏。
-- **安全**：拖动判定 4px、垂直滑动 8px 取消手势；拖动跨过按钮时在 capture 阶段吞掉一次 click，避免误触「清缓存」；键盘用 roving tabindex + 左右方向键，只有 `:focus-visible` 才亮透镜；触摸松手后透镜淡出；设置页导航保留原生 Tab 顺序，另支持上下方向键。
-- **降级**：`backdrop-filter: url()` 不可用、WebKit 或 `data-reduce-transparency` 时不写滤镜变量，CSS 回落到磨砂；`data-no-shadow` 去掉外投影；`prefers-reduced-motion` 时弹簧直接到位；`forced-colors` 隐藏玻璃层只留按钮；`data-liquid-glass="off"` 时弹窗回到普通 5 宫格、设置页回到原来的文字导航，导航底座不再生成大尺寸滤镜。
-- **性能**：弹窗透镜放大时按 70ms / 10px 节流重建位移贴图；设置页导轨底座只用普通 blur，只有 208×36 的透镜生成 SVG 滤镜；设置页开关和排版滑块共用一张 30×20 的 `ensureGlassFilter` 滤镜，弹窗小开关单独一张 20×14，不是每个控件一张；静止时 `requestAnimationFrame` 停止。无第三方运行时依赖，仍是零构建。
-- **测试**：新增 `test/glass-dock.test.mjs`（槽位几何、竖向槽位、橡皮筋、最近槽位、指针槽位、三通道 scale）、`test/content-injection.test.mjs`（补注入清单与 manifest 逐项一致）；新增 `liquidGlass` 默认值与导入校验；Node 全量测试全绿。真实 Chrome 155 无头检查（`--no-sandbox`，仅本地）：弹窗挂载 2 个滤镜、hover 0.45、press 1.0 / 88×68、松手回弹、鼠标离开归零、键盘方向键、拖动 0 次 click、深浅色 / 减少透明、中英文透镜副本同步；设置页导航透镜跟随当前分组 / 悬停移动，开关关闭后透镜销毁、导航恢复原样式，再打开能重新挂载；设置页开关和排版滑块共用 `--glass-slider-filter`，滑块从 54px 移到 134px，关闭液态玻璃后滤镜回落到 `none`，开关变成白底强调色描边的小滑块。
-- **许可**：`THIRD-PARTY-NOTICES.md` 增补 Liquid Glass Slider 与 nikdelvin/liquid-glass 两段 MIT；`README.md` 加「致谢」；五个新文件头保留 Sak 与上游署名。
+- **文献引用（`70f04f7`）**：Nature Medicine 正文的 `<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>` 以前被 `tokensOf` 当普通行内文字拼进句子，「…diseases1,2.」整句送翻；仅译文把译文写进第一个文本节点、清空链接里的数字，上标和跳转都没了，模型写的数字留在正文；双语译文是纯文本。先查了 nature.com 的服务器 HTML 和浏览器里的实际 DOM（两者一致：每个编号一个链接，逗号是上标里的文本节点，书目只在 `title`），再按真实结构修。
+- **做法**：上标引用当保留区（`isCitationEl`，判定条件见 §5.2.1），复用 `<kN>` 标记、`keepPlan` 和事务还原，没有另起翻译流程。`units.js` 把 `keepParse` 的标记切分抽成 `keepDrops`（行为不变），新增 `keepMarks` / `sentenceEndAt` / `keepPlacement`；`dom.js` 新增 `injectCited`（仅译文：词级 → 句级 → 降级成双语；双语：上标副本 `citeClone`）；`hover.js` 的 `mapFromNode` 按阅读顺序取译文节点里所有文本节点；提示词只在带标记的批次多一句引用说明；诊断 `placements` 记 `cite` 落点。保留区原来的兜底（隐藏保留元素）不用在引用上。
+- **缓存**：缓存键是送翻文本，带标记的段落和旧版本压平引用的条目是两个键，旧条目不会被命中，不清用户缓存；`SCHEMA`、配置结构、`DT.tx` 语义都没变。受影响的只有带上标引用的段落（会按带标记的文本重新翻一次）。
+- **液态玻璃开关（`49fec11`）**：设置页 `input.switch` 和弹窗 `.mini-switch` 原来是两份实现，都按「内框 = width × height」写 `top/left: 2px` 和固定 translate 行程，但全局 `* { box-sizing: border-box }` 让 1px 描边吃掉了内框：透镜上 2px 下 0px、开状态贴住右边框；减少透明 / 关闭液态玻璃时透镜的 2px 描边按 content-box 撑大，比槽低、开状态冲出右边。现在 `lib/ui-tokens.css` 一份 `.switch`（弹窗加 `.switch-sm`），只认 `--switch-w / -h / -border / -pad / -knob-w`，行程 = 槽宽 − 透镜宽 − 2×（描边 + 内距）；外框和透镜尺寸不变（透镜 = `ensureGlassFilter` 贴图尺寸），四边内距相等，开 / 关只改 translate，按下只改 scale；`options.css` / `popup.css` 删掉各自的开关样式。见坑 44。
+- **测试**：自检新增文献引用一节（`tpl-nature-cite` 是 nature.com 该段的真实 DOM，2026-10-22 抓取；旧代码上全部失败，只换回旧 `hover.js` 时双语悬停那条失败）；`test/translate-pipeline.test.mjs` 加「旧压平缓存不命中、旧条目不清空」，`test/prompt.test.mjs` 加引用说明断言；新增 `test/switch-geometry.test.mjs`（透镜尺寸 = 滤镜贴图 = 排版滑块透镜，页面里没有第二份开关实现）；E2E 新增「文献引用（Nature 上标）」一节，页面放在与 nature.com 相同的路径，两种 `href` 都做真实点击，关闭后逐字还原。合并后 Node、自检、E2E 全部通过。
+- **已知 / 未验证**：真实模型能否原样照抄 `<kN>` 标记只用假模型测过（照抄不了会降级，不会丢引用）；没有带扩展在 nature.com 实页上用真实模型翻过；链接包在上标外面的写法、纯 CSS 上标仍按普通文字处理（§9）。开关在真实 1 倍屏和 Edge 上没看过。
