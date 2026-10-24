@@ -276,6 +276,21 @@
     return ok && attr === null ? true : 'inject=' + ok + ' attr=' + attr;
   });
 
+  check('文献引用：阿拉伯语维基 [ا] 字母脚注仍识别为原子', function () {
+    var host = document.createElement('div');
+    host.innerHTML = '<p id="ar-cite-p">هذه فقرة عربية مع مرجع<sup class="mw-ref reference" id="cite_ref-1"><a href="#cite_note-1"><span>[ا]</span></a></sup> ونص تالٍ.</p><div id="cite_note-1">مرجع</div>';
+    document.body.appendChild(host);
+    var savedArea = DT.areaOf;
+    DT.areaOf = function () { return 'content'; };
+    var units = DT.collect(host);
+    var unit = units.filter(function (one) { return one.el && one.el.id === 'ar-cite-p'; })[0];
+    var kind = unit && unit.keep && unit.keep[0] && unit.keep[0].kind;
+    var wire = unit && unit.wire || '';
+    DT.areaOf = savedArea;
+    host.remove();
+    return kind === 'cite' && wire.indexOf('<k1>') >= 0 ? true : 'kind=' + kind + ' wire=' + wire.slice(0, 80);
+  });
+
   check('normalizeText: 折叠空白', function () {
     return eq(DT.normalizeText('  a \n\t b  '), 'a b');
   });

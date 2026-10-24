@@ -26,6 +26,7 @@ import {
   stylePrompt,
   styleFingerprint,
   normalizeIntensity,
+  normalizeFunStyle,
   STYLES
 } from '../lib/config.js';
 import { systemPrompt } from '../lib/prompt.js';
@@ -292,6 +293,10 @@ t('风格 id 保持 catgirl，显示名改为傲娇猫娘；强度默认标准',
   assert.deepEqual(FUN_INTENSITIES.map((one) => one.value), ['light', 'standard', 'exaggerated']);
   assert.equal(DEFAULTS.funIntensity, 'standard');
   assert.equal(normalizeIntensity('nope'), 'standard');
+  assert.equal(DEFAULTS.funStyle, 'plain');
+  assert.equal(normalizeFunStyle('catgirl'), 'catgirl');
+  assert.equal(normalizeFunStyle('nope'), 'plain');
+  assert.equal(mergeConfig(DEFAULTS, { funStyle: 'classical' }).funStyle, 'classical');
 });
 
 t('stylePrompt：plain 为空；三个强度互不相同；风格 id 不变', () => {

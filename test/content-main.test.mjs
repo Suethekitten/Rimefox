@@ -980,7 +980,7 @@ await t('翻译进行中动态补翻继续使用已生效风格，不因弹窗�
   assert.equal(requests[1].style, 'plain', '未应用的风格不能突然出现在同一页');
 });
 
-await t('还原后生效风格回到普通；选中风格只保留在单页状态里（弹窗关闭再打开仍能读到）', async () => {
+await t('还原后保留用户选择；再次明确翻译仍用选中的趣味风格', async () => {
   const env = await boot();
   await env.message({ type: 'dt:setStyle', style: 'catgirl' });
   let status = await env.message({ type: 'dt:status' });
@@ -992,8 +992,28 @@ await t('还原后生效风格回到普通；选中风格只保留在单页状�
   await env.message({ type: 'dt:toggle' }); // 还原
   status = await env.message({ type: 'dt:status' });
   assert.equal(status.enabled, false);
+  assert.equal(status.style, 'plain', '页面上已经没有译文，不能声称还在用猫娘');
+  assert.equal(status.selectedStyle, 'catgirl', '还原不能重置用户选择');
+  env.config.hasKey = true;
+  await env.message({ type: 'dt:toggle' });
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.style, 'catgirl', '再次明确翻译沿用原选择');
+});
+
+await t('配置里的默认趣味风格：新页面会恢复；本页亲手选择后不被配置广播覆盖', async () => {
+  const env = await boot({ config: { funStyle: 'classical' } });
+  let status = await env.message({ type: 'dt:status' });
+  assert.equal(status.selectedStyle, 'classical');
   assert.equal(status.style, 'plain');
-  assert.equal(status.selectedStyle, 'plain');
+  env.config.funStyle = 'catgirl';
+  await env.message({ type: 'dt:configChanged' });
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.selectedStyle, 'catgirl', '未亲手选择时跟随配置默认值');
+  await env.message({ type: 'dt:setStyle', style: 'plain' });
+  env.config.funStyle = 'classical';
+  await env.message({ type: 'dt:configChanged' });
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.selectedStyle, 'plain', '本页明确选择不能被其它配置广播覆盖');
 });
 
 await t('自定义语言：代码 / 脚本变化才重建；改名称 / 说明不重发请求', async () => {

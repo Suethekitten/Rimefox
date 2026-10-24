@@ -12,7 +12,7 @@ import {
   DEFAULTS
 } from '../lib/config.js';
 import { providerById } from '../lib/providers.js';
-import { applyI18n, t, translateText } from '../lib/i18n.js';
+import { applyI18n, t } from '../lib/i18n.js';
 import { normalizeHosts, hostListed } from '../lib/site-rules.js';
 import { applyUiTheme, applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig } from '../lib/ui-appearance.js';
 import { openWelcomePage } from '../lib/welcome.js';
@@ -246,7 +246,7 @@ function paintStatus(title, count, detail) {
 function refreshStyleLabels() {
   STYLES.forEach((style, i) => {
     const opt = el.styleSelect.options[i];
-    if (opt) opt.textContent = translateText(style.label);
+    if (opt) opt.textContent = t(style.label);
   });
 }
 
@@ -257,7 +257,8 @@ function fillTargetOptions(cfg) {
   languageOptions(cfg && cfg.customLanguages).forEach((lang) => {
     const opt = document.createElement('option');
     opt.value = lang.value;
-    opt.textContent = lang.label;
+    // 内置语言名跟随界面语言；自定义名称是用户数据，保持原文。
+    opt.textContent = lang.kind === 'custom' ? lang.label : t(lang.label);
     if (lang.kind === 'custom') {
       opt.setAttribute('data-i18n-skip', '1');
       if (lang.code) opt.title = lang.code;
@@ -553,7 +554,7 @@ async function init() {
   STYLES.forEach((style) => {
     const opt = document.createElement('option');
     opt.value = style.value;
-    opt.textContent = translateText(style.label);
+    opt.textContent = t(style.label);
     el.styleSelect.appendChild(opt);
   });
   el.styleSelect.value = 'plain';
@@ -626,6 +627,8 @@ el.styleSelect.addEventListener('change', async () => {
   try {
     status = await sendToTab({ type: 'dt:setStyle', style: wanted });
     supported = true;
+    // 选择是用户偏好：写进配置，刷新 / 重开浏览器后仍保留；写配置不触发翻译。
+    await saveAndRemember({ funStyle: wanted });
   } catch (err) {
     el.styleSelect.value = status.selectedStyle || status.style || 'plain';
     el.stat.textContent = t('切换失败：') + err.message;

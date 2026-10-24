@@ -345,7 +345,8 @@
   // 现在把它当保留区：编号随句子送翻、标记原样回来，页面上的上标链接本身永远不写；双语译文里放它的副本。
   // 只认「<sup> + 可见文字只有编号和分隔符 + 编号都在链接里 + 每个链接都指向文献锚点」：
   // 数学指数 x<sup>2</sup>、10<sup>−6</sup>、化学式 H<sub>2</sub>O、序数 1<sup>st</sup>、普通链接都不满足
-  var CITE_TEXT = /^[\s[(]*\d{1,4}(?:\s*[,，;；/–—−-]\s*\d{1,4})*[\s\])]*$/;
+  // 阿拉伯语维基用 [ا] / [ب] 这类字母作为脚注标记；数字仍用 ASCII / 阿拉伯-印度数字。
+  var CITE_TEXT = /^[\s[(]*[0-9\u0660-\u0669\u06f0-\u06f9]{1,4}(?:\s*[,，;；/–—−-]\s*[0-9\u0660-\u0669\u06f0-\u06f9]{1,4})*[\s\])]*$/;
   // 链接自己说明是引用：DPUB-ARIA 角色，或 data-test / data-track-action / aria-label / class 里的字样。
   // 用词边界避免 preference 里的 reference 误命中；reference anchor / citation-ref 这类带连字符的照样命中。
   var CITE_HINT = /(?:^|[\s_-])(citations?|references?|footnotes?|biblio(?:graphy|ref)?|noteref|cite|xref|fn-?ref)(?:[\s_-]|$)/i;
@@ -443,12 +444,24 @@
     var yes = false;
     var visible = null;
     var visibleSet = null;
+    var said = [
+      el.getAttribute('role'),
+      el.getAttribute('aria-label'),
+      el.getAttribute('data-test'),
+      typeof el.className === 'string' ? el.className : ''
+    ].join(' ');
     if (!CITE_TEXT.test(text) && (tag === 'A' || el.getElementsByTagName('a').length)) {
       visible = visibleCitationNodes(el);
       visibleSet = new Set(visible);
       text = visible.map(function (node) { return node.nodeValue; }).join('');
     }
-    if (CITE_TEXT.test(text)) {
+    var hinted = CITE_HINT.test(said);
+    // 非数字脚注只接受真正的上标 / cite 容器：短字母编号 [ا] / [ب]，
+    // 或带内部链接的 citation-needed 上标；[الإنجليزية] 这类无链接语言标注不算。
+    var shortMarker = /^[\s\[(]*[\u0621-\u064a]{1,2}[\s\])]*$/.test(text);
+    var hasInnerLink = el.getElementsByTagName('a').length > 0;
+    var allowHint = hinted && (tag === 'SUP' || tag === 'CITE') && (shortMarker || hasInnerLink);
+    if (CITE_TEXT.test(text) || allowHint) {
       if (tag === 'A') {
         yes = citeLink(el, el);
       } else {
@@ -461,15 +474,13 @@
             if (visibleSet && !visibleSet.has(t)) continue;
             if (/\d/.test(t.nodeValue) && !(t.parentNode && t.parentNode.closest && t.parentNode.closest('a'))) yes = false;
           }
-          for (var i = 0; yes && i < links.length; i += 1) yes = citeLink(links[i], el);
+          // 强 citation 字样 + 内部链接：有些模板链接到维基项目页 / 外部说明页，
+          // 不是文章内锚点，但它仍然是脚注原子，不能当普通链接而让整段不安全。
+          for (var i = 0; yes && i < links.length; i += 1) {
+            if (!citeLink(links[i], el) && !hinted) yes = false;
+          }
         } else {
           // 没有可点的链接时只接受强提示 + 上标 / citation 容器，避免把 <span>2</span> 当引用
-          var said = [
-            el.getAttribute('role'),
-            el.getAttribute('aria-label'),
-            el.getAttribute('data-test'),
-            typeof el.className === 'string' ? el.className : ''
-          ].join(' ');
           yes = (tag === 'SUP' || tag === 'CITE' || tag === 'SPAN') && CITE_HINT.test(said);
         }
       }
@@ -868,8 +879,9 @@
       formats.push(range);
     });
     keep.forEach(function (k, index) {
-      if (k.kind !== 'link' || k.el.childNodes.length !== 1 || k.el.firstChild.nodeType !== 3) return;
-      if (k.text.length > 600 || k.text.indexOf('\n') >= 0 || isProtectedEl(k.el)) return;
+      // 普通链接可能用 <span>/<sup> 包住标签（维基的 [الإنجليزية] 等），
+      // 不能因为不是单个文本节点就放弃翻译；格式范围覆盖整个可见标签。
+      if (k.kind !== 'link' || !k.text || k.text.indexOf('\n') >= 0 || k.text.length > 600 || isProtectedEl(k.el)) return;
       formats.push({ start: k.start, end: k.end, el: k.el, kind: 'link', tag: 'a', style: {}, linkIndex: index,
         parent: k.el.parentNode, next: sourceSibling(k.el, 'nextSibling'), stamp: k.el.getAttribute('style') + '|' + k.el.getAttribute('class') });
     });
@@ -911,8 +923,43 @@
     var original = unit.keep[index];
     var format = (unit.formats || []).filter(function (f) { return f.linkIndex === index; })[0];
     if (!format || result.formatMissing) return original.text;
+    // 普通链接标签在 <fN> 里，译文在 result.stripped 的对应范围；atom.text 仍是原文，
+    // 不能拿它当标签，否则双语副本永远保留阿拉伯语 / 英文原文。
+    var range = (result.ranges || []).filter(function (f) { return f.id === format.id; })[0];
+    if (range) {
+      var label = result.stripped.slice(range.start, range.end).trim();
+      if (label) return label;
+    }
     var atom = result.atoms.filter(function (a) { return a.id === index + 1; })[0];
     return atom ? atom.text : original.text;
+  }
+
+  // 把原子（链接 / 图表）的可见标签写进它自己的 DOM，不改变链接节点身份。
+  // 维基的 [الإنجليزية] 会嵌套 <sup>，所以不能只处理“唯一文本节点”。
+  function writeVisibleLabel(el, label, ops, saved) {
+    var texts = [];
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (var t = walker.nextNode(); t; t = walker.nextNode()) {
+      if (/\S/.test(t.nodeValue)) texts.push(t);
+    }
+    if (!texts.length) return false;
+    var first = texts[0];
+    var before = first.nodeValue;
+    var wrote = /^\s*/.exec(before)[0] + label + /\s*$/.exec(before)[0];
+    if (ops) {
+      setText(first, wrote, ops);
+      saved.push({ node: first, value: before, wrote: wrote });
+      for (var i = 1; i < texts.length; i += 1) {
+        var extra = texts[i];
+        var old = extra.nodeValue;
+        setText(extra, '', ops);
+        saved.push({ node: extra, value: old, wrote: '' });
+      }
+    } else {
+      first.nodeValue = wrote;
+      for (var j = 1; j < texts.length; j += 1) texts[j].nodeValue = '';
+    }
+    return true;
   }
 
   // 主调度、对齐和去重使用页面最终会显示的文字；保护区在本地恢复，不来自模型。
@@ -3212,24 +3259,11 @@
     return '';
   }
 
-  // 图表链接 / 补充材料普通链接的可见标签本地化：只写唯一文本节点，进事务，还原时放回原文
+  // 图表链接 / 补充材料普通链接的可见标签本地化：写进原子自己的 DOM，进事务，还原时放回原文
   function relabelAtom(k, ops, saved) {
     var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.targetCode || DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.targetCode || DT.state.target) : '';
     if (!label || label === k.text) return k.text;
-    var texts = [];
-    var walker = document.createTreeWalker(k.el, NodeFilter.SHOW_TEXT);
-    for (var t = walker.nextNode(); t; t = walker.nextNode()) {
-      if (/\S/.test(t.nodeValue)) texts.push(t);
-    }
-    if (texts.length !== 1) return k.text;
-    var node = texts[0];
-    var before = node.nodeValue;
-    var lead = /^\s*/.exec(before)[0];
-    var trail = /\s*$/.exec(before)[0];
-    var wrote = lead + label + trail;
-    setText(node, wrote, ops);
-    saved.push({ node: node, value: before, wrote: wrote });
-    return label;
+    return writeVisibleLabel(k.el, label, ops, saved) ? label : k.text;
   }
 
 
@@ -3432,11 +3466,8 @@
     keep.forEach(function (k, index) {
       if (unit.inlineResult && k.kind === 'link') {
         var label = inlineLabel(unit, unit.inlineResult, index);
-        if (label !== k.text && k.el.childNodes.length === 1 && k.el.firstChild.nodeType === 3) {
-          var original = k.el.firstChild.nodeValue;
-          var wrote = /^\s*/.exec(original)[0] + label + /\s*$/.exec(original)[0];
-          setText(k.el.firstChild, wrote, ops);
-          saved.push({ node: k.el.firstChild, value: original, wrote: wrote });
+        if (label !== k.text && writeVisibleLabel(k.el, label, ops, saved)) {
+          // 已写入模型返回的链接标签（可能嵌在 <span>/<sup> 里）。
         } else relabelAtom(k, ops, saved);
       } else if (k.kind === 'xref' || k.kind === 'link') relabelAtom(k, ops, saved);
       tokensOf(k.el).forEach(function (token) { if (token.node) targetNodes.push(token.node); });
@@ -3590,14 +3621,7 @@
     var labelTarget = DT.state.targetCode || DT.state.target;
     var label = k.kind === 'xref' ? xrefLabel(k.text, labelTarget) : k.kind === 'link' ? linkLabel(k.text, labelTarget) : '';
     if (unit && unit.inlineResult && k.kind === 'link') label = inlineLabel(unit, unit.inlineResult, index);
-    if (label) {
-      var texts = [];
-      var walker = document.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
-      for (var t = walker.nextNode(); t; t = walker.nextNode()) {
-        if (/\S/.test(t.nodeValue)) texts.push(t);
-      }
-      if (texts.length === 1) texts[0].nodeValue = /^\s*/.exec(texts[0].nodeValue)[0] + label + /\s*$/.exec(texts[0].nodeValue)[0];
-    }
+    if (label) writeVisibleLabel(copy, label, null, null);
     return copy;
   }
 

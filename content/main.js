@@ -408,6 +408,11 @@
       if (res && res.ok && res.config) {
         var prevConfig = DT.state.config || {};
         DT.state.config = res.config;
+        // 配置里的默认趣味风格只在本页还没有亲手选过时同步；
+        // 用户在本页的下拉选择优先，配置广播不能覆盖，也不能改变已经生效的 style。
+        if (!DT.state.selectedStyleExplicit && DT.STYLE_IDS.indexOf(res.config.funStyle) >= 0) {
+          DT.state.selectedStyle = res.config.funStyle;
+        }
         // 站点规则可以固定这个网站的显示方式 / 译文样式
         var site = res.config.page && res.config.page.site;
         var mode = (site && site.mode) || res.config.mode || 'dual';
@@ -1168,9 +1173,9 @@
     cancelRun();
     DT.state.enabled = false;
     if (DT.hover) DT.hover.clear();
-    // 还原是单页生命周期的终点：已应用和待应用的风格都回到普通，下一次明确开始翻译也不会意外带风格。
+    // 还原只结束本页这次运行，不重置用户选择。style 是当前页实际译文风格，
+    // 页面恢复原文后不再声称猫娘；selectedStyle 保留，下一次明确翻译继续用。
     DT.state.style = 'plain';
-    DT.state.selectedStyle = 'plain';
     DT.state.intensity = 'standard';
     DT.send({ type: 'resume:set', value: false }).catch(function () {});
     DT.restore();
@@ -1604,6 +1609,7 @@
     // 下次明确点「翻译此页」或「重新翻译」时才应用；已翻译页面保持当前文风。
     if (msg.type === 'dt:setStyle') {
       DT.state.selectedStyle = DT.STYLE_IDS.indexOf(msg.style) >= 0 ? msg.style : 'plain';
+      DT.state.selectedStyleExplicit = true;
       sendResponse(summarize());
       return false;
     }

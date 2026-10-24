@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.12.0';
+  DT.VERSION = '0.12.1';
   // 允许重复注入：页面还没加载完就打开弹窗 / 按快捷键时，后台补注入（ensureInjected）的这批脚本
   // 会和 manifest 声明的那批各跑一次。只初始化一次：再跑会清空 DT.state 和 onConfig 的订阅，
   // 而 main.js、appearance.js、dock.js 这些已经启动过的模块不会重新订阅，站点规则 / 外观就再也不生效
@@ -21,7 +21,8 @@
     configLangInfo: null, // 配置里待生效语言的元数据
     contextStale: false, // AI 精翻上下文已更新，但现有译文仍用旧上下文；重译后清掉
     style: 'plain', // 当前实际生效的趣味风格（只对当前页生效）
-    selectedStyle: 'plain', // 用户在弹窗里选中、尚未应用的风格
+    selectedStyle: 'plain', // 用户选择 / 配置里的默认趣味风格；明确翻译时才应用
+    selectedStyleExplicit: false, // 本页用户是否亲手选过风格；避免配置广播覆盖本页选择
     intensity: 'standard', // 当前页面实际生效的趣味强度
     contextStatus: null, // AI 精翻只记录模式 / 条数，不记录上下文正文
     config: null,

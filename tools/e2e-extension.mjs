@@ -38,6 +38,8 @@ const LIVE_AOZORA = flag('--aozora-live')
   : '';
 const VERBOSE = flag('--verbose');
 const SHADOW_ONLY = flag('--shadow-only');
+const ARABIC_ONLY = flag('--arabic-only');
+const STYLE_PERSIST_ONLY = flag('--style-persist-only');
 const MEDICAL_ONLY = flag('--medical-only');
 const SELFTEST_ONLY = flag('--selftest-only');
 const GLOSSARY_ONLY = flag('--glossary-only');
@@ -378,6 +380,7 @@ ${LINK_FIXTURE}
   '/medical.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Medical</title></head><body>
 <p id="med">An odds ratio of 2.1 (95% CI 1.2–3.4) was reported in the randomized controlled trial.</p>
 </body></html>`,
+  '/arabic.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/arabic-wikipedia.html'), 'utf8'),
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
 <p id="p1">This is the first paragraph of the article with enough words to translate.</p>
@@ -489,6 +492,31 @@ const server = http.createServer((req, res) => {
       // 中文目标要回真正中文占多数的假译文：只回「译:English」会被语言守卫判为
       // 错误语言而不写缓存，缓存回归就会误报。尾部中文不改变开头的源文断言。
       const zhFake = (text) => prefix + text + '译:' + '汉'.repeat(Math.max(2, Math.ceil(String(text).length * 0.35))) + '。';
+      // 阿拉伯语维基夹具：把可见正文和普通链接标签写成中文，同时完整保留 <kN> 引用。
+      const arabicZhFake = (text) => {
+        const stack = [];
+        let out = '';
+        String(text).split(/(<\/?[kf]\d+>)/g).forEach((part) => {
+          const mark = /^<(\/?)([kf])\d+>$/.exec(part);
+          if (mark) {
+            if (mark[1]) stack.pop(); else stack.push(mark[2]);
+            out += part;
+            return;
+          }
+          // 普通链接在协议里是 <kN><fM>标签</fM></kN>：里面的 f 允许翻译，
+          // 只有纯 k（引用编号 / notranslate）才原样保留。
+          if (stack.indexOf('f') >= 0) {
+            out += part.replace(/[^\s]+/g, '中文链接');
+            return;
+          }
+          if (stack.indexOf('k') >= 0) {
+            out += part;
+            return;
+          }
+          out += part.replace(/[^\s.,!?;:،؛…()\[\]{}"'“”‘’\-–—]+/g, '中文');
+        });
+        return /[\u4e00-\u9fff]/.test(out) ? out : '中文译文。';
+      };
       const CHOSUN_ZH = '韩国电力公司已启动下一任社长的重新公开招募。这是选拔李在明政府任命的首位韩电掌门人的程序，新任社长将负责为湖南、龙仁半导体集群和人工智能数据中心等三大超大型项目扩充所需电网。';
       const wantsAlign = sys.includes('"parts"');
       if (wantsAlign) {
@@ -523,6 +551,7 @@ const server = http.createServer((req, res) => {
               const atoms = String(t).match(/<k\d+>[\s\S]*?<\/k\d+>/g);
               return atoms ? OWID_ZH.replace('11 自', atoms.join('') + ' 自') : OWID_ZH;
             }
+            if (stats.arabicFixture && zhTarget) return arabicZhFake(String(t));
             if (wantsAlign) return aligned(t, i);
             if (english && /<f\d+>/.test(String(t))) {
               // A compliant fake response translates visible slots while keeping
@@ -1162,6 +1191,82 @@ async function koreanBoldChecks() {
   await patchConfig({ targetLang: 'zh-CN', mode: 'dual', dockEnabled: false });
 }
 
+async function arabicChecks() {
+  console.log('\n[阿拉伯语维基：RTL + 链接 + 引用]');
+  stats.arabicFixture = true;
+  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', lazy: false, hoverCompare: false, aiContextEnabled: false, privacyEnabled: false, customLanguages: [], professionalProfile: 'general', medicalMode: false, glossary: [] });
+  const tab = await openTab(ORIGIN + '/arabic.html');
+  const before = await pageEval(tab, `return (() => {
+    const root = document.querySelector('#mw-content-text');
+    window.__arLinks = Array.from(root.querySelectorAll('p a'));
+    return {
+      html: root.outerHTML,
+      p: root.querySelectorAll('p').length,
+      sups: root.querySelectorAll('p sup').length,
+      links: Array.from(root.querySelectorAll('p a')).map((a) => ({ text: a.textContent, href: a.getAttribute('href'), id: a.id }))
+    };
+  })()`);
+  check('阿拉伯语夹具：段落 / 链接 / 脚注来自真实维基结构', before.p >= 6 && before.sups >= 4 && before.links.length >= 10, JSON.stringify({ p: before.p, sups: before.sups, links: before.links.length }));
+  check('阿拉伯语夹具：翻译前链接节点身份已记录', await pageEval(tab, "return window.__arLinks.every((a) => a.isConnected && !!a.getAttribute('href'))"));
+
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const dualReady = await until(() => pageEval(tab, "return document.querySelectorAll('#mw-content-text p [data-dt-target]').length >= 6"), 30000);
+  await settled(tab);
+  await sleep(800);
+  const dual = await pageEval(tab, `return (() => {
+    const root = document.querySelector('#mw-content-text');
+    const ps = Array.from(root.querySelectorAll('p'));
+    const links = Array.from(root.querySelectorAll('p a'));
+    return {
+      p: ps.length,
+      withTarget: ps.filter((p) => p.querySelector('[data-dt-target]')).length,
+      sups: root.querySelectorAll('p sup').length,
+      ordinary: links.filter((a) => !a.closest('sup') && a.closest('[data-dt-target]') && String(a.textContent || '').trim()).map((a) => ({ text: a.textContent, href: a.getAttribute('href') })),
+      cites: links.filter((a) => a.closest('sup')).map((a) => a.textContent),
+      sameNodes: window.__arLinks.every((a) => a.isConnected)
+    };
+  })()`);
+  check('阿拉伯语双语：每个正文段落都有译文，RTL 原文按设计保留', !!dualReady && dual.withTarget === dual.p, JSON.stringify({ withTarget: dual.withTarget, p: dual.p }));
+  const dualLinkBad = dual.ordinary.filter((a) => !/[\u4e00-\u9fff]/.test(a.text) || !a.href);
+  check('阿拉伯语双语：普通正文链接仍可点击且标签已中文化', dual.ordinary.length > 0 && dualLinkBad.length === 0, JSON.stringify({ bad: dualLinkBad.slice(0, 8), total: dual.ordinary.length }));
+  check('阿拉伯语双语：原文脚注上标仍在，译文引用副本完整', dual.sups >= before.sups && dual.cites.some((t) => /[ا-ي]/.test(t)), JSON.stringify({ sups: dual.sups, before: before.sups, cites: dual.cites.slice(0, 4) }));
+  check('阿拉伯语双语：链接节点身份未被替换', dual.sameNodes);
+  await tabMsg(tab.tabId, { type: 'dt:setMode', mode: 'translation' });
+  await sleep(800);
+  await settled(tab);
+  await sleep(800);
+  const only = await pageEval(tab, `return (() => {
+    const root = document.querySelector('#mw-content-text');
+    const ps = Array.from(root.querySelectorAll('p'));
+    const links = Array.from(root.querySelectorAll('p a'));
+    const residual = ps.map((p) => {
+      const clone = p.cloneNode(true);
+      clone.querySelectorAll('sup,a,rt,rp').forEach((n) => n.remove());
+      return { id: p.id, text: clone.textContent, arabic: (clone.textContent.match(/[\u0621-\u064a]/g) || []).length };
+    }).filter((one) => one.arabic > 0);
+    return {
+      p: ps.length,
+      replaced: ps.filter((p) => p.hasAttribute('data-dt-replaced')).length,
+      residual,
+      links: links.filter((a) => !a.closest('sup') && String(a.textContent || '').trim()).map((a) => ({ text: a.textContent, href: a.getAttribute('href') })),
+      sups: root.querySelectorAll('p sup').length,
+      sameNodes: window.__arLinks.every((a) => a.isConnected)
+    };
+  })()`);
+  check('阿拉伯语仅译文：所有正文段落完成替换，没有非预期阿拉伯语残留', only.replaced === only.p && only.residual.length === 0, JSON.stringify({ replaced: only.replaced, p: only.p, residual: only.residual }));
+  const onlyLinkBad = only.links.filter((a) => !/[\u4e00-\u9fff]/.test(a.text) || !a.href);
+  check('阿拉伯语仅译文：普通链接文字中文化且 href 不变', only.links.length > 0 && onlyLinkBad.length === 0, JSON.stringify({ bad: onlyLinkBad.slice(0, 8), total: only.links.length }));
+  check('阿拉伯语仅译文：脚注 / 上标和链接节点身份保持', only.sups === before.sups && only.sameNodes, JSON.stringify({ sups: only.sups, before: before.sups }));
+
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(tab, "return document.querySelectorAll('#mw-content-text [data-dt-target]').length === 0"), 10000);
+  await sleep(300);
+  const restored = await pageEval(tab, "return document.querySelector('#mw-content-text').outerHTML");
+  check('阿拉伯语：关闭翻译后原始 DOM 逐字恢复', restored === before.html, restored === before.html ? '' : 'restored differs');
+  await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
+  stats.arabicFixture = false;
+}
+
 async function directionChecks() {
   console.log('\n[双向文字排版]');
   await patchConfig({ targetLang: 'zh-CN', customLanguages: [], mode: 'translation', lazy: false, hoverCompare: false, dockEnabled: false });
@@ -1378,6 +1483,41 @@ async function popupChecks() {
   const offAgain = await until(async () => ((await readConfig()).medicalMode === false ? 'off' : null), 5000);
   check('弹窗：关闭医学模式并写入全局配置', offAgain === 'off');
   await send('Target.closeTarget', { targetId }, pop);
+}
+
+async function popupLocaleChecks() {
+  console.log('\n[弹窗动态选项本地化]');
+  await patchConfig({ uiLang: 'zh', funStyle: 'catgirl', customLanguages: [], targetLang: 'zh-CN' });
+  const make = async () => {
+    const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/popup/index.html' });
+    const pop = await attach(targetId);
+    await until(() => evaluate(pop, "document.getElementById('styleSelect') && document.getElementById('styleSelect').options.length === 3"), 10000);
+    await sleep(500);
+    return { targetId, pop };
+  };
+  const read = (pop) => evaluate(pop, `(function () {
+    const styles = Array.from(document.getElementById('styleSelect').options).map((o) => o.textContent);
+    const targets = Array.from(document.getElementById('target').options).map((o) => ({ value: o.value, text: o.textContent }));
+    return { lang: document.documentElement.lang, styles, zh: targets.find((x) => x.value === 'zh-CN'), en: targets.find((x) => x.value === 'en') };
+  })()`);
+  let made = await make();
+  let zh = await read(made.pop);
+  check('弹窗中文：趣味风格选项为普通 / 文言文 / 傲娇猫娘', zh.lang === 'zh-CN' && zh.styles.join('|') === '普通|文言文|傲娇猫娘', JSON.stringify(zh));
+  check('弹窗中文：内置目标语言使用中文名称', zh.zh && zh.zh.text === '简体中文' && zh.en && zh.en.text === 'English', JSON.stringify(zh));
+  await evaluate(made.pop, "document.getElementById('langToggle').click(); true");
+  await until(async () => (await readConfig()).uiLang === 'en', 5000);
+  await sleep(500);
+  const en = await read(made.pop);
+  check('弹窗英文：趣味风格选项立即变为 Plain / Classical Chinese / Tsundere catgirl', en.lang === 'en' && en.styles.join('|') === 'Plain|Classical Chinese|Tsundere catgirl', JSON.stringify(en));
+  check('弹窗英文：内置目标语言使用英文名称', en.zh && en.zh.text === 'Simplified Chinese' && en.en && en.en.text === 'English', JSON.stringify(en));
+  await send('Target.closeTarget', { targetId: made.targetId }, made.pop);
+  made = await make();
+  const reopened = await read(made.pop);
+  check('弹窗重新打开：英文选项和偏好仍然一致', reopened.lang === 'en' && reopened.styles.join('|') === 'Plain|Classical Chinese|Tsundere catgirl', JSON.stringify(reopened));
+  await evaluate(made.pop, "document.getElementById('langToggle').click(); true");
+  await until(async () => (await readConfig()).uiLang === 'zh', 5000);
+  await send('Target.closeTarget', { targetId: made.targetId }, made.pop);
+  await patchConfig({ uiLang: 'zh', funStyle: 'plain' });
 }
 
 async function customLanguageUiChecks() {
@@ -2235,8 +2375,51 @@ async function styleUiChecks() {
   await settled(tab);
   const after = await tabMsg(tab.tabId, { type: 'dt:status' });
   check('真实浏览器：只有明确重译才应用新风格并发请求', stats.requests > before && after && after.style === 'classical', JSON.stringify({ requests: stats.requests - before, style: after && after.style }));
+
+  const beforeRestore = stats.requests;
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const restored = await tabMsg(tab.tabId, { type: 'dt:status' });
+  check('真实浏览器：还原不重置已选风格，只把当前页 style 收回 plain', restored && restored.enabled === false && restored.style === 'plain' && restored.selectedStyle === 'classical' && stats.requests === beforeRestore, JSON.stringify({ enabled: restored && restored.enabled, style: restored && restored.style, selected: restored && restored.selectedStyle, requests: stats.requests - beforeRestore }));
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const reapplied = await until(async () => {
+    const st = await tabMsg(tab.tabId, { type: 'dt:status' });
+    return st && !st.busy && st.style === 'classical' ? st : null;
+  }, 20000);
+  check('真实浏览器：再次明确翻译沿用原选择', !!reapplied && reapplied.selectedStyle === 'classical', JSON.stringify(reapplied && { style: reapplied.style, selected: reapplied.selectedStyle }));
   await tabMsg(tab.tabId, { type: 'dt:toggle' });
   await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
+}
+
+async function stylePersistenceChecks() {
+  console.log('\n[趣味风格：弹窗保存 / 页面刷新]');
+  await patchConfig({ targetLang: 'zh-CN', customLanguages: [], mode: 'dual', lazy: false, aiContextEnabled: false, privacyEnabled: false, funStyle: 'plain' });
+  let page = await openTab(ORIGIN + '/page.html');
+  await tabMsg(page.tabId, { type: 'dt:status' });
+  const pageTabId = await swEval(`return new Promise((resolve) => chrome.tabs.query({ url: ${JSON.stringify(ORIGIN + '/page.html')} }, (tabs) => resolve(tabs && tabs[0] ? tabs[0].id : null)))`);
+  const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/popup/index.html' });
+  const pop = await attach(targetId);
+  await until(() => evaluate(pop, "!!document.getElementById('styleSelect')"), 10000);
+  await swEval(`return new Promise((resolve) => chrome.tabs.update(${JSON.stringify(pageTabId)}, { active: true }, () => resolve(true)))`);
+  await evaluate(pop, 'location.reload(); true');
+  await until(() => evaluate(pop, "document.getElementById('styleSelect') && !document.getElementById('styleSelect').disabled"), 10000);
+  await evaluate(pop, "(function(){var s=document.getElementById('styleSelect');s.value='catgirl';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()");
+  const saved = await until(async () => ((await readConfig()).funStyle === 'catgirl' ? 'saved' : null), 5000);
+  check('弹窗选择趣味风格：写入配置，不触发翻译', saved === 'saved', String(saved));
+  await send('Target.closeTarget', { targetId }, pop);
+  await send('Target.closeTarget', { targetId: page.targetId }, page.s);
+  page = await openTab(ORIGIN + '/page.html');
+  await tabMsg(page.tabId, { type: 'dt:status' });
+  const reloaded = await tabMsg(page.tabId, { type: 'dt:status' });
+  check('重新打开 / 刷新页面后：选中的趣味风格仍在，页面还没有自动翻译', reloaded.selectedStyle === 'catgirl' && reloaded.style === 'plain' && reloaded.enabled === false, JSON.stringify(reloaded && { selected: reloaded.selectedStyle, style: reloaded.style, enabled: reloaded.enabled }));
+  await tabMsg(page.tabId, { type: 'dt:toggle' });
+  const applied = await until(async () => {
+    const st = await tabMsg(page.tabId, { type: 'dt:status' });
+    return st && st.style === 'catgirl' ? st : null;
+  }, 20000);
+  check('刷新后再次明确翻译：沿用保存的趣味风格', !!applied, JSON.stringify(applied && { style: applied.style, selected: applied.selectedStyle }));
+  await tabMsg(page.tabId, { type: 'dt:toggle' });
+  await send('Target.closeTarget', { targetId: page.targetId }, page.s);
+  await patchConfig({ funStyle: 'plain' });
 }
 
 async function customLanguageLifecycleChecks() {
@@ -2761,6 +2944,10 @@ try {
     await medicalChecks();
   } else if (SHADOW_ONLY) {
     await shadowChecks();
+  } else if (ARABIC_ONLY) {
+    await arabicChecks();
+  } else if (STYLE_PERSIST_ONLY) {
+    await stylePersistenceChecks();
   } else if (BILIBILI_LIVE) {
     await liveBilibiliChecks(BILIBILI_LIVE);
   } else if (LIVE_AOZORA) {
@@ -2777,8 +2964,10 @@ try {
     await chinagpChecks();
     await koreanBoldChecks();
     await directionChecks();
+    await arabicChecks();
     await languageChecks();
     await styleUiChecks();
+    await stylePersistenceChecks();
     await customLanguageLifecycleChecks();
     await aiContextChecks();
     await localeChecks();
@@ -2789,6 +2978,7 @@ try {
     await selftestChecks();
     await inputChecks();
     await popupChecks();
+    await popupLocaleChecks();
     await medicalChecks();
     await shadowChecks();
   }

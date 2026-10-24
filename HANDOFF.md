@@ -637,6 +637,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `thinkingExtra` | `''` | `custom` 时合并进请求体的 JSON 字符串 |
 | `targetLang` | `zh-CN` | 内置语言代码或 `customLanguages` 里的自定义语言 id |
 | `customLanguages` | `[]` | 用户目标语言 `[{id, name, code?, note?}]`；内置语言仍在 `LANGUAGES`。id 以 `cl_` 开头；有标准代码时 `code` 是规范 BCP 47，没有代码时只存内部 id，不把内部 id 当语言标签 |
+| `funStyle` | `plain` | 用户选择的默认趣味风格：`plain` / `classical` / `catgirl`；只在下一次明确翻译时应用，切换下拉框不发请求；每页仍可临时改选 |
 | `funIntensity` | `standard` | 趣味风格强度：`light` / `standard` / `exaggerated`；只对非 plain 风格生效，通过提示词而非 temperature 实现 |
 | `aiContextEnabled` | `false` | AI 精翻：在正常翻译请求中附带有限的相关上下文（标题 / 章节 / 缩写 / 同文章相邻正文）；不额外发起复核；隐私脱敏开启时不发送上下文；开启 / 关闭与上下文内容都进入缓存身份 |
 | `batchSize` | 8 | 单批条数（屏幕外的批次用。按离屏幕距离分级：屏幕内 ≤3 条 / ≤500 字符，一屏以内 ≤1000 字符，见 `takeBatch`） |
@@ -800,20 +801,15 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.12.0）
+## 14. 本版技术记录（0.12.1）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **行内格式**：ParagraphUnit 新增本地 formats 描述与显式 v1 wire，扩展既有 injectMixed / injectCited / injectRuby；有限语义壳只作用于可信目标范围，safeSlot、字体和方向策略继续共用，协议定义见[引擎 §3.5](docs/TRANSLATION-ENGINE-HANDOFF.md#35-有限行内格式协议-v1)。
-- **共享验证**：内容脚本与 service worker 使用同一 classic 纯函数解析器，ESM 入口不复制实现；后台在缓存、新结果和严格复核检查原子/格式，失败携带 inlineErrors，按协议身份隔离缓存和在途去重。
-- **保护与失败**：保护文字只保留在本地；专业章节跳过保护祖先，保护页和 Shadow 适配页省略无法可靠映射的 title。源标记冲突零请求；结构失败按原文和结构签名固定，页面未变时不再请求。
-- **事务与生命周期**：新增格式壳纳入自身节点识别；失败回滚写入、注册与记录，活跃注入暂停事务压缩；混合段落目标映射只包含本单元，站点改写目标文字会释放旧记录。旧请求取消、模式/语言切换和纯 Ruby 安全路径保留。
-- **验证**：固定夹具由 selftest 与现有 inline-layout 工具共用，Node 测真实后台和调度，扩展 E2E 测本地假接口完整链路；版本准备同步三处，运行方法见第 7 节，测试证据与限制见[本地开发报告](docs/archive/2026-10-24-inline-fidelity-0.12.0.md)。
-- **自定义语言（B）**：配置升到 v8；内置语言之外可添加 / 删除自定义目标，内部 id 与规范 BCP 47 code 分离，无 code 的虚构语言不写 `lang` / `data-dt-lang`。目标解析、方向 / 字体、提示词数据边界、输入框跟随和导入合并共用 `lib/config.js`，纯函数见 `test/language-context.test.mjs`。
-- **趣味风格（B）**：下拉框只写 `selectedStyle`，`dt:setStyle` 不发请求、不取消在途；`enable` / `dt:retranslate` 才应用风格与三档强度。强度走提示词，不单独发请求。
-- **AI 精翻（B）**：默认关闭；开启时上下文只并进正常翻译请求，不额外复核。上下文按批次参与缓存身份（`ai-v1`）；隐私脱敏开启时整段不发。标题 / 章节变化只标记 `contextStale`，不重翻已完成正文；明确重译后使用新上下文。
-- **语言守卫与保真修复**：`lib/lang-guard.js` 两个方向对称；中文目标整段英文仍显示但不写缓存。仅译文下的按钮 / label / summary 文字作为控件原子保留；带背景 / 边框的空格式壳事务内隐藏，关闭后逐字恢复。
-- **联合验证**：合并后 Node、自检、扩展 E2E、inline-layout 与发版检查均重跑；两分支的测试保留在同一 `test/` / `selftest/` 中，没有删除或弱化断言。证据见 [A 报告](docs/archive/2026-10-24-inline-fidelity-0.12.0.md) 与 [B 报告](docs/archive/2026-10-24-language-style-context.md)。
+- **A 动态选项**：弹窗的动态下拉框统一按当前 UI 语言取词，内置语言名用 `t()`，自定义语言名保留用户原文并跳过 i18n；界面语言切换、重开弹窗、配置广播三条路径共用同一套标签刷新。
+- **B 风格生命周期**：配置新增 `funStyle`（默认 `plain`）；弹窗选择先写 `dt:setStyle`，再持久化配置。内容页用 `selectedStyleExplicit` 区分“本页亲手选择”和“配置默认值”，还原只把当前页 `style` 收回 plain，不清 `selectedStyle`；配置广播不重译、不改变已生效风格。
+- **C 阿拉伯语页**：数字脚注之外，识别维基 `[ا]` / `[ب]` 单字母脚注和带内部链接的 citation-needed 上标；不要把 `[الإنجليزية]` 这类语言标注误判为脚注。普通链接的 `<fN>` 标签译文从 `result.ranges` 取，不再回退到不可变的 `<kN>` 原文；嵌套在 `<span>` / `<sup>` 的链接标签也可本地化，写回仍只改文本、不换链接节点。
+- **验证**：新增真实维基段落固定的 `test/fixtures/arabic-wikipedia.html`（含 9 段、字母脚注、citation-needed、嵌套链接），扩展 E2E 增加 RTL 双栏 / 仅译文 / 还原 / 链接身份检查；阿拉伯语页和趣味风格的回归均保留在 Node、selftest 与 Chrome E2E 中，测试证据见本地报告与 commit message。
+- **限制**：E2E 使用假接口验证协议和 DOM，不证明真实模型会翻译每个 `<fN>` 标签；模型省略格式标记时仍按安全回退保留原文。真实维基的导航 / 列表等非正文区域按既有区域规则跳过。
 
 ## 15. 专业翻译引擎
 
