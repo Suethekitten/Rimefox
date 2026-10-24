@@ -44,7 +44,7 @@
 chrome-extension://<扩展ID>/selftest/index.html
 ```
 扩展 ID 在扩展管理页的卡片上能看到（Edge 同样是 `chrome-extension://` 开头）。
-应显示 **135 / 135 全部通过**。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
+应显示 **全部通过**，以实际输出为准。这个页面不联网、不花钱，改完 DOM 引擎先跑它。
 自检页只在直接加载仓库目录时才有：商店包和 0.8.6 起的 GitHub Release 包只收运行时文件（`tools/package-store.mjs` 的白名单），设置页里的「打开自检页」会自动隐藏。
 
 ---
@@ -63,6 +63,7 @@ edge-bilingual/
 │   ├── engines/           各协议实现（openai / anthropic / gemini）
 │   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
 │   ├── parse.js           模型返回值解析（JSON 数组容错）+ 换行规范化 + 写入前校验 + 输出长度护栏
+│   ├── inline-protocol.js  classic / ESM 共用的有限格式校验，inline.js 为 ESM 导出入口
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格 / 结构化对齐共用目标语言约束），纯函数
 │   ├── lang-guard.js      目标语言保守校验：英文等拉丁字母目标却整段回中日韩正文（缓存定向失效用），纯函数
 │   ├── cache.js           三层翻译缓存：内存 + storage.session+ storage.local（短文本，512 KB）
@@ -371,26 +372,16 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
 - **渲染事务**：所有文本 / 节点 / 属性 / 样式修改都进 `DT.tx`；`DT.restore()` 逆序回放，只撤销仍是我们
   写入的值。`DT.releaseReplaced` 只放回被站点改过的替换型 / Ruby 段落；`DT.refreshStale` 只撤掉源文本
   确实变了的双语段落，兄弟段落不动。
-- **段落里的保留区**（notranslate / `translate="no"` / 站点规则 `excludeSelectors` 的行内子元素）：整段单元（`tokensOf`）照样把它们的文字拼进句子，
-  送翻时用 `<k1>…</k1>` 包住（`unit.wire` = `DT.units.keepWrap`；缓存按带标记的文本记），本批有标记时提示词追加「标记连同内容原样照抄、按译文语序摆放」（`lib/prompt.js` 的 `hasKeepMarks`，没标记的请求提示词逐字不变）。
-  回包经 `DT.units.keepParse`：标记里的内容一律换回原文（双语 / 悬停 / 去重都用去标记的文字）。**保留元素的文本节点永远不写、不清空**：
-  仅译文单行段落按标记把译文切成 N+1 段，分别写进各保留元素前后的文本节点（`keepPlan`）；模型漏了标记时按原文逐字（整词、唯一、按序）找位置；
-  换了顺序 / 找不到 / 某一侧没有文本节点可写 → 兜底：整句写进非保留节点，保留元素 `display:none !important` + `data-dt-keep-hidden`（进 `DT.tx`，还原恢复）。
-  兜底的边界（0.9.8）：写完再读一次计算样式，没藏住（动画 / 用户样式）就撤回、不打标记（悬停映射信这个标记）；带图标 / 图片 / 链接 / 按钮的保留元素不藏，宁可文字重复；
-  `setStyle` 记下 style 属性原文，没人动过就逐字放回（CSSOM 回放会改写写法、丢掉行内 `!important`）。
-  分行段落、Ruby 段落直接走兜底（只有保留内容的那一行不隐藏；模型少回了几行、那一行拿不到译文时也不藏，除非保留内容已原样出现在写进去的译文里）。
-  长段落按 `maxUnitChars` 切片（`DT.splitLong`）不会切在 `<kN>…</kN>` 里面：切开后两半都不是成对标记，后台不加说明、模型不照抄。
-  模型编出来的编号（发出去只有 k1，回来有 `<k7>`）只去掉标记、留下中间的字，原文里本来就有这串字的才当普通文字（`keepParse` 第三个参数是原文）。
-  保留区挂在 `addParagraphs` 里，三条收集路径共用：
-  own 单元（子元素全被跳过：`ownTokens`，`ownText` 与它一致）和 0.9.7 的局部段落（`flowTokens`）也把**直接子级**里看得见的行内保留元素拼进句子（`keptChild`），
-  否则「Install `<span class="notranslate">`Rimefox`</span>` today.」只送「Install today.」、仅译文时整句写在 span 前面；
-  隐藏 / `display:none`、块级或打断文字流（`breaksFlow`）的保留元素，以及因别的原因跳过的子元素（已翻过 `data-dt-src`、译文 / 界面节点、`PRE` / `IMG` 等跳过类标签、可编辑）仍不收。
-  文字流里带 notranslate 的行内 `<code>`（GitHub）、行内子元素里嵌的保留元素同样按保留区处理。整段只剩保留内容的段落不收。
+- **段落里的保留区**：`notranslate`、`translate="no"`、站点 `excludeSelectors` 仍进入本地字符映射，但 v1 送翻只留 `<kN></kN>`，完整保护文字不进入段落 API 载荷。回包必须保留完整唯一原子，保护 DOM 不改写、不隐藏；结构错误保持原文，不能套用旧版的隐藏兜底。
+  引用、提及、Ruby 和复杂链接等不可变原子仍带必要标签文字供上下文理解；「不改 DOM」「不翻译」「不外发」是不同边界。简单普通链接仅允许修改原 Text 节点的标签，属性、节点身份和事件不变。
+  纯引用等未启用 v1 的单元继续使用既有 `keepWrap` / `keepParse` / `keepMarks`；旧漏标记定位和隐藏兜底仅供兼容，不能用于带 opaque protect 的新协议。
+  源文本本身含保留格式标记时不猜测：无保护内容则不启用格式映射，有保护内容则记录本地固定失败且不请求。
+  协议、格式范围、缓存和回退的唯一技术说明见 [翻译引擎 §3.5](docs/TRANSLATION-ENGINE-HANDOFF.md#35-有限行内格式协议-v1)。
 - **文献引用**（`isCitationEl`）：Nature / Springer 的 `<sup><a data-test="citation-ref" href="…#ref-CR1">1</a>,<a …>2</a></sup>`；Science / Atypon 的 `<a role="doc-biblioref" href="#core-collateral-R1"><i>1</i></a>–<a …>`（没有 sup，直接夹在正文里，目标在 `div.citations`）；Wikipedia `sup.reference`、Markdown 脚注（`role="doc-noteref"`）、带 citation / reference 语义的 span、无链接但带强提示的 `<sup>` 也是保留区。
   判定是组合证据：候选行内元素 + 可见文字只有编号和分隔符（`1,2`、`3–5`、`[3]`）+ 数字都在链接里 + 每个链接有 DPUB 角色 / citation 字样，或指向本页且目标真的像参考文献（`li`、`doc-biblioentry`、`#ref/#bib/#cite/#fn`、reference / biblio class 等）。数学指数、序数、化学式（`<sub>`）、图表 / 章节锚点、站外链接、普通数字链接、链接包在上标外面（`<a><sup>2</sup></a>`）都不算。
   **图表交叉引用**（`isXrefEl`）：指向本页锚点、可见文字是图表标签的链接（Fig. 1、Figs. 2 and 3、Fig. 1, A and B、Table S1、Eq. 4、Movie S2、Supplementary Fig. 3）也是保留区（`kind: 'xref'`）；裸数字链接、站外链接、普通文字链接不算。
-  **混合段落**：内容区域里「普通文字 + 一个或多个行内链接」现在也统一走混合行内渲染，不再要求段落先有引用 / 图表链接；普通链接当原子（`kind: 'link'`：节点身份 / href / 事件监听不变，文字默认原样，补充材料标签可靠时本地化），@提及（`kind: 'mention'`）、notranslate（`kind: 'protect'`）照旧。整段就是一个链接（导航 / 按钮 / 纯链接卡片）或有块级子元素的容器不在这里处理，交给 `areaOf` / `flowTokens` / 原有 `injectReplace`。实现位置：`content/dom.js` 的 `hasMixedPlainLinkInside` / `isPlainLinkEl` / `keepRangesOf` / `injectMixed` / `DT.inject`。
-  渲染走 `injectCited`：先用 `DT.units.keepMarks` 取每个标记在「去掉标记和标记内容」的译文里的落点（同号重复只认第一次；不按原文逐字找 —— 引用只是几个数字，译文里本来就可能有同样的数字）。
+  **混合段落**：内容区域里「普通文字 + 一个或多个行内链接」现在也统一走混合行内渲染，不再要求段落先有引用 / 图表链接；普通链接当原子（`kind: 'link'`：节点身份 / href / 事件监听不变，简单 Text 标签通过 v1 翻译，复杂标签保留，补充材料可靠标签可本地化），@提及（`kind: 'mention'`）、notranslate（`kind: 'protect'`）照旧。整段就是一个链接（导航 / 按钮 / 纯链接卡片）或有块级子元素的容器不在这里处理，交给 `areaOf` / `flowTokens` / 原有 `injectReplace`。实现位置：`content/dom.js` 的 `hasMixedPlainLinkInside` / `isPlainLinkEl` / `keepRangesOf` / `injectMixed` / `DT.inject`。
+  未启用 v1 的兼容单元渲染走 `injectCited`：先用 `DT.units.keepMarks` 取每个标记在「去掉标记和标记内容」的译文里的落点（同号重复只认第一次；不按原文逐字找 —— 引用只是几个数字，译文里本来就可能有同样的数字）。
   **仅译文**（`injectMixed`，混合行内安全渲染，取代 0.11.1 的 `injectCitedOnly`）：DOM 结构和可翻译文字分开 —— 原子（引用、图表链接、混合段落里的普通链接、提及、notranslate）原地不动，节点身份 / href / id / 事件监听都不变；
   原子之外的文字节点（含空白）全部清空，译文按原子的落点切成 N+1 段，作为新文本节点插在原子之间；新节点永远不进单元内部的链接（`safeSlot`），中文正文不会继承超链接。不移动原有节点，所有改动走 RenderTransaction。
   落点：先后与页面一致 → 词级；模型换了先后 → `keepPlacement` 挪到所在那一句的句末标点前（`sentenceEndAt`）；模型漏了标记 → 按原文所在句映射到译文句末（`atomPlacement`）；
@@ -403,9 +394,9 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
   诊断按钮的 `placements` 记 `cite`：`exact` / `sentence` / `failed-only`（仅译文无法安全重建） / `dropped`（双语标记缺失）。
   缓存键是送翻文本：旧版本把引用压平进译文的条目（键里没有标记）不会被带标记的段落命中，不清用户缓存，旧条目随容量淘汰。
   提示词只在本批带标记时多一句「文献引用编号的标记紧跟所引词句，不另写、合并或删掉引用编号」，标记说明里点名「文献引用编号、图表编号、链接文字」。
-- **注入结果分类**（`DT.inject` 写 `unit.injectResult` / `DT.lastInject`，返回值仍是 true / false）：`success` / `already-rendered` / `not-applicable` / `empty` / `stale-generation` / `stale-source` / `unsafe-structure` / `invalid-placement`。
-  `main.js` 的 `tryInject`：`unsafe-structure` / `invalid-placement` 是「模型给了译文、但写不进页面」，记进 `renderFails`（`{ text, stamp: DT.unitStamp(unit), code, reason }`），`DT.state.renderFailed` / `lastRenderError` 进 `dt:status`，
-  **不算跳过、不记成已处理**；源文本和 DOM 状态（`DT.unitStamp` = 源节点签名）都没变时下一轮不再收、不再请求（确定性错误不无限重试、不重复计费），页面变了才重新收集（后台缓存里有译文，不再调用模型）。
+- **注入结果分类**（`DT.inject` 写 `unit.injectResult` / `DT.lastInject`，返回值仍是 true / false）：`success` / `already-rendered` / `not-applicable` / `empty` / `stale-generation` / `stale-source` / `unsafe-structure` / `invalid-placement` / `invalid-inline`。
+  `main.js` 的 `tryInject`：`unsafe-structure` / `invalid-placement` / `invalid-inline` 是「模型给了译文、但写不进页面」，记进 `renderFails`（`{ text, stamp: DT.unitStamp(unit), code, reason }`），`DT.state.renderFailed` / `lastRenderError` 进 `dt:status`，
+  **不算跳过、不记成已处理**；源文本和 DOM 状态（`DT.unitStamp` = 源节点签名）都没变时下一轮不再收、不再请求（确定性错误不无限重试、不重复计费），页面变了才重新收集；有效译文可命中缓存，协议失败不缓存且不自动追加付费重试。
   `stale-source` 标脏、本轮结束后重收；`stale-generation` 什么都不记；`already-rendered` / `not-applicable` / `empty` 照旧记成已处理。`DT.releaseReplaced` 也释放 `cited` 记录：站点改写后放回原文、按新内容重翻。
 - **多译文节点**：同一个容器里多个 `[data-dt-target]` 是正常的；`cleanupDuplicateTargets` 只清理
   `data-dt-unit` 相同的克隆副本，不能按「同一父级只留一个」清理。
@@ -763,15 +754,15 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.11.7）
+## 14. 本版技术记录（0.12.0）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-- **输入框异步写回**：发送翻译前保存完整输入值或富文本 DOM 快照，以及最初选区的节点和偏移；不保存会随 DOM 更新漂移的 live Range。返回后检查连接状态、焦点、可编辑状态、输入法组词和内容快照，满足条件才重建选区并通过原生编辑命令写回；保留撤销栈与 input 事件。
-- **术语并发收录**：saveConfig 支持同步函数补丁，在原保存队列内读取最新配置、清洗、合并及落盘；函数返回 null 时不写存储。glossary:add 的新增、覆盖、冲突和容量判断均在该队列内执行，避免两个成功请求相互覆盖，原有分类和说明保留。
-- **接口缓存隔离**：后台为 scope 增加协议及规范化 API 地址，持久缓存、对齐旁路和在途去重共用此身份；没有接口身份的旧条目不猜测来源，也不主动清空，首次翻译可能重新请求，详见[请求与缓存约定](docs/TRANSLATION-ENGINE-HANDOFF.md#6-请求缓存与性能)。
-- **回归覆盖**：test/background-state.test.mjs 使用真实后台、假存储及假 API，验证术语并发新增、同名冲突、覆盖、容量、保存失败恢复、地址和协议切换、旧条目隔离及在途切换；tools/e2e-extension.mjs 在真实 Chrome 内延迟后台响应，验证新草稿、富文本选区移动及重建、失焦和输入法组词，并按 manifest 核对实际加载版本，避免发版后误报。
-- **发布验证**：按第 7 节执行完整 Node、浏览器 E2E 和离线自检，并校验发版说明和发布包；浏览器验证使用本地假 API，不调用真实付费服务，版本号由 manifest、core 和 package 同步。
+- **行内格式**：ParagraphUnit 新增本地 formats 描述与显式 v1 wire，扩展既有 injectMixed / injectCited / injectRuby；有限语义壳只作用于可信目标范围，safeSlot、字体和方向策略继续共用，协议定义见[引擎 §3.5](docs/TRANSLATION-ENGINE-HANDOFF.md#35-有限行内格式协议-v1)。
+- **共享验证**：内容脚本与 service worker 使用同一 classic 纯函数解析器，ESM 入口不复制实现；后台在缓存、新结果和严格复核检查原子/格式，失败携带 inlineErrors，按协议身份隔离缓存和在途去重。
+- **保护与失败**：保护文字只保留在本地；专业章节跳过保护祖先，保护页和 Shadow 适配页省略无法可靠映射的 title。源标记冲突零请求；结构失败按原文和结构签名固定，页面未变时不再请求。
+- **事务与生命周期**：新增格式壳纳入自身节点识别；失败回滚写入、注册与记录，活跃注入暂停事务压缩；混合段落目标映射只包含本单元，站点改写目标文字会释放旧记录。旧请求取消、模式/语言切换和纯 Ruby 安全路径保留。
+- **验证**：固定夹具由 selftest 与现有 inline-layout 工具共用，Node 测真实后台和调度，扩展 E2E 测本地假接口完整链路；版本准备同步三处，运行方法见第 7 节，测试证据与限制见[本地开发报告](docs/archive/2026-10-24-inline-fidelity-0.12.0.md)。
 
 ## 15. 专业翻译引擎
 

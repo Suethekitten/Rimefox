@@ -1,0 +1,367 @@
+{
+  "baseline": {
+    "revision": "a909ec551f3642c76fd47b5b0e000ee12ceb4864",
+    "suite": "Final selftest/inline-fidelity.js, fixed fixture, frozen 0.11.7 source scripts",
+    "passed": 245,
+    "total": 298,
+    "failed": [
+      {
+        "name": "strong:wire-preserves-semantic-range",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "strong:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "leading-bold:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "em:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "italic:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "nested:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "nested:outer-bold-only",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "span-inherited:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "family:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "small:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "sup-sub:normal-body-outside-script",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "relative-note:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "article-link:label-translated",
+        "ok": false,
+        "detail": "<a id=\"fidelity-guide\" href=\"/guide?from=fidelity#intro\" title=\"Guide\" target=\"_blank\" rel=\"noopener\" aria-label=\"Open documentation\" data-semantic=\"documentation\">documentation</a>"
+      },
+      {
+        "name": "protected:not-sent-to-model",
+        "ok": false,
+        "detail": "Translate this text around <k1>AcmeSecretBrand</k1> and <k2>private-account-42</k2> while preserving their nodes."
+      },
+      {
+        "name": "excluded:not-sent-to-model",
+        "ok": false,
+        "detail": "The surrounding explanation contains <k1>SiteExcludedSecret</k1> and continues as ordinary translatable prose."
+      },
+      {
+        "name": "ruby:formatted-target-never-writes-annotations",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "icons:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "rtl:target-direction-isolated",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "prewrap:inject",
+        "ok": false,
+        "detail": "{\"code\":\"invalid-placement\",\"reason\":\"line-count\"}"
+      },
+      {
+        "name": "prewrap:blank-line-and-order",
+        "ok": false,
+        "detail": "\"First important line.\\nSecond line with uncertain evidence.\\n\\nFinal line with details.\""
+      },
+      {
+        "name": "cross-node:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "font-policy:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":19,\"vertical\":\"baseline\",\"parent\":\"SPAN\"}]"
+      },
+      {
+        "name": "strong:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"SPAN\"}]"
+      },
+      {
+        "name": "strong:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"P\"}]"
+      },
+      {
+        "name": "strong:correct-semantic-fragment",
+        "ok": false,
+        "detail": "[{\"weight\":400,\"italic\":false,\"size\":18,\"vertical\":\"baseline\",\"parent\":\"SPAN\"}]"
+      },
+      {
+        "name": "font-policy:translation-target-font-shell",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "reorder:independent-format-identities",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "reorder:semantic-ranges-follow-target-order",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "invalid:unknown-format:refused",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "invalid:unknown-format:zero-write",
+        "ok": false,
+        "detail": "6"
+      },
+      {
+        "name": "invalid:missing-format-close:refused",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "invalid:missing-format-close:zero-write",
+        "ok": false,
+        "detail": "6"
+      },
+      {
+        "name": "invalid:duplicate-format:refused",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "invalid:duplicate-format:zero-write",
+        "ok": false,
+        "detail": "6"
+      },
+      {
+        "name": "invalid:unknown-atom:refused",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "invalid:unknown-atom:zero-write",
+        "ok": false,
+        "detail": "6"
+      },
+      {
+        "name": "invalid:crossed-format-nesting",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "invalid:atom-missing:refused",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"sentence\"}"
+      },
+      {
+        "name": "invalid:atom-missing:original-survives",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "invalid:atom-duplicate:refused",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"exact\"}"
+      },
+      {
+        "name": "invalid:atom-duplicate:original-survives",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "invalid:atom-leak:refused",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"exact\"}"
+      },
+      {
+        "name": "invalid:atom-leak:original-survives",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "protected:invalid-missing:rejected-before-write",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "protected:invalid-duplicate:rejected-before-write",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "protected:invalid-duplicate:original-visible",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "protected:invalid-invented-text:rejected-before-write",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "transaction:write-fault-contained",
+        "ok": false,
+        "detail": "Deterministic write fault"
+      },
+      {
+        "name": "transaction:immediate-exact-rollback",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "name": "transaction:dual-insertion-fault-contained",
+        "ok": false,
+        "detail": "{\"code\":\"unsafe-structure\",\"reason\":\"renderer-refused\"}"
+      },
+      {
+        "name": "reserved:protected-source-fails-closed",
+        "ok": false,
+        "detail": "{\"code\":\"success\",\"reason\":\"replace\"}"
+      },
+      {
+        "name": "transaction:compact-fault-contained",
+        "ok": false,
+        "detail": "Deterministic transaction compaction fault"
+      },
+      {
+        "name": "transaction:compact-fault-restores-only-current-unit",
+        "ok": false,
+        "detail": ""
+      }
+    ],
+    "metrics": {
+      "cases": 26,
+      "units": 609,
+      "collectMs": 40.1,
+      "injectMs": 6.8,
+      "writes": {
+        "childList": 27,
+        "characterData": 151,
+        "attributes": 164
+      },
+      "elapsedMs": 107
+    }
+  },
+  "final": {
+    "source": "0.12.0 working tree",
+    "browser": "Chrome/156.0.8078.48",
+    "selftest": {
+      "text": "257 / 257  全部通过",
+      "ok": true
+    },
+    "scenarios": [
+      {
+        "width": 1000,
+        "zoom": 1,
+        "passed": 552,
+        "total": 552,
+        "failed": [],
+        "metrics": {
+          "cases": 26,
+          "units": 609,
+          "collectMs": 33.9,
+          "injectMs": 7.4,
+          "writes": {
+            "childList": 129,
+            "characterData": 127,
+            "attributes": 122
+          },
+          "elapsedMs": 123.1
+        },
+        "layoutTotal": 254,
+        "layoutPassed": 254,
+        "fidelityTotal": 298,
+        "fidelityPassed": 298
+      },
+      {
+        "width": 390,
+        "zoom": 1.25,
+        "passed": 552,
+        "total": 552,
+        "failed": [],
+        "metrics": {
+          "cases": 26,
+          "units": 609,
+          "collectMs": 29.6,
+          "injectMs": 7.2,
+          "writes": {
+            "childList": 129,
+            "characterData": 127,
+            "attributes": 122
+          },
+          "elapsedMs": 116.8
+        },
+        "layoutTotal": 254,
+        "layoutPassed": 254,
+        "fidelityTotal": 298,
+        "fidelityPassed": 298
+      },
+      {
+        "width": 1280,
+        "zoom": 1.75,
+        "passed": 552,
+        "total": 552,
+        "failed": [],
+        "metrics": {
+          "cases": 26,
+          "units": 609,
+          "collectMs": 29.8,
+          "injectMs": 6.7,
+          "writes": {
+            "childList": 129,
+            "characterData": 127,
+            "attributes": 122
+          },
+          "elapsedMs": 114.5
+        },
+        "layoutTotal": 254,
+        "layoutPassed": 254,
+        "fidelityTotal": 298,
+        "fidelityPassed": 298
+      }
+    ]
+  },
+  "scope": "Local fixed fixtures; no model or paid API requests. Browser models are not semantic quality evidence."
+}

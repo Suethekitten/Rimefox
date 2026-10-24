@@ -1,0 +1,136 @@
+{
+  "implementationCommit": "7dc3e040c0dec38ac78d5836b7e0fbf6155c4ffa",
+  "baseline": "a909ec551f3642c76fd47b5b0e000ee12ceb4864",
+  "date": "2026-10-24",
+  "status": "Local commits only. User requested no further testing; independent acceptance delegated to another AI.",
+  "node": {
+    "files": 39,
+    "sequentialExitCode": 0,
+    "mainCases": 32,
+    "protocolCases": 9,
+    "pipelineCases": 19
+  },
+  "selftest": {
+    "passed": 259,
+    "total": 259,
+    "mode": "file://, headless Chrome, same 5000ms virtual-time command as CI"
+  },
+  "extension": {
+    "browser": "Chrome/156.0.8078.48",
+    "passed": 197,
+    "total": 197,
+    "failures": [],
+    "stats": {
+      "requests": 96,
+      "texts": 207,
+      "withEffort": 2,
+      "aligned": 2
+    },
+    "exceptions": []
+  },
+  "layout": {
+    "browser": "Chrome/156.0.8078.48",
+    "scenarios": [
+      {
+        "width": 1000,
+        "zoom": 1,
+        "passed": 552,
+        "total": 552
+      },
+      {
+        "width": 390,
+        "zoom": 1.25,
+        "passed": 552,
+        "total": 552
+      },
+      {
+        "width": 1280,
+        "zoom": 1.75,
+        "passed": 552,
+        "total": 552
+      }
+    ]
+  },
+  "live": {
+    "aozora": {
+      "browser": "Chrome/156.0.8078.48",
+      "passed": 13,
+      "total": 13,
+      "failures": [],
+      "stats": {
+        "requests": 8,
+        "texts": 39,
+        "withEffort": 6,
+        "aligned": 7
+      },
+      "exceptions": []
+    },
+    "chosun": {
+      "browser": "Chrome/156.0.8078.48",
+      "passed": 9,
+      "total": 9,
+      "failures": [],
+      "stats": {
+        "requests": 15,
+        "texts": 73,
+        "withEffort": 6,
+        "aligned": 0
+      },
+      "exceptions": []
+    },
+    "bilibili": {
+      "browser": "Chrome/156.0.8078.48",
+      "passed": 6,
+      "total": 7,
+      "failures": [
+        {
+          "name": "真实 B站：向下滚动加载的新评论进入翻译队列",
+          "ok": false,
+          "detail": "4 -> 4"
+        }
+      ],
+      "stats": {
+        "requests": 38,
+        "texts": 136,
+        "withEffort": 6,
+        "aligned": 8
+      },
+      "exceptions": []
+    },
+    "science": {
+      "browser": "Chrome/156.0.8078.48",
+      "passed": 1,
+      "total": 4,
+      "failures": [
+        {
+          "name": "Science 实页：引用链接被识别成保留区",
+          "ok": false,
+          "detail": "{\"ok\":false,\"why\":\"没有带 doc-biblioref 的段落\"}"
+        },
+        {
+          "name": "Science 实页：编号进标记，锚点 / 属性不进送翻正文",
+          "ok": false,
+          "detail": "没有带 doc-biblioref 的段落"
+        },
+        {
+          "name": "检查脚本本身跑完",
+          "ok": false,
+          "detail": "Error: TypeError: Cannot read properties of undefined (reading 'innerHTML') |     at <anonymous>:6:20 |     at <anonymous>:21:5"
+        }
+      ],
+      "stats": {
+        "requests": 0,
+        "texts": 0,
+        "withEffort": 0,
+        "aligned": 0
+      },
+      "exceptions": []
+    }
+  },
+  "limits": [
+    "No paid model API calls. Fake model responses do not prove real-model semantic fidelity.",
+    "Science did not expose the expected article DOM; unavailable content is not a pass. The runner subsequently gained an early return to avoid a secondary missing-node exception; the live page was not rerun.",
+    "Bilibili did not load additional comments during scrolling; live incremental loading remains unverified.",
+    "Performance benchmark exits 2 on both revisions due to the existing Ruby collection warning; it is not an all-green result."
+  ]
+}
