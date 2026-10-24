@@ -3,7 +3,7 @@
   "default_locale": "zh_CN",
   "name": "__MSG_extensionName__",
   "short_name": "凛狐",
-  "version": "0.11.7",
+  "version": "0.12.0",
   "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "114",
   "permissions": [
@@ -54,6 +54,7 @@
       "exclude_matches": ["*://chromewebstore.google.com/*", "*://chrome.google.com/webstore/*", "*://accounts.google.com/*"],
       "js": [
         "content/core.js",
+        "lib/inline-protocol.js",
         "content/units.js",
         "content/direction.js",
         "content/dom.js",

@@ -2,8 +2,16 @@
 <html><head><meta charset="utf-8">
 <style>#fixture{width:760px;font:16px/1.8 serif;margin:20px}.box{margin:8px 0}</style>
 </head><body><div id="fixture"></div><pre id="result"></pre>
+<script>
+// Script networking is blocked and counted; loading the local harness scripts is
+// browser file access and cannot invoke a model or a paid API.
+window.__benchNetworkAttempts = 0;
+window.fetch = function () { window.__benchNetworkAttempts += 1; return Promise.reject(new Error('No network in DOM benchmark')); };
+XMLHttpRequest.prototype.open = function () { window.__benchNetworkAttempts += 1; throw new Error('No network in DOM benchmark'); };
+</script>
 <script src="../content/core.js"></script>
 <script src="../content/units.js"></script>
+<script src="../lib/inline-protocol.js"></script>
 <script src="../content/dom.js"></script>
 <script src="../content/hover.js"></script>
 <script>
@@ -35,6 +43,22 @@
     if (ruby) s += '<ruby><rb>下人</rb><rp>（</rp><rt>げにん</rt><rp>）</rp></ruby>と<ruby><rb>羅生門</rb><rp>（</rp><rt>らしょうもん</rt><rp>）</rp></ruby>';
     return s;
   }
+  function fakeTranslation(unit, index) {
+    var wire = unit.wire || unit.text;
+    if (!/<[kf]\d+>/.test(wire)) return '中文译文' + index + '。';
+    var out = '', from = 0, re = /<k\d+>[\s\S]*?<\/k\d+>|<\/?f\d+>/g, match;
+    function gap(text) { return text.split('\n').map(function (line) { return /\S/.test(line) ? '中文译文' + index : line; }).join('\n'); }
+    while ((match = re.exec(wire))) {
+      out += gap(wire.slice(from, match.index)) + match[0];
+      from = match.index + match[0].length;
+    }
+    return out + gap(wire.slice(from));
+  }
+  function nodeList(box) {
+    var out = [], walker = document.createTreeWalker(box, NodeFilter.SHOW_ALL);
+    for (var node = walker.nextNode(); node; node = walker.nextNode()) out.push(node);
+    return out;
+  }
   function run(name, build) {
     var box = document.createElement('div');
     box.className = 'box';
@@ -42,27 +66,39 @@
     build(box);
     gc();
     var before = box.textContent;
+    var beforeHTML = box.innerHTML;
+    var beforeNodes = nodeList(box);
     var h0 = heapMB();
     var t0 = now();
     var units = DT.collect(box);
     var t1 = now();
     var targets = 0;
     var injectOk = true;
+    var writes = { childList: 0, characterData: 0, attributes: 0, addedNodes: 0, removedNodes: 0 };
+    var observer = new MutationObserver(function () {});
+    observer.observe(box, { childList: true, subtree: true, attributes: true, characterData: true });
     if (units.length) {
       DT.state.mode = 'dual';
       if (DT.beginRenderCache) DT.beginRenderCache();
       try {
-        units.forEach(function (u, i) { if (!DT.inject(u, '中文译文' + i + '。', 'zh-CN')) injectOk = false; });
+        units.forEach(function (u, i) { if (!DT.inject(u, fakeTranslation(u, i), 'zh-CN')) injectOk = false; });
       } finally {
         if (DT.endRenderCache) DT.endRenderCache();
       }
       targets = box.querySelectorAll('[data-dt-target]').length;
     }
     var t2 = now();
+    observer.takeRecords().forEach(function (record) {
+      writes[record.type] += 1;
+      Array.prototype.forEach.call(record.addedNodes || [], function (node) { writes.addedNodes += 1 + nodeList(node).length; });
+      Array.prototype.forEach.call(record.removedNodes || [], function (node) { writes.removedNodes += 1 + nodeList(node).length; });
+    });
+    observer.disconnect();
     var again = units.length ? DT.collect(box) : [];
     var t3 = now();
     DT.restore();
-    var restoreOk = box.textContent === before;
+    var restoredNodes = nodeList(box);
+    var restoreOk = box.textContent === before && box.innerHTML === beforeHTML && restoredNodes.length === beforeNodes.length && restoredNodes.every(function (node, i) { return node === beforeNodes[i]; });
     box.remove();
     gc();
     return {
@@ -71,11 +107,16 @@
       injectMs: Math.round((t2 - t1) * 10) / 10,
       recollectMs: Math.round((t3 - t2) * 10) / 10,
       recollectUnits: again.length, restoreOk: restoreOk,
+      writes: writes,
+      formattedUnits: units.filter(function (unit) { return unit.formats && unit.formats.length; }).length,
+      wireChars: units.reduce(function (sum, unit) { return sum + (unit.wire || unit.text).length; }, 0),
+      sourceChars: units.reduce(function (sum, unit) { return sum + unit.text.length; }, 0),
       heapBeforeMB: h0, heapAfterMB: heapMB(), hash: hash(before)
     };
   }
 
-  var out = { scenarios: [], longTasks: longTasks, ua: navigator.userAgent };
+  var out = { scenarios: [], longTasks: longTasks, ua: navigator.userAgent, cache: 'Not exercised: direct DOM harness. Request/cache checks run in e2e-extension and translate-pipeline tests.' };
+  out.scenarios.push(run('short-paragraph', function (box) { box.textContent = 'An ordinary short paragraph with a complete sentence.'; }));
   ['10000', '100000', '500000'].forEach(function (n) {
     out.scenarios.push(run('single-' + n + '-chars', function (box) { box.textContent = 'あ'.repeat(Number(n)); }));
   });
@@ -92,6 +133,30 @@
       html += '<div class="row"><span>row ' + i + ' </span><b>bold</b><i>italic</i><a href="#">link</a><br><ul><li>one</li><li>two</li></ul><table><tr><td>cell ' + i + '</td></tr></table></div>';
     }
     box.innerHTML = html;
+  }));
+  out.scenarios.push(run('formatted-article-300', function (box) {
+    for (var i = 0; i < 300; i += 1) {
+      var p = document.createElement('p');
+      p.appendChild(document.createTextNode('The '));
+      var strong = document.createElement('strong'); strong.textContent = 'important'; p.appendChild(strong);
+      p.appendChild(document.createTextNode(' result remains '));
+      var em = document.createElement('em'); em.textContent = 'uncertain'; p.appendChild(em);
+      p.appendChild(document.createTextNode(' and requires further evidence.'));
+      box.appendChild(p);
+    }
+  }));
+  out.scenarios.push(run('academic-mixed-150', function (box) {
+    for (var i = 0; i < 150; i += 1) {
+      var p = document.createElement('p');
+      p.appendChild(document.createTextNode('The '));
+      var em = document.createElement('em'); em.textContent = 'observed'; p.appendChild(em);
+      p.appendChild(document.createTextNode(' association was reported previously'));
+      var cite = document.createElement('a'); cite.href = '#reference-' + i; cite.setAttribute('role', 'doc-biblioref'); cite.textContent = String(i + 1); p.appendChild(cite);
+      p.appendChild(document.createTextNode(' and is described in the '));
+      var a = document.createElement('a'); a.href = '#article-' + i; a.textContent = 'documentation'; p.appendChild(a);
+      p.appendChild(document.createTextNode('.'));
+      box.appendChild(p);
+    }
   }));
 
   (function dynamic() {
@@ -135,7 +200,7 @@
       var units = DT.collect(box);
       DT.state.mode = 'dual';
       if (DT.beginRenderCache) DT.beginRenderCache();
-      units.forEach(function (u) { DT.inject(u, '循环译文', 'zh-CN'); });
+      units.forEach(function (u, i) { DT.inject(u, fakeTranslation(u, i), 'zh-CN'); });
       if (DT.endRenderCache) DT.endRenderCache();
       DT.restore();
     }
@@ -146,6 +211,7 @@
   })();
 
   out.longTasks = longTasks;
+  out.networkAttempts = window.__benchNetworkAttempts;
   result.textContent = JSON.stringify(out);
 })();
 </script></body></html>

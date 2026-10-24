@@ -1,0 +1,381 @@
+{
+  "order": [
+    "0.11.7 frozen a909ec5",
+    "0.12.0 working tree snapshot"
+  ],
+  "benchmarkSha256": "9bac49480f0ad62f7f0dcddece755a0e4a4a818e1045986b3b9eda349b46b6cd",
+  "networkAttempts": [
+    0,
+    0
+  ],
+  "warnings": [
+    [
+      "paragraphs-3000-with-ruby collect 361.5ms > 100ms"
+    ],
+    [
+      "paragraphs-3000-with-ruby collect 394.2ms > 100ms"
+    ]
+  ],
+  "cases": [
+    {
+      "name": "short-paragraph",
+      "units": [
+        1,
+        1
+      ],
+      "collectMs": [
+        3.6,
+        3.8
+      ],
+      "injectMs": [
+        0.7,
+        0.6
+      ],
+      "recollectMs": [
+        0.1,
+        0.2
+      ],
+      "recollectUnits": [
+        0,
+        0
+      ],
+      "addedNodes": [
+        2,
+        2
+      ],
+      "wireChars": [
+        53,
+        53
+      ],
+      "sourceChars": [
+        53,
+        53
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    },
+    {
+      "name": "single-10000-chars",
+      "units": [
+        1,
+        1
+      ],
+      "collectMs": [
+        3.5,
+        4.6
+      ],
+      "injectMs": [
+        0.5,
+        0.7
+      ],
+      "recollectMs": [
+        0.2,
+        0.2
+      ],
+      "recollectUnits": [
+        0,
+        0
+      ],
+      "addedNodes": [
+        2,
+        2
+      ],
+      "wireChars": [
+        10000,
+        10000
+      ],
+      "sourceChars": [
+        10000,
+        10000
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    },
+    {
+      "name": "single-100000-chars",
+      "units": [
+        1,
+        1
+      ],
+      "collectMs": [
+        22.5,
+        27.8
+      ],
+      "injectMs": [
+        3.1,
+        3.2
+      ],
+      "recollectMs": [
+        2.4,
+        1
+      ],
+      "recollectUnits": [
+        0,
+        0
+      ],
+      "addedNodes": [
+        2,
+        2
+      ],
+      "wireChars": [
+        100000,
+        100000
+      ],
+      "sourceChars": [
+        100000,
+        100000
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    },
+    {
+      "name": "single-500000-chars",
+      "units": [
+        1,
+        1
+      ],
+      "collectMs": [
+        78,
+        95
+      ],
+      "injectMs": [
+        11.8,
+        11.8
+      ],
+      "recollectMs": [
+        4.2,
+        4.4
+      ],
+      "recollectUnits": [
+        0,
+        0
+      ],
+      "addedNodes": [
+        2,
+        2
+      ],
+      "wireChars": [
+        500000,
+        500000
+      ],
+      "sourceChars": [
+        500000,
+        500000
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    },
+    {
+      "name": "paragraphs-1000-with-ruby",
+      "units": [
+        1000,
+        1000
+      ],
+      "collectMs": [
+        63.1,
+        66.2
+      ],
+      "injectMs": [
+        7.7,
+        7.9
+      ],
+      "recollectMs": [
+        3.3,
+        3.4
+      ],
+      "recollectUnits": [
+        0,
+        0
+      ],
+      "addedNodes": [
+        2000,
+        2000
+      ],
+      "wireChars": [
+        46890,
+        46890
+      ],
+      "sourceChars": [
+        46890,
+        46890
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    },
+    {
+      "name": "paragraphs-3000-with-ruby",
+      "units": [
+        3000,
+        3000
+      ],
+      "collectMs": [
+        361.5,
+        394.2
+      ],
+      "injectMs": [
+        23.3,
+        21.1
+      ],
+      "recollectMs": [
+        6.6,
+        7.4
+      ],
+      "recollectUnits": [
+        0,
+        0
+      ],
+      "addedNodes": [
+        6000,
+        6000
+      ],
+      "wireChars": [
+        142890,
+        142890
+      ],
+      "sourceChars": [
+        142890,
+        142890
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    },
+    {
+      "name": "dom-10000-nodes",
+      "units": [
+        3000,
+        3000
+      ],
+      "collectMs": [
+        45.7,
+        46.5
+      ],
+      "injectMs": [
+        222.2,
+        233.6
+      ],
+      "recollectMs": [
+        39.3,
+        43.7
+      ],
+      "recollectUnits": [
+        3000,
+        3000
+      ],
+      "addedNodes": [
+        5142,
+        5142
+      ],
+      "wireChars": [
+        14781,
+        14781
+      ],
+      "sourceChars": [
+        14781,
+        14781
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    },
+    {
+      "name": "formatted-article-300",
+      "units": [
+        300,
+        300
+      ],
+      "collectMs": [
+        6.6,
+        9.3
+      ],
+      "injectMs": [
+        18.6,
+        26
+      ],
+      "recollectMs": [
+        1,
+        1
+      ],
+      "recollectUnits": [
+        0,
+        0
+      ],
+      "addedNodes": [
+        600,
+        2400
+      ],
+      "wireChars": [
+        20700,
+        26100
+      ],
+      "sourceChars": [
+        20700,
+        20700
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    },
+    {
+      "name": "academic-mixed-150",
+      "units": [
+        150,
+        150
+      ],
+      "collectMs": [
+        7,
+        8
+      ],
+      "injectMs": [
+        9.3,
+        12.2
+      ],
+      "recollectMs": [
+        0.6,
+        0.7
+      ],
+      "recollectUnits": [
+        0,
+        0
+      ],
+      "addedNodes": [
+        1200,
+        1650
+      ],
+      "wireChars": [
+        16092,
+        18792
+      ],
+      "sourceChars": [
+        13392,
+        13392
+      ],
+      "restoreOk": [
+        true,
+        true
+      ]
+    }
+  ],
+  "dynamicMs": [
+    446.2,
+    451.7
+  ],
+  "cyclesMs": [
+    45.8,
+    48.7
+  ],
+  "scope": "One deterministic headless Chrome sample per revision, direct page harness; no paid model calls. Same current benchmark frozen for both revisions. Includes MutationObserver instrumentation overhead. Cache/request lifecycle is tested separately by extension E2E. Direction/layout regression is in e2e-inline-layout, not this historical benchmark."
+}

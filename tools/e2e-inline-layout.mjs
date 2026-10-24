@@ -17,9 +17,14 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-inline-layout-'));
 const html = fs.readFileSync(path.join(ROOT, 'selftest/index.html'), 'utf8');
 const template = /<template id="tpl-inline-layout">([\s\S]*?)<\/template>/.exec(html);
 if (!template) throw new Error('Missing inline layout fixture');
+const fidelityHtml = fs.readFileSync(path.join(ROOT, 'test/fixtures/inline-fidelity.html'), 'utf8');
+const fidelityStyle = /<style>([\s\S]*?)<\/style>/.exec(fidelityHtml);
+const fidelityMain = /<main id="inline-fidelity-fixture">([\s\S]*?)<\/main>/.exec(fidelityHtml);
+if (!fidelityStyle || !fidelityMain) throw new Error('Missing inline fidelity fixture');
 const page = (old) => '<!doctype html><html lang="en"><meta charset="utf-8"><title>Local inline layout fixture</title><style>body{margin:24px}.fx-inline-layout{max-width:100%}</style><body>' +
   '<template id="tpl-inline-layout">' + template[1] + '</template>' +
-  '<script src="/content/core.js"></script><script src="/content/units.js"></script><script src="' + (old ? '/baseline-dom.js' : '/content/dom.js') + '"></script><script src="/selftest/inline-layout.js"></script></body></html>';
+  '<template id="tpl-inline-fidelity"><style>' + fidelityStyle[1] + '</style><main id="inline-fidelity-fixture">' + fidelityMain[1] + '</main></template>' +
+  '<script src="/lib/inline-protocol.js"></script><script src="/content/core.js"></script><script src="/content/units.js"></script><script src="' + (old ? '/baseline-dom.js' : '/content/dom.js') + '"></script><script src="/content/direction.js"></script><script src="/selftest/inline-layout.js"></script><script src="/selftest/inline-fidelity.js"></script></body></html>';
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   if (url.pathname === '/layout' || url.pathname === '/baseline') {
@@ -106,6 +111,9 @@ try {
     await send('Emulation.setPageScaleFactor', { pageScaleFactor: scenario.pageScale }, tab.sessionId);
     await evaluate(tab.sessionId, 'document.documentElement.style.zoom=' + scenario.zoom);
     const result = await evaluate(tab.sessionId, 'runInlineLayoutChecks({long:true})');
+    const fidelity = await evaluate(tab.sessionId, 'runInlineFidelityChecks()');
+    result.checks = result.checks.concat(fidelity.checks);
+    result.fidelity = { evidence: fidelity.evidence, metrics: fidelity.metrics };
     const failed = result.checks.filter((item) => !item.ok);
     report.scenarios.push({ ...scenario, ...result });
     console.log((failed.length ? 'FAIL ' : 'PASS ') + scenario.width + 'px / CSS zoom ' + scenario.zoom + ' / device scale ' + scenario.deviceScale + ' / page scale ' + scenario.pageScale + ': ' + (result.checks.length - failed.length) + '/' + result.checks.length);

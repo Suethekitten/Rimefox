@@ -2,8 +2,7 @@
 
 > 给接手翻译引擎的 Agent / 协作者。先读 [AGENTS.md](../AGENTS.md)、[HANDOFF.md](../HANDOFF.md) 和本文。
 > 本文只讲**翻译引擎**：从网页收集文字 → 段落 / 句子 → API 请求分片 → 渲染写回 → 悬停 → 还原的整条链路。
-> 最近更新：0.9.6（2026-10-20）。0.9.6 统一了普通 / 结构化对齐的目标语言约束（修掉日译英变中文），新增保守的目标语言缓存校验；0.9.2 修了真实青空文库《罗生门》的分段与仅译文空白 / 注音残留；0.9.1 把「一个元素 = 一个翻译单元」的松散模型换成了
-> **ParagraphUnit + SentenceUnit + Alignment + RenderTransaction**；旧文档里「所有译文 append 到元素末尾」的说法只适用于独占元素的段落。
+> 最近更新：0.12.0（2026-10-24），通用行内格式作为 ParagraphUnit / 混合原子 / RenderTransaction 的组合扩展，协议定义见 §3.5；0.11.7 输入框、术语并发和端点缓存隔离保持。
 
 ---
 
@@ -213,7 +212,7 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
   模型合并 / 拆分行时依次填写，多出的并进最后一行，多余的行清空并折叠它自己的换行；`aligned` 记录是否逐行对应。
 - **只改本段落的行**：段落之间的空行是别人的锚点，绝不折叠。
 - 混合行内内容（文献引用、图表链接、普通链接、提及、notranslate、Ruby 夹在正文里）：原子原地不动，原子外的文字清空后，译文作为新文本节点插在原子之间、永远不进链接（`injectMixed`：词级 / 句级 / 漏标记按原句恢复，`<br>` 与 pre-wrap 的 `\n` 分行逐行对齐）；Ruby 整体当原子，中文不写进 rt/rp；结构不支持或行数对不上时保持原文并写明注入结果，仅译文不降级双语。见 [HANDOFF §5.2.1](../HANDOFF.md) 的「文献引用」与「注入结果分类」。
-- 普通行内链接：内容区域里只要普通文字和链接混排，链接就作为原子，中文正文写在链接外；整段链接 / 导航 / 按钮保持原行为。普通链接文字默认保留，图表 / 补充材料等可靠标签本地化。`@username` 提及链接作为保留区，用户名链接保持原样。
+- 普通行内链接：内容区域里只要普通文字和链接混排，链接就作为原子，中文正文写在链接外；整段链接 / 导航 / 按钮保持原行为。简单 Text 链接通过 v1 可翻译标签，复杂标签保守保留，图表 / 补充材料可靠标签仍本地化。`@username` 提及链接作为保留区，用户名链接保持原样。
 - **稳定正文 / 无双语回退**：仅译文下 `hasUnsafeInlineLink` 不再设置 `linkFallback='dual'`；无法安全重建时保持原文并报 `unsafe-structure`。`[8]` / `［9］` 等本地数字引用链接、上标数字链接和参考文献目标数字链接进入 `keep`，普通 “section 1” 数字锚点不误判。
 - **上下文防抖**：医学文档快照从 `DT.replacedOf(el).src` 读原文，只有网站自身的标题 / 章节 mutation 才 `contextChanged`；own 译文、方向壳和移动的原文本不触发补扫 / startOver。`DT.debugStats` 记录 startOver / restore / contextChanged / incremental / injectDual / linkFallback 计数，便于本地复现，不输出正文。
 - **双向排版**：`content/direction.js` 从目标 BCP 47 语言和原始 DOM 的 `dir` / computed `direction` / 文档语言判断方向。双语译文节点独立设置 `dir` / `lang` / inline direction + `unicode-bidi:isolate`；完整仅译文块用事务改父块方向，部分 / 共享容器把写入的文本节点移进 `data-dt-dir="wrap"` 隔离壳（`move` + `insert` 事务）。混合段落的每段新译文单独隔离，引用 / 链接 / Ruby 原子不改。块方向、文本节点移动、壳都由 RenderTransaction 还原；不能对 html/body/article 全局写 direction。
@@ -233,6 +232,22 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 - 绝不把整句译文写进 `ruby/rb/rt/rp`。未翻译段落的 `rt` 不会被动到（不是全局隐藏所有 `<rt>`）。
 - 还原：事务逆序恢复文本、`display`、属性，移除译文节点；关闭翻译 / 模式切换 / 重译都走同一条路。
 - 已知取舍：纯 Ruby 段落的译文仍用独立容器，不再按基字逐词替换；Ruby 与引用 / 链接混排时 `<ruby>` 整体作为原子保留，基字本身不翻译，周围正文重建；竖排（縦書き）和特殊 ruby 布局未验证。
+
+### 3.5 有限行内格式协议 v1
+
+`attachInline` 在本地保留 `{id,start,end,el,kind,tag,style}`，不序列化网页 HTML。strong/b/em/i/span/code/small/sup/sub 的有限语义差异写成 `<fN>文字</fN>`，模型仅重排/翻译文字与受控编号；DOM 从本地描述创建有限标签和样式，不解析模型 HTML。格式范围须处于同一行且有可靠源字符映射，整段统一样式继续由原字体策略处理，首字下沉不作为局部强调。
+
+- 不可变原子沿用 `<kN>…</kN>`；普通链接只有单个 Text 子节点时，标签可用 `<kN><fM>label</fM></kN>`，其余原子保持源内容不变。
+- `kind: protect` 的 wire 是空 `<kN></kN>`；原始节点和文字留本地，注入、悬停、去重经 `inlineText` 恢复。引用/提及/Ruby 及复杂链接标签仍可外发，不能把所有保留原子称为隐私保护。专业元数据跳过保护节点与祖先；有保护内容或启用 Shadow 适配时省略标题，避免部分名称从 title 旁路泄露。
+- `lib/inline-protocol.js` 是唯一实现，classic 内容脚本与 `lib/inline.js` ESM wrapper 共用；`inspect(source,target)` 校验唯一性、配对、父子关系、原子字节和虚构 HTML，返回 `stripped/ranges/atoms`。兄弟格式允许随目标语序重排，不能跨嵌套或凭长度猜对应。
+- 所有 f 均缺失而 k 仍可信时只显示普通译文，不强贴强调，也不缓存；部分缺失、错误嵌套、虚构标记或原子内容改变则拒绝。源文本含保留标记字面量时关闭新格式映射；若同时有 protect，固定本地失败且零请求。
+- `translate` 消息仅 opt-in 单元带 `inlineProtocol:'v1'`，不与普通单元混批；同可见优先级内补齐兼容小批，避免交错格式把每段变成一次请求。`splitLong(text,max,inlineProtocol)` 只在 opt-in 时识别 f，k 与嵌套格式/原子内换行都不可拆。后台提示词身份增加 `:inline-v1`，保留既有端点、模型、目标语言、术语和专业 scope；不清空用户全部缓存。
+- 用户术语、术语说明、医学词和缓存指纹按共享解析器去标记的可见文字匹配；跨 f 边界不能漏词，空保护原子不从本地原文恢复。专业上下文的缩写采用同样的可见文字。
+- 后台验证缓存、新响应及严格复核候选；坏缓存定向移除，新坏结果不缓存、不追加结构重试。`inlineErrors[i]` 回到调度后计 renderFailed，清掉同段尚未发出的切片，未变更段落不再请求。已经发出的并发切片仍受既有代际取消边界限制。
+- DOM 再次预检后才写入；`injectMixed` 在既有 gap 中构建语义壳，原链接仅事务改标签 Text，原子不移动。失败回滚新增事务、注册和渲染记录；活跃注入期间暂停压缩以维持 checkpoint。纯 Ruby 继续独立译文容器，不把译文写进 rt/rp。
+- 双语语义壳继承原站字体；仅译文继续目标文字字体适配，不把其字体壳套到双语。格式壳参与 own 节点识别、恢复与目标文字变更检测；混合悬停只映射本单元目标节点。
+
+限制：结构校验只能证明标记关系可靠，不能证明模型将强调赋给了语义正确的译词；真实模型质量仍需人工抽样。复杂嵌套链接不改标签，跨行或过大局部格式保守放弃；无法安全放置原子、分行失配或源标记冲突可保留原文并给出失败原因，不能偷偷改为双语。
 
 ---
 
@@ -274,7 +289,7 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 ## 6. 请求、缓存与性能
 
 - `splitLong` 只负责请求长度；一个 ParagraphUnit 可以对应多个请求片段，最终仍写回该段落的唯一渲染位置。
-- `align: true` 只改变**响应格式**，不增加请求；对齐旁路表以缓存键为键，最多 4000 条，SW 重启丢失只是降级。
+- v1 格式单元使用本地句子对齐，不追加模型对齐字段；其余 `align: true` 只改变**响应格式**，不增加请求；对齐旁路表以缓存键为键，最多 4000 条，SW 重启丢失只是降级。
 - 同接口身份下的旧字符串译文仍可命中；模型不遵守 `parts` 时 `parseAlignedArray` 退回 `parseArray`。
 - 专业模式在后台结果处理层增加可选 `validations`，不参与 DOM 注入规则。标准/快速不增加模型请求，严格模式仅有限复核高风险片段；更换译文会丢弃旧模型对齐偏移。专业缓存上下文与费用边界见 [专业引擎](PROFESSIONAL-TRANSLATION.md)。
 - 脱敏 / 换行规范化改变了译文字符 → 对应当前这条的 `parts` 被丢弃（偏移不再可靠），不影响译文显示。
@@ -302,7 +317,11 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 ## 7. 测试
 
 ```bash
-node --test test/*.test.mjs          # CI 发版前同一条
+for f in test/*.test.mjs; do node "$f" || exit 1; done
+node tools/e2e-inline-layout.mjs      # 共用fixture，视口/缩放与异常协议回归
+node tools/stability-audit.mjs --json /tmp/rimefox-stability.json
+# 可比历史：同一bench加载指定提交的冻结内容脚本
+node tools/stability-audit.mjs --ref a909ec5 --json /tmp/rimefox-baseline.json
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp）
 # 自检页（本机 headless Chrome 需要 --no-sandbox）
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \

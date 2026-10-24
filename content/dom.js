@@ -71,6 +71,8 @@
   var savedRecord = new WeakMap(); // 我们写过的文本节点 → 替换型记录（O(1) 找同段）
   var targetRegistry = new Map(); // data-dt-unit → 真正的译文节点（识别克隆副本）
   var tx = [];
+  var renderFrames = 0;
+  var compactPending = false;
   var nodeUnit = new WeakMap();
   var elUnits = new WeakMap(); // 共用容器的多个段落：元素 → 单元列表（悬停兜底解析）
   var ownNodes = new WeakSet();
@@ -91,6 +93,7 @@
         node.hasAttribute('data-dt-ui') ||
         node.hasAttribute('data-dt-dir') ||
         node.hasAttribute('data-dt-font') ||
+        node.hasAttribute('data-dt-format') ||
         node.hasAttribute('data-dt-shadow-style')
       );
     }
@@ -185,6 +188,7 @@
           fontWeight: cs.fontWeight,
           fontStyle: cs.fontStyle,
           fontFamily: cs.fontFamily,
+          verticalAlign: cs.verticalAlign,
           letterSpacing: cs.letterSpacing,
           textTransform: cs.textTransform,
           color: cs.color,
@@ -204,7 +208,7 @@
     if (!el || el.nodeType !== 1) return true;
     if (SKIP_TAGS[tagOf(el)]) return true;
     if (el.hasAttribute('data-dt-target')) return true;
-    if (el.hasAttribute('data-dt-dir')) return true;
+    if (el.hasAttribute('data-dt-dir') || el.hasAttribute('data-dt-format')) return true;
     if (!recheck && el.hasAttribute('data-dt-src')) return true; // 已翻译过
     if (el.closest && el.closest('[data-dt-ui]')) return true;
     if (el.getAttribute('translate') === 'no') return true;
@@ -244,10 +248,10 @@
       for (var i = 0; i < kids.length; i += 1) {
         var kid = kids[i];
         if (kid.nodeType === 3) {
-          if (kid.nodeValue) out.push({ node: kid, keep: keep });
+          if (kid.nodeValue && !(ownNodes.has(kid) && DT.isOwnWrite(kid))) out.push({ node: kid, keep: keep });
         } else if (kid.nodeType === 1) {
           if (kid.hasAttribute('data-dt-target')) continue;
-          if (kid.hasAttribute('data-dt-ui') || kid.hasAttribute('data-dt-dir')) continue;
+          if (kid.hasAttribute('data-dt-ui') || kid.hasAttribute('data-dt-dir') || kid.hasAttribute('data-dt-format')) continue;
           var tag = tagOf(kid);
           if (NON_TEXT_TAGS[tag]) continue;
           if (tag === 'BR') {
@@ -751,7 +755,10 @@
   // inside：hasKeepInside(el) 的结果，同一容器的各段共用（每段都 querySelector 一遍，长容器会变成 O(n²)）
   function attachKeep(unit, el, inside) {
     unit.keep = inside ? keepRangesOf(el, unit.map.chars, unit.text, inside === 'links') : [];
-    if (!unit.keep.length) return true;
+    if (!unit.keep.length) {
+      attachInline(unit);
+      return true;
+    }
     var rest = '';
     var at = 0;
     unit.keep.forEach(function (k) {
@@ -760,7 +767,161 @@
     });
     if (!/\S/.test(rest + unit.text.slice(at))) return false;
     unit.wire = DT.units.keepWrap(unit.text, unit.keep);
+    attachInline(unit);
     return true;
+  }
+
+  // 只复制有限的语义差异。原网页属性、类名、字体族和 HTML 不进入模型或新格式壳。
+  var FORMAT_TAGS = { STRONG: 1, B: 1, EM: 1, I: 1, SPAN: 1, SMALL: 1, SUP: 1, SUB: 1, CODE: 1 };
+  function formatStyle(el) {
+    var tag = tagOf(el);
+    if (!FORMAT_TAGS[tag]) return null;
+    var parent = el.parentElement;
+    var cs = styleOf(el);
+    var base = parent && styleOf(parent);
+    if (!cs || !base) return null;
+    var out = {};
+    if (cs.fontWeight !== base.fontWeight) out.weight = cs.fontWeight;
+    if (cs.fontStyle !== base.fontStyle) out.fontStyle = cs.fontStyle;
+    var size = parseFloat(cs.fontSize);
+    var baseSize = parseFloat(base.fontSize);
+    var ratio = baseSize > 0 ? size / baseSize : 1;
+    if (ratio >= 0.5 && ratio <= 1.5 && Math.abs(ratio - 1) > 0.01) out.size = String(ratio) + 'em';
+    if (cs.verticalAlign !== base.verticalAlign && /^(super|sub)$/.test(cs.verticalAlign)) out.vertical = cs.verticalAlign;
+    if (tag === 'SMALL' && !out.size) out.size = '0.833333em';
+    if (tag === 'SUP' || tag === 'SUB') {
+      out.size = '0.833333em';
+      out.vertical = tag === 'SUP' ? 'super' : 'sub';
+    }
+    if (tag === 'CODE') out.code = true;
+    // 某些局部加粗仅由专有字体名表达；传递语义，不传递不兼容字体。
+    if (!out.weight && cs.fontFamily !== base.fontFamily && /bold|black|heavy|semibold|demi/i.test(cs.fontFamily)) out.weight = '700';
+    return Object.keys(out).length ? out : null;
+  }
+
+  function attachInline(unit) {
+    if (/[<＜]\s*\/?\s*[kf]\s*\d/i.test(unit.text)) {
+      unit.formats = [];
+      if ((unit.keep || []).some(function (k) { return k.kind === 'protect'; })) {
+        // A literal source marker cannot safely share the reserved namespace. Never
+        // fall back to the old wire, which would expose protected text to the API.
+        unit.inlineIssue = 'reserved-marker-source';
+        unit.wire = '';
+      } else unit.formatMode = 'source-marker-opt-out';
+      return;
+    }
+    var formats = [];
+    var candidates = new Map();
+    var keep = unit.keep || [];
+    var nodeMemo = new Map();
+    var chars = unit.map.chars || [];
+    chars.forEach(function (c, index) {
+      if (!c || !c.node) return;
+      if (!nodeMemo.has(c.node)) {
+        var list = [];
+        for (var p = c.node.parentElement; p && p !== unit.el; p = p.parentElement) {
+          if (keepIndexOf(unit, p) >= 0 || (p.closest && p.closest('ruby,rt,rp'))) continue;
+          if (FORMAT_TAGS[tagOf(p)] && !isDropcapNode(c.node)) list.push(p);
+        }
+        nodeMemo.set(c.node, list);
+      }
+      nodeMemo.get(c.node).forEach(function (el) {
+        var range = candidates.get(el);
+        if (!range) { range = { start: index, end: index + 1, el: el }; candidates.set(el, range); }
+        else range.end = index + 1;
+      });
+    });
+    candidates.forEach(function (range) {
+      if (range.start === 0 && range.end === unit.text.length) return;
+      if (range.end - range.start > 600 || unit.text.slice(range.start, range.end).indexOf('\n') >= 0) return;
+      // 一个格式壳若包含不可改原子，保留原子机制优先，不能把错误范围贴到原子上。
+      if (keep.some(function (k) { return k.start < range.end && k.end > range.start; })) return;
+      var style = formatStyle(range.el);
+      if (!style) return;
+      range.kind = 'format';
+      range.tag = tagOf(range.el).toLowerCase();
+      range.style = style;
+      range.parent = range.el.parentNode;
+      range.next = sourceSibling(range.el, 'nextSibling');
+      range.semantic = JSON.stringify(style);
+      range.stamp = range.el.getAttribute('style') + '|' + range.el.getAttribute('class');
+      formats.push(range);
+    });
+    keep.forEach(function (k, index) {
+      if (k.kind !== 'link' || k.el.childNodes.length !== 1 || k.el.firstChild.nodeType !== 3) return;
+      if (k.text.length > 600 || k.text.indexOf('\n') >= 0 || isProtectedEl(k.el)) return;
+      formats.push({ start: k.start, end: k.end, el: k.el, kind: 'link', tag: 'a', style: {}, linkIndex: index,
+        parent: k.el.parentNode, next: sourceSibling(k.el, 'nextSibling'), stamp: k.el.getAttribute('style') + '|' + k.el.getAttribute('class') });
+    });
+    formats.sort(function (a, b) {
+      if (a.start !== b.start) return a.start - b.start;
+      if (a.end !== b.end) return b.end - a.end;
+      if (a.el.contains(b.el)) return -1;
+      if (b.el.contains(a.el)) return 1;
+      return 0;
+    });
+    if (formats.length > 120) formats = [];
+    formats.forEach(function (f, i) { f.id = i + 1; });
+    unit.formats = formats;
+    if (formats.length || keep.some(function (k) { return k.kind === 'protect'; })) {
+      var topology = new Set();
+      unit.inlineSourceTopology = [];
+      chars.forEach(function (c) {
+        if (!c || !c.node || topology.has(c.node)) return;
+        topology.add(c.node);
+        unit.inlineSourceTopology.push({ node: c.node, parent: c.node.parentNode,
+          next: sourceSibling(c.node, 'nextSibling'), previous: sourceSibling(c.node, 'previousSibling') });
+      });
+      unit.inlineProtocol = 'v1';
+      unit.wire = DT.units.inlineWrap(unit.text, keep, formats);
+    }
+  }
+
+  function inlineProtocol() {
+    return typeof globalThis !== 'undefined' && globalThis.__RimefoxInline;
+  }
+
+  function inspectInline(unit, raw) {
+    var protocol = inlineProtocol();
+    if (!protocol || !protocol.inspect) return { ok: false, reason: 'protocol-unavailable' };
+    return protocol.inspect(unit.wire, String(raw || ''));
+  }
+
+  function inlineLabel(unit, result, index) {
+    var original = unit.keep[index];
+    var format = (unit.formats || []).filter(function (f) { return f.linkIndex === index; })[0];
+    if (!format || result.formatMissing) return original.text;
+    var atom = result.atoms.filter(function (a) { return a.id === index + 1; })[0];
+    return atom ? atom.text : original.text;
+  }
+
+  // 主调度、对齐和去重使用页面最终会显示的文字；保护区在本地恢复，不来自模型。
+  DT.inlineText = function (unit, raw) {
+    if (!unit || unit.inlineProtocol !== 'v1') return raw;
+    var result = inspectInline(unit, raw);
+    if (!result.ok) return '';
+    var out = '';
+    var pos = 0;
+    result.atoms.forEach(function (atom) {
+      out += result.stripped.slice(pos, atom.at);
+      var index = atom.id - 1;
+      var k = unit.keep[index];
+      if (k) out += k.kind === 'link' ? inlineLabel(unit, result, index) : k.text;
+      pos = atom.at;
+    });
+    return out + result.stripped.slice(pos);
+  };
+
+  function inlineMetadataChanged(unit) {
+    if ((unit.inlineSourceTopology || []).some(function (snap) {
+      return snap.node.parentNode !== snap.parent || sourceSibling(snap.node, 'nextSibling') !== snap.next ||
+        sourceSibling(snap.node, 'previousSibling') !== snap.previous;
+    })) return true;
+    return (unit.formats || []).some(function (f) {
+      return !f.el.isConnected || f.el.parentNode !== f.parent || sourceSibling(f.el, 'nextSibling') !== f.next || !unit.el.contains(f.el) ||
+        (f.kind !== 'link' && f.semantic !== JSON.stringify(formatStyle(f.el))) ||
+        f.stamp !== f.el.getAttribute('style') + '|' + f.el.getAttribute('class');
+    });
   }
 
   // 藏起来会让页面少东西的保留元素：图标、图片、链接、按钮。兜底时宁可留着（文字重复一次）
@@ -1117,6 +1278,19 @@
     return out;
   }
 
+  // Ignore generated pieces when recording source topology. A website may add or
+  // move nodes without changing the values of any previously collected Text node.
+  function sourceSibling(node, side) {
+    var next = node && node[side];
+    while (next) {
+      var generated = next.nodeType === 3 ? ownNodes.has(next) : next.nodeType === 1 &&
+        (next.hasAttribute('data-dt-target') || next.hasAttribute('data-dt-format') || next.hasAttribute('data-dt-dir') || next.hasAttribute('data-dt-font'));
+      if (!generated) return next;
+      next = next[side];
+    }
+    return null;
+  }
+
   function fillSnapshot(unit) {
     var snap = [];
     var seen = new Set();
@@ -1155,13 +1329,14 @@
       for (var i = 0; i < kids.length; i += 1) {
         var kid = kids[i];
         if (kid.nodeType === 3) {
+          if (ownNodes.has(kid) && DT.isOwnWrite(kid)) continue;
           var v = kid.nodeValue || '';
           for (var c = 0; c < v.length; c += 1) mix(v.charCodeAt(c));
           chars += v.length;
           continue;
         }
         if (kid.nodeType !== 1) continue;
-        if (kid.hasAttribute('data-dt-target') || kid.hasAttribute('data-dt-ui') || kid.hasAttribute('data-dt-dir')) continue;
+        if (kid.hasAttribute('data-dt-target') || kid.hasAttribute('data-dt-ui') || kid.hasAttribute('data-dt-dir') || kid.hasAttribute('data-dt-format')) continue;
         var tag = tagOf(kid);
         if (NON_TEXT_TAGS[tag]) continue;
         if (tag === 'BR') {
@@ -2114,6 +2289,8 @@
   // 局部撤销（模式切换 / 站点改写 / 节点删除）后，事务里的旧 op 不能再留着：
   // 它们仍引用已经恢复或脱离页面的节点，长时间运行会让 DT.tx 无限增长。
   function compactTx() {
+    if (renderFrames) { if (tx.length >= 4000) compactPending = true; return; }
+    compactPending = false;
     if (tx.length < 4000) return;
     var kept = [];
     for (var i = 0; i < tx.length; i += 1) {
@@ -2213,6 +2390,12 @@
     var saved = rec.saved || [];
     for (var i = 0; i < saved.length; i += 1) {
       if (!saved[i].node.isConnected || saved[i].node.nodeValue !== saved[i].wrote) return false;
+    }
+    if (rec.unit && rec.unit.targetValues) {
+      for (var tv = 0; tv < rec.unit.targetValues.length; tv += 1) {
+        var targetValue = rec.unit.targetValues[tv];
+        if (!targetValue.node.isConnected || targetValue.node.nodeValue !== targetValue.value) return false;
+      }
     }
     if (rec.mode === 'cited' && rec.unit && rec.unit.citedInserted) {
       for (var c = 0; c < rec.unit.citedInserted.length; c += 1) {
@@ -2334,6 +2517,11 @@
     var sourceEl = unit.el;
     var node = makeNode(sourceEl, text, lang, !unit.whole, 'dual');
     if (cited) text = fillCited(node, unit, cited);
+    else if (unit.inlineResult) {
+      node.textContent = '';
+      appendInlineRange(node, unit, unit.inlineResult.stripped, 0, unit.inlineResult.stripped.length);
+      text = node.textContent;
+    }
     node.setAttribute('data-dt-unit', unit.id);
     registerTarget(node, unit.id);
     nodeUnit.set(node, unit);
@@ -2701,7 +2889,7 @@
     var boundary = null;
     var cur = slot.parent;
     while (cur && cur !== unit.el && cur.nodeType === 1) {
-      if (styleDiffers(cur, base)) boundary = cur;
+      if (styleDiffers(cur, base) || (unit.formats || []).some(function (f) { return f.kind !== 'link' && f.el === cur; })) boundary = cur;
       cur = cur.parentNode;
     }
     if (!boundary || styleBoundaryIsWhole(unit, boundary) || !boundary.parentNode) return slot;
@@ -2821,7 +3009,7 @@
   //   图表链接的标记丢了时按它的标签（Fig. 1 / 图 1）在译文里唯一定位。定不下来就失败（保持原文、报原因），绝不退回双语。
   // 双语（含绝对定位 / 界面区域导致的 replaceMode）：保持 keepPlan / 副本逻辑
   function injectCited(unit, marks, plain, lang, area, replaceMode) {
-    if (replaceMode && DT.state.mode === 'translation') return injectMixed(unit, marks, area);
+    if (replaceMode && (DT.state.mode === 'translation' || unit.inlineResult)) return injectMixed(unit, marks, area);
     if (replaceMode) {
       var single = (unit.groups.filled || []).length < 2 && !(unit.ruby && unit.ruby.length);
       var place = single ? DT.units.keepPlacement(marks.stripped, marks.at) : null;
@@ -3010,7 +3198,7 @@
 
   function injectMixed(unit, marks, area) {
     var keep = unit.keep || [];
-    if (!keep.length) return failInject(unit, 'unsafe-structure', 'no-atoms');
+    if (!keep.length && !(unit.formats && unit.formats.length)) return failInject(unit, 'unsafe-structure', 'no-atoms');
     if (unit.ruby && unit.ruby.length && !keep.some(isRubyKeep)) return failInject(unit, 'unsafe-structure', 'ruby');
     var groups = (unit.groups && unit.groups.filled) || [];
     var multi = groups.length > 1;
@@ -3020,23 +3208,25 @@
     }
     var fixed = recoverXrefMarks(unit, marks);
     var stripped = fixed.stripped;
-    var srcLines = multi ? unit.text.split('\n') : [unit.text];
-    // 单行段落：模型多给的换行当空格（逐字替换，长度不变，落点不偏）
-    var dstLines = multi ? stripped.split('\n') : [stripped.replace(/\n/g, ' ')];
-    if (!multi) stripped = dstLines[0];
+    var srcOff = [];
+    var dstOff = [];
+    function filledLines(value, offsets) {
+      var lines = [];
+      var off = 0;
+      value.split('\n').forEach(function (line) {
+        if (line.trim()) { lines.push(line); offsets.push(off); }
+        off += line.length + 1;
+      });
+      return lines;
+    }
+    var srcLines = multi ? filledLines(unit.text, srcOff) : [unit.text];
+    // 空行不生成独立翻译单元，但仍留在真实文本偏移及原始换行结构中。
+    var dstLines = multi ? filledLines(stripped, dstOff) : [stripped.replace(/\n/g, ' ')];
+    if (!multi) { stripped = dstLines[0]; srcOff = [0]; dstOff = [0]; }
     if (multi && (srcLines.length !== groups.length || dstLines.length !== groups.length)) {
       return failInject(unit, 'invalid-placement', 'line-count');
     }
-    var srcOff = [];
-    var dstOff = [];
-    var so = 0;
-    var dOff = 0;
-    for (var l = 0; l < srcLines.length; l += 1) {
-      srcOff.push(so);
-      dstOff.push(dOff);
-      so += srcLines[l].length + 1;
-      dOff += dstLines[l].length + 1;
-    }
+    var l;
     // 每个原子属于原文的哪一行；模型把标记放到别的行里就当丢了，在它自己那一行里恢复
     var lineOf = keep.map(function (k) {
       var li = 0;
@@ -3077,15 +3267,21 @@
       });
     }
     var texts = [];
+    var textStarts = [];
+    var textEnds = [];
     var from = 0;
     seq.forEach(function (item, n) {
       var seg = stripped.slice(from, Math.max(from, item.pos));
       var prev = n > 0 ? seq[n - 1] : null;
       if (prev && prev.keep != null && item.keep != null && !/\S/.test(seg)) seg += citeSeparator(unit, prev.keep, item.keep);
       texts.push(seg);
+      textStarts.push(from);
+      textEnds.push(Math.max(from, item.pos));
       from = Math.max(from, item.br || item.nl ? item.pos + 1 : item.pos);
     });
     texts.push(stripped.slice(from));
+    textStarts.push(from);
+    textEnds.push(stripped.length);
 
     // 先计划、再写入。多个原子共享同一包装时，固定的 before 让外移后的文字仍按页面顺序追加。
     var slotMemo = new Map();
@@ -3096,8 +3292,8 @@
     }
     seq.forEach(function (item) {
       if (!item.nl) {
-        item.beforeSlot = safeSlot(unit, item.node, false, item.cite, slotMemo);
-        item.afterSlot = safeSlot(unit, item.node, true, item.cite, slotMemo);
+        item.beforeSlot = styleSafeSlot(unit, safeSlot(unit, item.node, false, item.cite, slotMemo));
+        item.afterSlot = styleSafeSlot(unit, safeSlot(unit, item.node, true, item.cite, slotMemo));
         previousConnected = item;
         return;
       }
@@ -3106,6 +3302,12 @@
       if (!item.newlineSlot) item.newlineSlot = { parent: unit.el, before: null };
     });
 
+    var emptySlot = null;
+    if (!seq.length) {
+      var firstSource = unit.firstNode || (unit.map.chars.filter(function (c) { return c && c.node; })[0] || {}).node;
+      emptySlot = styleSafeSlot(unit, safeSlot(unit, firstSource, false, false));
+      if (!emptySlot) return failInject(unit, 'unsafe-structure', 'no-text-slot');
+    }
     var ops = [];
     var saved = [];
     var seen = new Set();
@@ -3150,33 +3352,54 @@
       ownNodes.add(item.node);
       inserted.push(item.node);
     });
-    function put(text, slot) {
+    var targetNodes = [];
+    function put(text, slot, start, end) {
       if (!text || !slot || !slot.parent) return;
       slot = styleSafeSlot(unit, slot);
-      var node = document.createTextNode(text);
+      var fragment = document.createDocumentFragment();
+      var leaves;
+      if (unit.inlineResult) {
+        leaves = appendInlineRange(fragment, unit, stripped, start, end);
+        if (text.length > end - start) {
+          var suffix = document.createTextNode(text.slice(end - start));
+          fragment.appendChild(suffix); leaves.push(suffix);
+        }
+      }
+      else { var plain = document.createTextNode(text); fragment.appendChild(plain); leaves = [plain]; }
+      var roots = Array.prototype.slice.call(fragment.childNodes);
       if (isolate) {
-        // 混合段落不整体改父元素方向：每段新译文单独放进 inline 隔离壳，
-        // 原始 RTL 引用 / 链接 / Ruby 保持自己的方向。
         var span = document.createElement('span');
         span.className = 'dt-dir';
         DT.direction.applyTargetNode(span, unit.el, dmeta.lang, true);
         span.setAttribute('data-dt-dir', 'wrap');
-        span.appendChild(node);
-        insertNode(span, slot.parent, slot.before, ops);
-        inserted.push(span);
-      } else {
+        span.appendChild(fragment);
+        roots = [span];
+      }
+      roots.forEach(function (node) {
         insertNode(node, slot.parent, slot.before, ops);
         inserted.push(node);
-      }
-      nodeUnit.set(node, unit);
-      ownNodes.add(node);
+      });
+      leaves.forEach(function (node) { nodeUnit.set(node, unit); ownNodes.add(node); ownWrites.set(node, node.nodeValue); targetNodes.push(node); });
     }
-    // 第 0 段在序列第一个之前；第 n 段紧跟在第 n-1 个之后
-    put(texts[0], seq[0].beforeSlot);
-    for (var n = 1; n < texts.length; n += 1) put(texts[n], seq[n - 1].afterSlot);
-    keep.forEach(function (k) {
-      if (k.kind === 'xref' || k.kind === 'link') relabelAtom(k, ops, saved);
+    // 第 0 段在序列第一个之前；无原子的格式段仍复用同一个 gap 插入路径。
+    put(texts[0], seq.length ? seq[0].beforeSlot : emptySlot, textStarts[0], textEnds[0]);
+    for (var n = 1; n < texts.length; n += 1) put(texts[n], seq[n - 1].afterSlot, textStarts[n], textEnds[n]);
+    keep.forEach(function (k, index) {
+      if (unit.inlineResult && k.kind === 'link') {
+        var label = inlineLabel(unit, unit.inlineResult, index);
+        if (label !== k.text && k.el.childNodes.length === 1 && k.el.firstChild.nodeType === 3) {
+          var original = k.el.firstChild.nodeValue;
+          var wrote = /^\s*/.exec(original)[0] + label + /\s*$/.exec(original)[0];
+          setText(k.el.firstChild, wrote, ops);
+          saved.push({ node: k.el.firstChild, value: original, wrote: wrote });
+        } else relabelAtom(k, ops, saved);
+      } else if (k.kind === 'xref' || k.kind === 'link') relabelAtom(k, ops, saved);
+      tokensOf(k.el).forEach(function (token) { if (token.node) targetNodes.push(token.node); });
     });
+    seq.forEach(function (item) {
+      if (item.nl || item.br) targetNodes.push(item.node);
+    });
+    rememberTargetNodes(unit, targetNodes);
     // 只给新插入的译文段加目标语言字体壳；原子链接 / 引用标签不动。
     inserted.forEach(function (node) {
       if (!node || !node.parentNode) return;
@@ -3195,7 +3418,8 @@
       });
     });
 
-    var rendered = shownTextOf(unit.el);
+    var targetMap = DT.targetMapOf(unit);
+    var rendered = targetMap ? targetMap.text : shownTextOf(unit.el);
     var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: DT.splitLines(unit.text), aligned: true };
     DT.replaced.push(item);
     setAttr(unit.el, 'data-dt-replaced', '1', ops);
@@ -3215,6 +3439,90 @@
     return true;
   }
 
+  // 在既有 gap 渲染中加入有限格式；目标范围完全来自严格协议，不按文字长度猜对应。
+  function appendInlineRange(parent, unit, text, start, end) {
+    var result = unit.inlineResult;
+    var formats = unit.formats || [];
+    var ranges = result && !result.formatMissing ? result.ranges.filter(function (r) {
+      var f = formats[r.id - 1];
+      return f && f.kind !== 'link' && r.end > start && r.start < end;
+    }) : [];
+    var boundaries = [start, end];
+    ranges.forEach(function (r) {
+      boundaries.push(Math.max(start, r.start));
+      boundaries.push(Math.min(end, r.end));
+    });
+    boundaries.sort(function (a, b) { return a - b; });
+    var seen = [];
+    boundaries.forEach(function (p) { if (!seen.length || p !== seen[seen.length - 1]) seen.push(p); });
+    var nodes = [];
+    for (var i = 1; i < seen.length; i += 1) {
+      var a = seen[i - 1];
+      var b = seen[i];
+      if (b <= a) continue;
+      var active = ranges.filter(function (r) { return r.start <= a && r.end >= b; });
+      active.sort(function (x, y) {
+        if (x.start !== y.start) return x.start - y.start;
+        if (x.end !== y.end) return y.end - x.end;
+        // 同范围时根据模型协议的父关系维持源嵌套。
+        if (y.parent === 'f' + x.id) return -1;
+        if (x.parent === 'f' + y.id) return 1;
+        return x.id - y.id;
+      });
+      var target = parent;
+      active.forEach(function (r) {
+        var f = formats[r.id - 1];
+        var tag = /^(strong|b|em|i|small|sup|sub|code)$/.test(f.tag) ? f.tag : 'span';
+        var span = document.createElement(tag);
+        span.setAttribute('data-dt-format', unit.id);
+        var st = f.style || {};
+        span.style.setProperty('display', 'inline', 'important');
+        if (st.weight) span.style.setProperty('font-weight', st.weight, 'important');
+        if (st.fontStyle) span.style.setProperty('font-style', st.fontStyle, 'important');
+        if (st.size) span.style.setProperty('font-size', st.size, 'important');
+        if (st.vertical) span.style.setProperty('vertical-align', st.vertical, 'important');
+        if (st.code) span.style.setProperty('font-family', 'monospace', 'important');
+        target.appendChild(span);
+        nodeUnit.set(span, unit);
+        target = span;
+      });
+      var node = document.createTextNode(text.slice(a, b));
+      target.appendChild(node);
+      ownNodes.add(node);
+      ownWrites.set(node, node.nodeValue);
+      nodeUnit.set(node, unit);
+      nodes.push(node);
+    }
+    return nodes;
+  }
+
+  function rememberTargetNodes(unit, nodes) {
+    var seen = new Set();
+    unit.targetNodes = nodes.filter(function (node) {
+      if (!node || seen.has(node)) return false;
+      seen.add(node);
+      return true;
+    }).sort(function (a, b) {
+      if (a === b) return 0;
+      return a.compareDocumentPosition(b) & 4 ? -1 : 1;
+    });
+    unit.targetValues = unit.targetNodes.filter(function (node) { return node.nodeType === 3; }).map(function (node) { return { node: node, value: node.nodeValue }; });
+  }
+
+  DT.targetMapOf = function (unit) {
+    if (!unit || !unit.targetNodes) return null;
+    var text = '';
+    var chars = [];
+    unit.targetNodes.forEach(function (node) {
+      if (!node.isConnected) return;
+      if (node.nodeType === 1 && tagOf(node) === 'BR') { text += '\n'; chars.push({ br: node }); return; }
+      var value = String(node.nodeValue || '');
+      for (var i = 0; i < value.length; i += 1) chars.push({ node: node, off: i });
+      text += value;
+    });
+    return { text: text, chars: chars };
+  };
+
   // 上标引用的副本：href / 上标样式 / aria-label / title 照旧，点了照样跳到参考文献；
   // 去掉 id（页面上不能有重复 id，参考文献里的返回链接仍指向原上标）
   function citeClone(el) {
@@ -3231,9 +3539,10 @@
   }
 
   // 原子的副本：图表链接的标签按 xrefLabel 换成「图 1」（只有一个文本节点时）
-  function atomClone(k) {
+  function atomClone(k, unit, index) {
     var copy = citeClone(k.el);
     var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.target) : '';
+    if (unit && unit.inlineResult && k.kind === 'link') label = inlineLabel(unit, unit.inlineResult, index);
     if (label) {
       var texts = [];
       var walker = document.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
@@ -3270,13 +3579,19 @@
     items.forEach(function (item) {
       var seg = marks.stripped.slice(pos, item.at);
       if (prev >= 0 && !/\S/.test(seg)) seg += citeSeparator(unit, prev, item.i);
-      if (seg) node.appendChild(document.createTextNode(seg));
-      node.appendChild(isStructKeep(item.k) ? atomClone(item.k) : document.createTextNode(item.k.text));
+      if (seg) {
+        if (unit.inlineResult) appendInlineRange(node, unit, marks.stripped, pos, item.at);
+        else node.appendChild(document.createTextNode(seg));
+      }
+      node.appendChild(isStructKeep(item.k) ? atomClone(item.k, unit, item.i) : document.createTextNode(item.k.text));
       pos = item.at;
       prev = item.i;
     });
     var tail = marks.stripped.slice(pos);
-    if (tail) node.appendChild(document.createTextNode(tail));
+    if (tail) {
+      if (unit.inlineResult) appendInlineRange(node, unit, marks.stripped, pos, marks.stripped.length);
+      else node.appendChild(document.createTextNode(tail));
+    }
     if (!unit.citeMode) unit.citeMode = citesOk ? 'exact' : 'dropped';
     return node.textContent;
   }
@@ -3302,6 +3617,10 @@
       setAttr(node, 'data-dt-rt-hidden', '1', ops);
     });
     var target = makeNode(unit.el, text, lang, true, 'translation');
+    if (unit.inlineResult && !(unit.keep && unit.keep.length)) {
+      target.textContent = '';
+      appendInlineRange(target, unit, unit.inlineResult.stripped, 0, unit.inlineResult.stripped.length);
+    }
     target.setAttribute('data-dt-unit', unit.id);
     registerTarget(target, unit.id);
     nodeUnit.set(target, unit);
@@ -3314,6 +3633,7 @@
       setAttr(unit.el, 'data-dt-sig', unit.sig, ops);
     }
     unit.renderedText = text;
+    fillSnapshot(unit);
     pushRendered({ unit: unit, mode: 'ruby', node: target, ops: ops, saved: saved, ruby: unit.ruby });
     linkUnit(unit);
     record('replace', target, unit.el, text, area);
@@ -3333,6 +3653,7 @@
   // 旧译文不能再写进新内容，调用方放弃这次注入，下一轮按新内容重翻
   DT.sourceChanged = function (unit) {
     if (!unit || !unit.el) return true;
+    if (unit.inlineProtocol === 'v1' && inlineMetadataChanged(unit)) return true;
     if (unit.snapshot) return sourceChangedSnapshot(unit);
     var now = unit.own ? ownText(unit.el) : DT.unitText(unit.el);
     return now !== unit.text;
@@ -3547,15 +3868,30 @@
     }
     var unit = isUnit ? unitOrEl : legacyUnit(unitOrEl, ownOrAlign && ownOrAlign.parts ? false : ownOrAlign);
     if (unit) unit.injectResult = null;
+    if (unit && unit.inlineIssue) return injectOutcome(unit, false, 'invalid-placement', 'inline-' + unit.inlineIssue);
     if (!unit || !unit.el || !unit.el.isConnected) return injectOutcome(unit, false, 'stale-source', 'disconnected');
     // 根节点本身就是文献引用 / 用户名提及（独立链接或 citation span）：没有可安全改写的正文，原样保留。
     if (!(unit.keep && unit.keep.length) && (isCitationEl(unit.el) || isMentionEl(unit.el))) {
       return injectOutcome(unit, false, 'not-applicable', 'root-is-atom');
     }
     // 保留区：text 可以带 <kN> 标记（模型原样回来的），也可以不带（按原文逐字找位置）
+    var inline = null;
+    if (unit.inlineProtocol === 'v1') {
+      inline = inspectInline(unit, text);
+      if (!inline.ok) return injectOutcome(unit, false, 'invalid-placement', 'inline-' + inline.reason);
+      if (inlineMetadataChanged(unit)) return injectOutcome(unit, false, 'stale-source', 'inline-metadata-changed');
+      unit.inlineResult = inline;
+      unit.formatMode = inline.formatMissing ? 'plain-fallback' : 'mapped';
+    }
     var segs = null;
     var cited = null; // 结构性原子（引用 / 图表链接 / 混合段落普通链接）在译文里的落点（见 injectCited）
-    if (text && unit.keep && unit.keep.length) {
+    if (inline) {
+      text = DT.inlineText(unit, text);
+      if (!(unit.ruby && unit.ruby.length && !(unit.keep && unit.keep.length))) cited = { stripped: inline.stripped, at: (unit.keep || []).map(function (k, i) {
+        var a = inline.atoms.filter(function (atom) { return atom.id === i + 1; })[0];
+        return a ? a.at : -1;
+      }) };
+    } else if (text && unit.keep && unit.keep.length) {
       if (hasStructAtom(unit)) cited = DT.units.keepMarks(text, unit.keep, unit.text);
       var kept = DT.units.keepParse(text, unit.keep, unit.text);
       text = kept.text;
@@ -3592,7 +3928,7 @@
     // 普通行内链接不能因为写回第一个文本节点而吞掉整段译文 / 把链接扩到整段。
     // 带引用 / 图表链接的单元里，普通链接本身就是原子（见 keepRangesOf），交给混合行内渲染，不走这里；
     // 只有普通链接的单元无法安全原地切分时降级成双语（已知限制，见 HANDOFF §9）。
-    if (!cited && replaceMode && area === 'content' && hasUnsafeInlineLink(unit)) {
+    if ((!cited || (inline && !hasStructAtom(unit))) && replaceMode && area === 'content' && hasUnsafeInlineLink(unit)) {
       var outerLink = unit.el.closest && unit.el.closest('a');
       if (outerLink && outerLink !== unit.el) return injectOutcome(unit, false, 'unsafe-structure', 'inside-ancestor-link');
       if (DT.state.mode === 'translation') {
@@ -3606,9 +3942,37 @@
       replaceMode = false;
     }
     var ok;
-    if (cited) ok = injectCited(unit, cited, text, lang, area, replaceMode);
-    else if (replaceMode) ok = unit.ruby && unit.ruby.length ? injectRuby(unit, text, lang, area) : injectReplace(unit, text, area, segs);
-    else ok = injectDual(unit, text, lang, area);
+    var checkpoint = tx.length;
+    var renderedCheckpoint = rendered.length;
+    var replacedCheckpoint = DT.replaced.length;
+    var renderError = null;
+    renderFrames += 1;
+    try {
+      if (cited) ok = injectCited(unit, cited, text, lang, area, replaceMode);
+      else if (replaceMode) ok = unit.ruby && unit.ruby.length ? injectRuby(unit, text, lang, area) : injectReplace(unit, text, area, segs);
+      else ok = injectDual(unit, text, lang, area);
+    } catch (err) {
+      renderError = err;
+      ok = false;
+    } finally {
+      if (!ok) {
+        while (rendered.length > renderedCheckpoint) dropRendered(rendered[rendered.length - 1]);
+        undoOps(tx.slice(checkpoint));
+        tx.length = checkpoint;
+        DT.replaced.length = replacedCheckpoint;
+        if (targetRegistry.get(unit.id) === unit.targetNode) targetRegistry.delete(unit.id);
+        unit.targetNode = null;
+        unit.targetNodes = null;
+        unit.targetValues = null;
+        unit.citedInserted = null;
+      }
+      renderFrames -= 1;
+      if (compactPending) compactTx();
+    }
+    if (renderError) {
+      DT.log('inject rollback', renderError);
+      return injectOutcome(unit, false, 'unsafe-structure', 'inline-render-exception');
+    }
     if (ok) return injectOutcome(unit, true, 'success', unit.citeMode || unit.renderMode || '');
     var why = unit.injectResult;
     return injectOutcome(unit, false, why ? why.code : 'unsafe-structure', why ? why.reason : 'renderer-refused');
@@ -3904,6 +4268,9 @@
       while (wrap.firstChild) wrap.parentNode.insertBefore(wrap.firstChild, wrap);
       wrap.remove();
     }
+
+    var formatWraps = queryAllDeep('[data-dt-format]');
+    for (var fw = 0; fw < formatWraps.length; fw += 1) formatWraps[fw].remove();
 
     // 移除追加的译文节点
     var targets = queryAllDeep('[data-dt-target]');

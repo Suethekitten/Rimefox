@@ -273,6 +273,8 @@
   }
 
   function targetMapOf(unit) {
+    var bounded = DT.targetMapOf && DT.targetMapOf(unit);
+    if (bounded) return bounded;
     if (unit.renderMode === 'replace') return mapFromGroups(unit);
     if (unit.renderMode === 'cited') return mapFromNode(unit.el);
     if (unit.renderMode === 'ruby') return mapFromNode(unit.targetNode);
