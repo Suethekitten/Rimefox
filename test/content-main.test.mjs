@@ -851,6 +851,7 @@ await t('dt:setTarget：已删除的自定义语言回退到配置里的有效�
 
 await t('AI 上下文：导航、隐藏内容、编辑器草稿都不进相邻段落', async () => {
   const h1 = contextElement('h1', 'Article title');
+  const h2 = contextElement('h2', 'Methods heading');
   const current = contextElement('p', 'Current body paragraph for context.');
   const normal = contextElement('p', 'Adjacent visible paragraph for context.');
   const nav = contextElement('nav', 'NAV SECRET');
@@ -858,7 +859,7 @@ await t('AI 上下文：导航、隐藏内容、编辑器草稿都不进相邻�
   hidden.hidden = true;
   const draft = contextElement('p', 'DRAFT SECRET');
   draft.isContentEditable = true;
-  const article = contextElement('article', '', [h1, current, normal, nav, hidden, draft]);
+  const article = contextElement('article', '', [h1, h2, current, normal, nav, hidden, draft]);
   const body = contextElement('body', '', [article]);
   const pageDocument = { title: 'Article title', querySelectorAll: body.querySelectorAll, querySelector: body.querySelector };
   const env = await boot({ config: { aiContextEnabled: true, lazy: false, skipSameLang: false }, pageDocument });
@@ -871,6 +872,7 @@ await t('AI 上下文：导航、隐藏内容、编辑器草稿都不进相邻�
   const json = JSON.stringify(context);
   assert.ok(context.adjacent && context.adjacent.some((one) => one.indexOf('Adjacent visible') >= 0), json);
   ['NAV SECRET', 'HIDDEN SECRET', 'DRAFT SECRET'].forEach((secret) => assert.equal(json.indexOf(secret), -1, secret + ' 不能进上下文'));
+  assert.equal(context.adjacent.some((one) => one.indexOf('Methods heading') >= 0), false, '章节标题已在 headings 里，不能再当相邻正文重复注入');
 });
 
 await t('dt:setTarget：先更新语言元数据再重建，配置广播到达后不再第二次重建', async () => {
@@ -947,6 +949,128 @@ await t('保存 AI / 强度设置只影响下一次明确翻译，不重建已�
   env.config.funIntensity = 'exaggerated';
   await env.message({ type: 'dt:configChanged' });
   assert.equal(env.page.rebuilds, before, '保存设置不能重启正在进行的整页翻译');
+});
+
+await t('AI 精翻：只改标题 / 章节不重译已译正文，只标记过期；明确重译后新上下文生效', async () => {
+  const fixture = contextFixture();
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ config: { aiContextEnabled: true, lazy: false, skipSameLang: false }, hooks, pageDocument: fixture.pageDocument });
+  env.DT.areaOf = () => 'content';
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  const requests = [];
+  let allow = true;
+  installTranslationFixture(env, unit, (msg) => {
+    requests.push(msg);
+    return { ok: true, results: ['译文。'], context: { mode: 'ai', omitted: '', chars: 12, items: { title: 1, headings: 1, abbreviations: 0, adjacent: 0 } } };
+  });
+  env.DT.collectAll = (accept) => (allow ? [unit] : []).filter((item) => !accept || accept(item));
+  await env.message({ type: 'dt:toggle' });
+  await flush();
+  for (let i = 0; i < 8; i += 1) {
+    const busy = await env.message({ type: 'dt:status' });
+    if (!busy.busy) break;
+    await flush();
+  }
+  assert.equal(requests.length, 1);
+  const rebuilds = env.page.rebuilds;
+  const from = hooks.timers.length;
+  allow = false;
+  env.document.title = 'Changed context title';
+  const title = contextElement('title', env.document.title);
+  hooks.observers[0]([{ type: 'characterData', target: title.childNodes[0] }]);
+  fixture.h2.childNodes[0].nodeValue = 'Changed section heading';
+  hooks.observers[0]([{ type: 'characterData', target: fixture.h2.childNodes[0] }]);
+  hooks.timers.slice(from).forEach((fn) => fn());
+  await flush();
+  await flush();
+  let status = await env.message({ type: 'dt:status' });
+  assert.equal(requests.length, 1, '标题 / 章节变化不能重新请求已译正文');
+  assert.equal(env.page.rebuilds, rebuilds, '不能重建整页');
+  assert.equal(status.contextStale, true, '应标记旧上下文过期');
+  assert.equal(status.context && status.context.stale, true);
+  allow = true;
+  await env.message({ type: 'dt:retranslate' });
+  await flush();
+  await flush();
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(requests.length, 2, '明确重译才重新请求');
+  assert.equal(requests[1].documentContext.title, 'Changed context title');
+  assert.equal(status.contextStale, false, '重译后清除过期标记');
+});
+
+await t('删除正在使用的自定义语言：不立即重译，旧译文保持原语言；明确重译才应用回退目标', async () => {
+  const yue = { id: 'cl_yue', name: '粤语（香港）', label: '粤语（香港）', kind: 'custom', code: 'yue-Hant-HK', script: 'hant', cjk: true, detect: 'none' };
+  const zh = { value: 'zh-CN', name: '简体中文', label: '简体中文', kind: 'builtin', code: 'zh-CN', script: 'hans', cjk: true, detect: 'zh' };
+  const fixture = contextFixture();
+  const env = await boot({
+    config: {
+      targetLang: yue.id,
+      customLanguages: [{ id: yue.id, name: yue.name, code: yue.code }],
+      activeLanguage: yue,
+      languages: [yue],
+      lazy: false,
+      skipSameLang: false
+    },
+    pageDocument: fixture.pageDocument
+  });
+  env.DT.areaOf = () => 'content';
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  const requests = [];
+  const injected = installTranslationFixture(env, unit, (msg) => {
+    requests.push(msg);
+    return { ok: true, results: ['粤语译文。'] };
+  });
+  env.DT.collectAll = (accept) => [unit].filter((item) => !accept || accept(item));
+  await env.message({ type: 'dt:toggle' });
+  await flush();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].target, yue.id);
+  const rebuilds = env.page.rebuilds;
+  // 配置广播：语言被删除，目标安全回退 zh-CN。
+  env.config = {
+    ...env.config,
+    targetLang: 'zh-CN',
+    customLanguages: [],
+    activeLanguage: zh,
+    languages: [zh]
+  };
+  await env.message({ type: 'dt:configChanged' });
+  await flush();
+  let status = await env.message({ type: 'dt:status' });
+  assert.equal(requests.length, 1, '删除在用的语言不能立即产生翻译请求');
+  assert.equal(env.page.rebuilds, rebuilds, '不能整页重建');
+  assert.equal(status.target, yue.id, '页面实际译文仍是旧语言');
+  assert.equal(status.configTarget, 'zh-CN', '配置目标已回退');
+  assert.equal(status.targetPending, true);
+  // 再广播一次也不能产生请求 / 重启。
+  await env.message({ type: 'dt:configChanged' });
+  await flush();
+  assert.equal(requests.length, 1);
+  await env.message({ type: 'dt:retranslate' });
+  await flush();
+  await flush();
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(requests.length, 2, '明确重译才请求新目标');
+  assert.equal(requests[1].target, 'zh-CN');
+  assert.equal(status.target, 'zh-CN');
+  assert.equal(status.targetPending, false);
+  assert.equal(injected.length >= 1, true);
+});
+
+await t('AI 精翻开关：contextStatus 立即更新，不等到下一次请求', async () => {
+  const env = await boot({ config: { aiContextEnabled: false, lazy: false } });
+  let status = await env.message({ type: 'dt:status' });
+  assert.equal(status.context.mode, 'off');
+  env.config.aiContextEnabled = true;
+  await env.message({ type: 'dt:configChanged' });
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.context.mode, 'ai');
+  assert.equal(status.context.omitted, 'pending');
+  assert.equal(status.contextStale, false);
+  env.config.aiContextEnabled = false;
+  await env.message({ type: 'dt:configChanged' });
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.context.mode, 'off');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

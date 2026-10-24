@@ -186,7 +186,9 @@ function render() {
   // 显示用户「选中」的风格（可能尚未应用）；实际生效风格仍在 status.style，切换下拉框不触发翻译。
   el.styleSelect.value = status.selectedStyle || status.style || 'plain';
   el.target.disabled = false;
-  const targetValue = status.target || 'zh-CN';
+  // 删除在用语言后，配置目标（configTarget）与页面实际译文目标（target）不同：
+  // 下拉框显示待生效目标，状态的 detail 说明当前译文仍是什么。
+  const targetValue = status.targetPending && status.configTarget ? status.configTarget : (status.target || 'zh-CN');
   if (Array.from(el.target.options).some((opt) => opt.value === targetValue)) el.target.value = targetValue;
   else if (currentCfg && Array.from(el.target.options).some((opt) => opt.value === currentCfg.targetLang)) el.target.value = currentCfg.targetLang;
   else if (el.target.options.length) el.target.value = el.target.options[0].value;
@@ -220,6 +222,14 @@ function render() {
   if (status.enabled && status.qualityWarnings) {
     const warning = t('专业翻译有 ' + status.qualityWarnings + ' 段需要核对；请对照原文确认数值与结论。');
     detail = detail ? detail + '\n' + warning : warning;
+  }
+  if (status.targetPending) {
+    const pending = t('目标语言已更新；当前页面译文保持不变，点「重新翻译」后应用。');
+    detail = detail ? detail + '\n' + pending : pending;
+  }
+  if (status.contextStale) {
+    const stale = t('页面上下文已更新；已译内容保持不变，重新翻译后使用新上下文。');
+    detail = detail ? detail + '\n' + stale : stale;
   }
   paintStatus(title, count, detail);
 }
@@ -523,8 +533,9 @@ function onConfigElsewhere(next) {
   renderHover();
   renderMedical();
   fillTargetOptions(currentCfg);
-  if (status && status.target && Array.from(el.target.options).some((opt) => opt.value === status.target)) {
-    el.target.value = status.target;
+  const shownTarget = status && status.targetPending && status.configTarget ? status.configTarget : (status && status.target);
+  if (shownTarget && Array.from(el.target.options).some((opt) => opt.value === shownTarget)) {
+    el.target.value = shownTarget;
   }
   render();
 }
@@ -560,7 +571,8 @@ async function init() {
   }
 
   await refresh();
-  if (status.target && Array.from(el.target.options).some((opt) => opt.value === status.target)) el.target.value = status.target;
+  const initialTarget = status.targetPending && status.configTarget ? status.configTarget : status.target;
+  if (initialTarget && Array.from(el.target.options).some((opt) => opt.value === initialTarget)) el.target.value = initialTarget;
   if (status.busy) startPolling();
   applyI18n(document, cfg.uiLang);
   refreshStyleLabels();
@@ -695,7 +707,7 @@ async function runQuickTranslate() {
     const res = await sendToBg({
       type: 'translate',
       texts: [text],
-      target: (status && status.target) || currentCfg.targetLang || 'zh-CN'
+      target: (status && (status.configTarget || status.target)) || currentCfg.targetLang || 'zh-CN'
     });
     if (res && res.ok && res.results && typeof res.results[0] === 'string' && res.results[0]) {
       el.quickOut.textContent = res.results[0];

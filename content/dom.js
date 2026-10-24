@@ -1877,7 +1877,8 @@
     }
     var node = document.createElement('span');
     node.setAttribute('data-dt-target', '1');
-    node.setAttribute('data-dt-lang', lang || '');
+    // 没有标准代码的虚构语言不写空属性，避免 QA 看到 data-dt-lang="" 误以为语言标签存在。
+    if (lang) node.setAttribute('data-dt-lang', lang);
     node.className = 'dt-target ' + (inline ? 'dt-inline' : 'dt-block');
     node.textContent = text;
     node.style.cssText = [

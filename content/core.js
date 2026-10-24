@@ -14,11 +14,15 @@
     enabled: false,
     mode: 'dual',
     theme: 'underline',
-    target: 'zh-CN',
+    target: 'zh-CN', // 当前页面译文实际使用的目标语言
+    configTarget: null, // 配置里待生效的目标语言（删除在用语言回退时可能与 target 不同）
+    targetPending: false, // 配置目标已变，但页面仍有旧目标译文，等用户明确重译
+    langInfo: null, // 当前页面实际使用语言的元数据（内部 id 与 BCP 47 code 分开）
+    configLangInfo: null, // 配置里待生效语言的元数据
+    contextStale: false, // AI 精翻上下文已更新，但现有译文仍用旧上下文；重译后清掉
     style: 'plain', // 当前实际生效的趣味风格（只对当前页生效）
     selectedStyle: 'plain', // 用户在弹窗里选中、尚未应用的风格
     intensity: 'standard', // 当前页面实际生效的趣味强度
-    langInfo: null, // 后台下发的目标语言元数据（自定义语言内部 id 与 BCP 47 code 分开）
     contextStatus: null, // AI 精翻只记录模式 / 条数，不记录上下文正文
     config: null,
     total: 0,

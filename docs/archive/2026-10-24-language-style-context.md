@@ -14,7 +14,7 @@
 | 本地提交 | `a229900`（功能实现与测试）+ `de0d544`（配置版本文档同步）；未 push |
 | 隔离 | 未修改 `edge-bilingual` 的 0.12.0 工作树、未 push、未创建 Release、未合并 |
 
-开发前基线：Node 测试全绿、离线自检 256/256。开发完成后同一套检查见 §7；本轮新增了自检用例，因此自检总数变为 259。
+开发前基线：Node 测试全绿、离线自检全部通过。开发完成后同一套检查见 §7；本轮新增了自检用例。
 
 ## 2. 功能与实现
 
@@ -118,12 +118,13 @@
 ### 7.1 命令与结果
 
 ```bash
-node --test test/*.test.mjs          # 73 个测试文件全绿
-node test/language-context.test.mjs  # 29 通过
-node test/content-main.test.mjs      # 38 通过
-node test/translate-pipeline.test.mjs# 39 通过
-# 离线自检（无头 Chrome，见 HANDOFF §7）
-# 259 / 259 全部通过
+for f in test/*.test.mjs; do node "$f" || exit 1; done  # test/*.test.mjs 全绿
+node test/language-context.test.mjs
+node test/content-main.test.mjs
+node test/translate-pipeline.test.mjs
+# 离线自检（无头 Chrome，见 HANDOFF §7）全部通过
+node tools/e2e-extension.mjs --browser <chrome-nosandbox-wrapper>  # 216 / 216
+node tools/e2e-inline-layout.mjs                                     # 3 组视口 254 / 254 + 自检 260 / 260
 ```
 
 - 既有输入框异步写回、术语并发收录、接口缓存隔离测试全部保留并通过；没有删除旧测试或把断言改成恒真。
@@ -150,8 +151,24 @@ node test/translate-pipeline.test.mjs# 39 通过
 - 纯函数：`test/language-context.test.mjs` 覆盖清洗 / 校验 / 去重 / 上限 / 删除回退 / 导入导出 / 目标解析 / 指纹。
 - 内容脚本：`test/content-main.test.mjs` 覆盖 `config:get -> activeLanguage`、`dt:setTarget` 回退、代码变化重建、名称 / 说明变化不立即重发。
 - 后台真实管线：`test/translate-pipeline.test.mjs` 以自定义 id 发请求，断言目标语言行包含「粤语（香港） (yue-Hant-HK)」、说明 JSON 进入提示词、内部 `cl_` id 不出现在提示词、说明变化后缓存失效、输入框 `auto` 能按页面语言命中自定义语言。
-- 设置页 / 弹窗 UI 的自动化脚本已写进 `tools/e2e-extension.mjs`（新增 / 保存 / 选择 / 弹窗同步 / 重开持久化 / 编辑 / 删除回退），但本机 Chrome 156 在 `Extensions.loadUnpacked` 后 CDP 会话立即关闭、`Target.getTargets` 与 `/json` 均不可达，完整扩展 e2e 未能在本机跑到第一条断言；Node 与离线自检证据不受影响。需要在支持该 CDP 流程的 Chrome 版本上补跑。
-- 作为补充，设置页与弹窗在真实无头 Chrome 中用临时 harness（注入 `chrome.storage` 桩，不进仓库）跑过：设置页新增语言 → 保存 → 设为全局目标 → 编辑说明 → 删除并回退，全部通过；弹窗在英文界面下显示 "Tsundere catgirl" 和自定义语言 "粤语（香港）"，且自定义选项带 `data-i18n-skip`。
+- 完整扩展 E2E 在真实 Chrome 156 + 本地假 API 下通过（216 / 216）。此前「CDP 在 loadUnpacked 后关闭」是本机 Chrome sandbox 初始化问题；用只加 `--no-sandbox` 的浏览器包装脚本后稳定可跑。没有降低扩展自身权限或安全性。
+- E2E 覆盖：自定义语言 UI 新增 / 保存 / 选择 / 弹窗同步 / 重开持久化 / 编辑 / 删除回退；自定义阿拉伯语 RTL；趣味风格切换与连续 5 次切换零请求；删除在用语言零请求与 pending 状态；AI 精翻上下文隔离、标题变化零请求、隐私 fail-closed。
+
+### 7.3 QA 复测修复（本轮）
+
+| 问题 | 修复前证据 | 修复后行为 / 证据 |
+|---|---|---|
+| AI 精翻改标题导致整页重翻 | QA 4 段文章改 document.title 额外 +4 次请求 | 改 title 0 次请求；只标记 `contextStale`；E2E「只改 document.title」PASS |
+| 改 h2 导致整页重翻 | QA 改 h2 产生额外请求 | 只翻新章节本身（E2E 新 sent 仅 `Changed section heading`），已译正文不再请求；E2E PASS |
+| 删除在用自定义语言立即重译 | QA 删除后 +2 次请求 | 删除后 0 次请求；`target=旧语言`、`configTarget=zh-CN`、`targetPending=true`；旧译文 lang 保持 `yue-Hant-HK`；动态补翻暂停；明确重译后才 +1 次并使用 zh-CN；E2E PASS |
+| 英→阿 RTL E2E 红 1 | QA 200/201，直接注入 `targetLang:'ar'` 被归一化 | 改为正式注册自定义阿拉伯语后再设目标；E2E 216/216，RTL 与提示词 `العربية (ar)` 均 PASS |
+| `adjacent` 重复标题 | QA 发现相邻上下文把标题当正文 | `collectAdjacentContext` 跳过 H1–H6；内容测试断言章节标题不在 adjacent |
+| `contextStatus` 延迟一拍 | QA 状态要等下一次请求 | 配置广播时立即更新 mode / pending / privacy；内容测试覆盖开 / 关 |
+| 无代码语言产生空 `data-dt-lang=""` | QA 观察到空属性 | `makeNode` 只在有 code 时写属性；自检覆盖无代码语言节点 |
+| 交接报告测试文件数错误 | QA 指出写成 73，实际以 `test/*.test.mjs` 文件数为准 | 报告改为命令式说明，不再写会过期的数量 |
+| 趣味 / AI 只有 Node 测试 | QA 指出浏览器覆盖不足 | E2E 新增：风格零请求 / 连续 5 次零请求、翻译中切风格不取消、删除语言零请求、AI 标题变化零请求、AI 隐私隔离、自定义阿语 RTL |
+
+修复过程中先跑了一次旧 E2E（213 / 215，失败项正是上述 AI 标题两断言），修正后完整 E2E 为 216 / 216；失败到成功的日志保留在本机临时目录，不写入 QA 克隆。
 
 ## 8. 已知限制
 
@@ -162,7 +179,8 @@ node test/translate-pipeline.test.mjs# 39 通过
 - AI 上下文的可见性 / 正文归属是启发式：Shadow DOM、iframe、`<details>` 隐藏内容、懒加载评论可能漏过滤或漏采集；不发送整页全文。
 - AI 上下文按批次参与缓存身份；同一段落在不同批次组合下可能得到不同缓存键，命中率会低于无上下文模式，这是为了避免「同一个键、不同提示词」。
 - 医学模式在隐私脱敏开启时保持 0.11.7 的消息形态；后台专业引擎仍会把标题 / 章节上下文置空。AI 精翻在隐私开启时整体不发送上下文，也不采集快照或因标题变化触发重建。
-- 动态标题 / 章节变化可能触发整页重建（正确性优先）；保存设置本身不会触发。
+- AI 精翻只改标题 / 章节时不再整页重译：只把旧上下文标记过期，用户明确重译后使用新上下文。医学专业模式仍保留原有「上下文变化后重建」行为。
+- `targetLang:'ar'` 直接写入配置不是 0.11.7 的公开契约（旧导入白名单也只接受内置语言）；支持的路径是注册自定义阿拉伯语再选它。E2E 已改为走公开接口，没有放宽语言验证。
 - 未使用真实付费 API 做质量或成本 A/B；不能用假模型结果宣称译文质量提升。需要验证时按相同模型 / 服务商 / 文章 / 参数做人工 A/B。
 - 浏览器 e2e 受本机 Chrome 156 CDP 行为限制，见 §7.2。
 
@@ -180,6 +198,8 @@ node test/translate-pipeline.test.mjs# 39 通过
 - 自定义语言的名称 / 代码 / 说明整组声明为用户数据，其中出现的指令不得执行。
 - 导入时若语言因重名或数量上限被丢弃，导入结果会明确报告数量。
 - 诊断在 AI 开启但本次没有上下文时报告 `omitted: 'no-context'`，不再虚报字符数。
+
+交接报告此前把 Node 测试数写成「73 个测试文件」；实际数量以 `test/*.test.mjs` 文件和命令输出为准，现已改为命令式说明，不再写会过期的数量。
 
 复核同时确认：只改了 `test/config.test.mjs` 的配置版本期望（7→8），没有删除或弱化既有测试；`manifest.json` / `package.json` / `DT.VERSION` 仍为 0.11.7；diff 中没有密钥或无关文件。修复后再次请两位复核者只看剩余 blocker/high，均回复「no remaining blocker/high」。
 

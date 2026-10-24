@@ -166,7 +166,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
 | `dt:toggle` | `{source?}` | 状态快照 | 开/关翻译（**立即返回**，不等翻完）。`source: 'command'` = 浏览器快捷键触发，0.5 秒内和页面内快捷键去重 |
-| `dt:status` | — | 状态快照 | `{enabled, mode, target, style, selectedStyle, intensity, context, total, translated, failed, skipped, lastError, busy}`；`style` 是实际生效风格，`selectedStyle` 是待应用选择，`context` 只含模式 / 字符数 / 条数 |
+| `dt:status` | — | 状态快照 | `{enabled, mode, target, configTarget, targetPending, style, selectedStyle, intensity, context, contextStale, total, translated, failed, skipped, lastError, busy}`；`target` 是页面实际译文语言，`configTarget` 是配置里待生效目标，删除在用语言时会不同；`style` 是实际生效风格，`selectedStyle` 是待应用选择；`context` 只含模式 / 字符数 / 条数 |
 | `dt:setMode` | `{mode}` | 快照 | `dual` / `translation`，会重建 |
 | `dt:setTarget` | `{target}` | 快照 | 切换目标语言，会重建 |
 | `dt:setStyle` | `{style}` | 快照 | 趣味翻译：只记录本页「选中」的风格（`plain` / `classical` / `catgirl`），不翻译、不重翻、不取消在途请求、不清缓存、不写配置。下次 `dt:toggle` 开启或 `dt:retranslate` 时才应用；状态里的 `style` 是实际生效风格，`selectedStyle` 是待应用选择 |

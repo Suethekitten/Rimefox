@@ -156,6 +156,26 @@ t('删除正在使用的自定义语言：目标回退，不留下空值 / 无�
   assert.equal(mergeConfig(input, { customLanguages: [] }).inputTargetLang, 'auto');
 });
 
+t('阿拉伯语：直接 targetLang:ar 不符合公开配置契约，自定义注册后才是支持路径', () => {
+  const ar = { id: 'cl_arabic1', name: 'العربية', code: 'ar', note: '' };
+  assert.equal(normalizeTargetLang('ar', []), DEFAULTS.targetLang, '旧 E2E 直接注入的 ar 不是公开配置值');
+  assert.equal(normalizeTargetLang(ar.id, [ar]), ar.id);
+  const info = languageInfoFor(ar.id, [ar]);
+  assert.equal(info.code, 'ar');
+  assert.equal(info.script, 'arab');
+  const rejected = pickImportedConfig({
+    app: 'rimefox', schema: 1,
+    config: { targetLang: 'ar', theme: 'mask', mode: 'dual', lazy: false }
+  });
+  assert.ok(rejected.rejected.includes('targetLang'));
+  const accepted = pickImportedConfig({
+    app: 'rimefox', schema: 1,
+    config: { customLanguages: [ar], targetLang: ar.id, inputTargetLang: ar.id, theme: 'mask', mode: 'dual' }
+  });
+  assert.equal(accepted.config.targetLang, ar.id);
+  assert.equal(accepted.config.customLanguages[0].code, 'ar');
+});
+
 t('resolveInputTarget：自定义 id / 代码 / 页面语言都能解析；内置行为不变', () => {
   assert.equal(resolveInputTarget(yue.id, '', [yue]), yue.id);
   assert.equal(resolveInputTarget('yue-Hant-HK', '', [yue]), yue.id);

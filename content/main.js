@@ -229,6 +229,8 @@
     var total = 0;
     function add(candidate) {
       if (!candidate || candidate.nodeType !== 1 || candidate.tagName === 'ARTICLE' || candidate.tagName === 'MAIN' || candidate.tagName === 'BODY') return;
+      // 标题已经在 headings 里作为参考；再次当作相邻正文会重复注入，也会挤占预算。
+      if (/^H[1-6]$/.test(candidate.tagName || '')) return;
       if (candidate.querySelector && candidate.querySelector('article')) return;
       if (contextRoot(candidate) !== root) return;
       if (contextSkippable(candidate)) return;
@@ -366,11 +368,13 @@
     try {
       var res = await DT.send({ type: 'config:get' });
       if (res && res.ok && res.config) {
+        var prevConfig = DT.state.config || {};
         DT.state.config = res.config;
         // 站点规则可以固定这个网站的显示方式 / 译文样式
         var site = res.config.page && res.config.page.site;
         var mode = (site && site.mode) || res.config.mode || 'dual';
-        var target = res.config.targetLang || 'zh-CN';
+        var incomingTarget = res.config.targetLang || 'zh-CN';
+        var incomingInfo = res.config.activeLanguage || null;
         if (mode !== cfgMode) {
           cfgMode = mode;
           if (DT.state.mode !== mode) {
@@ -378,23 +382,70 @@
             rebuild = true;
           }
         }
-        // 目标语言元数据每次配置广播都更新：自定义语言的 code / 检测能力可能刚改过；
-        // 但只有 target 值真的变了才重建，改说明不会立刻重发付费请求。
-        DT.state.langInfo = res.config.activeLanguage || null;
-        DT.state.targetCode = (DT.state.langInfo && DT.state.langInfo.code) || '';
-        // 名称 / 说明变化不重发请求；代码（影响方向、字体、lang）变化时重建，避免旧译文继续用错排版。
-        var renderLangSig = DT.state.langInfo
-          ? [DT.state.langInfo.kind, DT.state.langInfo.code, DT.state.langInfo.script].join('|')
-          : '';
-        if (DT.state.renderedLangSig !== undefined && DT.state.renderedLangSig !== renderLangSig) rebuild = true;
-        DT.state.renderedLangSig = renderLangSig;
-        if (target !== cfgTarget) {
-          cfgTarget = target;
-          if (DT.state.target !== target) {
-            DT.state.target = target;
-            rebuild = true;
-          }
+
+        // 配置里的目标语言与实际译文语言分开保存：删除正在使用的自定义语言时，
+        // 配置回退 zh-CN，但页面上的旧译文仍保持原语言，等用户明确重译。
+        DT.state.configTarget = incomingTarget;
+        DT.state.configLangInfo = incomingInfo;
+
+        // AI 开关 / 隐私状态立即反映到 status，不再等下一次请求回包。
+        var aiWanted = res.config.aiContextEnabled === true;
+        var privacyOn = res.config.privacyEnabled === true;
+        var prevContextMode = DT.state.contextStatus && DT.state.contextStatus.mode;
+        var nextContextMode = aiWanted ? 'ai' : 'off';
+        var contextNeedsReset = !DT.state.contextStatus || prevContextMode !== nextContextMode ||
+          (aiWanted && privacyOn && DT.state.contextStatus.omitted !== 'privacy') ||
+          (aiWanted && !privacyOn && DT.state.contextStatus.omitted === 'privacy');
+        if (contextNeedsReset) {
+          DT.state.contextStatus = {
+            mode: nextContextMode,
+            omitted: aiWanted ? (privacyOn ? 'privacy' : 'pending') : '',
+            chars: 0,
+            items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 },
+            pending: aiWanted
+          };
         }
+        if (!aiWanted || privacyOn) DT.state.contextStale = false;
+
+        var prevCustoms = Array.isArray(prevConfig.customLanguages) ? prevConfig.customLanguages : [];
+        var nextCustoms = Array.isArray(res.config.customLanguages) ? res.config.customLanguages : [];
+        var activeWasCustom = String(DT.state.target || '').indexOf('cl_') === 0;
+        var activeCustomRemoved = activeWasCustom && !nextCustoms.some(function (one) { return one && one.id === DT.state.target; });
+        var targetChanged = incomingTarget !== cfgTarget || DT.state.targetPending;
+
+        if (targetChanged) {
+          cfgTarget = incomingTarget;
+          if (DT.state.enabled && activeCustomRemoved && incomingTarget !== DT.state.target) {
+            // 删除在用语言：不重建、不重新请求；停掉可能还在用旧配置的在途任务，
+            // 已展示译文保持原语言，动态补翻暂停到用户明确重译。
+            DT.state.targetPending = true;
+            cancelRun();
+          } else {
+            if (DT.state.target !== incomingTarget) {
+              DT.state.target = incomingTarget;
+              rebuild = true;
+            }
+            DT.state.langInfo = incomingInfo;
+            DT.state.targetCode = (incomingInfo && incomingInfo.code) || '';
+            DT.state.targetPending = false;
+            var renderLangSig = incomingInfo
+              ? [incomingInfo.kind, incomingInfo.code, incomingInfo.script].join('|')
+              : '';
+            if (DT.state.renderedLangSig !== undefined && DT.state.renderedLangSig !== renderLangSig) rebuild = true;
+            DT.state.renderedLangSig = renderLangSig;
+          }
+        } else if (!DT.state.targetPending) {
+          // 配置目标没变：名称 / 说明 / 代码可能刚改过。名称和说明不重发；
+          // 代码影响方向 / 字体，变化时按原规则重建。
+          DT.state.langInfo = incomingInfo;
+          DT.state.targetCode = (incomingInfo && incomingInfo.code) || '';
+          var currentLangSig = incomingInfo
+            ? [incomingInfo.kind, incomingInfo.code, incomingInfo.script].join('|')
+            : '';
+          if (DT.state.renderedLangSig !== undefined && DT.state.renderedLangSig !== currentLangSig) rebuild = true;
+          DT.state.renderedLangSig = currentLangSig;
+        }
+
         // 医学模式改变提示词和术语，已注入的普通译文不能继续冒充专业译文。
         // 比较「当前页面实际是用哪种模式翻的」而不是上一次 loadConfig：配置广播
         // 与启动/切换的先后顺序会影响后者，曾出现过开启后已翻段落不重建的情况。
@@ -409,8 +460,9 @@
     }
     applyChrome();
     if (DT.state.config) DT.emitConfig(DT.state.config);
-    // 翻译中换了显示方式 / 目标语言：已注入的译文是按旧设置写的，整页重建（注入策略跟模式走）
-    if (rebuild && DT.state.enabled) startOver();
+    // 翻译中换了显示方式 / 目标语言：已注入的译文是按旧设置写的，整页重建（注入策略跟模式走）。
+    // 删除在用语言进入 pending 时先不重建，等用户明确重译。
+    if (rebuild && DT.state.enabled && !DT.state.targetPending) startOver();
     return DT.state.config;
   }
 
@@ -419,10 +471,15 @@
       enabled: DT.state.enabled,
       mode: DT.state.mode,
       target: DT.state.target,
+      configTarget: DT.state.configTarget || DT.state.target,
+      targetPending: DT.state.targetPending === true,
       style: DT.state.style || 'plain',
       selectedStyle: DT.state.selectedStyle || 'plain',
       intensity: DT.state.intensity || 'standard',
-      context: DT.state.contextStatus || null,
+      context: DT.state.contextStatus
+        ? Object.assign({}, DT.state.contextStatus, { stale: DT.state.contextStale === true })
+        : null,
+      contextStale: DT.state.contextStale === true,
       total: DT.state.total,
       translated: DT.state.translated,
       failed: DT.state.failed,
@@ -484,10 +541,22 @@
     lastBeat = 0;
   }
 
+  // 上下文只影响翻译参考时，不取消在途 / 不重翻整页：标记过期，后续新任务用新上下文。
+  function markContextStale() {
+    DT.state.contextStale = true;
+    if (!DT.state.contextStatus) {
+      DT.state.contextStatus = { mode: 'ai', omitted: '', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } };
+    }
+    DT.state.contextStatus.stale = true;
+  }
+
   // opts: { reset: 是否清零统计, silent: 是否不弹提示 }
   async function translatePage(opts) {
     var options = opts || {};
     if (running || !DT.state.enabled) return;
+    // 配置目标已回退但页面还是旧目标译文：暂停动态补翻，避免两种目标语言混排；
+    // 明确点「重新翻译」或「开始翻译」后 applyConfigTarget() 会清掉这个标记。
+    if (DT.state.targetPending) return;
     var medical = false;
     var aiContext = false;
     var wantsContext = false;
@@ -529,8 +598,13 @@
       // 这里再要求 contextDirty，避免每次增量补扫都拿译文后的标题和原快照比较。
       if (wantsContext && contextWasDirty && contextChanged(snapshot)) {
         debugStats.contextChangedCount += 1;
-        startOver('context-changed');
-        return;
+        if (medical) {
+          // 医学专业上下文与译文质量直接相关，保留原有整页重建行为。
+          startOver('context-changed');
+          return;
+        }
+        // AI 精翻：只标记旧上下文过期，不重新请求已经完成的正文；本轮新段落用当前快照。
+        markContextStale();
       }
       DT.state.renderedMedical = medical;
       DT.state.renderedProfessional = professionalStrategy(cfg);
@@ -548,6 +622,8 @@
 
       if (options.reset) {
         DT.state.translated = 0;
+        DT.state.contextStale = false;
+        if (DT.state.contextStatus) DT.state.contextStatus.stale = false;
         resetFailures();
       }
 
@@ -822,8 +898,12 @@
           scopeSnapshots = new WeakMap();
           if (contextChanged(documentSnapshot())) {
             debugStats.contextChangedCount += 1;
-            startOver('context-changed-after-batch');
-            return;
+            if (medical) {
+              startOver('context-changed-after-batch');
+              return;
+            }
+            // AI 精翻：已发出的这一批继续注入（避免白付一次请求），只标记旧上下文过期。
+            markContextStale();
           }
         }
         lastBeat = Date.now();
@@ -836,7 +916,11 @@
           return;
         }
         if (res.error) DT.state.lastError = res.error;
-        if (res.context) DT.state.contextStatus = res.context;
+        if (res.context) {
+          // 回包代表的是「这次实际发送的上下文」；如果请求期间标题 / 章节又变了，
+          // 保留 stale 标记，不能让回包把它洗掉。
+          DT.state.contextStatus = Object.assign({}, res.context, { stale: DT.state.contextStale === true });
+        }
         batch.forEach(function (seg, k) {
           var value = res.results[k];
           var validation = res.validations && res.validations[k];
@@ -933,6 +1017,19 @@
     }
   }
 
+  // 配置里可能已经回退了目标语言（删除在用自定义语言），但页面上的旧译文还在。
+  // 只有用户明确开始翻译 / 重译时才把它落到本页。
+  function applyConfigTarget() {
+    var cfg = DT.state.config || {};
+    var next = DT.state.configTarget || cfg.targetLang || DT.state.target || 'zh-CN';
+    var info = DT.state.configLangInfo || cfg.activeLanguage || null;
+    DT.state.target = next;
+    DT.state.langInfo = info;
+    DT.state.targetCode = (info && info.code) || '';
+    DT.state.targetPending = false;
+    DT.state.renderedLangSig = info ? [info.kind, info.code, info.script].join('|') : '';
+  }
+
   // 用户明确开始翻译 / 重新翻译时才把「选中但未应用」的风格与当前强度落到本页。
   // 下拉框 change 本身绝不调用这里，避免切换菜单就发付费请求。
   function applySelectedStyle(cfg) {
@@ -951,6 +1048,7 @@
       DT.toast('还没配置 API Key：点扩展图标 → 设置');
       return summarize();
     }
+    applyConfigTarget();
     applySelectedStyle(cfg);
     DT.state.enabled = true;
     DT.send({ type: 'resume:set', value: true }).catch(function () {});
@@ -1342,6 +1440,16 @@
   // 给页面里的悬浮入口（dock.js）用：和弹窗按钮走同一套逻辑
   function setMode(mode) {
     DT.state.mode = mode === 'translation' ? 'translation' : 'dual';
+    // 删除在用语言后处于 pending：先还原旧译文、只应用显示方式，不拿新目标去付费请求。
+    // 用户之后点「重新翻译」时才按回退后的目标语言重建。
+    if (DT.state.targetPending) {
+      DT.restore();
+      DT.state.total = 0;
+      DT.state.translated = 0;
+      DT.state.failed = 0;
+      applyChrome();
+      return summarize();
+    }
     // 注入策略跟模式相关（双语=追加，仅译文=原地替换），必须重建
     startOver();
     return summarize();
@@ -1416,17 +1524,20 @@
         if (knownLanguages && knownLanguages.length && !knownLanguages.some(function (one) { return one.value === nextTarget; })) {
           nextTarget = (DT.state.config && DT.state.config.targetLang) || DT.state.target;
         }
-        if (nextTarget !== DT.state.target) {
-          DT.state.target = nextTarget;
-          var hitLanguage = null;
-          if (knownLanguages && knownLanguages.length) {
-            for (var li = 0; li < knownLanguages.length; li += 1) {
-              if (knownLanguages[li].value === nextTarget) {
-                hitLanguage = knownLanguages[li];
-                break;
-              }
+        var hitLanguage = null;
+        if (knownLanguages && knownLanguages.length) {
+          for (var li = 0; li < knownLanguages.length; li += 1) {
+            if (knownLanguages[li].value === nextTarget) {
+              hitLanguage = knownLanguages[li];
+              break;
             }
           }
+        }
+        DT.state.configTarget = nextTarget;
+        DT.state.configLangInfo = hitLanguage || (DT.state.config && DT.state.config.activeLanguage) || null;
+        DT.state.targetPending = false;
+        if (nextTarget !== DT.state.target) {
+          DT.state.target = nextTarget;
           if (hitLanguage) {
             DT.state.langInfo = hitLanguage;
             DT.state.targetCode = hitLanguage.code || '';
@@ -1457,10 +1568,14 @@
         };
         // 只记录模式与计数，不记录上下文正文 / 标题 / 页面正文。
         report.experience = {
+          target: DT.state.target,
+          configTarget: DT.state.configTarget || DT.state.target,
+          targetPending: DT.state.targetPending === true,
           style: DT.state.style || 'plain',
           selectedStyle: DT.state.selectedStyle || 'plain',
           intensity: DT.state.intensity || 'standard',
-          context: DT.state.contextStatus || null
+          context: DT.state.contextStatus || null,
+          contextStale: DT.state.contextStale === true
         };
       } catch (err) {
         report = { error: String(err) };
@@ -1478,6 +1593,7 @@
     // 明确的重翻动作：此时才把用户选中的风格 / 最新强度应用到本页。
     if (msg.type === 'dt:retranslate') {
       DT.state.enabled = true;
+      applyConfigTarget();
       applySelectedStyle(DT.state.config);
       startOver();
       sendResponse(summarize());
