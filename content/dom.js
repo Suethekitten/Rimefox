@@ -922,7 +922,12 @@
   function inlineLabel(unit, result, index) {
     var original = unit.keep[index];
     var format = (unit.formats || []).filter(function (f) { return f.linkIndex === index; })[0];
-    if (!format || result.formatMissing) return original.text;
+    if (!format) return original.text;
+    // 全部 <fN> 被模型安全省略时，链接标签仍在 <kN> 里；atom.text 是目标语言文本，
+    // 不能因为 formatMissing 就退回原文，否则中文正文里会留下英文 / 阿拉伯语链接标签。
+    // 只有完全没有 atom 的异常情况才保守回退原文。
+    var atom = result.atoms.filter(function (a) { return a.id === index + 1; })[0];
+    if (result.formatMissing) return atom ? atom.text : original.text;
     // 普通链接标签在 <fN> 里，译文在 result.stripped 的对应范围；atom.text 仍是原文，
     // 不能拿它当标签，否则双语副本永远保留阿拉伯语 / 英文原文。
     var range = (result.ranges || []).filter(function (f) { return f.id === format.id; })[0];
@@ -930,7 +935,6 @@
       var label = result.stripped.slice(range.start, range.end).trim();
       if (label) return label;
     }
-    var atom = result.atoms.filter(function (a) { return a.id === index + 1; })[0];
     return atom ? atom.text : original.text;
   }
 
@@ -961,6 +965,14 @@
     }
     return true;
   }
+
+  // 内容脚本把多个切片的译文拼回整段后，必须在写 DOM 前再校验一次完整 wire。
+  // 每个切片单独合法、拼起来却缺了 <fN>（或 k/f 父子关系变化）时，这里必须返回失败，
+  // 不能交给 inlineText 变成空串后被误记成“空译文 / 已处理”。
+  DT.inlineInspect = function (unit, raw) {
+    if (!unit || unit.inlineProtocol !== 'v1') return { ok: true, reason: '', formatMissing: false, stripped: '', ranges: [], atoms: [] };
+    return inspectInline(unit, raw);
+  };
 
   // 主调度、对齐和去重使用页面最终会显示的文字；保护区在本地恢复，不来自模型。
   DT.inlineText = function (unit, raw) {

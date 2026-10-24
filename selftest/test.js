@@ -291,6 +291,17 @@
     return kind === 'cite' && wire.indexOf('<k1>') >= 0 ? true : 'kind=' + kind + ' wire=' + wire.slice(0, 80);
   });
 
+  check('行内拼接校验：部分 <f> 缺失拒绝，全部缺失安全标记 formatMissing', function () {
+    if (!DT.inlineInspect) return 'missing DT.inlineInspect';
+    var unit = { inlineProtocol: 'v1', wire: 'Read <f1>alpha</f1> and <f2>beta</f2> now.' };
+    var partial = DT.inlineInspect(unit, '阅读 <f1>甲</f1> 和 beta。');
+    var all = DT.inlineInspect(unit, '阅读甲和乙。');
+    var good = DT.inlineInspect(unit, '阅读 <f1>甲</f1> 和 <f2>乙</f2>。');
+    return partial && !partial.ok && partial.reason === 'missing-marker' && all && all.ok && all.formatMissing === true && good && good.ok && good.formatMissing === false
+      ? true
+      : 'partial=' + JSON.stringify(partial) + ' all=' + JSON.stringify(all) + ' good=' + JSON.stringify(good);
+  });
+
   check('normalizeText: 折叠空白', function () {
     return eq(DT.normalizeText('  a \n\t b  '), 'a b');
   });

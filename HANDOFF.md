@@ -811,6 +811,11 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **验证**：新增真实维基段落固定的 `test/fixtures/arabic-wikipedia.html`（含 9 段、字母脚注、citation-needed、嵌套链接），扩展 E2E 增加 RTL 双栏 / 仅译文 / 还原 / 链接身份检查；阿拉伯语页和趣味风格的回归均保留在 Node、selftest 与 Chrome E2E 中，测试证据见本地报告与 commit message。
 - **限制**：E2E 使用假接口验证协议和 DOM，不证明真实模型会翻译每个 `<fN>` 标签；模型省略格式标记时仍按安全回退保留原文。真实维基的导航 / 列表等非正文区域按既有区域规则跳过。
 
+- **0.12.1 可靠性补充（本轮）**：内容脚本在把切片拼回整段后再次 inlineInspect；切片各自合法但拼回缺 f 标记时记 invalid-inline / renderFailed，不再经 keepText 变成空串后被 skipped + settled。formatMissing 的链接标签改用 k 内的目标语言 atom，不再退回源标签。
+- **模型输出验收**：新增 source-aware looksUntranslatedForTarget，拒绝原文回显、短拒绝、阿拉伯语/英文回显；明显正文的空回包和失控长文返回 outputErrors（empty/runaway/wrong-language），不写缓存、不自动重试，由内容脚本单独计 outputFailed。缓存命中也重新验收，旧空值 / 超长值 / 回显值失效。
+- **缓存/解析边界**：cache 增加 epoch，清空后旧请求不能把结果重新写回；截断的 JSON 数组/对象只按解析失败处理；配置广播会清输出失败记录，允许换 Key/服务商后再试。新增 test/output-acceptance.test.mjs、english-wikipedia.html、replay-inline.html 和 Chrome 重放夹具。
+- **限制**：真实付费模型未调用；假 API 只验证处理链路。同脚本源文回显（如日文→中文且输出仍日文）仍可能漏过脚本守卫；模型只回部分中文/混合语言、或漏 k 标记时仍按安全策略拒绝，需要用户明确重译。真实维基导航/列表等非正文区域按既有规则跳过。
+
 ## 15. 专业翻译引擎
 
 专业策略通过静态 Registry 接入共用翻译管线，医学是首个实现；配置迁移、数据、上下文、质量与费用边界统一见 [专业引擎文档](docs/PROFESSIONAL-TRANSLATION.md)。当前本地实施与验收证据见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)。DOM 引用的插入安全独立于专业模式，见 [翻译引擎渲染契约](docs/TRANSLATION-ENGINE-HANDOFF.md#33-仅译文)。

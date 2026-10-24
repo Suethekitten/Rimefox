@@ -36,6 +36,9 @@
   // 不算「跳过」也不算「已处理」：源文本和 DOM 状态（DT.unitStamp）都没变就不再收、不再请求；
   // 页面变了才重新收集（译文在后台缓存里，重新注入不会再调用模型）
   var renderFails = new WeakMap();
+  // 模型回包本身不可用（wrong-language / empty-output / runaway-output）：
+  // 与 DOM 注入失败分开计数，页面和源文本都没变时不重发、不进入付费退避。
+  var outputFails = new WeakMap();
   var CHURN_MAX = 3;
   var retryTimer = 0;
   var retryAt = 0;
@@ -528,7 +531,9 @@
       failed: DT.state.failed,
       skipped: DT.state.skipped || 0,
       renderFailed: DT.state.renderFailed || 0,
+      outputFailed: DT.state.outputFailed || 0,
       lastRenderError: DT.state.lastRenderError || '',
+      lastOutputError: DT.state.lastOutputError || '',
       lastError: DT.state.lastError || '',
       qualityWarnings: DT.state.qualityWarnings || 0,
       lastQualityWarning: DT.state.lastQualityWarning || '',
@@ -687,9 +692,11 @@
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
         if (unit.style === 'plain' && cfg.skipSameLang !== false && !jaPageToZh && DT.looksLikeTarget(unit.text, target, DT.targetInfo())) return false;
         if (unitState(settled, unit) === unit.text) return false;
-        // 上次注入失败、页面也没变：同一个确定性错误不再重试，也不再请求翻译
+        // 上次注入失败 / 模型回包不可用、页面也没变：同一个确定性错误不再重试，也不再请求翻译
         var broken = unitState(renderFails, unit);
         if (broken && broken.text === unit.text && broken.stamp === (DT.unitStamp ? DT.unitStamp(unit) : '')) return false;
+        var outputBroken = unitState(outputFails, unit);
+        if (outputBroken && outputBroken.text === unit.text && outputBroken.stamp === (DT.unitStamp ? DT.unitStamp(unit) : '')) return false;
         if ((unitState(churn, unit) || 0) >= CHURN_MAX) return false;
         // 懒翻译：只翻屏幕附近的，远处的等滚到附近再翻（滚动会触发补扫，见 onViewChange）。
         // 放在退避判断前面：远处的失败段不安排重试，滚回来时再说
@@ -822,6 +829,19 @@
         unit.failed = false;
       }
 
+      // 模型回包不可用：页面保持不变，记录独立类别；同一源文本 / DOM 不再重发。
+      function noteOutputFailure(unit, code) {
+        if (!unitState(outputFails, unit)) DT.state.outputFailed = (DT.state.outputFailed || 0) + 1;
+        setUnitState(outputFails, unit, {
+          text: unit.text,
+          stamp: DT.unitStamp ? DT.unitStamp(unit) : '',
+          code: code
+        });
+        DT.state.lastOutputError = code;
+        unit.done = true;
+        unit.failed = false;
+      }
+
       function tryInject(unit) {
         if (!unit || unit.done) return;
         if (cancelled()) return;
@@ -829,6 +849,16 @@
           if (unit.slots[k] === undefined) return; // 还有段没回来（或失败了，等下次补扫重试）
         }
         var raw = DT.joinSlots(unit.slots, DT.translationSeps(unit.seps, target, DT.targetInfo()));
+        // 每个切片单独合法，不代表拼回整段后仍然合法：一个切片省略全部 <fN>（协议允许）
+        // 另一个切片保留 <fN>，拼起来就会缺标记。这里必须显式失败，不能让它经 keepText
+        // 变成空串后走「跳过 + settled」——那会让长复杂段落永久不再重试。
+        if (unit.inlineProtocol && DT.inlineInspect) {
+          var joinedInline = DT.inlineInspect(unit, raw);
+          if (joinedInline && !joinedInline.ok) {
+            noteRenderFailure(unit, 'invalid-inline', joinedInline.reason);
+            return;
+          }
+        }
         // 去掉保留标记后的译文：对齐校验、去重都按页面上实际显示的文字算；注入时再按标记切分
         var text = DT.keepText(unit, raw);
         unit.done = true;
@@ -1016,6 +1046,18 @@
             pending = pending.filter(function (item) { return item.ui !== seg.ui; });
             return;
           }
+          var outputError = res.outputErrors && res.outputErrors[k];
+          if (outputError) {
+            if (DT.sourceChanged(queue[seg.ui])) {
+              queue[seg.ui].done = true;
+              dirty = true;
+              return;
+            }
+            noteOutputFailure(queue[seg.ui], String(outputError));
+            // 模型回包不可用是确定性失败：不自动重发，不产生额外 Token；用户重译或页面变化后再试。
+            pending = pending.filter(function (item) { return item.ui !== seg.ui; });
+            return;
+          }
           var value = res.results[k];
           var validation = res.validations && res.validations[k];
           if (validation && (validation.status === 'review' || validation.status === 'error')) {
@@ -1085,6 +1127,11 @@
           DT.toast('翻译失败：' + (DT.state.lastError || '未知错误'), 5000);
         } else if (DT.state.failed > 0) {
           DT.toast('新增 ' + (DT.state.translated) + ' 段译文，' + DT.state.failed + ' 段失败');
+        } else if (DT.state.outputFailed > 0) {
+          DT.toast(DT.uiText(
+            '已翻译 ' + DT.state.translated + ' 段，' + DT.state.outputFailed + ' 段模型输出异常，已保留原文且未自动重试',
+            'Translated ' + DT.state.translated + ' paragraphs; ' + DT.state.outputFailed + ' kept original because the model output was unusable and was not retried automatically'
+          ), 6000);
         } else if (DT.state.renderFailed > 0) {
           DT.toast(DT.uiText(
             '已翻译 ' + DT.state.translated + ' 段，' + DT.state.renderFailed + ' 段因格式或结构问题保留原文',
@@ -1159,8 +1206,11 @@
     resetFailures();
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
+    DT.state.outputFailed = 0;
     DT.state.lastRenderError = '';
+    DT.state.lastOutputError = '';
     DT.state.lastError = '';
+    outputFails = new WeakMap();
     applyChrome();
     // 注意：这里故意不 await —— 弹窗要能立刻拿到状态并开始轮询
     translatePage({ reset: true });
@@ -1187,6 +1237,7 @@
     settled = new WeakMap();
     churn = new WeakMap();
     renderFails = new WeakMap();
+    outputFails = new WeakMap();
     resetFailures();
     applyChrome();
     DT.toast('已还原原文');
@@ -1462,6 +1513,7 @@
     settled = new WeakMap();
     churn = new WeakMap();
     renderFails = new WeakMap();
+    outputFails = new WeakMap();
     resetFailures();
     DT.state.total = 0;
     DT.state.translated = 0;
@@ -1469,7 +1521,9 @@
     DT.state.lastQualityWarning = '';
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
+    DT.state.outputFailed = 0;
     DT.state.lastRenderError = '';
+    DT.state.lastOutputError = '';
     DT.state.lastError = '';
     applyChrome();
     if (DT.state.enabled) translatePage({ reset: true, silent: true });
@@ -1677,6 +1731,17 @@
           context: DT.state.contextStatus || null,
           contextStale: DT.state.contextStale === true
         };
+        // 只报类别和计数，不报正文 / 原始回包 / API Key。
+        report.failures = {
+          translated: DT.state.translated || 0,
+          failed: DT.state.failed || 0,
+          skipped: DT.state.skipped || 0,
+          renderFailed: DT.state.renderFailed || 0,
+          outputFailed: DT.state.outputFailed || 0,
+          lastError: DT.state.lastError || '',
+          lastRenderError: DT.state.lastRenderError || '',
+          lastOutputError: DT.state.lastOutputError || ''
+        };
       } catch (err) {
         report = { error: String(err) };
       }
@@ -1706,6 +1771,11 @@
     if (msg.type === 'dt:configChanged') {
       loadConfig().then(function () {
         resetFailures();
+        // 换了服务商 / Key / 模型后，上一批“模型输出语言错误”不应永久挡住这段；
+        // 只清输出失败记录，不清别的缓存，也不会自动发起请求。
+        outputFails = new WeakMap();
+        DT.state.outputFailed = 0;
+        DT.state.lastOutputError = '';
         scheduleIncremental();
       });
       return false;

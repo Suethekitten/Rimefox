@@ -57,6 +57,13 @@ t('单条直接回纯文本', () => {
   assert.deepEqual(parseArray('这是译文', 1), ['这是译文']);
 });
 
+t('单条返回截断的 JSON 数组 / 对象：拒绝，不把半截协议当正文', () => {
+  assert.equal(parseArray('["这是一段未完成的译文', 1), null);
+  assert.equal(parseArray('[{"translation":"半截"', 1), null);
+  assert.equal(parseArray('{"translation":"半截"', 1), null);
+  assert.deepEqual(parseArray('"正常字符串"', 1), ['正常字符串']);
+});
+
 t('保留分行的译文：\\n 转义照常解析，行数不变', () => {
   assert.deepEqual(parseArray('["第一行\\n第二行","单行"]', 2), ['第一行\n第二行', '单行']);
 });

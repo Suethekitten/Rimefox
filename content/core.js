@@ -28,7 +28,9 @@
     config: null,
     total: 0,
     translated: 0,
-    failed: 0
+    failed: 0,
+    outputFailed: 0, // 模型回包语言错误 / 空正文 / 失控长文；不自动重试
+    lastOutputError: ''
   };
 
   // 趣味翻译风格的 id（文案与提示词在 lib/config.js 的 STYLES，内容脚本只认 id）

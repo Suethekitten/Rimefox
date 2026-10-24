@@ -495,6 +495,107 @@ await t('注入失败（模型已给译文、DOM 写不进去）：不算跳过 
   assert.equal(DT.state.renderFailed, 1, '同一段只算一次失败');
 });
 
+await t('模型回包语言错误：不算成功 / 跳过，记 outputFailed；页面没变不再自动请求', async () => {
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ config: { lazy: true, skipSameLang: false }, hooks });
+  const DT = env.DT;
+  DT.generation = 1;
+  const el = {
+    ...fakeElement(),
+    isConnected: true,
+    getBoundingClientRect: () => ({ width: 600, height: 20, top: 0, bottom: 20 })
+  };
+  const unit = () => ({ el, text: 'High-profile applications of AI include advanced web search engines.', index: 0, gen: 1, sentences: [], style: 'plain' });
+  let injects = 0;
+  let stamp = 'dom-v1';
+  const asked = [];
+  DT.collectAll = (accept) => [unit()].filter((u) => !accept || accept(u));
+  DT.unitStamp = () => stamp;
+  DT.inject = (u, raw) => {
+    injects += 1;
+    return true;
+  };
+  DT.sourceChanged = () => false;
+  DT.send = async (msg) => {
+    if (msg.type === 'config:get') {
+      return { ok: true, config: { hasKey: true, targetLang: 'zh-CN', mode: 'translation', lazy: true, skipSameLang: false } };
+    }
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') {
+      asked.push(...msg.texts);
+      return { ok: true, results: [null], outputErrors: ['wrong-language'], alignments: [null] };
+    }
+    return { ok: true };
+  };
+
+  await env.message({ type: 'dt:toggle' });
+  for (let i = 0; i < 4; i += 1) await flush();
+  assert.equal(injects, 0, '语言错误不能把原文 / 半成品写进页面');
+  assert.equal(DT.state.translated || 0, 0);
+  assert.equal(DT.state.skipped || 0, 0, '语言错误不能静默算成跳过');
+  assert.equal(DT.state.outputFailed, 1);
+  assert.equal(DT.state.lastOutputError, 'wrong-language');
+  await rescan(hooks);
+  await rescan(hooks);
+  assert.equal(asked.length, 1, '页面没变：模型输出错误不自动重发（不产生额外 Token）');
+  stamp = 'dom-v2';
+  await rescan(hooks);
+  assert.equal(asked.length, 2, '页面变化后才重新收集 / 请求');
+  assert.equal(injects, 0);
+  assert.equal(DT.state.outputFailed, 1, '同一段只算一次输出失败');
+});
+
+await t('切片的行内格式拼接后损坏：记 invalid-inline / renderFailed，不能当空译文跳过并 settled', async () => {
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ config: { lazy: true, skipSameLang: false, maxUnitChars: 1200 }, hooks });
+  const DT = env.DT;
+  DT.generation = 1;
+  // 真实环境由 content/dom.js 提供 inlineInspect；这个测试只验证内容脚本在“拼接后校验失败”时的分类。
+  DT.inlineInspect = (unit, raw) => ({ ok: /<f1>/.test(raw) && /<f2>/.test(raw), reason: 'missing-marker', formatMissing: false });
+  const filler = 'This is a long sentence with enough words to force multiple translation slices. '.repeat(24);
+  const wire = 'Start <f1>alpha</f1> ' + filler + ' End <f2>beta</f2>.';
+  const el = {
+    ...fakeElement(),
+    isConnected: true,
+    getBoundingClientRect: () => ({ width: 600, height: 20, top: 0, bottom: 20 })
+  };
+  const unit = () => ({ el, text: wire, wire, inlineProtocol: 'v1', index: 0, gen: 1, sentences: [], style: 'plain' });
+  let injects = 0;
+  let stamp = 'dom-v1';
+  const asked = [];
+  DT.collectAll = (accept) => [unit()].filter((u) => !accept || accept(u));
+  DT.unitStamp = () => stamp;
+  DT.inject = (u, raw) => {
+    injects += 1;
+    return true;
+  };
+  DT.sourceChanged = () => false;
+  DT.send = async (msg) => {
+    if (msg.type === 'config:get') {
+      return { ok: true, config: { hasKey: true, targetLang: 'zh-CN', mode: 'translation', lazy: true, skipSameLang: false, maxUnitChars: 1200 } };
+    }
+    if (msg.type === 'resume:get') return { ok: true, value: false };
+    if (msg.type === 'translate') {
+      asked.push(...msg.texts);
+      // 每个切片单独看都合法：第一片没有 f，第二片保留 f2；拼回整段后 f1 缺失。
+      return { ok: true, results: msg.texts.map((x) => (/<f2>/.test(x) ? '<f2>第二片中文</f2>' : '第一片中文。')), alignments: msg.texts.map(() => null) };
+    }
+    return { ok: true };
+  };
+
+  await env.message({ type: 'dt:toggle' });
+  for (let i = 0; i < 5; i += 1) await flush();
+  assert.ok(asked.length >= 2, '测试需要至少两个切片：' + JSON.stringify(asked.map((x) => x.length)));
+  assert.equal(injects, 0, '拼接校验失败不能调用注入');
+  assert.equal(DT.state.skipped || 0, 0, '不能静默算成「跳过」');
+  assert.equal(DT.state.renderFailed, 1, '要记成格式 / 加入失败');
+  assert.match(DT.state.lastRenderError, /invalid-inline/);
+  const askedBefore = asked.length;
+  await rescan(hooks);
+  assert.equal(asked.length, askedBefore, '页面没变不再请求');
+  assert.equal(injects, 0);
+});
+
 await t('保留区：超长段落切片后，带标记的每一片都是成对的 <kN>（后台才会加「原样照抄」的说明）', async () => {
   const { hasKeepMarks } = await import(new URL('lib/prompt.js', root));
   const env = await boot({ config: { lazy: false, skipSameLang: false } });

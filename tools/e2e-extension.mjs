@@ -39,6 +39,9 @@ const LIVE_AOZORA = flag('--aozora-live')
 const VERBOSE = flag('--verbose');
 const SHADOW_ONLY = flag('--shadow-only');
 const ARABIC_ONLY = flag('--arabic-only');
+const MODEL_REPLAY_ONLY = flag('--model-replay-only');
+const INLINE_REPLAY_ONLY = flag('--inline-replay-only');
+const LANGUAGE_ONLY = flag('--language-only');
 const STYLE_PERSIST_ONLY = flag('--style-persist-only');
 const MEDICAL_ONLY = flag('--medical-only');
 const SELFTEST_ONLY = flag('--selftest-only');
@@ -381,6 +384,8 @@ ${LINK_FIXTURE}
 <p id="med">An odds ratio of 2.1 (95% CI 1.2–3.4) was reported in the randomized controlled trial.</p>
 </body></html>`,
   '/arabic.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/arabic-wikipedia.html'), 'utf8'),
+  '/english.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/english-wikipedia.html'), 'utf8'),
+  '/replay-inline.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/replay-inline.html'), 'utf8'),
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
 <p id="p1">This is the first paragraph of the article with enough words to translate.</p>
@@ -551,6 +556,15 @@ const server = http.createServer((req, res) => {
               const atoms = String(t).match(/<k\d+>[\s\S]*?<\/k\d+>/g);
               return atoms ? OWID_ZH.replace('11 自', atoms.join('') + ' 自') : OWID_ZH;
             }
+            // Deterministic model-output replay for the health checks below.
+            // A source echo must be rejected by the product, never injected as success.
+            if (stats.outputMode === 'wrong-language') return String(t);
+            if (stats.outputMode === 'empty') return '';
+            if (stats.outputMode === 'partial-f' && String(t).includes('REPLAY_INLINE')) return '阅读 <f1>甲</f1> 和<k1>乙</k1>。';
+            if (stats.outputMode === 'all-missing-f' && String(t).includes('REPLAY_INLINE')) return '阅读甲和<k1>乙</k1>。';
+            if (stats.outputMode === 'slice-mixed' && String(t).includes('SLICE_MIXED')) return /<f2>/.test(String(t)) ? '<f2>第二片中文</f2>' : '第一片中文。';
+            if (stats.outputMode === 'correct') return arabicZhFake(String(t));
+            if (/^ar/i.test(targetCode)) return 'هذا نص عربي تمت ترجمته للاختبار。';
             if (stats.arabicFixture && zhTarget) return arabicZhFake(String(t));
             if (wantsAlign) return aligned(t, i);
             if (english && /<f\d+>/.test(String(t))) {
@@ -1265,6 +1279,51 @@ async function arabicChecks() {
   check('阿拉伯语：关闭翻译后原始 DOM 逐字恢复', restored === before.html, restored === before.html ? '' : 'restored differs');
   await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
   stats.arabicFixture = false;
+}
+
+async function modelReplayChecks() {
+  console.log('\n[模型回包重放：错误语言 / 空正文 / 正确译文]');
+  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false, aiContextEnabled: false, privacyEnabled: false, customLanguages: [], professionalProfile: 'general', medicalMode: false });
+  const fixtures = [
+    { url: '/english.html', root: '#mwIQ', original: 'High-profile', label: '英文' },
+    { url: '/arabic.html', root: '#mwLQ', original: 'تشمل أبرز', label: '阿拉伯语' }
+  ];
+  for (const fixture of fixtures) {
+    const tab = await openTab(ORIGIN + fixture.url);
+    const clear = () => contentEval(tab, "window.__DT.send({ type: 'cache:clear' })");
+    const state = () => tabMsg(tab.tabId, { type: 'dt:status' });
+    const targetState = () => pageEval(tab, "const p=document.querySelector(" + JSON.stringify(fixture.root) + ");return {text:p?p.textContent:'',targets:p?p.querySelectorAll('[data-dt-target]').length:0,replaced:p?p.hasAttribute('data-dt-replaced'):false,links:p?p.querySelectorAll('a[href]').length:0,sups:p?p.querySelectorAll('sup').length:0};");
+    stats.arabicFixture = fixture.label === '阿拉伯语';
+    stats.outputMode = 'wrong-language';
+    await clear();
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+    await until(async () => { const st = await state(); return st && !st.busy; }, 25000);
+    const wrong = await state();
+    const wrongDom = await targetState();
+    check(fixture.label + '原文回显：状态记为模型输出失败，页面不写入', wrong && wrong.outputFailed > 0 && wrong.translated === 0 && wrongDom.targets === 0 && wrongDom.replaced === false, JSON.stringify({ status: wrong && { outputFailed: wrong.outputFailed, skipped: wrong.skipped, translated: wrong.translated }, dom: wrongDom }));
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+
+    stats.outputMode = 'empty';
+    await clear();
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+    await until(async () => { const st = await state(); return st && !st.busy; }, 25000);
+    const empty = await state();
+    const emptyDom = await targetState();
+    check(fixture.label + '正文空回包：状态记为模型输出失败，页面不写入', empty && empty.outputFailed > 0 && emptyDom.targets === 0, JSON.stringify({ status: empty && { outputFailed: empty.outputFailed, skipped: empty.skipped }, dom: emptyDom }));
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+
+    stats.outputMode = 'correct';
+    await clear();
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+    await until(async () => { const st = await state(); return st && !st.busy && st.translated > 0; }, 25000);
+    const good = await state();
+    const goodDom = await targetState();
+    check(fixture.label + '正确回包：正文写入目标语言，链接仍在', good && good.outputFailed === 0 && (goodDom.targets > 0 || goodDom.replaced) && /[\u4e00-\u9fff]/.test(goodDom.text) && goodDom.links > 0, JSON.stringify({ status: good && { translated: good.translated, outputFailed: good.outputFailed }, dom: { targets: goodDom.targets, replaced: goodDom.replaced, links: goodDom.links, sups: goodDom.sups, text: goodDom.text.slice(0, 80) } }));
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+    await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
+  }
+  stats.arabicFixture = false;
+  stats.outputMode = '';
 }
 
 async function directionChecks() {
@@ -2291,7 +2350,7 @@ async function selftestChecks() {
 // ---------------- 0.9.6 目标语言：日文 → 英文（悬停开 / 关） ----------------
 async function languageChecks() {
   console.log('\n[目标语言：日文 → 英文]');
-  await patchConfig({ targetLang: 'en', hoverCompare: true, dockEnabled: false, customPrompt: '' });
+  await patchConfig({ targetLang: 'en', hoverCompare: true, mode: 'dual', dockEnabled: false, customPrompt: '' });
   const tab = await openTab(ORIGIN + '/aozora.html');
   await tabMsg(tab.tabId, { type: 'dt:toggle' });
   const ready = await until(() => pageEval(tab, "return document.querySelectorAll('#mt [data-dt-target]').length === 3"), 20000);
@@ -2387,6 +2446,43 @@ async function styleUiChecks() {
   }, 20000);
   check('真实浏览器：再次明确翻译沿用原选择', !!reapplied && reapplied.selectedStyle === 'classical', JSON.stringify(reapplied && { style: reapplied.style, selected: reapplied.selectedStyle }));
   await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
+}
+
+async function inlineReplayChecks() {
+  console.log('\n[行内协议重放：缺部分标记 / 全缺标记 / 切片拼接损坏]');
+  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false, aiContextEnabled: false, privacyEnabled: false, customLanguages: [], professionalProfile: 'general', medicalMode: false });
+  const tab = await openTab(ORIGIN + '/replay-inline.html');
+  const clear = () => contentEval(tab, "window.__DT.send({ type: 'cache:clear' })");
+  const state = () => tabMsg(tab.tabId, { type: 'dt:status' });
+  const dom = (selector) => pageEval(tab, "return (() => { const p=document.querySelector(" + JSON.stringify(selector) + "); return {text:p?p.textContent:'',targets:p?p.querySelectorAll('[data-dt-target]').length:0,replaced:p?p.hasAttribute('data-dt-replaced'):false,link:p&&p.querySelector('a')?p.querySelector('a').textContent:''}; })()");
+  stats.outputMode = 'partial-f';
+  await clear();
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(async () => { const st = await state(); return st && !st.busy; }, 25000);
+  const partial = await state();
+  const partialDom = await dom('#replay-inline');
+  check('行内重放：只缺一个 <f> → invalid-inline / renderFailed，不写页面', partial && partial.renderFailed > 0 && partial.outputFailed === 0 && partial.skipped === 0 && partialDom.replaced === false, JSON.stringify({ status: partial && { renderFailed: partial.renderFailed, outputFailed: partial.outputFailed, skipped: partial.skipped }, dom: partialDom }));
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+
+  stats.outputMode = 'all-missing-f';
+  await clear();
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(async () => { const st = await state(); return st && !st.busy && st.translated > 0; }, 25000);
+  const all = await state();
+  const allDom = await dom('#replay-inline');
+  check('行内重放：全部 <f> 缺失 → 安全显示中文译文，链接仍可点击', all && all.outputFailed === 0 && allDom.replaced === true && /[\u4e00-\u9fff]/.test(allDom.text) && /[\u4e00-\u9fff]/.test(allDom.link), JSON.stringify({ status: all && { translated: all.translated, outputFailed: all.outputFailed }, dom: allDom }));
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+
+  stats.outputMode = 'slice-mixed';
+  await clear();
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(async () => { const st = await state(); return st && !st.busy; }, 25000);
+  const mixed = await state();
+  const mixedDom = await dom('#replay-long');
+  check('行内重放：切片拼接后缺标记 → renderFailed，不能 skipped + settled', mixed && mixed.renderFailed > 0 && mixed.skipped === 0 && mixedDom.replaced === false, JSON.stringify({ status: mixed && { renderFailed: mixed.renderFailed, outputFailed: mixed.outputFailed, skipped: mixed.skipped }, dom: mixedDom }));
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  stats.outputMode = '';
   await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
 }
 
@@ -2946,6 +3042,12 @@ try {
     await shadowChecks();
   } else if (ARABIC_ONLY) {
     await arabicChecks();
+  } else if (MODEL_REPLAY_ONLY) {
+    await modelReplayChecks();
+  } else if (INLINE_REPLAY_ONLY) {
+    await inlineReplayChecks();
+  } else if (LANGUAGE_ONLY) {
+    await languageChecks();
   } else if (STYLE_PERSIST_ONLY) {
     await stylePersistenceChecks();
   } else if (BILIBILI_LIVE) {
@@ -2965,6 +3067,10 @@ try {
     await koreanBoldChecks();
     await directionChecks();
     await arabicChecks();
+    await modelReplayChecks();
+    await inlineReplayChecks();
+    stats.outputMode = '';
+    stats.arabicFixture = false;
     await languageChecks();
     await styleUiChecks();
     await stylePersistenceChecks();

@@ -538,34 +538,38 @@ await t('缓存：标记 en 却是整段中文 → 只失效这一条并重新�
   assert.equal(again.results[0], 'This is the English translation.');
 });
 
-await t('新回包：英文目标却回整段中文 → 这次照常显示，但绝不写缓存，下次重新请求', async () => {
+await t('新回包：英文目标却回整段中文 → 拒绝注入，不写缓存，下次重新请求', async () => {
   reply = (texts) => JSON.stringify(texts.map(() => ZH_LONG));
   calls = [];
   const src = 'Live Chinese reply source 〔en-live〕';
   const first = await send({ type: 'translate', texts: [src], target: 'en', align: true });
-  assert.equal(first.results[0], ZH_LONG, '这一次仍返回给页面，不吞掉译文');
+  assert.equal(first.results[0], null, '目标语言不符不能当成功译文');
+  assert.equal(first.outputErrors[0], 'wrong-language');
   assert.equal(first.alignments[0], null, '目标语言明显不符时不写对齐旁路');
   assert.equal(calls.length, 1);
 
   calls = [];
   const second = await send({ type: 'translate', texts: [src], target: 'en' });
   assert.equal(calls.length, 1, '坏结果没有进缓存，下次必须重新请求');
-  assert.equal(second.cached, 0);
+  assert.equal(second.cached || 0, 0);
+  assert.equal(second.results[0], null);
 });
 
-await t('新回包：中文目标却回整段英文 → 这次照常显示，但绝不写缓存，下次重新请求', async () => {
+await t('新回包：中文目标却回整段英文 → 拒绝注入，不写缓存，下次重新请求', async () => {
   reply = (texts) => JSON.stringify(texts.map(() => EN_LONG));
   calls = [];
   const src = 'Live English reply source 〔zh-live〕';
   const first = await send({ type: 'translate', texts: [src], target: 'zh-CN', align: true });
-  assert.equal(first.results[0], EN_LONG, '这一次仍返回给页面，不吞掉译文');
+  assert.equal(first.results[0], null, '目标语言不符不能当成功译文');
+  assert.equal(first.outputErrors[0], 'wrong-language');
   assert.equal(first.alignments[0], null, '目标语言明显不符时不写对齐旁路');
   assert.equal(calls.length, 1);
 
   calls = [];
   const second = await send({ type: 'translate', texts: [src], target: 'zh-CN' });
   assert.equal(calls.length, 1, '坏结果没有进缓存，下次必须重新请求');
-  assert.equal(second.cached, 0);
+  assert.equal(second.cached || 0, 0);
+  assert.equal(second.results[0], null);
 });
 
 await t('目标语言隔离：同一原文 en 与 zh-CN 各自缓存，不串用', async () => {
@@ -794,7 +798,7 @@ await t('自定义语言：目标语言行 / 说明进入提示词，缓存按�
   await setConfig({ customLanguages: [], targetLang: 'en' });
 });
 
-await t('自定义语言代码 en-GB：模型回整段中文不写缓存，下次重新请求', async () => {
+await t('自定义语言代码 en-GB：模型回整段中文拒绝注入、不写缓存，下次重新请求', async () => {
   const custom = { id: 'cl_0a1b2c4e', name: 'Pirate English', code: 'en-GB', note: 'Use British spelling.' };
   await setConfig({ customLanguages: [custom], targetLang: 'en', aiContextEnabled: false, privacyEnabled: false, medicalMode: false, glossary: [] });
   const bad = '这是一整段中文译文，本应输出英文却输出了中文，用来验证目标语言校验不会把错误结果写进缓存。'.repeat(2);
@@ -803,10 +807,12 @@ await t('自定义语言代码 en-GB：模型回整段中文不写缓存，下�
   calls = [];
   const first = await send({ type: 'translate', texts: [src], target: custom.id });
   assert.equal(calls.length, 1);
-  assert.equal(first.results[0], bad, '这次仍显示模型结果');
+  assert.equal(first.results[0], null, '语言不符不能显示为成功译文');
+  assert.equal(first.outputErrors[0], 'wrong-language');
   calls = [];
-  await send({ type: 'translate', texts: [src], target: custom.id });
+  const second = await send({ type: 'translate', texts: [src], target: custom.id });
   assert.equal(calls.length, 1, '语言明显不符的译文不能写缓存');
+  assert.equal(second.cached || 0, 0);
   reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
   await setConfig({ customLanguages: [], targetLang: 'en' });
 });

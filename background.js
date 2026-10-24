@@ -1,7 +1,7 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
 import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget, languageInfoFor, languageOptions, customLanguageFingerprint, normalizeTargetLang, styleFingerprint, normalizeIntensity } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint, hasKeepMarks } from './lib/prompt.js';
-import { looksForeignForTarget } from './lib/lang-guard.js';
+import { looksUntranslatedForTarget } from './lib/lang-guard.js';
 import { chat, ApiError } from './lib/provider.js';
 import { parseArray, parseAlignedArray, parseArrayFromReasoning, isRunaway, normalizeTranslationBreaks, leaksWrapper } from './lib/parse.js';
 import {
@@ -71,6 +71,16 @@ function sleep(ms) {
 function inlineVisible(text) {
   const checked = inspectInline(text, text);
   return checked.ok ? checked.text : '';
+}
+
+// 明显是一段正文（而不是按钮 / 标签 / 缩写）才把空回包、超长回包算模型失败。
+// 长度和句末标点都要有：短文本可能本来就不需要翻译，不能因此报错。
+function isSubstantialSource(text) {
+  const value = String(text == null ? '' : text);
+  const letters = (value.match(/\p{L}/gu) || []).length;
+  if (letters < 40) return false;
+  if (/[。！？.!?؟]/.test(value)) return true;
+  return value.trim().split(/\s+/).length >= 8;
 }
 
 // style：趣味翻译风格（lib/config.js 的 STYLES），普通翻译为 'plain'
@@ -209,6 +219,7 @@ function hostOf(sender) {
 
 async function handleTranslate(msg, sender) {
   await cache.ready;
+  const cacheEpoch = cache.epoch ? cache.epoch() : 0;
   const cfg = await getConfig();
   maxParallel = Math.max(1, Math.min(16, Number(cfg.concurrency) || 6));
 
@@ -269,6 +280,9 @@ async function handleTranslate(msg, sender) {
   const alignments = new Array(texts.length).fill(null);
   const validations = new Array(texts.length).fill(null);
   const inlineErrors = new Array(texts.length).fill(null);
+  // 模型回包本身不可用（语言错误 / 空正文 / 失控长文），不是 DOM 注入失败。
+  // 这些结果不写缓存，不计 skipped，也不自动重试；用户明确重译时才重新请求。
+  const outputErrors = new Array(texts.length).fill(null);
 
   const active = activeConfig(cfg);
   if (!active.apiKey) {
@@ -342,12 +356,20 @@ async function handleTranslate(msg, sender) {
     // 残留 JSON 包装的旧译文当作没命中，重新翻（不整体清缓存）
     if (typeof hit === 'string') {
       const fixed = normalizeTranslationBreaks(text, hit);
+      const cacheSource = inlineProtocol ? inlineVisible(text) : text;
       if (leaksWrapper(text, fixed)) {
         cache.remove(keyOf(text));
         alignCache.delete(keyOf(text));
         hit = undefined;
         hitAlign = null;
-      } else if (looksForeignForTarget(fixed, languageInfo.code || target)) {
+      } else if ((!fixed.trim() && isSubstantialSource(cacheSource)) || (isSubstantialSource(cacheSource) && isRunaway(cacheSource, fixed))) {
+        // 旧版本 / 旧在途请求可能把空回包或失控长文写进缓存；读取时同样失效，
+        // 否则用户点「重新翻译」仍会拿到同一条坏译文。
+        cache.remove(keyOf(text));
+        alignCache.delete(keyOf(text));
+        hit = undefined;
+        hitAlign = null;
+      } else if (looksUntranslatedForTarget(cacheSource, fixed, languageInfo.code || target)) {
         // 目标语言是英文（或其它拉丁字母语系），缓存里却是整段中文：0.9.5 之前 align 提示词
         // 的中文示例把模型带偏后留下的坏结果。只失效这一条，不清整层、不动其它正常缓存，
         // 下次照常请求；对齐旁路一起丢掉，避免继续拿错译文做句级对应。
@@ -358,7 +380,7 @@ async function handleTranslate(msg, sender) {
         usageStats.languageMismatch();
       } else if (fixed !== hit) {
         // 换行被改写后译文偏移变了，旧对齐不能再用（下次悬停降级）
-        cache.set(keyOf(text), fixed);
+        if (cache.epoch() === cacheEpoch) cache.set(keyOf(text), fixed);
         alignCache.delete(keyOf(text));
         hit = fixed;
         hitAlign = null;
@@ -379,12 +401,13 @@ async function handleTranslate(msg, sender) {
   let todo = Array.from(groups.keys());
 
   // 这一条的结果定下来了：回填到它出现的所有位置；失败（null）时记下第一个原因
-  function fill(text, value, err, parts, validation, inlineError) {
+  function fill(text, value, err, parts, validation, inlineError, outputError) {
     groups.get(text).forEach((index) => {
       results[index] = value;
       alignments[index] = parts || null;
       validations[index] = validation || (typeof value === 'string' && value ? professional.validate(text, value) : null);
       inlineErrors[index] = inlineError || null;
+      outputErrors[index] = outputError || null;
     });
     if (value === null && !firstError) firstError = err || new ApiError('翻译失败', 0, '');
   }
@@ -398,7 +421,7 @@ async function handleTranslate(msg, sender) {
     if (!running) return true;
     waits.push(
       running.then((done) => {
-        fill(text, done.value, done.error, done.parts, done.validation, done.inlineError);
+        fill(text, done.value, done.error, done.parts, done.validation, done.inlineError, done.outputError);
       })
     );
     return false;
@@ -435,17 +458,17 @@ async function handleTranslate(msg, sender) {
       resolve = r;
     });
     inflight.set(key, running);
-    settles.set(text, (value, error, parts, validation, inlineError) => {
+    settles.set(text, (value, error, parts, validation, inlineError, outputError) => {
       if (inflight.get(key) === running) inflight.delete(key);
-      resolve({ value, error, parts, validation, inlineError });
+      resolve({ value, error, parts, validation, inlineError, outputError });
     });
   });
-  function settle(text, value, err, parts, validation, inlineError) {
-    fill(text, value, err, parts, validation, inlineError);
+  function settle(text, value, err, parts, validation, inlineError, outputError) {
+    fill(text, value, err, parts, validation, inlineError, outputError);
     const done = settles.get(text);
     if (done) {
       settles.delete(text);
-      done(value, value === null ? err || firstError : null, parts || null, validation, inlineError);
+      done(value, value === null ? err || firstError : null, parts || null, validation, inlineError, outputError);
     }
   }
 
@@ -541,6 +564,19 @@ async function handleTranslate(msg, sender) {
           const beforeBreaks = value;
           value = normalizeTranslationBreaks(text, value);
           if (value !== beforeBreaks) parts = null;
+          const targetCode = languageInfo.code || target;
+          const sourceVisible = inlineProtocol ? inlineVisible(text) : text;
+          const sourceSubstantial = isSubstantialSource(sourceVisible);
+          // 空正文 / 失控长文先于行内解析：空回包没有 <fN>，如果先跑 inspectInline
+          // 会被误判成 invalid-inline，用户看到的是结构错误而不是模型空回包。
+          if (typeof value === 'string' && !value.trim() && sourceSubstantial) {
+            settle(text, null, new ApiError('模型返回空译文，已保留原文', 0, 'empty-output'), null, null, null, 'empty-output');
+            continue;
+          }
+          if (typeof value === 'string' && sourceSubstantial && isRunaway(sourceVisible, value)) {
+            settle(text, null, new ApiError('模型返回内容异常偏长，已保留原文', 0, 'runaway-output'), null, null, null, 'runaway-output');
+            continue;
+          }
           let inlineState = inlineProtocol ? inspectInline(text, value) : null;
           if (inlineState && !inlineState.ok) {
             settle(text, null, new ApiError('模型返回的行内格式不完整，已保留原文', 0, inlineState.reason), null, null, inlineState.reason);
@@ -551,9 +587,17 @@ async function handleTranslate(msg, sender) {
             settle(text, null, new ApiError('模型返回的译文里混进了 JSON 格式，已丢弃', 0, ''));
             continue;
           }
+          const outputVisible = inlineProtocol && inlineState ? inlineState.text : String(value == null ? '' : value);
+          // 语言守卫必须在写缓存和交给页面之前执行。旧实现只阻止坏结果进缓存，
+          // 仍会把整段英文 / 阿拉伯语当作译文注入，页面看起来就是“漏翻但成功”。
+          if (typeof value === 'string' && looksUntranslatedForTarget(sourceVisible, outputVisible, targetCode)) {
+            usageStats.languageMismatch();
+            settle(text, null, new ApiError('模型返回的目标语言不符，已保留原文', 0, 'wrong-language'), null, null, null, 'wrong-language');
+            continue;
+          }
           let result = '';
           let validation = null;
-          if (typeof value === 'string' && value.trim() && !isRunaway(text, value)) {
+          if (typeof value === 'string' && value.trim() && !isRunaway(sourceVisible, value)) {
             validation = professional.validate(text, value);
             const reviewed = await reviewHighRisk({
               engine: professional, source: text, translation: value, report: validation, budget: reviewBudget,
@@ -563,20 +607,24 @@ async function handleTranslate(msg, sender) {
                   const checked = inspectInline(text, candidate);
                   if (!checked.ok || checked.formatMissing) return false;
                 }
-                return !leaksWrapper(text, candidate) && !isRunaway(text, candidate) && !looksForeignForTarget(candidate, languageInfo.code || target);
+                return !leaksWrapper(text, candidate) && !isRunaway(text, candidate) && !looksUntranslatedForTarget(sourceVisible, candidate, targetCode);
               }
             });
             value = reviewed.translation;
             validation = reviewed.report;
             if (reviewed.changed) parts = null; // A new translation invalidates the old model offsets.
             if (inlineProtocol) inlineState = inspectInline(text, value);
-            result = value;
-            // 目标语言明显不符（例如英文目标却回了整段中文）：这次仍显示，但绝不写缓存 / 对齐旁路，
-            // 免得一次模型抽风永久生效；下次请求会重新翻。不再追加请求，也就不会重复计费。
-            if (looksForeignForTarget(value, languageInfo.code || target)) {
-              parts = null;
+            const finalVisible = inlineProtocol && inlineState ? inlineState.text : value;
+            // 复核模型也可能把语言改回原文；同样在写页面 / 缓存前拒绝。
+            if (looksUntranslatedForTarget(sourceVisible, finalVisible, targetCode)) {
               usageStats.languageMismatch();
-            } else if (!noCache && !(inlineState && inlineState.formatMissing)) {
+              settle(text, null, new ApiError('模型返回的目标语言不符，已保留原文', 0, 'wrong-language'), null, null, null, 'wrong-language');
+              continue;
+            }
+            result = value;
+            // inline 格式缺失（全部 <fN> 被安全省略）时显示译文但不写缓存；
+            // 部分格式缺失会更早按 invalid-inline 失败，绝不会到这里。
+            if (!noCache && cache.epoch() === cacheEpoch && !(inlineState && inlineState.formatMissing)) {
               cache.set(keyOf(text), value);
               if (wantAlign) rememberAlign(keyOf(text), parts);
             }
@@ -611,7 +659,7 @@ async function handleTranslate(msg, sender) {
         : { mode: 'ai', omitted: 'no-context', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } })
       : { mode: 'off', omitted: '', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } };
   if (results.length && failed === results.length) {
-    return { ok: false, error: describeError(firstError), results, alignments, validations, inlineErrors, context: contextReport };
+    return { ok: false, error: describeError(firstError), results, alignments, validations, inlineErrors, outputErrors, context: contextReport };
   }
 
   return {
@@ -620,6 +668,7 @@ async function handleTranslate(msg, sender) {
     alignments,
     validations,
     inlineErrors,
+    outputErrors,
     failed,
     cached,
     context: contextReport,

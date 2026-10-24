@@ -3,7 +3,7 @@
 // 运行：node test/lang-guard.test.mjs
 import assert from 'node:assert/strict';
 
-import { looksForeignForTarget } from '../lib/lang-guard.js';
+import { looksForeignForTarget, looksUntranslatedForTarget } from '../lib/lang-guard.js';
 
 let pass = 0;
 let fail = 0;
@@ -27,12 +27,33 @@ const JA_PROSE =
   'ただ、所々丹塗りの剥げた、大きな円柱に、蟋蟀が一匹とまっている。';
 const EN_PROSE =
   'It was a evening in late autumn. A lowly servant was waiting for the rain to stop under the Rashomon gate, and nobody else was there.';
+const AR_PROSE =
+  'تشمل أبرز تطبيقات الذكاء الاصطناعي محركات البحث المتقدمة على الويب، وروبوتات المحادثة، والمساعدات الافتراضية، والمركبات ذاتية القيادة، وتوليد المحتوى.';
 
 console.log('\n[目标语言保守校验]');
+
+t('源语言回显 + 短拒绝：参数化跨语言表', () => {
+  const cases = [
+    { source: EN_PROSE, output: EN_PROSE, target: 'zh-CN', expected: true },
+    { source: AR_PROSE, output: AR_PROSE, target: 'zh-CN', expected: true },
+    { source: EN_PROSE, output: 'Sorry, I cannot help with that.', target: 'zh-CN', expected: true },
+    { source: EN_PROSE, output: EN_PROSE, target: 'ar', expected: true },
+    { source: AR_PROSE, output: AR_PROSE, target: 'en', expected: true },
+    { source: EN_PROSE, output: '这是正常中文译文，保留 OpenAI 和 DeepMind。', target: 'zh-CN', expected: false },
+    { source: 'Short label', output: 'Short label', target: 'zh-CN', expected: false }
+  ];
+  cases.forEach((one) => {
+    assert.equal(looksUntranslatedForTarget(one.source, one.output, one.target), one.expected, JSON.stringify(one));
+  });
+});
 
 t('英文目标：整段中文正文 → 判为异常', () => {
   assert.equal(looksForeignForTarget(ZH_PROSE, 'en'), true);
   assert.equal(looksForeignForTarget(ZH_PROSE, 'en-US'), true);
+});
+
+t('英文目标：整段阿拉伯语正文 → 判为异常', () => {
+  assert.equal(looksForeignForTarget(AR_PROSE, 'en'), true);
 });
 
 t('英文目标：整段日文 / 韩文正文 → 判为异常', () => {
@@ -78,6 +99,17 @@ t('中日韩目标：整段英文回包 → 判为异常（不写缓存）', () 
   assert.equal(looksForeignForTarget(EN_PROSE, 'zh-TW'), true);
   assert.equal(looksForeignForTarget(EN_PROSE, 'ja'), true);
   assert.equal(looksForeignForTarget(EN_PROSE, 'ko'), true);
+});
+
+t('中文目标：整段阿拉伯语回包 → 判为异常；中文里保留阿拉伯专名不误杀', () => {
+  assert.equal(looksForeignForTarget(AR_PROSE, 'zh-CN'), true);
+  assert.equal(looksForeignForTarget('正常中文译文，保留 العربية 和人名，不应被误判。', 'zh-CN'), false);
+});
+
+t('阿拉伯语目标：整段英文 / 中文回包 → 判为异常；阿拉伯语正常译文放行', () => {
+  assert.equal(looksForeignForTarget(EN_PROSE, 'ar'), true);
+  assert.equal(looksForeignForTarget(ZH_PROSE, 'ar'), true);
+  assert.equal(looksForeignForTarget(AR_PROSE, 'ar'), false);
 });
 
 t('中日韩目标：短英文 / 无句末标点 / 中英混排不误杀', () => {
