@@ -655,7 +655,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `medicalMode` | false | 医学开关的旧版兼容别名，与 `professionalProfile` 同步。|
 | `glossary` | `[]` | 术语表 `[{source, target, category?, note?}]`，全局一份。说明、固定/语境译法、CSV/JSON 兼容和按命中失效的缓存规则见 [术语表帮助](docs/GLOSSARY.md)。划词收录仍走 `glossary:add`，覆盖译法保留原分类和说明。|
 | `debug` | false | 输出调试日志 |
-| `_v` | 7 | 配置版本（迁移逻辑在 `migrateConfig`） |
+| `_v` | 8 | 配置版本（迁移逻辑在 `migrateConfig`；v8 只新增自定义语言 / 趣味强度 / AI 精翻字段，专业字段与旧值保留） |
 
 ---
 
