@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { professionalProfileFor, normalizeProfessionalOptions } from '../lib/config.js';
+import { professionalProfileFor, normalizeProfessionalOptions, normalizeIntensity, FUN_INTENSITIES } from '../lib/config.js';
 
 const root = new URL('..', import.meta.url);
 
@@ -701,6 +701,252 @@ await t('在途翻译期间文档标题变化：丢弃旧上下文结果并重�
   assert.deepEqual(injected, ['新论文译文。']);
   assert.deepEqual(contexts, ['Oncology trial', 'A different oncology paper']);
   assert.equal(env.page.rebuilds, 1);
+});
+
+
+console.log('\n[趣味风格：选中但不应用 / 零请求]');
+
+await t('内容脚本强度 id 与规范化函数和 ESM 配置一致（差分）', async () => {
+  const { DT } = await boot();
+  assert.deepEqual(Array.from(DT.INTENSITY_IDS), FUN_INTENSITIES.map((one) => one.value));
+  [undefined, null, '', 'nope', 'light', ' standard ', 'exaggerated', '  exaggerated  '].forEach((value) => {
+    assert.equal(DT.normalizeIntensity(value), normalizeIntensity(value));
+  });
+});
+
+await t('未翻译时切换风格：只记录选中，不开启翻译、不发请求、不重建', async () => {
+  const env = await boot();
+  const before = env.sent.filter((msg) => msg.type === 'translate').length;
+  const status = await env.message({ type: 'dt:setStyle', style: 'catgirl' });
+  assert.equal(status.selectedStyle, 'catgirl');
+  assert.equal(status.style, 'plain');
+  assert.equal(status.enabled, false);
+  assert.equal(env.sent.filter((msg) => msg.type === 'translate').length, before);
+  assert.equal(env.sent.some((msg) => msg.type === 'resume:set'), false);
+  assert.equal(env.page.rebuilds, 0);
+});
+
+await t('已翻译页面切换风格：不重翻、不取消在途、不改变已生效风格；重新翻译才应用新风格与强度', async () => {
+  const fixture = contextFixture();
+  const env = await boot({ config: { lazy: false, skipSameLang: false, funIntensity: 'exaggerated' }, pageDocument: fixture.pageDocument });
+  env.DT.areaOf = () => 'content';
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  const requests = [];
+  const injected = installTranslationFixture(env, unit, (msg) => {
+    requests.push(msg);
+    return { ok: true, results: ['39例患者接受了PFS评估。'] };
+  });
+  // 真实的 collectAll 会把 accept 过滤后的 unit.style 写好；桩也要走一次 accept。
+  env.DT.collectAll = (accept) => [unit].filter((item) => !accept || accept(item));
+  await env.message({ type: 'dt:toggle' });
+  await flush();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].style, 'plain');
+  const rebuilds = env.page.rebuilds;
+  const status = await env.message({ type: 'dt:setStyle', style: 'catgirl' });
+  assert.equal(status.selectedStyle, 'catgirl');
+  assert.equal(status.style, 'plain');
+  assert.equal(status.intensity, 'standard');
+  assert.equal(requests.length, 1, '切换下拉框不能发翻译请求');
+  assert.equal(env.page.rebuilds, rebuilds, '不能取消在途 / 重建页面');
+  assert.equal(injected.length, 1);
+  await env.message({ type: 'dt:retranslate' });
+  await flush();
+  assert.equal(requests.length, 2, '只有明确重翻才发第二次请求');
+  assert.equal(requests[1].style, 'catgirl');
+  assert.equal(requests[1].intensity, 'exaggerated');
+});
+
+await t('翻译进行中切换风格：不取消旧请求；旧结果照常注入；重翻才用新风格', async () => {
+  const fixture = contextFixture();
+  const env = await boot({ config: { lazy: false, skipSameLang: false }, pageDocument: fixture.pageDocument });
+  env.DT.areaOf = () => 'content';
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  let resolveOld;
+  const requests = [];
+  const injected = installTranslationFixture(env, unit, (msg) => {
+    requests.push(msg);
+    return new Promise((resolve) => {
+      resolveOld = resolve;
+    });
+  });
+  env.DT.collectAll = (accept) => [unit].filter((item) => !accept || accept(item));
+  await env.message({ type: 'dt:toggle' });
+  await flush();
+  assert.equal(requests.length, 1);
+  const status = await env.message({ type: 'dt:setStyle', style: 'catgirl' });
+  assert.equal(status.selectedStyle, 'catgirl');
+  assert.equal(status.style, 'plain');
+  assert.equal(requests.length, 1, 'setStyle 不能取消并重发');
+  resolveOld({ ok: true, results: ['旧风格译文。'] });
+  await flush();
+  await flush();
+  assert.deepEqual(injected, ['旧风格译文。'], '旧请求的结果仍应注入');
+  await env.message({ type: 'dt:retranslate' });
+  await flush();
+  assert.equal(requests.length, 2, '明确重翻才发第二次');
+  assert.equal(requests[1].style, 'catgirl');
+});
+
+await t('翻译进行中动态补翻继续使用已生效风格，不因弹窗里的待应用选择突然变风格', async () => {
+  const fixture = contextFixture();
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ config: { lazy: false, skipSameLang: false }, pageDocument: fixture.pageDocument, hooks });
+  env.DT.areaOf = () => 'content';
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  const requests = [];
+  installTranslationFixture(env, unit, (msg) => {
+    requests.push(msg);
+    return { ok: true, results: ['译文。'] };
+  });
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(requests.length, 1);
+  await env.message({ type: 'dt:setStyle', style: 'catgirl' });
+  const from = hooks.timers.length;
+  await env.message({ type: 'dt:configChanged' });
+  hooks.timers.slice(from).forEach((fn) => fn());
+  await flush();
+  await flush();
+  assert.equal(requests.length, 2, '配置广播后的补扫应继续翻译');
+  assert.equal(requests[1].style, 'plain', '未应用的风格不能突然出现在同一页');
+});
+
+await t('还原后生效风格回到普通；选中风格只保留在单页状态里（弹窗关闭再打开仍能读到）', async () => {
+  const env = await boot();
+  await env.message({ type: 'dt:setStyle', style: 'catgirl' });
+  let status = await env.message({ type: 'dt:status' });
+  assert.equal(status.selectedStyle, 'catgirl');
+  env.config.hasKey = true;
+  await env.message({ type: 'dt:toggle' });
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.style, 'catgirl');
+  await env.message({ type: 'dt:toggle' }); // 还原
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.enabled, false);
+  assert.equal(status.style, 'plain');
+  assert.equal(status.selectedStyle, 'plain');
+});
+
+await t('自定义语言：代码 / 脚本变化才重建；改名称 / 说明不重发请求', async () => {
+  const info = { value: 'cl_yue', name: '粤语（香港）', label: '粤语（香港）', kind: 'custom', code: 'yue-Hant-HK', script: 'hant', cjk: true, detect: 'none' };
+  const env = await boot({
+    resume: true,
+    config: { targetLang: 'cl_yue', customLanguages: [{ id: 'cl_yue', name: '粤语（香港）', code: 'yue-Hant-HK' }], activeLanguage: info, languages: [{ value: 'cl_yue', label: '粤语（香港）' }], lazy: false }
+  });
+  const before = env.page.rebuilds;
+  env.config.activeLanguage = { ...info, name: '粤语新名', label: '粤语新名', note: '新的说明' };
+  await env.message({ type: 'dt:configChanged' });
+  assert.equal(env.page.rebuilds, before, '改名称 / 说明不能立刻重发付费请求');
+  env.config.activeLanguage = { ...info, code: 'yue-Hans', script: 'hans' };
+  await env.message({ type: 'dt:configChanged' });
+  assert.equal(env.page.rebuilds, before + 1, '代码 / 脚本变化影响方向与字体，必须重建');
+});
+
+await t('dt:setTarget：已删除的自定义语言回退到配置里的有效目标，不写进本页状态', async () => {
+  const env = await boot({ resume: true, config: { targetLang: 'zh-CN', languages: [{ value: 'zh-CN', label: '简体中文' }] } });
+  const status = await env.message({ type: 'dt:setTarget', target: 'cl_missing' });
+  assert.equal(status.target, 'zh-CN');
+  assert.equal(env.DT.state.target, 'zh-CN');
+});
+
+await t('AI 上下文：导航、隐藏内容、编辑器草稿都不进相邻段落', async () => {
+  const h1 = contextElement('h1', 'Article title');
+  const current = contextElement('p', 'Current body paragraph for context.');
+  const normal = contextElement('p', 'Adjacent visible paragraph for context.');
+  const nav = contextElement('nav', 'NAV SECRET');
+  const hidden = contextElement('p', 'HIDDEN SECRET');
+  hidden.hidden = true;
+  const draft = contextElement('p', 'DRAFT SECRET');
+  draft.isContentEditable = true;
+  const article = contextElement('article', '', [h1, current, normal, nav, hidden, draft]);
+  const body = contextElement('body', '', [article]);
+  const pageDocument = { title: 'Article title', querySelectorAll: body.querySelectorAll, querySelector: body.querySelector };
+  const env = await boot({ config: { aiContextEnabled: true, lazy: false, skipSameLang: false }, pageDocument });
+  env.DT.areaOf = () => 'content';
+  const context = JSON.parse(JSON.stringify(env.DT.professionalContext.collect(
+    [{ el: current, text: 'Current body paragraph for context.' }],
+    null,
+    { adjacent: true }
+  )));
+  const json = JSON.stringify(context);
+  assert.ok(context.adjacent && context.adjacent.some((one) => one.indexOf('Adjacent visible') >= 0), json);
+  ['NAV SECRET', 'HIDDEN SECRET', 'DRAFT SECRET'].forEach((secret) => assert.equal(json.indexOf(secret), -1, secret + ' 不能进上下文'));
+});
+
+await t('dt:setTarget：先更新语言元数据再重建，配置广播到达后不再第二次重建', async () => {
+  const zh = { value: 'zh-CN', name: '简体中文', label: '简体中文', kind: 'builtin', code: 'zh-CN', script: 'hans', cjk: true, detect: 'zh' };
+  const ja = { value: 'ja', name: '日本語', label: '日本語', kind: 'builtin', code: 'ja', script: 'jpan', cjk: true, detect: 'ja' };
+  const env = await boot({ resume: true, config: { targetLang: 'zh-CN', activeLanguage: zh, languages: [zh, ja], lazy: false } });
+  assert.equal(env.DT.state.targetCode, 'zh-CN');
+  const before = env.page.rebuilds;
+  const status = await env.message({ type: 'dt:setTarget', target: 'ja' });
+  assert.equal(status.target, 'ja');
+  assert.equal(env.DT.state.langInfo.value, 'ja', '必须立刻换成本页新语言的元数据');
+  assert.equal(env.DT.state.targetCode, 'ja');
+  assert.equal(env.page.rebuilds, before + 1);
+  // 模拟随后到达的配置广播：目标语言和描述与刚才一致，不能再重建 / 再付一次钱。
+  env.config.targetLang = 'ja';
+  env.config.activeLanguage = ja;
+  await env.message({ type: 'dt:configChanged' });
+  assert.equal(env.page.rebuilds, before + 1, '广播不能第二次重建');
+});
+
+await t('AI 精翻 + 隐私：不做上下文快照 / 不因标题变化重建', async () => {
+  const fixture = contextFixture();
+  const env = await boot({ config: { aiContextEnabled: true, privacyEnabled: true, lazy: false, skipSameLang: false }, pageDocument: fixture.pageDocument });
+  env.DT.areaOf = () => 'content';
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  let requested;
+  installTranslationFixture(env, unit, (msg) => {
+    requested = msg;
+    return { ok: true, results: ['译文。'], context: { mode: 'ai', omitted: 'privacy', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } } };
+  });
+  env.DT.collectAll = (accept) => [unit].filter((item) => !accept || accept(item));
+  await env.message({ type: 'dt:toggle' });
+  await flush();
+  assert.equal(requested.documentContext, undefined);
+  assert.equal(env.DT.state.renderedContext, '', '隐私开启时不应采集 / 记录文档上下文');
+});
+
+console.log('\n[AI 精翻上下文接线]');
+
+await t('AI 精翻开启：同一次翻译请求带标题 / 相邻段落，不额外发请求；关闭时不采集', async () => {
+  const fixture = contextFixture();
+  const env = await boot({ config: { aiContextEnabled: true, lazy: false, skipSameLang: false }, pageDocument: fixture.pageDocument });
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  const requests = [];
+  installTranslationFixture(env, unit, (msg) => {
+    requests.push(msg);
+    return { ok: true, results: ['译文。'], context: { mode: 'ai', omitted: '', chars: 10, items: { title: 1, headings: 0, abbreviations: 0, adjacent: 1 } } };
+  });
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(requests.length, 1, 'AI 精翻不能额外增加模型请求');
+  assert.equal(requests[0].documentContext.title, 'Oncology trial');
+  assert.ok(requests[0].documentContext.adjacent.some((one) => one.indexOf('progression-free') >= 0));
+  assert.equal(env.DT.state.contextStatus.mode, 'ai');
+});
+
+await t('隐私脱敏开启：上下文完全不发送给后台；状态仍记录降级', async () => {
+  const fixture = contextFixture();
+  const env = await boot({ config: { aiContextEnabled: true, privacyEnabled: true, lazy: false, skipSameLang: false }, pageDocument: fixture.pageDocument });
+  const unit = { el: fixture.current, text: 'PFS was assessed in 39 patients.', own: false, style: 'plain' };
+  let requested;
+  installTranslationFixture(env, unit, (msg) => {
+    requested = msg;
+    return { ok: true, results: ['译文。'], context: { mode: 'ai', omitted: 'privacy', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } } };
+  });
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(requested.documentContext, undefined);
+  assert.equal(env.DT.state.contextStatus.omitted, 'privacy');
+});
+
+await t('保存 AI / 强度设置只影响下一次明确翻译，不重建已翻译页面', async () => {
+  const env = await boot({ resume: true, config: { aiContextEnabled: false, funIntensity: 'standard', lazy: false } });
+  const before = env.page.rebuilds;
+  env.config.aiContextEnabled = true;
+  env.config.funIntensity = 'exaggerated';
+  await env.message({ type: 'dt:configChanged' });
+  assert.equal(env.page.rebuilds, before, '保存设置不能重启正在进行的整页翻译');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

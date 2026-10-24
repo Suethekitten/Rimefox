@@ -1339,6 +1339,101 @@ async function popupChecks() {
   await send('Target.closeTarget', { targetId }, pop);
 }
 
+async function customLanguageUiChecks() {
+  console.log('\n[自定义目标语言：设置页 / 弹窗 / 持久化]');
+  await patchConfig({ customLanguages: [], targetLang: 'zh-CN', inputTargetLang: 'auto' });
+  const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
+  const o = await attach(targetId);
+  await until(() => evaluate(o, "!!document.getElementById('customLangName')"));
+  await sleep(600);
+  const added = await evaluate(o, `(function(){
+    const set = (id, value) => { const el = document.getElementById(id); el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('customLangName', '粤语（香港）');
+    set('customLangCode', 'yue-Hant-HK');
+    set('customLangNote', '使用自然的香港粤语书面表达，以繁体字为主。');
+    document.getElementById('customLangSave').click();
+    return {
+      row: !!document.querySelector('.custom-lang-item'),
+      text: document.querySelector('.custom-lang-item') ? document.querySelector('.custom-lang-item').textContent : '',
+      result: document.getElementById('customLangResult').textContent
+    };
+  })()`);
+  check('设置页：新增自定义语言进入表单列表', added.row && /粤语（香港）/.test(added.text) && /yue-Hant-HK/.test(added.text), JSON.stringify(added));
+  await until(() => evaluate(o, "!document.getElementById('save').disabled"));
+  await evaluate(o, "document.getElementById('save').click(); true");
+  await until(async () => {
+    const cfg = await readConfig();
+    return cfg && cfg.customLanguages && cfg.customLanguages.length === 1 ? cfg : null;
+  }, 5000);
+  const saved = await readConfig();
+  check('设置页：保存后写入独立 customLanguages，不改内置语言表', saved.customLanguages.length === 1 && saved.customLanguages[0].name === '粤语（香港）' && saved.customLanguages[0].code === 'yue-Hant-HK', JSON.stringify(saved.customLanguages));
+  const customId = saved.customLanguages[0].id;
+  const selected = await evaluate(o, `(function(){
+    const sel = document.getElementById('targetLang');
+    const has = Array.from(sel.options).some((opt) => opt.value === ${JSON.stringify(customId)} && opt.textContent === '粤语（香港）');
+    sel.value = ${JSON.stringify(customId)};
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return { has, value: sel.value };
+  })()`);
+  check('设置页：自定义语言出现在目标语言选择器里，名称与用户输入一致', selected.has && selected.value === customId, JSON.stringify(selected));
+  await until(() => evaluate(o, "!document.getElementById('save').disabled"));
+  await evaluate(o, "document.getElementById('save').click(); true");
+  await until(async () => {
+    const cfg = await readConfig();
+    return cfg && cfg.targetLang === customId ? cfg : null;
+  }, 5000);
+  check('设置页：可以把自定义语言设为全局目标语言', (await readConfig()).targetLang === customId);
+  const { targetId: popId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/popup/index.html' });
+  const pop = await attach(popId);
+  await until(() => evaluate(pop, "!!document.getElementById('target') && document.getElementById('target').options.length > 3"));
+  const popupLabel = await evaluate(pop, "Array.from(document.getElementById('target').options).map((o) => o.textContent).filter((x) => x === '粤语（香港）').length");
+  check('弹窗：同一自定义语言显示名称与设置页一致', popupLabel === 1, 'count=' + popupLabel);
+  await send('Target.closeTarget', { targetId: popId }, pop);
+  const { targetId: againId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
+  const again = await attach(againId);
+  await until(() => evaluate(again, "!!document.querySelector('.custom-lang-item')"));
+  const persisted = await evaluate(again, `(function(){
+    const row = document.querySelector('.custom-lang-item');
+    const sel = document.getElementById('targetLang');
+    return { text: row ? row.textContent : '', selected: sel ? sel.value : '', has: sel ? Array.from(sel.options).some((o) => o.value === sel.value && o.textContent === '粤语（香港）') : false };
+  })()`);
+  check('设置页：重新打开后语言列表 / 选择器仍保留', /粤语（香港）/.test(persisted.text) && persisted.has, JSON.stringify(persisted));
+  await evaluate(again, `(function(){
+    const row = document.querySelector('.custom-lang-item');
+    row.querySelector('button').click();
+    const note = document.getElementById('customLangNote');
+    note.value = '改用简体字，保持口语。';
+    note.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('customLangSave').click();
+    return true;
+  })()`);
+  await until(() => evaluate(again, "!document.getElementById('save').disabled"));
+  await evaluate(again, "document.getElementById('save').click(); true");
+  const edited = await until(async () => {
+    const cfg = await readConfig();
+    return cfg && cfg.customLanguages[0] && cfg.customLanguages[0].note === '改用简体字，保持口语。' ? cfg : null;
+  }, 5000);
+  check('设置页：编辑说明后保存', !!edited && edited.customLanguages[0].note === '改用简体字，保持口语。');
+  await evaluate(again, `(function(){
+    const row = document.querySelector('.custom-lang-item');
+    const buttons = row.querySelectorAll('button');
+    buttons[buttons.length - 1].click();
+    return true;
+  })()`);
+  await until(() => evaluate(again, "!document.getElementById('save').disabled"));
+  await evaluate(again, "document.getElementById('save').click(); true");
+  const fallback = await until(async () => {
+    const cfg = await readConfig();
+    return cfg && Array.isArray(cfg.customLanguages) && cfg.customLanguages.length === 0 ? cfg : null;
+  }, 5000);
+  check('设置页：删除正在使用的自定义语言，目标语言回退到简体中文', fallback && fallback.targetLang === 'zh-CN' && fallback.inputTargetLang === 'auto', JSON.stringify(fallback && { target: fallback.targetLang, input: fallback.inputTargetLang, langs: fallback.customLanguages }));
+  const fallbackMessage = await evaluate(again, "document.getElementById('customLangResult').textContent");
+  check('设置页：删除正在使用的语言有可理解的回退提示', /回退|回到|简体/.test(fallbackMessage), fallbackMessage);
+  await send('Target.closeTarget', { targetId: againId }, again);
+  await send('Target.closeTarget', { targetId }, o);
+  await patchConfig({ customLanguages: [], targetLang: 'zh-CN', inputTargetLang: 'auto' });
+}
+
 async function optionsChecks() {
   console.log('\n[设置页]');
   const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
@@ -1411,6 +1506,7 @@ async function optionsChecks() {
   await glossaryNotesChecks(o);
   // 后面的检查不要带着这张术语表跑
   await patchConfig({ glossary: [] });
+  await customLanguageUiChecks();
 }
 
 async function glossaryNotesChecks(o) {

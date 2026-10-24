@@ -112,8 +112,11 @@
   }
 
   function targetMeta(unit) {
-    var lang = (DT.state && DT.state.target) || (unit && unit.targetLang) || 'en';
-    var target = dirForLang(lang);
+    var rawLang = (DT.state && (DT.state.targetCode || DT.state.target)) || (unit && unit.targetLang) || 'en';
+    // lang 只返回可验证的 BCP 47 code；没有 code 的自定义语言返回空字符串，
+    // 方向仍按内部 id 安全降级为 LTR，但绝不把 cl_… 写进 lang 属性。
+    var lang = DT.langCode ? DT.langCode(rawLang) : rawLang;
+    var target = dirForLang(lang || rawLang);
     var source = sourceDir(unit && unit.el, unit && unit.text);
     return {
       lang: lang,
@@ -127,12 +130,14 @@
   // 给新译文节点设置独立方向。用 isolate 而不是 bidi-override，保留 Unicode BiDi 算法。
   function applyTargetNode(node, sourceEl, lang, inline) {
     if (!node) return null;
-    var targetLang = lang || (DT.state && DT.state.target) || 'en';
-    var target = dirForLang(targetLang);
+    var targetLang = lang || (DT.state && (DT.state.targetCode || DT.state.target)) || 'en';
+    // 自定义语言的内部 id 不是 BCP 47：只把有效的 code 写进 lang；没有 code 时不伪造标签。
+    var code = DT.langCode ? DT.langCode(targetLang) : targetLang;
+    var target = dirForLang(code || targetLang);
     var source = sourceDir(sourceEl);
     node.setAttribute('dir', target);
     node.setAttribute('data-dt-dir', target);
-    node.setAttribute('lang', targetLang);
+    if (code) node.setAttribute('lang', code);
     try {
       node.style.setProperty('direction', target, 'important');
       node.style.setProperty('unicode-bidi', 'isolate', 'important');

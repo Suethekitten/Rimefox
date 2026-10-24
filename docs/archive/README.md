@@ -6,6 +6,7 @@
 
 | 文件 | 是什么 | 归档时的版本 |
 |---|---|---|
+| [2026-10-24-language-style-context.md](2026-10-24-language-style-context.md) | 自定义目标语言、趣味风格零误触、傲娇猫娘 / 强度、AI 精翻的开发报告与验证证据 | 0.11.7 基线，本地分支未发布 |
 | [2026-10-23-glossary-notes.md](2026-10-23-glossary-notes.md) | 可选术语说明、语境首选译法、CSV/JSON 兼容和本地验证记录 | 0.11.6，本地未发布 |
 | [2026-10-23-professional-engine-v2.md](2026-10-23-professional-engine-v2.md) | 专业引擎 v2 / JAMA 本地开发报告及链接的精简验证证据 | 0.11.3，本地未发布 |
 | [STORE-READINESS.md](STORE-READINESS.md) | Chrome 商店上架审计与「差哪 5 项」 | 0.8.5 |

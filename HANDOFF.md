@@ -59,6 +59,7 @@ edge-bilingual/
 ├── lib/
 │   ├── config.js          配置默认值 + 存储读写 + 版本迁移（v7）
 │   ├── professional/      专业 Registry、策略、上下文、本地校验与有限严格复核；医学适配现有 medical/
+│   ├── ai-context.js      AI 精翻的上下文预算 / 提示词 / 缓存指纹（纯函数，复用 professional/context 的规范化）
 │   ├── provider.js        接口门面：chat() / listModels()，按 engine 分发
 │   ├── engines/           各协议实现（openai / anthropic / gemini）
 │   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
@@ -146,7 +147,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
-| `translate` | `{texts: string[], target: string, style?: string, noCache?: boolean, pageLang?: string, documentContext?: object}` | `{ok, results: (string\|null)[], alignments, validations, failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败。`target: 'auto'` 跟随 `pageLang`；`noCache` 不读写缓存。可选专业上下文与质量结果见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
+| `translate` | `{texts: string[], target: string, style?: string, intensity?: string, noCache?: boolean, pageLang?: string, documentContext?: object}` | `{ok, results: (string\|null)[], alignments, validations, context, failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败。`target: 'auto'` 跟随 `pageLang`；`noCache` 不读写缓存。`style` 是趣味风格，`intensity` 是 light / standard / exaggerated（只对非 plain 生效）。`context` 只回报上下文模式 / 字符数 / 条数，不含正文。可选专业上下文与质量结果见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
 | `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本）。`config.page` 是后台按发送方网址算好的 `{accent, customCss, typo, site, night, provider}`（自定义 CSS 已清洗、站点规则已匹配） |
 | `mode:set` | `{mode}` | `{ok}` | 悬浮入口切显示方式后记进配置；只接受 `dual` / `translation`，内容脚本改不了别的配置项 |
 | `hover:set` | `{value: boolean}` | `{ok, value}` / `{ok:false,error}` | 悬浮入口切悬停对照；只接受严格布尔值，内容脚本不能改其他配置项 |
@@ -165,10 +166,10 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
 | `dt:toggle` | `{source?}` | 状态快照 | 开/关翻译（**立即返回**，不等翻完）。`source: 'command'` = 浏览器快捷键触发，0.5 秒内和页面内快捷键去重 |
-| `dt:status` | — | 状态快照 | `{enabled, mode, target, total, translated, failed, skipped, lastError, busy}` |
+| `dt:status` | — | 状态快照 | `{enabled, mode, target, style, selectedStyle, intensity, context, total, translated, failed, skipped, lastError, busy}`；`style` 是实际生效风格，`selectedStyle` 是待应用选择，`context` 只含模式 / 字符数 / 条数 |
 | `dt:setMode` | `{mode}` | 快照 | `dual` / `translation`，会重建 |
 | `dt:setTarget` | `{target}` | 快照 | 切换目标语言，会重建 |
-| `dt:setStyle` | `{style}` | 快照 | 趣味翻译：`plain` / `classical` / `catgirl`，当前页按风格重建（没开翻译就顺带打开），不写进配置；还原后回到 `plain` |
+| `dt:setStyle` | `{style}` | 快照 | 趣味翻译：只记录本页「选中」的风格（`plain` / `classical` / `catgirl`），不翻译、不重翻、不取消在途请求、不清缓存、不写配置。下次 `dt:toggle` 开启或 `dt:retranslate` 时才应用；状态里的 `style` 是实际生效风格，`selectedStyle` 是待应用选择 |
 | `dt:retranslate` | — | 快照 | 清空重翻 |
 | `dt:diagnose` | — | 诊断报告对象 | 见第 7 节 |
 | `dt:translateInput` | — | 无 | 右键菜单「凛狐：翻译输入框内容」：翻译当前聚焦的输入框（有选区只翻最初选区），原地写回；等待期间内容、DOM 端点或焦点变化，以及返回时正在输入法组词，均取消写回 |
@@ -602,7 +603,10 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `customProviders` | `[]` | 用户保存并命名的自定义服务商 `[{id, name}]` |
 | `thinkingMode` | `off` | `auto` / `off` / `custom`，见接口层一节（0.5.1 前默认 `auto`） |
 | `thinkingExtra` | `''` | `custom` 时合并进请求体的 JSON 字符串 |
-| `targetLang` | `zh-CN` | |
+| `targetLang` | `zh-CN` | 内置语言代码或 `customLanguages` 里的自定义语言 id |
+| `customLanguages` | `[]` | 用户目标语言 `[{id, name, code?, note?}]`；内置语言仍在 `LANGUAGES`。id 以 `cl_` 开头；有标准代码时 `code` 是规范 BCP 47，没有代码时只存内部 id，不把内部 id 当语言标签 |
+| `funIntensity` | `standard` | 趣味风格强度：`light` / `standard` / `exaggerated`；只对非 plain 风格生效，通过提示词而非 temperature 实现 |
+| `aiContextEnabled` | `false` | AI 精翻：在正常翻译请求中附带有限的相关上下文（标题 / 章节 / 缩写 / 同文章相邻正文）；不额外发起复核；隐私脱敏开启时不发送上下文；开启 / 关闭与上下文内容都进入缓存身份 |
 | `batchSize` | 8 | 单批条数（屏幕外的批次用。按离屏幕距离分级：屏幕内 ≤3 条 / ≤500 字符，一屏以内 ≤1000 字符，见 `takeBatch`） |
 | `maxCharsPerBatch` | 2000 | 单批字符上限 |
 | `maxUnitChars` | 1200 | 长段落拆分阈值 |

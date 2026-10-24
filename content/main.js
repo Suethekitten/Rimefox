@@ -175,6 +175,25 @@
     var options = professionalOptions(cfg && cfg.professionalOptions);
     return JSON.stringify([professionalProfileFor(cfg), options.quality, options.subdomain, options.maxReviewRequests]);
   }
+  // 上下文只读正文：导航、侧栏、表单、可编辑草稿、广告 / 评论容器、隐藏内容都不算正文。
+  function contextSkippable(node) {
+    if (!node || node.nodeType !== 1) return false;
+    if (node.hidden) return true;
+    if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') return true;
+    if (node.isContentEditable) return true;
+    if (node.closest && node.closest('nav,footer,aside,form,[role="navigation"],[role="complementary"],[role="contentinfo"],[role="textbox"],[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"],[data-dt-ui]')) return true;
+    var signature = String(node.className || '') + ' ' + String(node.id || '');
+    if (/(^|[\s_-])(comment|comments|reply|replies|advert|ads?|sidebar|cookie|promo|sponsor)([\s_-]|$)/i.test(signature)) return true;
+    var cs = null;
+    try {
+      cs = window.getComputedStyle(node);
+    } catch (err) {
+      cs = null;
+    }
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.contentVisibility === 'hidden')) return true;
+    return false;
+  }
+
   function contextText(el, limit) {
     if (!el) return '';
     var replaced = DT.replacedOf && DT.replacedOf(el);
@@ -187,7 +206,8 @@
         return;
       }
       if (node.nodeType !== 1) return;
-      if (node.hasAttribute && (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui') || node.getAttribute('aria-hidden') === 'true')) return;
+      if (node.hasAttribute && (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui'))) return;
+      if (contextSkippable(node)) return;
       // 已替换的正文 / 标题 / 局部段落：上下文要读原 src，不能读页面上已经变成译文的文本。
       var replaced = DT.replacedOf && DT.replacedOf(node);
       if (replaced && typeof replaced.src === 'string') {
@@ -199,6 +219,34 @@
     }
     read(el);
     return text.replace(/\s+/g, ' ').trim();
+  }
+
+  // 相邻段落：只取同文章容器内、批次外、可见的正文块；按字符预算截断，绝不读全文。
+  function collectAdjacentContext(units, root, batchText) {
+    if (!root) return [];
+    var out = [];
+    var seen = Object.create(null);
+    var total = 0;
+    function add(candidate) {
+      if (!candidate || candidate.nodeType !== 1 || candidate.tagName === 'ARTICLE' || candidate.tagName === 'MAIN' || candidate.tagName === 'BODY') return;
+      if (candidate.querySelector && candidate.querySelector('article')) return;
+      if (contextRoot(candidate) !== root) return;
+      if (contextSkippable(candidate)) return;
+      if (DT.areaOf && DT.areaOf(candidate) !== 'content') return;
+      var text = contextText(candidate, 300);
+      if (!text || text.length < 12 || total + text.length > 900) return;
+      if (batchText.indexOf(text) >= 0 || seen[text]) return;
+      seen[text] = 1;
+      out.push(text);
+      total += text.length;
+    }
+    (units || []).forEach(function (unit) {
+      var el = unit && unit.el;
+      if (!el) return;
+      add(el.previousElementSibling);
+      add(el.nextElementSibling);
+    });
+    return out.slice(0, 4);
   }
   function contextRoot(el) {
     return el && el.closest ? el.closest('article') || el.closest('main,[role="main"]') : null;
@@ -260,7 +308,8 @@
     var name = candidate.slice(at).trim();
     return name.length > chars.length + 2 && name.length <= 120 && /[\s-]/.test(name) && /^[A-Za-z][A-Za-z0-9\s-]+$/.test(name) ? name : '';
   }
-  function collectDocumentContext(units, snapshot) {
+  function collectDocumentContext(units, snapshot, opts) {
+    var options = opts || {};
     var items = units || [];
     var root = null;
     var mixed = false;
@@ -304,6 +353,10 @@
     Object.keys(definitions).sort().slice(0, 8).forEach(function (key) {
       if (definitions[key]) context.abbreviations[key] = definitions[key];
     });
+    if (options.adjacent) {
+      var adjacent = collectAdjacentContext(items, root, batchText);
+      if (adjacent.length) context.adjacent = adjacent;
+    }
     return context;
   }
   DT.professionalContext = { collect: collectDocumentContext, snapshot: documentSnapshot, fingerprint: documentFingerprint, profile: professionalProfileFor, options: professionalOptions, strategy: professionalStrategy };
@@ -325,6 +378,16 @@
             rebuild = true;
           }
         }
+        // 目标语言元数据每次配置广播都更新：自定义语言的 code / 检测能力可能刚改过；
+        // 但只有 target 值真的变了才重建，改说明不会立刻重发付费请求。
+        DT.state.langInfo = res.config.activeLanguage || null;
+        DT.state.targetCode = (DT.state.langInfo && DT.state.langInfo.code) || '';
+        // 名称 / 说明变化不重发请求；代码（影响方向、字体、lang）变化时重建，避免旧译文继续用错排版。
+        var renderLangSig = DT.state.langInfo
+          ? [DT.state.langInfo.kind, DT.state.langInfo.code, DT.state.langInfo.script].join('|')
+          : '';
+        if (DT.state.renderedLangSig !== undefined && DT.state.renderedLangSig !== renderLangSig) rebuild = true;
+        DT.state.renderedLangSig = renderLangSig;
         if (target !== cfgTarget) {
           cfgTarget = target;
           if (DT.state.target !== target) {
@@ -357,6 +420,9 @@
       mode: DT.state.mode,
       target: DT.state.target,
       style: DT.state.style || 'plain',
+      selectedStyle: DT.state.selectedStyle || 'plain',
+      intensity: DT.state.intensity || 'standard',
+      context: DT.state.contextStatus || null,
       total: DT.state.total,
       translated: DT.state.translated,
       failed: DT.state.failed,
@@ -423,6 +489,8 @@
     var options = opts || {};
     if (running || !DT.state.enabled) return;
     var medical = false;
+    var aiContext = false;
+    var wantsContext = false;
     var snapshot = null;
     var scopeSnapshots = new WeakMap();
     var contextKey = '';
@@ -447,14 +515,19 @@
       // 先让已被站点改写的标题释放原文记录，再取当前上下文；所有 DOM 读取仍受本轮异常处理保护。
       DT.releaseReplaced();
       medical = professionalProfileFor(cfg) === 'medical';
+      // AI 精翻与医学模式共用同一套文档上下文采集；关闭时完全不采集（默认路径零开销）。
+      aiContext = cfg.aiContextEnabled === true;
+      // 隐私脱敏开启时 AI 上下文整体不发送，也不再采集 / 监视标题变化触发重建；
+      // 医学模式保持 0.11.7 的采集行为（后台会把上下文置空）。
+      wantsContext = medical || (aiContext && cfg.privacyEnabled !== true);
       var contextWasDirty = contextDirty;
-      snapshot = medical ? documentSnapshot() : null;
+      snapshot = wantsContext ? documentSnapshot() : null;
       contextDirty = false;
       contextKey = snapshot ? documentFingerprint(snapshot) : '';
       // 只有网站自己的标题 / 章节 / 文档结构变化才做全页重建。
       // 翻译器自己插入译文造成的 mutation 已在 noteContextMutation 过滤；
       // 这里再要求 contextDirty，避免每次增量补扫都拿译文后的标题和原快照比较。
-      if (medical && contextWasDirty && contextChanged(snapshot)) {
+      if (wantsContext && contextWasDirty && contextChanged(snapshot)) {
         debugStats.contextChangedCount += 1;
         startOver('context-changed');
         return;
@@ -488,11 +561,12 @@
       lastViewH = window.innerHeight;
       var deferred = 0; // 离屏幕太远、留到滚过去再翻的单元数
       var pageStyle = DT.state.style || 'plain';
+      var pageIntensity = DT.normalizeIntensity(DT.state.intensity || 'standard');
       var queue = DT.collectAll(function (unit) {
         if (DT.skipText(unit.text)) return false;
         // 趣味翻译：正文里够长的段落按风格改写；中文页面也要改写，所以风格单元不跳过「已是目标语言」
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
-        if (unit.style === 'plain' && cfg.skipSameLang !== false && !jaPageToZh && DT.looksLikeTarget(unit.text, target)) return false;
+        if (unit.style === 'plain' && cfg.skipSameLang !== false && !jaPageToZh && DT.looksLikeTarget(unit.text, target, DT.targetInfo())) return false;
         if (unitState(settled, unit) === unit.text) return false;
         // 上次注入失败、页面也没变：同一个确定性错误不再重试，也不再请求翻译
         var broken = unitState(renderFails, unit);
@@ -536,7 +610,7 @@
         unit.done = false;
         unit.wantAlign = !!hoverOn && unit.sentences && unit.sentences.length > 1;
         parts.forEach(function (part, k) {
-          pending.push({ ui: ui, k: k, text: part, style: unit.style || 'plain', align: unit.wantAlign });
+          pending.push({ ui: ui, k: k, text: part, style: unit.style || 'plain', intensity: pageIntensity, align: unit.wantAlign });
         });
       });
 
@@ -600,7 +674,7 @@
         for (var k = 0; k < unit.slots.length; k += 1) {
           if (unit.slots[k] === undefined) return; // 还有段没回来（或失败了，等下次补扫重试）
         }
-        var raw = DT.joinSlots(unit.slots, DT.translationSeps(unit.seps, target));
+        var raw = DT.joinSlots(unit.slots, DT.translationSeps(unit.seps, target, DT.targetInfo()));
         // 去掉保留标记后的译文：对齐校验、去重都按页面上实际显示的文字算；注入时再按标记切分
         var text = DT.keepText(unit, raw);
         unit.done = true;
@@ -646,14 +720,20 @@
         var dup =
           unit.style && unit.style !== 'plain'
             ? DT.normalizeText(text) === DT.normalizeText(unit.text)
-            : DT.isNearDuplicate(unit.text, text, target);
+            : DT.isNearDuplicate(unit.text, text, target, DT.targetInfo());
         if (dup) {
           DT.state.skipped = (DT.state.skipped || 0) + 1;
           setUnitState(settled, unit, unit.text);
           return;
         }
 
-        var injected = DT.inject(unit, raw, target, align);
+        // 自定义语言的内部 id 不是 BCP 47：只把有效的 code 交给方向 / 字体 / lang 属性；
+        // 没有 code 的虚构语言传空，让渲染层走安全降级，而不是把 cl_… 当语言标签。
+        var targetInfo = DT.targetInfo();
+        var renderTarget = targetInfo
+          ? (targetInfo.code || (targetInfo.kind === 'custom' ? '' : target))
+          : target;
+        var injected = DT.inject(unit, raw, renderTarget, align);
         var outcome = unit.injectResult || null;
         var code = injected ? 'success' : outcome ? outcome.code : 'already-rendered';
         if (injected) {
@@ -705,7 +785,11 @@
           var wantAlign = false;
           for (var ai = 0; ai < batch.length; ai += 1) if (batch[ai].align) wantAlign = true;
           var message = { type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain', align: wantAlign };
-          if (medical) {
+          if ((batch[0].style || 'plain') !== 'plain') message.intensity = batch[0].intensity || 'standard';
+          var privacyOmitted = cfg.privacyEnabled === true;
+          // 医学模式保持 0.11.7 的消息形态（后台引擎会在 privacyEnabled 时把上下文置空）；
+          // AI 精翻在隐私开启时整段不发，且不把相邻段落混进医学上下文。
+          if (wantsContext && (medical || !privacyOmitted)) {
             var batchUnits = batch.map(function (seg) { return { el: queue[seg.ui].el, text: seg.text }; });
             var scope = contextRoot(batchUnits[0].el);
             var scopedSnapshot = snapshot;
@@ -717,7 +801,7 @@
               }
               rememberContextScope(scope, scopedSnapshot);
             }
-            message.documentContext = collectDocumentContext(batchUnits, scopedSnapshot);
+            message.documentContext = collectDocumentContext(batchUnits, scopedSnapshot, { adjacent: aiContext && !privacyOmitted });
           }
           res = await DT.send(
             message,
@@ -732,7 +816,7 @@
           return;
         }
         if (cancelled()) return; // 期间用户点了"还原"，或这一轮已被复位
-        if (medical && contextDirty) {
+        if (wantsContext && contextDirty) {
           contextDirty = false;
           DT.releaseReplaced();
           scopeSnapshots = new WeakMap();
@@ -752,6 +836,7 @@
           return;
         }
         if (res.error) DT.state.lastError = res.error;
+        if (res.context) DT.state.contextStatus = res.context;
         batch.forEach(function (seg, k) {
           var value = res.results[k];
           var validation = res.validations && res.validations[k];
@@ -848,6 +933,16 @@
     }
   }
 
+  // 用户明确开始翻译 / 重新翻译时才把「选中但未应用」的风格与当前强度落到本页。
+  // 下拉框 change 本身绝不调用这里，避免切换菜单就发付费请求。
+  function applySelectedStyle(cfg) {
+    var selected = DT.state.selectedStyle || 'plain';
+    DT.state.style = DT.STYLE_IDS.indexOf(selected) >= 0 ? selected : 'plain';
+    DT.state.intensity = DT.state.style === 'plain'
+      ? 'standard'
+      : DT.normalizeIntensity((cfg && cfg.funIntensity) || (DT.state.config && DT.state.config.funIntensity));
+  }
+
   // ---------------- 开关 ----------------
   async function enable() {
     var cfg = await loadConfig();
@@ -856,6 +951,7 @@
       DT.toast('还没配置 API Key：点扩展图标 → 设置');
       return summarize();
     }
+    applySelectedStyle(cfg);
     DT.state.enabled = true;
     DT.send({ type: 'resume:set', value: true }).catch(function () {});
     detectForeignTranslator();
@@ -880,7 +976,10 @@
     cancelRun();
     DT.state.enabled = false;
     if (DT.hover) DT.hover.clear();
-    DT.state.style = 'plain'; // 趣味翻译是一次性的：还原后回到普通翻译
+    // 还原是单页生命周期的终点：已应用和待应用的风格都回到普通，下一次明确开始翻译也不会意外带风格。
+    DT.state.style = 'plain';
+    DT.state.selectedStyle = 'plain';
+    DT.state.intensity = 'standard';
     DT.send({ type: 'resume:set', value: false }).catch(function () {});
     DT.restore();
     renderedContextScopes = [];
@@ -1299,30 +1398,51 @@
       return false;
     }
 
-    // 趣味翻译：当前页按风格重翻（不写进配置）；还没开翻译就顺带打开
+    // 趣味翻译：只更新「用户选中的风格」，不翻译、不重翻、不取消在途请求、不清缓存。
+    // 下次明确点「翻译此页」或「重新翻译」时才应用；已翻译页面保持当前文风。
     if (msg.type === 'dt:setStyle') {
-      DT.state.style = DT.STYLE_IDS.indexOf(msg.style) >= 0 ? msg.style : 'plain';
-      if (DT.state.enabled) {
-        startOver();
-        sendResponse(summarize());
-        return false;
-      }
-      enable().then(sendResponse, function (err) {
-        sendResponse({ error: String(err) });
-      });
-      return true;
+      DT.state.selectedStyle = DT.STYLE_IDS.indexOf(msg.style) >= 0 ? msg.style : 'plain';
+      sendResponse(summarize());
+      return false;
     }
 
     if (msg.type === 'dt:setTarget') {
-      var nextTarget = msg.target || DT.state.target;
-      // 弹窗先存配置再发这条：配置广播可能已经按新语言重建过了，同一种语言不再重建一次
-      // （重建会作废上一轮，它在途的请求白白计费）
-      if (nextTarget !== DT.state.target) {
-        DT.state.target = nextTarget;
-        startOver();
-      }
-      sendResponse(summarize());
-      return false;
+      // 弹窗先存配置再发这条。先重新读一次配置，拿到最新的语言表 / activeLanguage，
+      // 再决定是否重建；避免广播晚到导致第一轮用旧 code 渲染、广播到达后再重建一次。
+      loadConfig().then(function () {
+        var nextTarget = msg.target || DT.state.target;
+        // 弹窗可能停留在旧语言列表：被删除 / 不认识的目标不要写进本页状态。
+        var knownLanguages = DT.state.config && DT.state.config.languages;
+        if (knownLanguages && knownLanguages.length && !knownLanguages.some(function (one) { return one.value === nextTarget; })) {
+          nextTarget = (DT.state.config && DT.state.config.targetLang) || DT.state.target;
+        }
+        if (nextTarget !== DT.state.target) {
+          DT.state.target = nextTarget;
+          var hitLanguage = null;
+          if (knownLanguages && knownLanguages.length) {
+            for (var li = 0; li < knownLanguages.length; li += 1) {
+              if (knownLanguages[li].value === nextTarget) {
+                hitLanguage = knownLanguages[li];
+                break;
+              }
+            }
+          }
+          if (hitLanguage) {
+            DT.state.langInfo = hitLanguage;
+            DT.state.targetCode = hitLanguage.code || '';
+            DT.state.renderedLangSig = [hitLanguage.kind, hitLanguage.code, hitLanguage.script].join('|');
+          } else if (knownLanguages && knownLanguages.length) {
+            DT.state.langInfo = null;
+            DT.state.targetCode = '';
+            DT.state.renderedLangSig = '';
+          }
+          startOver();
+        }
+        sendResponse(summarize());
+      }).catch(function (err) {
+        sendResponse({ error: String(err) });
+      });
+      return true;
     }
 
     if (msg.type === 'dt:diagnose') {
@@ -1334,6 +1454,13 @@
           options: professionalOptions(DT.state.config && DT.state.config.professionalOptions),
           qualityWarnings: DT.state.qualityWarnings || 0,
           lastQualityWarning: DT.state.lastQualityWarning || ''
+        };
+        // 只记录模式与计数，不记录上下文正文 / 标题 / 页面正文。
+        report.experience = {
+          style: DT.state.style || 'plain',
+          selectedStyle: DT.state.selectedStyle || 'plain',
+          intensity: DT.state.intensity || 'standard',
+          context: DT.state.contextStatus || null
         };
       } catch (err) {
         report = { error: String(err) };
@@ -1348,8 +1475,10 @@
       return false;
     }
 
+    // 明确的重翻动作：此时才把用户选中的风格 / 最新强度应用到本页。
     if (msg.type === 'dt:retranslate') {
       DT.state.enabled = true;
+      applySelectedStyle(DT.state.config);
       startOver();
       sendResponse(summarize());
       return false;

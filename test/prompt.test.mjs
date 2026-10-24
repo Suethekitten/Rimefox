@@ -127,6 +127,25 @@ t('promptFingerprint：空为 none，去空白后稳定，改内容变化', () =
 });
 
 
+t('普通提示词字节稳定（golden）：改动默认普通翻译提示词会在这里失败', () => {
+  const hash = (text) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i += 1) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(36);
+  };
+  assert.equal(hash(systemPrompt('zh-CN')), 'ihgpgj');
+  assert.equal(hash(systemPrompt('zh-CN', 'plain', [], '', false, true)), 'p1qdd0');
+  assert.equal(hash(systemPrompt('en')), '1k2nmvq');
+  // 强度只对非 plain 生效：普通翻译传夸张强度也必须逐字相同。
+  assert.equal(
+    systemPrompt('zh-CN', 'plain', [], '', false, false, false, null, { intensity: 'exaggerated' }),
+    systemPrompt('zh-CN')
+  );
+});
+
 t('align 模式：输出对象格式与句子分组规则；默认提示词逐字不变', () => {
   const plain = systemPrompt('zh-CN');
   const aligned = systemPrompt('zh-CN', 'plain', [], '', false, true);

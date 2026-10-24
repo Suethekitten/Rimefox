@@ -158,6 +158,33 @@
               <select id="targetLang" class="control"></select>
             </label>
 
+            <div class="custom-lang" id="customLanguages">
+              <div class="custom-lang-head">
+                <span class="row-title">自定义目标语言</span>
+                <span class="row-desc">无需改代码即可添加模型支持的语言。有标准代码时优先填写 BCP 47 标签（如 yue-Hant-HK）；虚构语言可只填名称。最多 20 种。</span>
+              </div>
+              <div class="custom-lang-list" id="customLangList"></div>
+              <div class="custom-lang-form">
+                <label class="custom-lang-field">
+                  <span>显示名称</span>
+                  <input id="customLangName" type="text" maxlength="40" autocomplete="off" placeholder="例如：粤语（香港）" />
+                </label>
+                <label class="custom-lang-field">
+                  <span>语言代码（可选）</span>
+                  <input id="customLangCode" type="text" maxlength="35" autocomplete="off" spellcheck="false" placeholder="例如：yue-Hant-HK" />
+                </label>
+                <label class="custom-lang-field custom-lang-note-field">
+                  <span>翻译说明（可选）</span>
+                  <textarea id="customLangNote" rows="2" maxlength="300" placeholder="例如：使用自然的香港粤语书面表达，以繁体字为主，避免机械转换为普通话书面语。"></textarea>
+                </label>
+                <div class="custom-lang-actions">
+                  <button id="customLangSave" type="button" class="btn">添加</button>
+                  <button id="customLangCancel" type="button" class="btn soft" hidden>取消编辑</button>
+                  <span id="customLangResult" class="result" role="status"></span>
+                </div>
+              </div>
+            </div>
+
             <label class="row">
               <span class="row-text">
                 <span class="row-title">译文样式</span>
@@ -182,6 +209,21 @@
               <input id="skipSameLang" type="checkbox" class="switch" />
             </label>
 
+          </div>
+
+          <div class="card">
+            <div class="card-title">趣味翻译</div>
+            <div class="row stack" id="funIntensityRow">
+              <span class="row-text">
+                <span class="row-title">趣味风格强度</span>
+                <span class="row-desc">仅对文言文、傲娇猫娘等趣味风格生效，普通翻译不受影响。保存后不会立刻重译；下次翻译或点「重新翻译」时生效。</span>
+              </span>
+              <div class="intensity-seg" id="funIntensity" role="group" aria-label="趣味风格强度">
+                <button type="button" data-intensity="light">轻度</button>
+                <button type="button" data-intensity="standard" class="active">标准</button>
+                <button type="button" data-intensity="exaggerated">夸张</button>
+              </div>
+            </div>
           </div>
 
           <div class="card">
@@ -212,6 +254,18 @@
               </span>
               <input id="professionalMaxReviewRequests" type="number" min="0" max="3" step="1" value="1" />
             </label>
+          </div>
+
+          <div class="card">
+            <div class="card-title">AI 精翻</div>
+            <label class="row stack" for="aiContextEnabled">
+              <span class="row-text">
+                <span class="row-title">AI 精翻</span>
+                <span class="row-desc">开启后将向你配置的翻译 API 发送有限的相关上下文，可能增加输入 Token 消耗，但默认不额外发起复核请求。</span>
+              </span>
+              <input id="aiContextEnabled" type="checkbox" class="switch" />
+            </label>
+            <p class="row-desc">上下文只来自当前文章标题、章节、缩写定义和同文章内相邻正文，并作为不可信参考数据发送。开启不会自动启用严格质量复核；已开启的严格复核仍按原预算运行。隐私脱敏开启时整段上下文都不发送。</p>
           </div>
 
           <div class="card">

@@ -1,5 +1,5 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
-import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget } from './lib/config.js';
+import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget, languageInfoFor, languageOptions, customLanguageFingerprint, normalizeTargetLang, styleFingerprint, normalizeIntensity } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint, hasKeepMarks } from './lib/prompt.js';
 import { looksForeignForTarget } from './lib/lang-guard.js';
 import { chat, ApiError } from './lib/provider.js';
@@ -13,6 +13,7 @@ import {
 } from './lib/glossary.js';
 import { createProfessionalEngine } from './lib/professional/engine.js';
 import { reviewHighRisk } from './lib/professional/review.js';
+import { aiContextPrompt, aiContextForTexts, aiContextFingerprintData, aiContextStats } from './lib/ai-context.js';
 import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
 import { resolveSiteRule, hostListed } from './lib/site-rules.js';
@@ -65,7 +66,8 @@ function sleep(ms) {
 }
 
 // style：趣味翻译风格（lib/config.js 的 STYLES），普通翻译为 'plain'
-async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked, align, professional) {
+// policy：{ languageInfo, intensity, aiContext }，只影响提示词与缓存身份，不额外发起请求。
+async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked, align, professional, policy) {
   let attempt = 0;
   let lastErr = null;
   const temperature = temperatureFor(cfg, style);
@@ -73,6 +75,14 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
   // 本批命中的用户术语（没命中就是空数组，提示词里不会多出术语段）
   const hits = matchGlossary(glossary, texts);
   const professionalPrompt = professional.prompt(texts, hits);
+  const promptOptions = {
+    languageInfo: policy && policy.languageInfo,
+    intensity: policy && policy.intensity,
+    // 医学 / 专业 profile 自己会带上下文（含相邻段落）；不要让同一次请求出现两份上下文块。
+    contextInstructions: policy && policy.aiContext && !professional.enabled
+      ? aiContextPrompt(policy.aiContext, texts, { prepared: true })
+      : ''
+  };
   // 段落里有网页标明不翻译的内容（<kN> 保留标记）：提示词加一段「原样照抄」
   const keepMarked = hasKeepMarks(texts);
   while (attempt < 3 && !mismatch) {
@@ -93,7 +103,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
         maxTokens: Math.min(8000, 512 + texts.join('').length * 2),
         timeoutMs: Number(cfg.timeoutMs) || 60000,
         messages: [
-          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align, keepMarked, professionalPrompt) },
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, privacyMasked, align, keepMarked, professionalPrompt, promptOptions) },
           { role: 'user', content: JSON.stringify(texts) }
         ]
       });
@@ -146,12 +156,12 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
     let leftErr = null;
     let rightErr = null;
     try {
-      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked, align, professional);
+      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked, align, professional, policy);
     } catch (err) {
       leftErr = err;
     }
     try {
-      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked, align, professional);
+      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked, align, professional, policy);
     } catch (err) {
       rightErr = err;
     }
@@ -195,8 +205,24 @@ async function handleTranslate(msg, sender) {
   // 输入框翻译（0.9.0）：target 传 'auto' = 跟随页面语言（页面把 <html lang> 一起发来，语言表只有这里一份）。
   // noCache：输入框里多半是草稿或私信，翻完不写三层缓存，也不读（免得把别人/上次的草稿带回来）
   const noCache = msg.noCache === true;
-  const target = msg.target === 'auto' ? resolveInputTarget(msg.target, msg.pageLang) : msg.target || cfg.targetLang;
+  let target = msg.target === 'auto'
+    ? resolveInputTarget(msg.target, msg.pageLang, cfg.customLanguages)
+    : msg.target || cfg.targetLang;
+  // 过期 / 被删除的自定义语言不能把空值或无效代码送进提示词 / 缓存；回退到配置里的有效目标。
+  let languageInfo = languageInfoFor(target, cfg.customLanguages);
+  if (!languageInfo) {
+    target = normalizeTargetLang(cfg.targetLang, cfg.customLanguages);
+    languageInfo = languageInfoFor(target, cfg.customLanguages);
+  }
   const style = styleById(msg.style).value; // 不认识的风格按普通翻译
+  const intensity = style === 'plain'
+    ? 'standard'
+    : normalizeIntensity(msg.intensity !== undefined ? msg.intensity : cfg.funIntensity);
+  // AI 精翻：默认关闭；开启时只把有限上下文并进正常翻译请求，不额外发起复核。
+  // 隐私脱敏开启时整段上下文都不发送（标题 / 章节也可能绕过脱敏），并记录降级。
+  const aiContextEnabled = cfg.aiContextEnabled === true;
+  const aiContextInput = aiContextEnabled && cfg.privacyEnabled !== true ? msg.documentContext : null;
+  const contextOmitted = aiContextEnabled && cfg.privacyEnabled === true ? 'privacy' : '';
   const glossary = normalizeGlossary(cfg.glossary);
   const professional = createProfessionalEngine(cfg, {
     target, style, documentContext: msg.documentContext,
@@ -205,6 +231,10 @@ async function handleTranslate(msg, sender) {
   const reviewBudget = { remaining: Math.max(0, Math.min(3, Number(professional.options.maxReviewRequests) || 0)) };
   const rawTexts = Array.isArray(msg.texts) ? msg.texts : [];
   const texts = rawTexts.map((t) => (t == null ? '' : String(t)));
+  // 先按整批裁好一份上下文：提示词与缓存身份用同一个对象，
+  // 避免同一段落在不同批次里出现“同一个键、不同提示词”。
+  const aiContextData = aiContextEnabled && aiContextInput ? aiContextForTexts(aiContextInput, texts) : null;
+  const policy = { languageInfo, intensity, aiContext: aiContextData };
   const results = new Array(texts.length).fill(null);
   // 结构化句子对齐（可选）：整页翻译才请求；划词 / 输入框 / 字幕不传，行为与 0.9.0 一致
   const wantAlign = msg.align === true && !noCache;
@@ -225,14 +255,22 @@ async function handleTranslate(msg, sender) {
     // 旧条目没有接口身份，不能推断它来自哪个地址；不复用，也不清空其他缓存。
     endpoint: JSON.stringify([active.engine, active.baseUrl.trim().replace(/\/+$/, '')]),
     host: hostOf(sender),
-    prompt: promptFingerprint(cfg.customPrompt)
+    prompt: promptFingerprint(cfg.customPrompt),
+    // 内置语言 / 普通风格不追加这两段：旧普通缓存键逐字不变。
+    lang: customLanguageFingerprint(languageInfo),
+    styleVersion: styleFingerprint(style, intensity)
   };
   const hitPrint = createHitFingerprint(glossary);
   const keys = new Map();
   const keyOf = (text) => {
     if (!keys.has(text)) {
+      // AI 精翻按本批实际发送的上下文算身份：上下文变化会换键；同一段落在不同批次里
+      // 可能因为上下文不同而得到不同键，这是为了避免「同一个键、不同提示词」。
+      const ai = aiContextEnabled
+        ? 'ai-v1:on:' + (aiContextData ? aiContextFingerprintData(aiContextData) : 'none')
+        : '';
       // Profile hooks own terminology, context and quality identity. General preserves old keys.
-      keys.set(text, cache.makeKey({ ...scope, glossary: hitPrint(text), professional: professional.fingerprint(text) }, text));
+      keys.set(text, cache.makeKey({ ...scope, ai, glossary: hitPrint(text), professional: professional.fingerprint(text) }, text));
     }
     return keys.get(text);
   };
@@ -261,7 +299,7 @@ async function handleTranslate(msg, sender) {
         alignCache.delete(keyOf(text));
         hit = undefined;
         hitAlign = null;
-      } else if (looksForeignForTarget(fixed, target)) {
+      } else if (looksForeignForTarget(fixed, languageInfo.code || target)) {
         // 目标语言是英文（或其它拉丁字母语系），缓存里却是整段中文：0.9.5 之前 align 提示词
         // 的中文示例把模型带偏后留下的坏结果。只失效这一条，不清整层、不动其它正常缓存，
         // 下次照常请求；对齐旁路一起丢掉，避免继续拿错译文做句级对应。
@@ -392,6 +430,8 @@ async function handleTranslate(msg, sender) {
       reviewCandidate = masked.rows[1].masked;
     }
     const hits = matchGlossary(glossary, [reviewSource]);
+    // 复核只带语言 / 风格身份，不重复注入 AI 精翻上下文：保持原有复核预算与输入范围。
+    const reviewOptions = { languageInfo, intensity, contextInstructions: '' };
     const meta = {};
     try {
       const raw = await chat({
@@ -399,7 +439,7 @@ async function handleTranslate(msg, sender) {
         thinkingMode: cfg.thinkingMode, thinkingExtra: cfg.thinkingExtra, maxHttpAttempts: 1,
         maxTokens: Math.min(8000, 512 + reviewSource.length * 2), meta,
         messages: [
-          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, !!masked, false, hasKeepMarks([reviewSource]), professional.prompt([reviewSource], hits)) +
+          { role: 'system', content: systemPrompt(target, style, hits, cfg.customPrompt, !!masked, false, hasKeepMarks([reviewSource]), professional.prompt([reviewSource], hits), reviewOptions) +
             '\n【定向质量复核】本轮输入是对象数组，每项含 source（原文）、translation（待复核译文）、risks（本地可疑项代码）。只返回与输入同序的 JSON 字符串数组。逐项对照原文核查数字、单位、引用标记、否定、条件、因果与结论强弱，仅在原文支持时纠正译文；疑点不等于事实，不得添加医学建议。保留所有隐私占位符和引用标记。本次模型复核不是专家审核。' },
           { role: 'user', content: JSON.stringify([{ source: reviewSource, translation: reviewCandidate, risks: report.issues.map(issue => issue.code) }]) }
         ]
@@ -427,7 +467,7 @@ async function handleTranslate(msg, sender) {
       try {
         // 发出去的是脱敏后的文本；映射只在本地
         const wire = privacyRows ? payload.map((text) => privacyRows.get(text).masked) : payload;
-        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows, wantAlign, professional);
+        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows, wantAlign, professional, policy);
         if (!out || !out.texts) throw new ApiError('模型返回无法解析', 0, '');
         for (let k = 0; k < payload.length; k += 1) {
           const text = payload[k];
@@ -464,7 +504,7 @@ async function handleTranslate(msg, sender) {
             const reviewed = await reviewHighRisk({
               engine: professional, source: text, translation: value, report: validation, budget: reviewBudget,
               review: requestReview,
-              accept: candidate => !leaksWrapper(text, candidate) && !isRunaway(text, candidate) && !looksForeignForTarget(candidate, target)
+              accept: candidate => !leaksWrapper(text, candidate) && !isRunaway(text, candidate) && !looksForeignForTarget(candidate, languageInfo.code || target)
             });
             value = reviewed.translation;
             validation = reviewed.report;
@@ -472,7 +512,7 @@ async function handleTranslate(msg, sender) {
             result = value;
             // 目标语言明显不符（例如英文目标却回了整段中文）：这次仍显示，但绝不写缓存 / 对齐旁路，
             // 免得一次模型抽风永久生效；下次请求会重新翻。不再追加请求，也就不会重复计费。
-            if (looksForeignForTarget(value, target)) {
+            if (looksForeignForTarget(value, languageInfo.code || target)) {
               parts = null;
               usageStats.languageMismatch();
             } else if (!noCache) {
@@ -501,8 +541,16 @@ async function handleTranslate(msg, sender) {
   await Promise.all(runs.concat(waits));
 
   const failed = results.filter((r) => r === null).length;
+  // 只报告上下文模式 / 字符数 / 条数，绝不回传上下文正文、页面标题或正文。
+  const contextReport = contextOmitted
+    ? { mode: 'ai', omitted: contextOmitted, chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } }
+    : aiContextEnabled
+      ? (aiContextData && Object.keys(aiContextData).length
+        ? aiContextStats(aiContextData, texts, { prepared: true })
+        : { mode: 'ai', omitted: 'no-context', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } })
+      : { mode: 'off', omitted: '', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } };
   if (results.length && failed === results.length) {
-    return { ok: false, error: describeError(firstError), results, alignments, validations };
+    return { ok: false, error: describeError(firstError), results, alignments, validations, context: contextReport };
   }
 
   return {
@@ -512,6 +560,7 @@ async function handleTranslate(msg, sender) {
     validations,
     failed,
     cached,
+    context: contextReport,
     error: firstError ? describeError(firstError) : ''
   };
 }
@@ -676,6 +725,10 @@ const ROUTES = {
         ...rest,
         providerConfig,
         hasKey: !!activeConfig(cfg).apiKey,
+        // 内容脚本不能 import：目标语言的安全展示 / 检测元数据随配置下发；
+        // 内部 id 与 BCP 47 code 分开，方向 / 字体只拿 code。
+        activeLanguage: languageInfoFor(cfg.targetLang, cfg.customLanguages),
+        languages: languageOptions(cfg.customLanguages),
         page: pageAppearance(cfg, sender),
         providers: providerChoices(cfg)
       }

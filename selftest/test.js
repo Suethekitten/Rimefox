@@ -146,6 +146,57 @@
     );
   });
 
+  check('looksLikeTarget: 自定义语言只在高置信度检测时才跳过', function () {
+    var hans = '这是一个完整的中文句子，用于测试识别效果。';
+    var hant = '這是一個完整的中文句子，用於測試識別效果。';
+    var yue = { value: 'cl_yue', kind: 'custom', code: 'yue-Hant-HK', detect: 'none', script: 'hant', cjk: true };
+    var zhHant = { value: 'cl_zhhant', kind: 'custom', code: 'zh-Hant-HK', detect: 'zh', script: 'hant', cjk: true };
+    return eq(
+      [
+        DT.looksLikeTarget(hans, 'cl_yue', yue),
+        DT.looksLikeTarget(hant, 'cl_yue', yue),
+        DT.looksLikeTarget(hans, 'cl_zhhant', zhHant),
+        DT.looksLikeTarget(hant, 'cl_zhhant', zhHant)
+      ],
+      [false, false, false, true]
+    );
+  });
+
+  check('translationSeps: 自定义 CJK 语言不加空格；未知虚构语言保留原文切点空白', function () {
+    return eq(
+      [
+        DT.translationSeps([' ', '', '\n'], 'cl_yue', { kind: 'custom', code: 'yue-Hant-HK', cjk: true }),
+        DT.translationSeps([' ', '', '\n'], 'cl_star', { kind: 'custom', code: '', cjk: false }),
+        DT.translationSeps([' ', '', '\n'], 'en')
+      ],
+      [['', '', '\n'], [' ', '', '\n'], [' ', ' ', '\n']]
+    );
+  });
+
+  check('方向 / 字体：自定义语言用 BCP 47 code，内部 id 不写进 lang', function () {
+    var node = document.createElement('span');
+    var savedTarget = DT.state.target;
+    var savedInfo = DT.state.langInfo;
+    DT.state.target = 'cl_yue';
+    DT.state.langInfo = { value: 'cl_yue', kind: 'custom', code: 'yue-Hant-HK', script: 'hant', cjk: true };
+    DT.direction.applyTargetNode(node, document.body, 'yue-Hant-HK', true);
+    var codeLang = node.getAttribute('lang');
+    var codeDir = node.getAttribute('dir');
+    var noCodeNode = document.createElement('span');
+    DT.state.target = 'cl_star';
+    DT.state.langInfo = { value: 'cl_star', kind: 'custom', code: '', script: '', cjk: false };
+    DT.direction.applyTargetNode(noCodeNode, document.body, 'cl_star', true);
+    var noCodeLang = noCodeNode.getAttribute('lang');
+    var fonts = [
+      DT.fonts.keyFor('yue-Hant-HK'),
+      DT.fonts.keyFor('yue-Hans'),
+      DT.direction.dirForLang('ar')
+    ];
+    DT.state.target = savedTarget;
+    DT.state.langInfo = savedInfo;
+    return eq([codeLang, codeDir, noCodeLang, fonts], ['yue-Hant-HK', 'ltr', null, ['zh-tw', 'zh-cn', 'rtl']]);
+  });
+
   check('normalizeText: 折叠空白', function () {
     return eq(DT.normalizeText('  a \n\t b  '), 'a b');
   });

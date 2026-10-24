@@ -1730,9 +1730,15 @@
     };
 
     function keyFor(lang) {
-      var s = String(lang || DT.state.target || '').toLowerCase().replace(/_/g, '-');
+      var s = String(lang || DT.state.targetCode || DT.state.target || '').toLowerCase().replace(/_/g, '-');
+      var base = s.split('-')[0];
+      var chineseFamily = /^(zh|yue|lzh|cmn|wuu|nan|hak)$/.test(base);
       if (/^zh-(tw|hk|mo|hant)/.test(s)) return 'zh-tw';
       if (/^zh/.test(s)) return 'zh-cn';
+      // 自定义中文变体（yue-Hant-HK / zh-Hant / lzh 等）：按 script 子标签选繁 / 简字体档案。
+      // 只有中文系语言才吃地区 / script 启发式：en-HK、ko-CN、ja-SG 不能被误配成中文字体。
+      if (chineseFamily && /(^|-)(hant|tw|hk|mo)(-|$)/.test(s)) return 'zh-tw';
+      if (chineseFamily && /(^|-)(hans|cn|sg)(-|$)/.test(s)) return 'zh-cn';
       if (/^ja/.test(s)) return 'ja';
       if (/^ko/.test(s)) return 'ko';
       // 未来文字系统：优先完整 key，再退化到主语言标签（th-TH -> th）。
@@ -1772,7 +1778,7 @@
     function policy(opts) {
       var args = opts || {};
       var mode = args.mode || DT.state.mode || 'translation';
-      var lang = args.target || args.lang || DT.state.target;
+      var lang = args.target || args.lang || DT.state.targetCode || DT.state.target;
       var source = args.sourceElement || null;
       var family = source ? familyOf(source) : (args.fontFamily || '');
       var key = keyFor(lang);
@@ -1825,11 +1831,11 @@
       // 导航 / 按钮 / 输入框等控件的 direct text node 不要加 inline 壳，避免 flex 布局多一项。
       if (DT.areaOf && DT.areaOf(parent) !== 'content') return null;
       var family = familyOf(parent);
-      var stack = stackFor(unit && unit.lang ? unit.lang : DT.state.target, family);
+      var stack = stackFor(unit && unit.lang ? unit.lang : (DT.state.targetCode || DT.state.target), family);
       if (!stack) return null;
       var span = document.createElement('span');
       span.className = 'dt-font';
-      span.setAttribute('data-dt-font', keyFor(unit && unit.lang ? unit.lang : DT.state.target));
+      span.setAttribute('data-dt-font', keyFor(unit && unit.lang ? unit.lang : (DT.state.targetCode || DT.state.target)));
       try {
         span.style.setProperty('font-family', stack, 'important');
         // 只承载字体族，不生成额外盒模型；包裹后不改变原行内 / 行布局。
@@ -1946,7 +1952,8 @@
     span.className = 'dt-dir';
     span.setAttribute('data-dt-dir', 'wrap');
     span.setAttribute('dir', meta.target);
-    if (meta.lang) span.setAttribute('lang', meta.lang);
+    // 只写 BCP 47 形态的 code；内部 id（cl_…）绝不能进 lang 属性。
+    if (meta.lang && /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(meta.lang)) span.setAttribute('lang', meta.lang);
     try {
       span.style.setProperty('direction', meta.target, 'important');
       span.style.setProperty('unicode-bidi', 'isolate', 'important');
@@ -2882,7 +2889,7 @@
     var at = marks.at.slice();
     keep.forEach(function (k, i) {
       if (at[i] >= 0 || k.kind !== 'xref') return;
-      var labels = [k.text, xrefLabel(k.text, DT.state.target)].filter(Boolean);
+      var labels = [k.text, xrefLabel(k.text, DT.state.targetCode || DT.state.target)].filter(Boolean);
       for (var j = 0; j < labels.length; j += 1) {
         var hit = stripped.indexOf(labels[j]);
         if (hit < 0 || stripped.indexOf(labels[j], hit + 1) >= 0) continue;
@@ -2981,7 +2988,7 @@
 
   // 图表链接 / 补充材料普通链接的可见标签本地化：只写唯一文本节点，进事务，还原时放回原文
   function relabelAtom(k, ops, saved) {
-    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.target) : '';
+    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.targetCode || DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.targetCode || DT.state.target) : '';
     if (!label || label === k.text) return k.text;
     var texts = [];
     var walker = document.createTreeWalker(k.el, NodeFilter.SHOW_TEXT);
@@ -3233,7 +3240,7 @@
   // 原子的副本：图表链接的标签按 xrefLabel 换成「图 1」（只有一个文本节点时）
   function atomClone(k) {
     var copy = citeClone(k.el);
-    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.target) : '';
+    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.targetCode || DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.targetCode || DT.state.target) : '';
     if (label) {
       var texts = [];
       var walker = document.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
@@ -3695,7 +3702,7 @@
           fallback: ranges.fallback || ''
         };
         u.skipByLength = DT.skipText(text);
-        u.alreadyTarget = DT.looksLikeTarget(text, DT.state.target);
+        u.alreadyTarget = DT.looksLikeTarget(text, DT.state.target, DT.state.langInfo);
         report.units.push(u);
       });
     }

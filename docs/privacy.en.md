@@ -8,7 +8,9 @@ Translation requests go directly to the API endpoint you configure. They may inc
 
 When the optional local masking feature is enabled, reliably detectable values (email addresses, phone numbers, ID card numbers and bank card numbers, optionally Chinese names in explicit contexts) are replaced with `__PII_<TYPE>_<n>__` placeholders before the request is sent; only the placeholder text is transmitted. See “Optional local masking” below.
 
-Requests also include the target language, translation instructions including your custom prompt, and matching glossary source terms and specified translations. Your API key is sent to the configured endpoint in authentication headers. Connection tests send fixed sample sentences; model-list requests also authenticate to that endpoint. The provider receives normal network metadata such as your IP address. Do not translate sensitive content or put secrets into prompts unless you trust the configured endpoint.
+Requests also include the target language, translation instructions including your custom prompt, and matching glossary source terms and specified translations. When you use a custom target language, its name, optional language code and translation note are sent as language preferences. Your API key is sent to the configured endpoint in authentication headers. Connection tests send fixed sample sentences; model-list requests also authenticate to that endpoint. The provider receives normal network metadata such as your IP address. Do not translate sensitive content or put secrets into prompts unless you trust the configured endpoint.
+
+AI-enhanced translation (“AI 精翻”) is off by default. When enabled, full-page translation requests may additionally include the current article title, section headings, explicit abbreviation definitions from the same article, and a limited number of adjacent body paragraphs from the same article container, subject to length and count limits. It does not send the whole page, navigation, comments, ads, hidden content or editor drafts.
 
 The only recipient is the endpoint you configure (for example DeepSeek, an OpenAI-compatible service, Anthropic, Gemini, Ollama, or your own gateway); the author and other third parties do not receive this data. If you enter an `http://` endpoint, data is transmitted in clear text; use HTTPS unless the endpoint is on your own machine.
 
@@ -23,6 +25,7 @@ Off by default. When enabled in Settings → Privacy, the extension masks sensit
 - If the model drops, rewrites or invents a placeholder, the affected segment is treated as a failed translation: the page keeps the source text and retries with the existing backoff, rather than displaying corrupted content or using source text as a translation.
 - Scope is limited to fixed-format data. Addresses, organizations, passwords, seed phrases and private keys are not masked. Chinese names are detected only in explicit contexts such as “Name:” or “I am …”, are off by default, and may still be missed or misidentified.
 - Translation caching is unchanged: short source/translation pairs may still be stored in the local disk cache under the existing rules; the mapping itself is never cached.
+- While masking is on, AI-enhanced translation context (title, headings, abbreviations, adjacent paragraphs) is not sent at all, because the extension cannot guarantee the same masking for that context. That translation falls back to ordinary context and the degraded state is recorded.
 
 ## Limited Use
 

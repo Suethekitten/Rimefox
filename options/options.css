@@ -2253,3 +2253,154 @@ details.more > summary:focus-visible {
   transform: none;
   box-shadow: none;
 }
+
+/* ---------------- 自定义目标语言 / 趣味强度 ---------------- */
+.custom-lang {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.custom-lang-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.custom-lang-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-lang-empty {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.custom-lang-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-subtle);
+}
+
+.custom-lang-item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.custom-lang-name {
+  color: var(--text-1);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.custom-lang-code {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.custom-lang-note {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.custom-lang-item-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.custom-lang-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.custom-lang-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.custom-lang-field input,
+.custom-lang-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.custom-lang-note-field {
+  grid-column: 1 / -1;
+}
+
+.custom-lang-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.custom-lang-actions .result {
+  flex: 1;
+  min-width: 140px;
+}
+
+.intensity-seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  width: min(360px, 100%);
+  padding: 3px;
+  border: 1px solid var(--field-edge);
+  border-radius: var(--r-md);
+  background: var(--bg-subtle);
+}
+
+.intensity-seg button {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.intensity-seg button:hover:not(.active) {
+  color: var(--text-1);
+}
+
+.intensity-seg button.active {
+  background: var(--bg-elevated);
+  color: var(--text-1);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgb(var(--shadow-rgb) / 0.1);
+}
+
+@media (max-width: 720px) {
+  .custom-lang-form {
+    grid-template-columns: 1fr;
+  }
+  .custom-lang-item {
+    grid-template-columns: 1fr;
+  }
+}

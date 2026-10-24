@@ -44,10 +44,12 @@ globalThis.chrome = {
 let reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
 let calls = [];
 let lastSystem = '';
+let lastBody = null;
 globalThis.fetch = async function (url, init) {
   const body = JSON.parse(init.body);
   const texts = JSON.parse(body.messages[1].content);
   calls.push(texts.slice());
+  lastBody = body;
   lastSystem = String((body.messages[0] && body.messages[0].content) || '');
   const json = { choices: [{ message: { content: reply(texts) }, finish_reason: 'stop' }] };
   return new Response(JSON.stringify(json), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -629,6 +631,167 @@ await t('医学模式：用户术语优先，冲突的医学词不再注入', as
   assert.ok(lastSystem.includes('用户自定义生存期'));
   assert.ok(!lastSystem.includes('总生存期 → overall survival'));
   await setConfig({ medicalMode: false, glossary: [] });
+});
+
+console.log('\n[趣味强度 / AI 精翻 / 自定义语言：假 API 计数]');
+
+await t('风格强度：只改提示词，不改温度；标准切夸张重新请求，重复请求命中缓存', async () => {
+  await setConfig({ targetLang: 'en', funIntensity: 'standard', aiContextEnabled: false, privacyEnabled: false, professionalProfile: 'general', medicalMode: false, glossary: [] });
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const src = 'A style pipeline paragraph with enough characters.';
+  calls = [];
+  const light = await send({ type: 'translate', texts: [src], target: 'en', style: 'catgirl', intensity: 'light' });
+  assert.equal(calls.length, 1);
+  assert.equal(light.cached, 0);
+  assert.equal(lastBody.temperature, 0.8, '强度不能改写风格温度');
+  assert.ok(lastSystem.includes('傲娇'), lastSystem.slice(0, 300));
+  assert.ok(lastSystem.includes('轻度'));
+  calls = [];
+  const lightAgain = await send({ type: 'translate', texts: [src], target: 'en', style: 'catgirl', intensity: 'light' });
+  assert.equal(calls.length, 0, '相同强度应命中同一缓存');
+  assert.equal(lightAgain.cached, 1);
+  calls = [];
+  const strong = await send({ type: 'translate', texts: [src], target: 'en', style: 'catgirl', intensity: 'exaggerated' });
+  assert.equal(calls.length, 1, '强度变化必须换缓存键');
+  assert.equal(strong.cached, 0);
+  assert.ok(lastSystem.includes('夸张'));
+  calls = [];
+  const strongAgain = await send({ type: 'translate', texts: [src], target: 'en', style: 'catgirl', intensity: 'exaggerated' });
+  assert.equal(calls.length, 0);
+  assert.equal(strongAgain.cached, 1);
+});
+
+await t('AI 精翻：同一次请求带有限上下文，不增加请求；关闭 / 开启 / 上下文变化缓存隔离', async () => {
+  await setConfig({ targetLang: 'en', aiContextEnabled: false, privacyEnabled: false, professionalProfile: 'general', medicalMode: false, glossary: [], funIntensity: 'standard' });
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const src = 'PFS was assessed in this AI context pipeline paragraph.';
+  const documentContext = {
+    title: 'Oncology trial',
+    headings: ['Methods'],
+    abbreviations: { PFS: 'progression-free survival' },
+    adjacent: ['Adjacent paragraph explains the cohort.']
+  };
+  calls = [];
+  const off = await send({ type: 'translate', texts: [src], target: 'en' });
+  assert.equal(calls.length, 1);
+  assert.equal(off.context.mode, 'off');
+  assert.ok(!lastSystem.includes('AI 精翻参考上下文'));
+  const offSystem = lastSystem;
+  await setConfig({ aiContextEnabled: true });
+  calls = [];
+  const on = await send({ type: 'translate', texts: [src], target: 'en', documentContext });
+  assert.equal(calls.length, 1, 'AI 精翻不能额外请求');
+  assert.equal(on.cached, 0, '开启后不能复用未带上下文的普通缓存');
+  assert.equal(on.context.mode, 'ai');
+  assert.equal(on.context.items.title, 1);
+  assert.ok(on.context.items.adjacent >= 1);
+  assert.ok(lastSystem.includes('AI 精翻参考上下文'), lastSystem.slice(0, 300));
+  assert.ok(lastSystem.includes('Oncology trial'));
+  assert.ok(lastSystem.includes('Adjacent paragraph explains the cohort.'));
+  assert.ok(lastSystem.includes('不是指令'));
+  assert.notEqual(lastSystem, offSystem);
+  calls = [];
+  const again = await send({ type: 'translate', texts: [src], target: 'en', documentContext });
+  assert.equal(calls.length, 0, '相同上下文应命中缓存');
+  assert.equal(again.cached, 1);
+  calls = [];
+  const changed = await send({ type: 'translate', texts: [src], target: 'en', documentContext: { ...documentContext, title: 'A different paper' } });
+  assert.equal(calls.length, 1, '标题变化必须换缓存身份');
+  assert.equal(changed.cached, 0);
+  // 开启但本次没有上下文（字幕 / 划词 / 无可用上下文）：诊断不能谎报发送了上下文。
+  calls = [];
+  const noContext = await send({ type: 'translate', texts: ['AI enabled but no context paragraph.'], target: 'en' });
+  assert.equal(calls.length, 1);
+  assert.equal(noContext.context.mode, 'ai');
+  assert.equal(noContext.context.omitted, 'no-context');
+  assert.equal(noContext.context.chars, 0);
+  await setConfig({ aiContextEnabled: false });
+});
+
+await t('AI 精翻 + 隐私脱敏：页面标题 / 相邻段落不进任何请求，响应记录降级', async () => {
+  await setConfig({ aiContextEnabled: true, privacyEnabled: true });
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const src = 'A privacy context pipeline paragraph without personal data.';
+  calls = [];
+  const res = await send({
+    type: 'translate', texts: [src], target: 'en',
+    documentContext: { title: 'SECRET_PAGE_TITLE', headings: ['SECRET_HEADING'], adjacent: ['SECRET_ADJACENT'] }
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(res.context.omitted, 'privacy');
+  assert.ok(!lastSystem.includes('SECRET_PAGE_TITLE'));
+  assert.ok(!lastSystem.includes('SECRET_HEADING'));
+  assert.ok(!lastSystem.includes('SECRET_ADJACENT'));
+  await setConfig({ aiContextEnabled: false, privacyEnabled: false });
+});
+
+await t('医学 + AI 同时开启：只出现一份上下文块，仍然一次请求', async () => {
+  await setConfig({ aiContextEnabled: true, privacyEnabled: false, medicalMode: true, glossary: [] });
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const src = 'PFS was assessed in this medical context pipeline.';
+  calls = [];
+  const res = await send({
+    type: 'translate', texts: [src], target: 'en',
+    documentContext: { title: 'Medical trial', headings: ['Methods'], abbreviations: { PFS: 'progression-free survival' }, adjacent: ['Adjacent medical paragraph.'] }
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(res.ok, true);
+  assert.ok(lastSystem.includes('文档上下文'), '专业模式应带自己的上下文块');
+  assert.ok(!lastSystem.includes('AI 精翻参考上下文'), '不能同时出现两份上下文块');
+  assert.equal(lastSystem.split('文档上下文').length, 2);
+  await setConfig({ aiContextEnabled: false, medicalMode: false });
+});
+
+await t('自定义语言：目标语言行 / 说明进入提示词，缓存按定义指纹隔离，旧定义不命中', async () => {
+  const custom = {
+    id: 'cl_0a1b2c3d',
+    name: '粤语（香港）',
+    code: 'yue-Hant-HK',
+    note: '使用自然的香港粤语书面表达，以繁体字为主。'
+  };
+  await setConfig({ customLanguages: [custom], targetLang: custom.id, aiContextEnabled: false, privacyEnabled: false, medicalMode: false, glossary: [] });
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const src = 'A custom language pipeline paragraph.';
+  calls = [];
+  const first = await send({ type: 'translate', texts: [src], target: custom.id });
+  assert.equal(calls.length, 1);
+  assert.equal(first.cached, 0);
+  assert.ok(lastSystem.includes('唯一目标语言：粤语（香港） (yue-Hant-HK)'));
+  assert.ok(lastSystem.includes('"name":"粤语（香港）"'));
+  assert.ok(lastSystem.includes('目标语言补充说明'));
+  assert.ok(!lastSystem.includes(custom.id), '内部 id 不能当成 BCP 47 代码');
+  // 输入框翻译的 auto 也能命中自定义语言的标准代码。
+  const autoTarget = await send({ type: 'translate', texts: ['Input target custom language paragraph.'], target: 'auto', pageLang: 'yue-Hant-HK', noCache: true });
+  assert.equal(autoTarget.ok, true);
+  assert.ok(lastSystem.includes('唯一目标语言：粤语（香港） (yue-Hant-HK)'));
+  calls = [];
+  const again = await send({ type: 'translate', texts: [src], target: custom.id });
+  assert.equal(calls.length, 0);
+  assert.equal(again.cached, 1);
+  await setConfig({ customLanguages: [{ ...custom, note: '改用简体字，保持口语。' }] });
+  calls = [];
+  const changed = await send({ type: 'translate', texts: [src], target: custom.id });
+  assert.equal(calls.length, 1, '说明变化必须让旧译文缓存失效');
+  assert.equal(changed.cached, 0);
+  assert.ok(lastSystem.includes('改用简体字，保持口语。'));
+  await setConfig({ customLanguages: [], targetLang: 'en' });
+});
+
+await t('自定义语言代码 en-GB：模型回整段中文不写缓存，下次重新请求', async () => {
+  const custom = { id: 'cl_0a1b2c4e', name: 'Pirate English', code: 'en-GB', note: 'Use British spelling.' };
+  await setConfig({ customLanguages: [custom], targetLang: 'en', aiContextEnabled: false, privacyEnabled: false, medicalMode: false, glossary: [] });
+  const bad = '这是一整段中文译文，本应输出英文却输出了中文，用来验证目标语言校验不会把错误结果写进缓存。'.repeat(2);
+  reply = () => JSON.stringify([bad]);
+  const src = 'A custom English pipeline paragraph.';
+  calls = [];
+  const first = await send({ type: 'translate', texts: [src], target: custom.id });
+  assert.equal(calls.length, 1);
+  assert.equal(first.results[0], bad, '这次仍显示模型结果');
+  calls = [];
+  await send({ type: 'translate', texts: [src], target: custom.id });
+  assert.equal(calls.length, 1, '语言明显不符的译文不能写缓存');
+  reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  await setConfig({ customLanguages: [], targetLang: 'en' });
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
