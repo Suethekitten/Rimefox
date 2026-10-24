@@ -796,6 +796,42 @@
     return out + s.slice(at);
   };
 
+  // 有限行内协议：只在源文本范围插入受控标记，不序列化网页 HTML。
+  // format 的同起点外层先开、内层先关；空 protect 不向 API 发送正文。
+  U.inlineWrap = function (text, keep, formats) {
+    var s = String(text || '');
+    var opens = {};
+    var closes = {};
+    var hidden = {};
+    function add(list, at, item) {
+      if (!list[at]) list[at] = [];
+      list[at].push(item);
+    }
+    (keep || []).forEach(function (k, index) {
+      var id = index + 1;
+      add(opens, k.start, { key: 'k' + id, end: k.end, rank: -1 });
+      add(closes, k.end, { key: 'k' + id, start: k.start, rank: -1 });
+      if (k.kind === 'protect') {
+        for (var i = k.start; i < k.end; i += 1) hidden[i] = true;
+      }
+    });
+    (formats || []).forEach(function (f, index) {
+      add(opens, f.start, { key: 'f' + f.id, end: f.end, rank: index });
+      add(closes, f.end, { key: 'f' + f.id, start: f.start, rank: index });
+    });
+    var out = '';
+    for (var i = 0; i <= s.length; i += 1) {
+      (closes[i] || []).sort(function (a, b) { return b.start - a.start || b.rank - a.rank; }).forEach(function (m) {
+        out += '</' + m.key + '>';
+      });
+      (opens[i] || []).sort(function (a, b) { return b.end - a.end || a.rank - b.rank; }).forEach(function (m) {
+        out += '<' + m.key + '>';
+      });
+      if (i < s.length && !hidden[i]) out += s.charAt(i);
+    }
+    return out;
+  };
+
   // 模型没留标记（或换了顺序）时，按原文逐字找保留内容：每个都要按顺序、整词、只出现一次
   function keepLocate(text, keep) {
     var segs = [];

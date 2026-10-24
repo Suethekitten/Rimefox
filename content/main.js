@@ -175,10 +175,45 @@
     var options = professionalOptions(cfg && cfg.professionalOptions);
     return JSON.stringify([professionalProfileFor(cfg), options.quality, options.subdomain, options.maxReviewRequests]);
   }
+  function contextProtectedSelector() {
+    var cfg = DT.state.config;
+    var site = cfg && cfg.page && cfg.page.site;
+    var selectors = site && site.excludeSelectors;
+    return '.notranslate,.no-translate,[translate="no"]' + (selectors && selectors.length ? ',' + selectors.join(',') : '');
+  }
+  function protectedContextNode(el) {
+    if (!el || el.nodeType !== 1) return false;
+    try {
+      for (var node = el; node; node = node.parentElement) {
+        if (node.matches && node.matches(contextProtectedSelector())) return true;
+      }
+      return false;
+    } catch (err) { return true; }
+  }
+  function contextTitle() {
+    // Shadow content has a separate tree; the adapter may discover its protected
+    // nodes only during collection, after this snapshot has already been read.
+    if (DT.shadow && DT.shadow.active && DT.shadow.active()) return '';
+    var text = String(document.title || '').replace(/\s+/g, ' ').trim();
+    if (!text || !document.querySelectorAll) return text;
+    // A title may repeat only part of a protected name/account. There is no
+    // trustworthy DOM range mapping into document.title, so omit this metadata
+    // whenever protected content exists rather than trying substring redaction.
+    var nodes;
+    try { nodes = document.querySelectorAll(contextProtectedSelector()); } catch (err) { return ''; }
+    if (nodes.length) return '';
+    return text.replace(/\s+/g, ' ').trim().slice(0, 240);
+  }
   function contextText(el, limit) {
     if (!el) return '';
+    if (protectedContextNode(el)) return '';
     var replaced = DT.replacedOf && DT.replacedOf(el);
-    if (replaced && typeof replaced.src === 'string') return replaced.src.slice(0, limit);
+    if (replaced && typeof replaced.src === 'string') {
+      // A flattened saved source no longer identifies protected characters. A
+      // heading with such descendants is omitted rather than guessed back in.
+      if (el.querySelector && el.querySelector(contextProtectedSelector())) return '';
+      return replaced.src.slice(0, limit);
+    }
     var text = '';
     function read(node) {
       if (!node || text.length >= limit) return;
@@ -187,10 +222,12 @@
         return;
       }
       if (node.nodeType !== 1) return;
+      if (protectedContextNode(node)) return;
       if (node.hasAttribute && (node.hasAttribute('data-dt-target') || node.hasAttribute('data-dt-ui') || node.getAttribute('aria-hidden') === 'true')) return;
       // 已替换的正文 / 标题 / 局部段落：上下文要读原 src，不能读页面上已经变成译文的文本。
       var replaced = DT.replacedOf && DT.replacedOf(node);
       if (replaced && typeof replaced.src === 'string') {
+        if (node.querySelector && node.querySelector(contextProtectedSelector())) return;
         text += replaced.src.slice(0, Math.max(0, limit - text.length));
         return;
       }
@@ -211,7 +248,7 @@
     return articles.length ? null : document.querySelector('main,[role="main"]') || document.body;
   }
   function documentSnapshot(root) {
-    var context = { title: String(document.title || '').replace(/\s+/g, ' ').trim().slice(0, 240), headings: [], abbreviations: {} };
+    var context = { title: contextTitle(), headings: [], abbreviations: {} };
     var scope = root || pageContextRoot();
     var headings = scope && scope.querySelectorAll ? scope.querySelectorAll('h1,h2,h3') : [];
     var budget = 600;
@@ -528,15 +565,21 @@
       // 只对多句段落请求结构化对齐；单句段落的段落级对应就是句子级，不需要额外字段
       var hoverOn = !DT.state.config || DT.state.config.hoverCompare !== false;
       queue.forEach(function (unit, ui) {
+        if (unit.inlineIssue) {
+          noteRenderFailure(unit, 'invalid-inline', unit.inlineIssue);
+          return;
+        }
         // 段落里有 notranslate 的行内内容时，送翻文本带 <kN> 保留标记（见 dom.js 的保留区）
-        var parts = DT.splitLong(DT.wireText(unit), maxUnit);
+        var parts = DT.splitLong(DT.wireText(unit), maxUnit, unit.inlineProtocol);
         unit.slots = new Array(parts.length);
         unit.ali = new Array(parts.length); // 每片的对齐（模型没给就是 undefined）
         unit.seps = parts.seps; // 段与段之间原来的分隔：在换行处切开的，拼回去仍是换行
         unit.done = false;
-        unit.wantAlign = !!hoverOn && unit.sentences && unit.sentences.length > 1;
+        // Inline ranges use the same string response; local sentence alignment
+        // remains available after stripping markers, without a second request.
+        unit.wantAlign = !unit.inlineProtocol && !!hoverOn && unit.sentences && unit.sentences.length > 1;
         parts.forEach(function (part, k) {
-          pending.push({ ui: ui, k: k, text: part, style: unit.style || 'plain', align: unit.wantAlign });
+          pending.push({ ui: ui, k: k, text: part, style: unit.style || 'plain', align: unit.wantAlign, inlineProtocol: unit.inlineProtocol || '' });
         });
       });
 
@@ -584,15 +627,44 @@
         var chars = 0;
         while (pending.length) {
           var seg = pending[0];
+          if (batch.length && (batch.length >= limitItems || seg.style !== batch[0].style)) break;
+          var pick = 0;
+          // Fill a compatible batch from the same visibility priority. Alternating
+          // plain/formatted siblings must not each create a one-item API request.
+          if (batch.length && seg.inlineProtocol !== batch[0].inlineProtocol) {
+            pick = -1;
+            for (var bi = 1; bi < pending.length; bi += 1) {
+              var candidate = pending[bi];
+              if (queue[candidate.ui].prio !== prio || candidate.style !== batch[0].style) break;
+              if (candidate.inlineProtocol === batch[0].inlineProtocol && chars + candidate.text.length <= limitChars) {
+                pick = bi;
+                break;
+              }
+            }
+            if (pick < 0) break;
+            seg = pending[pick];
+          }
           if (batch.length && (batch.length >= limitItems || chars + seg.text.length > limitChars)) break;
-          if (batch.length && seg.style !== batch[0].style) break; // 同一批不混风格：后台按批选提示词
-          batch.push(pending.shift());
+          batch.push(pending.splice(pick, 1)[0]);
           chars += seg.text.length;
         }
         return batch;
       }
 
       DT.log('segments', pending.length);
+
+      function noteRenderFailure(unit, code, reason) {
+        if (!unitState(renderFails, unit)) DT.state.renderFailed = (DT.state.renderFailed || 0) + 1;
+        setUnitState(renderFails, unit, {
+          text: unit.text,
+          stamp: DT.unitStamp ? DT.unitStamp(unit) : '',
+          code: code,
+          reason: reason || ''
+        });
+        DT.state.lastRenderError = code + (reason ? ': ' + reason : '');
+        unit.done = true;
+        unit.failed = false;
+      }
 
       function tryInject(unit) {
         if (!unit || unit.done) return;
@@ -668,17 +740,10 @@
         } else if (code === 'stale-source') {
           // 源节点已经不在页面上：页面更新了，本轮结束后重新收集
           dirty = true;
-        } else if (code === 'unsafe-structure' || code === 'invalid-placement') {
+        } else if (code === 'unsafe-structure' || code === 'invalid-placement' || code === 'invalid-inline') {
           // 模型已经给了译文，只是写不进页面：不算跳过、不记成已处理，记下原因；
           // 源文本和 DOM 状态都没变就不再重试（不重复请求），页面变了再收（后台缓存里有译文）
-          if (!unitState(renderFails, unit)) DT.state.renderFailed = (DT.state.renderFailed || 0) + 1;
-          setUnitState(renderFails, unit, {
-            text: unit.text,
-            stamp: DT.unitStamp ? DT.unitStamp(unit) : '',
-            code: code,
-            reason: outcome && outcome.reason ? outcome.reason : ''
-          });
-          DT.state.lastRenderError = code + (outcome && outcome.reason ? ': ' + outcome.reason : '');
+          noteRenderFailure(unit, code, outcome && outcome.reason);
         } else {
           // 已经有译文 / 不适用 / 没有译文：记成已处理，内容没变就不再每轮重收、重发同一段
           // （命中缓存也要走一次后台；缓存没了就是重复计费）
@@ -705,8 +770,16 @@
           var wantAlign = false;
           for (var ai = 0; ai < batch.length; ai += 1) if (batch[ai].align) wantAlign = true;
           var message = { type: 'translate', texts: texts, target: target, style: batch[0].style || 'plain', align: wantAlign };
+          if (batch[0].inlineProtocol) message.inlineProtocol = batch[0].inlineProtocol;
           if (medical) {
-            var batchUnits = batch.map(function (seg) { return { el: queue[seg.ui].el, text: seg.text }; });
+            var batchUnits = batch.map(function (seg) {
+              var visible = seg.text;
+              if (seg.inlineProtocol && window.__RimefoxInline) {
+                var checked = window.__RimefoxInline.inspect(visible, visible);
+                if (checked.ok) visible = checked.text;
+              }
+              return { el: queue[seg.ui].el, text: visible };
+            });
             var scope = contextRoot(batchUnits[0].el);
             var scopedSnapshot = snapshot;
             if (scope) {
@@ -753,6 +826,20 @@
         }
         if (res.error) DT.state.lastError = res.error;
         batch.forEach(function (seg, k) {
+          if (queue[seg.ui].done) return;
+          var inlineError = res.inlineErrors && res.inlineErrors[k];
+          if (inlineError) {
+            if (DT.sourceChanged(queue[seg.ui])) {
+              queue[seg.ui].done = true;
+              dirty = true;
+              return;
+            }
+            noteRenderFailure(queue[seg.ui], 'invalid-inline', String(inlineError));
+            // Deterministic protocol failure must not send the remaining slices
+            // of the unchanged paragraph again or enter paid retry backoff.
+            pending = pending.filter(function (item) { return item.ui !== seg.ui; });
+            return;
+          }
           var value = res.results[k];
           var validation = res.validations && res.validations[k];
           if (validation && (validation.status === 'review' || validation.status === 'error')) {
@@ -822,6 +909,11 @@
           DT.toast('翻译失败：' + (DT.state.lastError || '未知错误'), 5000);
         } else if (DT.state.failed > 0) {
           DT.toast('新增 ' + (DT.state.translated) + ' 段译文，' + DT.state.failed + ' 段失败');
+        } else if (DT.state.renderFailed > 0) {
+          DT.toast(DT.uiText(
+            '已翻译 ' + DT.state.translated + ' 段，' + DT.state.renderFailed + ' 段因格式或结构问题保留原文',
+            'Translated ' + DT.state.translated + ' paragraphs; ' + DT.state.renderFailed + ' kept original because formatting or structure could not be verified'
+          ), 5000);
         } else {
           DT.toast('已翻译 ' + queue.length + ' 段' + (deferred ? '，往下滚动会接着翻' : ''));
         }

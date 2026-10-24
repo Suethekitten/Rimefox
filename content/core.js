@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.11.7';
+  DT.VERSION = '0.12.0';
   // 允许重复注入：页面还没加载完就打开弹窗 / 按快捷键时，后台补注入（ensureInjected）的这批脚本
   // 会和 manifest 声明的那批各跑一次。只初始化一次：再跑会清空 DT.state 和 onConfig 的订阅，
   // 而 main.js、appearance.js、dock.js 这些已经启动过的模块不会重新订阅，站点规则 / 外观就再也不生效
@@ -376,6 +376,7 @@
   };
   // 模型回来的译文去掉保留标记（标记里的内容换回原文）：去重、对齐校验都按页面上实际显示的文字算
   DT.keepText = function (unit, text) {
+    if (unit && unit.inlineProtocol && DT.inlineText) return DT.inlineText(unit, text);
     return unit && unit.keep && unit.keep.length ? DT.units.keepParse(text, unit.keep, unit.text).text : text;
   };
 
@@ -384,7 +385,7 @@
   // 返回的数组带 seps：seps[i] 是第 i 段和第 i+1 段之间原来的分隔（换行 '\n' / '\n\n'；行内切点处有空白为 ' '，没有为 ''）。
   // 每一段都是原文的原样子串。拼回译文时先用 DT.translationSeps 按目标语言换掉行内分隔，再交给 DT.joinSlots，
   // 段落换行不会被拼成空格
-  DT.splitLong = function (text, max) {
+  DT.splitLong = function (text, max, inlineProtocol) {
     var limit = Math.max(200, Number(max) || 1200);
     var out;
     if (text.length <= limit) {
@@ -392,18 +393,28 @@
       out.seps = [];
       return out;
     }
-    if (text.indexOf('\n') >= 0) return splitByLines(text, limit);
-    var cut = splitSentences(text, limit);
+    if (text.indexOf('\n') >= 0) return splitByLines(text, limit, inlineProtocol);
+    var cut = splitSentences(text, limit, inlineProtocol);
     out = cut.parts;
     out.seps = cut.seps;
     return out;
   };
 
-  function splitByLines(text, limit) {
+  function splitByLines(text, limit, inlineProtocol) {
     // 先拆成「块」：一整行，或超长行按句切出的一截；sep 是它和前一块之间的分隔
     var atoms = [];
     var gap = '';
-    text.split('\n').forEach(function (line) {
+    var spans = keepSpans(text, inlineProtocol);
+    var lines = [];
+    var from = 0;
+    for (var ni = 0; ni < text.length; ni += 1) {
+      if (text.charAt(ni) === '\n' && !spanAt(spans, ni)) {
+        lines.push(text.slice(from, ni));
+        from = ni + 1;
+      }
+    }
+    lines.push(text.slice(from));
+    lines.forEach(function (line) {
       if (!line.trim()) {
         if (atoms.length) gap += '\n';
         return;
@@ -414,7 +425,7 @@
         atoms.push({ text: line, sep: sep });
         return;
       }
-      var cut = splitSentences(line, limit);
+      var cut = splitSentences(line, limit, inlineProtocol);
       cut.parts.forEach(function (piece, k) {
         atoms.push({ text: piece, sep: k ? cut.seps[k - 1] : sep });
       });
@@ -442,15 +453,20 @@
   // （3.5、example.com、10:30 不切）。紧跟的引号 / 括号算在前一句里（「……。」）
   var SENT_END = /[.!?…;:]+["'”’)\]]*(?=\s|$)|[。！？；：]+["'”’」』）)\]]*/g;
 
-  // 送翻文本里的保留区（dom.js 的 keepWrap：<k1>…</k1>）：[[开始, 结束]]。切点不能落在里面 ——
-  // 拆开以后两半都不是成对标记，后台不加「标记原样照抄」的说明，模型也就不会把标记带回来，
-  // 仅译文会走兜底，把 notranslate 的内容藏起来换成译文
-  var KEEP_SPAN = /<k(\d{1,3})>[\s\S]*?<\/k\1>/g;
-  function keepSpans(text) {
+  // 完整原子与v1格式区间不可切开。普通正文不把字面<fN>解释成协议。
+  function keepSpans(text, inlineProtocol) {
     var out = [];
+    var stack = [];
+    var re = inlineProtocol === 'v1' ? /<(\/?)([kf])(\d{1,3})>/g : /<(\/?)(k)(\d{1,3})>/g;
     var m;
-    KEEP_SPAN.lastIndex = 0;
-    while ((m = KEEP_SPAN.exec(text))) out.push([m.index, m.index + m[0].length]);
+    while ((m = re.exec(text))) {
+      if (!m[1]) {
+        stack.push({ key: m[2] + m[3], start: m.index });
+      } else if (stack.length && stack[stack.length - 1].key === m[2] + m[3]) {
+        var open = stack.pop();
+        if (!stack.length) out.push([open.start, re.lastIndex]);
+      }
+    }
     return out;
   }
   function spanAt(spans, at) {
@@ -464,8 +480,8 @@
   // 返回 { parts, seps }：parts 是原文的原样子串（只去掉切点两边的空白），seps[i] 是切点处原来有没有空白（' ' / ''）。
   // 以前先吃掉标点后的空白、再用空格拼回去：发给模型的原文里 3.5 变成 "3. 5"、example.com 变成 "example. com"，
   // 中文「你好。」里也被塞进空格（只影响超过 maxUnitChars 的长段落）
-  function splitSentences(text, limit) {
-    var spans = keepSpans(text);
+  function splitSentences(text, limit, inlineProtocol) {
+    var spans = keepSpans(text, inlineProtocol);
     var pieces = [];
     var last = 0;
     var m;

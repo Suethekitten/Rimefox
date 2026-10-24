@@ -105,6 +105,7 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
   sandbox.top = iframe ? {} : sandbox;
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(new URL('content/core.js', root), 'utf8'), sandbox, { filename: 'core.js' });
+  vm.runInContext(fs.readFileSync(new URL('lib/inline-protocol.js', root), 'utf8'), sandbox, { filename: 'inline-protocol.js' });
   vm.runInContext(fs.readFileSync(new URL('content/units.js', root), 'utf8'), sandbox, { filename: 'units.js' });
   // dom.js 的 DOM 引擎换成桩：这里只关心调度
   const DT = sandbox.__DT;
@@ -554,7 +555,15 @@ function contextElement(tag, text = '', children = []) {
     child.previousElementSibling = index ? el.childNodes[index - 1] : null;
     child.nextElementSibling = el.childNodes[index + 1] || null;
   });
-  el.matches = (selector) => selector.split(',').some((name) => name.trim().toUpperCase() === el.tagName);
+  el.matches = (selector) => selector.split(',').some((part) => {
+    const name = part.trim();
+    if (name[0] === '.') return String(el.className || '').split(/\s+/).includes(name.slice(1));
+    if (name === '[translate="no"]') return el.getAttribute('translate') === 'no';
+    return name.toUpperCase() === el.tagName;
+  });
+  Object.defineProperty(el, 'textContent', { configurable: true, get() {
+    return el.childNodes.map((child) => child.nodeType === 3 ? child.nodeValue : child.textContent).join('');
+  } });
   el.closest = (selector) => {
     for (let current = el; current; current = current.parentElement) if (current.matches && current.matches(selector)) return current;
     return null;
@@ -701,6 +710,167 @@ await t('在途翻译期间文档标题变化：丢弃旧上下文结果并重�
   assert.deepEqual(injected, ['新论文译文。']);
   assert.deepEqual(contexts, ['Oncology trial', 'A different oncology paper']);
   assert.equal(env.page.rebuilds, 1);
+});
+
+await t('v1与普通文本分批；格式段不再要求额外的模型句子对齐', async () => {
+  const env = await boot({ config: { lazy: false, skipSameLang: false, concurrency: 1 } });
+  const make = (text, inlineProtocol = '') => ({
+    el: contextElement('p', text), text, wire: inlineProtocol ? '<f1>' + text + '</f1>' : text,
+    inlineProtocol, sentences: [{ text: 'first.' }, { text: 'second.' }], style: 'plain'
+  });
+  const units = [make('Inline first. Inline second.', 'v1'), make('Ordinary first. Ordinary second.')];
+  const asked = [];
+  env.DT.collectAll = () => units;
+  env.DT.sourceChanged = () => false;
+  env.DT.inject = () => true;
+  env.DT.send = async (msg) => {
+    if (msg.type !== 'translate') return { ok: true };
+    asked.push(msg);
+    return { ok: true, results: msg.texts.map((text) => '译：' + text) };
+  };
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(asked.length, 2);
+  assert.equal(asked[0].inlineProtocol, 'v1');
+  assert.equal(asked[0].align, false);
+  assert.equal(asked[1].inlineProtocol, undefined);
+  assert.equal(asked[1].texts.length, 1);
+});
+
+await t('同视口交错普通/格式段落按协议装满小批，避免每段产生一个请求', async () => {
+  const env = await boot({ config: { lazy: false, skipSameLang: false, concurrency: 1 } });
+  const units = Array.from({ length: 6 }, (_, index) => ({
+    el: contextElement('p', 'Paragraph ' + index), text: 'Paragraph ' + index,
+    wire: index % 2 ? 'Paragraph ' + index : '<f1>Paragraph</f1> ' + index,
+    inlineProtocol: index % 2 ? '' : 'v1', style: 'plain', sentences: []
+  }));
+  const asked = [];
+  env.DT.collectAll = () => units;
+  env.DT.sourceChanged = () => false;
+  env.DT.inject = () => true;
+  env.DT.send = async (msg) => {
+    if (msg.type !== 'translate') return { ok: true };
+    asked.push(msg);
+    return { ok: true, results: msg.texts.map((text) => '译：' + text) };
+  };
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(asked.length, 2, '6个交错段落只需2个兼容批次，而非6次单条请求');
+  assert.deepEqual(asked.map((msg) => msg.texts.length), [3, 3]);
+  assert.ok(asked[0].texts.every((text) => text.includes('<f1>')));
+  assert.ok(asked[1].texts.every((text) => !text.includes('<f1>')));
+});
+
+await t('确定性v1错误不注入、不退避重试、不发送同段剩余切片；DOM变化才重新请求', async () => {
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ hooks, config: { lazy: true, skipSameLang: false, concurrency: 1, maxUnitChars: 200 } });
+  const text = 'Source sentence with enough words to form several safe slices. '.repeat(35);
+  const el = contextElement('p', text);
+  let stamp = 'initial';
+  const asked = [];
+  let injected = 0;
+  env.DT.collectAll = (accept) => [{ el, text, wire: '<f1>Source</f1>' + text.slice(6), inlineProtocol: 'v1', sentences: [], style: 'plain' }].filter(accept);
+  env.DT.unitStamp = () => stamp;
+  env.DT.sourceChanged = () => false;
+  env.DT.inject = () => { injected += 1; return true; };
+  env.DT.send = async (msg) => {
+    if (msg.type !== 'translate') return { ok: true };
+    asked.push(msg);
+    return { ok: true, results: msg.texts.map(() => null), inlineErrors: msg.texts.map(() => 'atom-missing') };
+  };
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(injected, 0);
+  assert.equal(asked.length, 1, '首批确定性失败后，不再发送该段剩余切片');
+  assert.equal(env.DT.state.renderFailed, 1);
+  assert.equal(env.DT.state.translated || 0, 0);
+  assert.equal(env.DT.state.skipped || 0, 0);
+  assert.match(env.DT.state.lastRenderError, /invalid-inline: atom-missing/);
+  await rescan(hooks);
+  await rescan(hooks);
+  assert.equal(asked.length, 1, '未变更段落不产生新请求');
+  stamp = 'changed-structure';
+  await rescan(hooks);
+  assert.equal(asked.length, 2);
+});
+
+await t('长段落切分保留嵌套f/k和原子内换行，拼回源文逐字一致', async () => {
+  const { inspectInline } = await import('../lib/inline.js');
+  const { DT } = await boot();
+  const atom = '<k1><f2>safe link\nlabel. Still the same label.</f2></k1>';
+  const wire = 'Opening sentence. '.repeat(25) + '<f1>emphasis. Inside emphasis.</f1> ' + atom + '\n' + 'Following sentence. '.repeat(30).trim();
+  const parts = DT.splitLong(wire, 200, 'v1');
+  assert.ok(parts.length > 2);
+  assert.equal(parts.filter((part) => part.includes('<k1>')).length, 1);
+  assert.ok(parts.some((part) => part.includes(atom)));
+  for (const part of parts) assert.equal(inspectInline(part, part).ok, true, part);
+  assert.equal(DT.joinSlots(parts, parts.seps), wire);
+});
+
+await t('保护内容不会从标题、父级保护章节、相邻定义或已替换src重新进入专业上下文', async () => {
+  const secret = 'private account secret';
+  const protectedHeading = contextElement('h2', secret);
+  const wrapper = contextElement('section', '', [protectedHeading]);
+  wrapper.className = 'notranslate';
+  const excluded = contextElement('h2', 'SiteExcludedSecret');
+  excluded.className = 'fixture-site-excluded';
+  const f = contextFixture();
+  f.near.setAttribute('translate', 'no');
+  const hidden = contextElement('span', 'ReplacedSecret');
+  hidden.className = 'notranslate';
+  f.h1.childNodes.push(hidden);
+  hidden.parentElement = f.h1;
+  f.article.childNodes.push(wrapper, excluded);
+  wrapper.parentElement = excluded.parentElement = f.article;
+  f.pageDocument.title = secret + ' | ' + 'SiteExcludedSecret | ReplacedSecret | Oncology trial';
+  const env = await boot({ config: { page: { site: { excludeSelectors: ['.fixture-site-excluded'] } } }, pageDocument: f.pageDocument });
+  env.DT.replacedOf = (el) => el === f.h1 ? { src: 'Oncology trial ReplacedSecret' } : null;
+  const context = env.DT.professionalContext.collect([{ el: f.current, text: 'PFS was assessed.' }]);
+  const json = JSON.stringify(context);
+  for (const value of [secret, 'SiteExcludedSecret', 'ReplacedSecret', 'progression-free survival']) assert.equal(json.includes(value), false, value);
+  assert.equal(context.title, '', '无法将保护文本可靠映射到标题时省略标题元数据');
+});
+
+await t('标题只包含保护文本的一部分时也不外发；普通正文的字面f不破坏旧k切片', async () => {
+  const f = contextFixture();
+  f.near.className = 'notranslate';
+  f.near.childNodes[0].nodeValue = 'SecretCustomerID 78423';
+  f.pageDocument.title = 'SecretCustomerID | Oncology trial';
+  const { DT } = await boot({ pageDocument: f.pageDocument });
+  assert.equal(DT.professionalContext.collect([{ el: f.current, text: 'PFS was assessed.' }]).title, '');
+  const atom = '<k1>' + 'long protected sentence. '.repeat(36) + '</k1>';
+  const wire = 'Literal <f1> ' + 'prefix sentence. '.repeat(12) + atom + ' closing.';
+  const parts = DT.splitLong(wire, 200);
+  assert.equal(parts.filter((part) => part.includes(atom)).length, 1);
+  assert.equal(DT.joinSlots(parts, parts.seps), wire);
+});
+
+await t('跨格式边界的缩写仍匹配相邻可靠定义，保护区不从本地原文恢复到上下文', async () => {
+  const fixture = contextFixture();
+  const env = await boot({ config: { professionalProfile: 'medical', lazy: false, skipSameLang: false }, pageDocument: fixture.pageDocument });
+  const unit = { el: fixture.current, text: 'PFS was assessed. PrivateSecret', wire: 'P<f1>FS</f1> was assessed.<k1></k1>', inlineProtocol: 'v1', sentences: [], style: 'plain' };
+  let requested;
+  installTranslationFixture(env, unit, (msg) => { requested = msg; return { ok: true, results: ['<f1>有效</f1>译文<k1></k1>'] }; });
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(requested.documentContext.abbreviations.PFS, 'progression-free survival');
+  assert.equal(JSON.stringify(requested).includes('PrivateSecret'), false);
+  assert.ok(requested.texts[0].includes('<f1>FS</f1>'));
+});
+
+await t('Shadow适配页省略标题元数据；源标记冲突与保护内容共存时零请求且不重试', async () => {
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ hooks, config: { lazy: false, skipSameLang: false }, pageDocument: { title: 'ShadowPrivateSecret | Trial' } });
+  env.DT.shadow = { active: () => true };
+  assert.equal(env.DT.professionalContext.snapshot().title, '');
+  env.DT.shadow = null;
+  const el = contextElement('p', 'Literal <f99> with PrivateSecret.');
+  let asked = 0;
+  env.DT.collectAll = (accept) => [{ el, text: el.textContent, inlineIssue: 'reserved-marker-source', inlineProtocol: 'v1', wire: '', sentences: [], style: 'plain' }].filter(accept);
+  env.DT.sourceChanged = () => false;
+  env.DT.send = async (msg) => { if (msg.type === 'translate') asked += 1; return { ok: true }; };
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(asked, 0);
+  assert.equal(env.DT.state.renderFailed, 1);
+  assert.match(env.DT.state.lastRenderError, /reserved-marker-source/);
+  await rescan(hooks);
+  assert.equal(asked, 0);
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

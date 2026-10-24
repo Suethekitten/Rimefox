@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Deterministic inline fidelity fixtures</title>
+  <style>
+    body { margin: 24px; font: 18px/1.7 Georgia, serif; }
+    main { max-width: 720px; }
+    .inherited-emphasis { font-weight: 700; font-style: italic; }
+    .family-emphasis { font-family: "Example Bold", Georgia, serif; }
+    .relative-note { font-size: .8em; vertical-align: super; }
+    .prewrap { white-space: pre-wrap; }
+    .icon { display: inline-block; width: 1em; height: 1em; vertical-align: middle; }
+    .citation { font-size: .72em; vertical-align: super; }
+    .base-font { font: 19px/1.6 "Noto Serif CJK KR", Georgia, serif; }
+  </style>
+</head>
+<body>
+  <!-- Each case is an independent paragraph. IDs and data-semantic labels are
+       stable test selectors, never instructions sent to a model. -->
+  <main id="inline-fidelity-fixture">
+    <p data-fidelity-case="plain">Hello beautiful world. Please read this sentence before continuing.</p>
+    <p data-fidelity-case="strong">Hello <strong data-semantic="beautiful">beautiful</strong> world. Please continue carefully.</p>
+    <p data-fidelity-case="leading-bold"><b data-semantic="important">Important:</b> the remaining sentence must retain normal body weight.</p>
+    <p data-fidelity-case="em">The <em data-semantic="uncertain">uncertain</em> result requires further evidence before publication.</p>
+    <p data-fidelity-case="italic">The article describes an <i data-semantic="unusual">unusual</i> result in the second experiment.</p>
+    <p data-fidelity-case="nested">The <strong data-semantic="important">important <em data-semantic="uncertain">uncertain</em> result</strong> needs a careful interpretation.</p>
+    <p data-fidelity-case="span-inherited">This result is <span class="inherited-emphasis"><span data-semantic="highly-uncertain">highly uncertain</span></span> and needs more evidence.</p>
+    <p data-fidelity-case="family">The <span class="family-emphasis" data-semantic="primary">primary result</span> remains distinct from ordinary body text.</p>
+    <p data-fidelity-case="code">Call <code data-semantic="identifier">loadConfig()</code> before starting the translation request.</p>
+    <p data-fidelity-case="small">The study is complete, <small data-semantic="preliminary">although the findings remain preliminary</small>, and further work is planned.</p>
+    <p data-fidelity-case="sup-sub">The value x<sup data-semantic="squared">2</sup> and the formula H<sub data-semantic="two">2</sub>O occur in the same explanatory sentence.</p>
+    <p data-fidelity-case="relative-note">Normal body text precedes a <span class="relative-note" data-semantic="aside">brief aside</span> and continues at normal size.</p>
+    <p data-fidelity-case="article-link">Read the <a id="fidelity-guide" href="/guide?from=fidelity#intro" title="Guide" target="_blank" rel="noopener" aria-label="Open documentation" data-semantic="documentation">documentation</a> before continuing with the remaining instructions.</p>
+    <p data-fidelity-case="nested-link">Read the <a id="fidelity-nested-guide" href="/guide/nested" data-semantic="nested-documentation"><strong data-semantic="complete">complete</strong> documentation</a> before starting the next task.</p>
+    <p data-fidelity-case="mention-link">The researcher <a href="/people/alice" class="mention" data-username="alice">@alice</a> shared a new explanation of the experiment.</p>
+    <p data-fidelity-case="protected">Translate this text around <span class="notranslate" data-protected="brand">AcmeSecretBrand</span> and <span translate="no" data-protected="account">private-account-42</span> while preserving their nodes.</p>
+    <p data-fidelity-case="excluded">The surrounding explanation contains <span class="fixture-site-excluded" data-protected="site-rule">SiteExcludedSecret</span> and continues as ordinary translatable prose.</p>
+    <p data-fidelity-case="citation">The <strong data-semantic="observed">observed</strong> association was reported previously<a href="#fidelity-ref-1" role="doc-biblioref" class="citation"><i>1</i></a> and is shown in <a href="#fidelity-fig-1">Fig. 1</a>.</p>
+    <p data-fidelity-case="ruby">At dusk the <ruby><rb>羅生門</rb><rp>（</rp><rt>らしょうもん</rt><rp>）</rp></ruby> gate stood beside a <em data-semantic="quiet">quiet</em> street with no visitors.</p>
+    <p data-fidelity-case="icons">Open the <svg class="icon" viewBox="0 0 10 10" aria-hidden="true" data-protected="icon"><path d="M1 5h8M5 1v8" stroke="currentColor" /></svg> <strong data-semantic="advanced">advanced</strong> menu and continue with the instructions.</p>
+    <p data-fidelity-case="rtl" lang="ar" dir="rtl">هذه نتيجة <strong data-semantic="important">مهمة</strong> مع رابط <a href="/guide/ar" data-semantic="guide">الدليل</a> للمستخدم.</p>
+    <p data-fidelity-case="prewrap" class="prewrap">First <strong data-semantic="important">important</strong> line.
+Second line with <em data-semantic="uncertain">uncertain</em> evidence.
+
+Final line with <a href="/guide/lines" data-semantic="details">details</a>.</p>
+    <p data-fidelity-case="whitespace">Text&nbsp;with <strong data-semantic="mixed-space">mixed   spaces</strong>,	inline <em data-semantic="line-break">line
+breaks</em> and a final sentence.</p>
+    <p data-fidelity-case="cross-node">Before <span>the <strong data-semantic="careful">careful</strong></span> scientist <em data-semantic="published">published</em> the final result, the team checked it twice.</p>
+    <p data-fidelity-case="font-policy" class="base-font">Original site typography surrounds <strong data-semantic="local-emphasis">local emphasis</strong> and must survive both translation modes.</p>
+    <p data-fidelity-case="dynamic">The original <strong data-semantic="dynamic-result">dynamic result</strong> is replaced by the website during an in-flight translation.</p>
+    <section aria-label="Local targets" translate="no">
+      <p id="fidelity-ref-1">Local reference target.</p>
+      <p id="fidelity-fig-1">Local figure target.</p>
+    </section>
+  </main>
+</body>
+</html>

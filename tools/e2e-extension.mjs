@@ -49,6 +49,7 @@ const DUAL_LIVE = flag('--dual-live')
     })()
   : '';
 const DUAL_LABEL = option('--label') || 'current';
+const EVIDENCE_DIR = option('--evidence-dir'); // Keep new live captures out of historical verification directories.
 const CHOSUN_LIVE = flag('--chosun-live')
   ? (() => {
       const arg = option('--chosun-live');
@@ -321,6 +322,11 @@ function templateOf(id) {
 }
 
 const PAGES = {
+  '/inline-fidelity.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Inline protocol integration</title></head><body>
+<p id="inline-valid">INLINE_VALID Read <strong>important</strong> <a href="#guide" target="_self" data-original="keep">documentation</a> before continuing with <span class="notranslate">PrivateInlineSecret</span>.</p>
+<p id="inline-bad">INLINE_BAD Read <strong>warning</strong> with <span translate="no">PrivateBadSecret</span>.</p>
+<script>window.originalInlineLink=document.querySelector('#inline-valid a');window.inlineClicks=0;originalInlineLink.addEventListener('click',function(e){e.preventDefault();window.inlineClicks++;});window.inlineSource=document.body.innerHTML;</script>
+</body></html>`,
   '/shadow-bili.html': SHADOW_BILI_PAGE,
   '/shadow-auto.html': SHADOW_AUTO_PAGE,
   [NATURE_PATH]: `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Nature citations</title>
@@ -496,8 +502,24 @@ const server = http.createServer((req, res) => {
       else {
         content = JSON.stringify(
           texts.map((t, i) => {
-            if (String(t).includes('trajectory')) return OWID_ZH;
+            if (String(t).includes('INLINE_BAD')) return String(t) + '<k1></k1>';
+            if (String(t).includes('INLINE_VALID')) return String(t).replace('INLINE_VALID Read ', '阅读').replace('important', '重要').replace('documentation', '文档').replace(' before continuing with ', '后继续，与');
+            if (String(t).includes('trajectory')) {
+              const atoms = String(t).match(/<k\d+>[\s\S]*?<\/k\d+>/g);
+              return atoms ? OWID_ZH.replace('11 自', atoms.join('') + ' 自') : OWID_ZH;
+            }
             if (wantsAlign) return aligned(t, i);
+            if (english && /<f\d+>/.test(String(t))) {
+              // A compliant fake response translates visible slots while keeping
+              // immutable k payloads and the exact source marker hierarchy.
+              const stack = [];
+              return String(t).split(/(<\/?[kf]\d+>)/g).map((part) => {
+                const mark = /^<(\/?)([kf])\d+>$/.exec(part);
+                if (mark) { if (mark[1]) stack.pop(); else stack.push(mark[2]); return part; }
+                if (!part.trim() || (stack.includes('k') && !stack.includes('f'))) return part;
+                return ' EN translation ' + (i + 1) + ' ';
+              }).join('');
+            }
             if (english) return 'EN translation ' + (i + 1);
             if (stats.aozoraLive && /[\u3040-\u30ff]/.test(String(t))) return '汉'.repeat(Math.max(4, String(t).length));
             if (stats.chosunLive && /^zh/i.test(targetCode) && /[\uac00-\ud7af]/.test(String(t))) return CHOSUN_ZH;
@@ -1263,7 +1285,7 @@ async function liveAozoraChecks(url) {
   console.log('\n[真实青空文库] ' + url);
   stats.aozoraLive = true;
   const tag = path.basename(ROOT);
-  const outDir = path.join(process.cwd(), 'docs', 'verification', '2026-10-19-aozora-roshomon');
+  const outDir = EVIDENCE_DIR ? path.resolve(EVIDENCE_DIR) : path.join(process.cwd(), 'docs', 'verification', '2026-10-19-aozora-roshomon');
   const tab = await openTab(url);
   const ready = await until(() => pageEval(tab, "return !!document.querySelector('.main_text')"), 30000);
   check('真实页面：找到 .main_text', !!ready);
@@ -1905,6 +1927,32 @@ async function inlineLinkChecks() {
   check('行内链接·双语：原文链接不动，译文块不在链接里', dual.text === '@alice' && !dual.targetInLink, JSON.stringify(dual));
 }
 
+async function inlineFidelityChecks() {
+  console.log('\n[行内格式协议完整管线]');
+  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: true, medicalMode: false, professionalProfile: 'general' });
+  const tab = await openTab(ORIGIN + '/inline-fidelity.html');
+  const before = await pageEval(tab, "return {good:document.querySelector('#inline-valid').outerHTML,bad:document.querySelector('#inline-bad').outerHTML};");
+  const from = stats.sent.length;
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(() => contentEval(tab, 'window.__DT.state.renderFailed === 1 && window.__DT.state.translated >= 1'), 20000);
+  await settled(tab);
+  const info = await pageEval(tab, `var p=document.querySelector('#inline-valid'),a=p.querySelector('a');a.click();return {same:a===window.originalInlineLink,label:a.textContent,href:a.getAttribute('href'),attr:a.getAttribute('data-original'),clicks:window.inlineClicks,emphasis:Array.from(p.querySelectorAll('strong,[data-dt-format]')).some(x=>x.textContent==='重要'),text:p.textContent,bad:document.querySelector('#inline-bad').outerHTML,targets:p.querySelectorAll('[data-dt-target]').length};`);
+  check('v1真实消息：格式对应译文，链接标签翻译且原节点/属性/事件保留', info.same && info.label === '文档' && info.href === '#guide' && info.attr === 'keep' && info.clicks === 1 && info.emphasis && info.targets === 0, JSON.stringify(info));
+  check('v1异常标记：重复原子保留原文并记录明确失败', info.bad === before.bad && (await contentEval(tab, 'window.__DT.state.lastRenderError')).includes('invalid-inline'), info.bad);
+  const sent = stats.sent.slice(from);
+  check('v1实际API载荷：保护文字未送出，原节点文字仍可见', !JSON.stringify(sent).includes('PrivateInlineSecret') && !JSON.stringify(sent).includes('PrivateBadSecret') && info.text.includes('PrivateInlineSecret'), JSON.stringify(sent));
+  const badCount = () => stats.sent.filter((text) => text.includes('INLINE_BAD')).length;
+  const count = badCount();
+  await pageEval(tab, "document.body.dispatchEvent(new MouseEvent('click',{bubbles:true}));return true;");
+  await sleep(700);
+  await settled(tab);
+  check('v1确定性错误：稳定页面补扫不重复请求', count === 1 && badCount() === count, count + ' -> ' + badCount());
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const restored = await pageEval(tab, "return {good:document.querySelector('#inline-valid').outerHTML,bad:document.querySelector('#inline-bad').outerHTML,same:document.querySelector('#inline-valid a')===window.originalInlineLink};");
+  check('v1整条管线：关闭后精确还原且链接身份不变', restored.good === before.good && restored.bad === before.bad && restored.same, JSON.stringify(restored));
+  await patchConfig({ mode: 'dual', hoverCompare: false });
+}
+
 // ---------------- Science Advances 真实页面 ----------------
 // Cloudflare 会挡无头模式；用 --headed --science-live 跑。用真实页面的正文段落验证引用识别，
 // 不调用真实模型：构造一段带保留标记的译文，在页面里注入 / 还原。
@@ -1916,7 +1964,7 @@ async function scienceLiveChecks(url = 'https://www.science.org/doi/10.1126/scia
     var p = Array.prototype.find.call(document.querySelectorAll('[role="paragraph"]'), function (el) {
       return el.querySelector('a[role="doc-biblioref"]');
     });
-    if (!p) return { ok: false, why: '没有带 doc-biblioref 的段落' };
+    if (!p) return { ok: false, why: '没有带 doc-biblioref 的段落', title: document.title, url: location.href };
     var units = window.__DT.collect(p);
     var u = units[0];
     if (!u) return { ok: false, why: '没有收集到单元' };
@@ -1930,6 +1978,7 @@ async function scienceLiveChecks(url = 'https://www.science.org/doi/10.1126/scia
   })()`);
   check('Science 实页：引用链接被识别成保留区', found.ok && found.keep.length >= 2 && found.keep.every((k) => k.cite), JSON.stringify(found));
   check('Science 实页：编号进标记，锚点 / 属性不进送翻正文', found.ok && found.wire.indexOf('<k1>') >= 0 && !/core-collateral|doc-biblioref/.test(found.wire), found.ok ? found.wire : found.why);
+  if (!found.ok) return; // Keep unavailable live content distinct from a renderer exception.
   const injected = await contentEval(tab, `(function () {
     var p = Array.prototype.find.call(document.querySelectorAll('[role="paragraph"]'), function (el) { return el.querySelector('a[role="doc-biblioref"]'); });
     var u = window.__DT.collect(p)[0];
@@ -2413,7 +2462,7 @@ async function dualLiveChecks(url) {
   await until(() => pageEval(t, "return !!document.querySelector('.article-body__content-text .dt-target')"), 30000);
   await settled(t);
   const info = await pageEval(t, "return (function(){var p=document.querySelector('.article-body__content-text');var target=p.querySelector('.dt-target');var pc=getComputedStyle(p);var tc=target?getComputedStyle(target):null;return {family:tc&&tc.fontFamily,sourceFamily:pc.fontFamily,weight:tc&&tc.fontWeight,sourceWeight:pc.fontWeight,size:tc&&tc.fontSize,sourceSize:pc.fontSize,line:tc&&tc.lineHeight,sourceLine:pc.lineHeight,fonts:p.querySelectorAll('.dt-font').length,targets:document.querySelectorAll('.dt-target').length};})()");
-  const outDir = path.join(process.cwd(), 'docs', 'verification', '2026-10-23-chosun-font-ab');
+  const outDir = EVIDENCE_DIR ? path.resolve(EVIDENCE_DIR) : path.join(process.cwd(), 'docs', 'verification', '2026-10-23-chosun-font-ab');
   const clip = await pageEval(t, "return (function(){var p=document.querySelector('.article-body__content-text');var r=p.getBoundingClientRect();return {x:0,y:Math.max(0,Math.floor(r.top+window.scrollY)-12),width:Math.min(window.innerWidth,860),height:620,scale:1};})()");
   const file = path.join(outDir, 'chosun-dual-' + DUAL_LABEL + '.png');
   await captureScreenshot(t, file, clip);
@@ -2431,7 +2480,7 @@ async function chosunLiveChecks(url) {
   await until(() => contentEval(t, '!!(window.__DT && window.__DT.styleBoundaryAware)'), 20000);
   await until(() => pageEval(t, "return document.querySelectorAll('.article-body__content-text').length >= 5"), 30000);
   await sleep(1000);
-  const shotDir = path.join(process.cwd(), 'docs', 'verification', '2026-10-23-chosun-font-ab');
+  const shotDir = EVIDENCE_DIR ? path.resolve(EVIDENCE_DIR) : path.join(process.cwd(), 'docs', 'verification', '2026-10-23-chosun-font-ab');
   const shotClip = await pageEval(t, "return (function(){var p=document.querySelector('.article-body__content-text');var r=p.getBoundingClientRect();return {x:0,y:Math.max(0,Math.floor(r.top+window.scrollY)-12),width:Math.min(window.innerWidth,860),height:620,scale:1};})()");
   await captureScreenshot(t, path.join(shotDir, 'chosun-01-korean-source.png'), shotClip);
   const before = await pageEval(t, "return Array.from(document.querySelectorAll('.article-body__content-text')).map((p)=>{var c=getComputedStyle(p);return {cls:p.className,weight:parseInt(c.fontWeight,10),family:c.fontFamily,text:p.textContent.slice(0,40)};});");
@@ -2503,6 +2552,7 @@ try {
     await citationChecks();
     await scienceLiveChecks(ORIGIN + '/science-cite.html');
     await inlineLinkChecks();
+    await inlineFidelityChecks();
     await scienceMixedChecks();
     await pmcChecks();
     await chinagpChecks();

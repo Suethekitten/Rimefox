@@ -58,6 +58,32 @@
     return a === e ? true : '期望 ' + e + '，实际 ' + a;
   }
 
+  // A valid model can omit every optional format boundary; atoms still occur exactly once.
+  function plainModelResponse(unit, text) {
+    return text + (unit.keep || []).map(function (k, index) {
+      return '<k' + (index + 1) + '>' + (k.kind === 'protect' ? '' : k.text) + '</k' + (index + 1) + '>';
+    }).join('');
+  }
+  function opaqueReply(unit, text) {
+    return String(text).replace(/<k(\d+)>[\s\S]*?<\/k\1>/g, function (whole, id) {
+      var k = (unit.keep || [])[Number(id) - 1];
+      return k && k.kind === 'protect' ? '<k' + id + '></k' + id + '>' : whole;
+    });
+  }
+  function wireWithoutFormats(unit) {
+    return DT.wireText(unit).replace(/<\/?f\d+>/g, '');
+  }
+  // Explicitly exercise the old marker-tolerant renderer with its original wire.
+  // v1 failures are tested separately and never take this compatibility path.
+  function legacyCollect(root) {
+    return DT.collect(root).map(function (unit) {
+      delete unit.inlineProtocol;
+      delete unit.formats;
+      unit.wire = DT.units.keepWrap(unit.text, unit.keep);
+      return unit;
+    });
+  }
+
   function byText(list, needle) {
     return list.filter(function (u) {
       return u.text.indexOf(needle) >= 0;
@@ -68,6 +94,29 @@
     var report = window.runInlineLayoutChecks();
     var failed = report.checks.filter(function (item) { return !item.ok; });
     return failed.length ? failed.map(function (item) { return item.name + ': ' + item.detail; }).join('；') : true;
+  });
+
+  checkAsync('通用行内语义格式：固定夹具、链接交互、异常回滚与精确还原', function () {
+    return fetch('../test/fixtures/inline-fidelity.html').then(function (response) {
+      if (!response.ok) throw new Error('无法读取本地行内格式夹具');
+      return response.text();
+    }).then(function (html) {
+      var fixture = new DOMParser().parseFromString(html, 'text/html');
+      var template = document.createElement('template');
+      template.id = 'tpl-inline-fidelity';
+      Array.prototype.forEach.call(fixture.querySelectorAll('style'), function (style) {
+        template.content.appendChild(style.cloneNode(true));
+      });
+      template.content.appendChild(fixture.querySelector('main').cloneNode(true));
+      document.body.appendChild(template);
+      try {
+        var report = window.runInlineFidelityChecks();
+        var failed = report.checks.filter(function (item) { return !item.ok; });
+        return failed.length ? failed.map(function (item) { return item.name + ': ' + item.detail; }).join('；') : true;
+      } finally {
+        template.remove();
+      }
+    });
   });
 
   // ---------------- 文本工具 ----------------
@@ -394,7 +443,7 @@
     var q = document.getElementById('fx-aeon-quote');
     var u = DT.collect(q)[0];
     if (!u) return '没有收集到引用段落';
-    if (!DT.inject(u.el, '引用里的中文译文。', 'zh-CN')) return 'inject 返回 false';
+    if (!DT.inject(u, plainModelResponse(u, '引用里的中文译文。'), 'zh-CN')) return 'inject 返回 false';
     var p = q.querySelector('p');
     if (!p) return '引用里没有 p';
     if (!p.querySelector('b') || !p.querySelector('i') || !p.querySelector('a')) return '原文行内结构被破坏';
@@ -450,7 +499,7 @@
   check('正文段落：追加双语，不替换原文', function () {
     var p = byText(units, 'Second paragraph with');
     if (!p) return '没找到目标段落';
-    if (!DT.inject(p.el, '第二段，含粗体和链接。', 'zh-CN')) return 'inject 返回 false';
+    if (!DT.inject(p, plainModelResponse(p, '第二段，含粗体和链接。'), 'zh-CN')) return 'inject 返回 false';
     var node = p.el.querySelector('[data-dt-target]');
     if (!node) return '正文应该是追加译文，不是替换';
     if (p.el.textContent.indexOf('Second paragraph with') === -1) return '原文被覆盖了';
@@ -2654,7 +2703,7 @@
       var neg = ['#neg-math', '#neg-ord', '#neg-ext', '#neg-link', '#neg-word'].map(function (sel) {
         var u = DT.collect(box.querySelector(sel))[0];
         if (!u) return sel + ':没收到';
-        return (u.keep || []).length + (u.wire ? ':wire' : '');
+        return (u.keep || []).length + (/<k\d+>/.test(u.wire || '') ? ':wire' : '');
       });
       var r = eq(neg, ['0', '0', '0', '1:wire', '0']);
       if (r !== true) return '误判：' + r;
@@ -2875,7 +2924,7 @@
       var brand = p.querySelector('.notranslate');
       var u = DT.collect(p)[0];
       if (!u || !u.keep || u.keep.length < 2) return '收集 keep：' + (u && u.keep && u.keep.length);
-      if (!DT.inject(u, '使用<k1>Rimefox</k1><k2>1</k2>现在。', 'zh-CN')) return 'inject 返回 false';
+      if (!DT.inject(u, opaqueReply(u, '使用<k1>Rimefox</k1><k2>1</k2>现在。'), 'zh-CN')) return 'inject 返回 false';
       if (p.querySelector('[data-dt-target]')) return '不应双语回退';
       if (p.querySelector('.notranslate') !== brand || brand.textContent !== 'Rimefox') return 'notranslate 被替换';
       var a = p.querySelector('#cite-n1');
@@ -3207,7 +3256,7 @@
         var href = link.getAttribute('href');
         var u = DT.collect(p)[0];
         if (!u) { errors.push(item[0] + ':没收到单元'); return; }
-        if (!DT.inject(u, item[2], 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
+        if (!DT.inject(u, plainModelResponse(u, item[2]), 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
         if (link.textContent !== item[1]) errors.push(item[0] + ':链接文字被改成了 ' + JSON.stringify(link.textContent));
         if (link.getAttribute('href') !== href) errors.push(item[0] + ':href 被改');
         if (textInsideLinks(p, 'ALICE')) errors.push(item[0] + ':译文落进了链接');
@@ -3229,7 +3278,7 @@
         var link = p.querySelector('a');
         var href = link.getAttribute('href');
         var u = DT.collect(p)[0];
-        if (!DT.inject(u, item[2], 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
+        if (!DT.inject(u, plainModelResponse(u, item[2]), 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
         if (link.textContent !== item[1]) errors.push(item[0] + ':普通链接文字被吞 / 改了：' + JSON.stringify(link.textContent));
         if (textInsideLinks(p, '阅读') || textInsideLinks(p, '更多')) errors.push(item[0] + ':译文落进普通链接');
         if (!textOutsideLinks(p, '阅读') && !textOutsideLinks(p, '更多')) errors.push(item[0] + ':链接外没有译文');
@@ -3262,7 +3311,7 @@
         var hrefs = links.map(function (a) { return a.getAttribute('href'); });
         var u = DT.collect(p)[0];
         if (!u) { errors.push(sel + '：没收到单元'); return; }
-        if (!DT.inject(u, '这是重要结果。', 'zh-CN')) { errors.push(sel + '：inject 失败 ' + JSON.stringify(u.injectResult)); return; }
+        if (!DT.inject(u, plainModelResponse(u, '这是重要结果。'), 'zh-CN')) { errors.push(sel + '：inject 失败 ' + JSON.stringify(u.injectResult)); return; }
         if (p.querySelector('[data-dt-target]')) errors.push(sel + '：退回了双语');
         var now = Array.prototype.slice.call(p.querySelectorAll('a'));
         if (now.length !== links.length || now.some(function (a, i) { return a !== links[i]; })) errors.push(sel + '：链接节点变了');
@@ -3284,7 +3333,7 @@
         var before = box.innerHTML;
         var link = p.querySelector('a');
         var u = DT.collect(p)[0];
-        if (!DT.inject(u, item[1], 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
+        if (!DT.inject(u, plainModelResponse(u, item[1]), 'zh-CN')) { errors.push(item[0] + ':inject false'); return; }
         var target = p.querySelector('[data-dt-target]');
         if (!target) errors.push(item[0] + ':没有译文块');
         if (target && link.contains(target)) errors.push(item[0] + ':译文块进了链接');
@@ -4143,8 +4192,8 @@
     try {
       var nt = DT.collect(box.querySelector('#own-nt'));
       if (nt.length !== 1 || !nt[0].own || nt[0].text !== 'Hello Rimefox world') return 'own 单元收集不对：' + JSON.stringify(nt.map(function (u) { return [u.text, !!u.own]; }));
-      if (DT.wireText(nt[0]) !== 'Hello <k1>Rimefox</k1> world') return '送翻文本：' + DT.wireText(nt[0]);
-      if (!DT.inject(nt[0], '你好 <k1>Rimefox</k1> 世界', 'zh-CN')) return 'inject 返回 false';
+      if (wireWithoutFormats(nt[0]) !== 'Hello <k1></k1> world') return '送翻文本：' + wireWithoutFormats(nt[0]);
+      if (!DT.inject(nt[0], '你好 <k1></k1> 世界', 'zh-CN')) return 'inject 返回 false';
       var p1 = box.querySelector('#own-nt');
       var span1 = p1.querySelector('.notranslate');
       if (span1.textContent !== 'Rimefox' || span1.style.display === 'none') return 'notranslate 被清空或隐藏：' + p1.innerHTML;
@@ -4152,7 +4201,7 @@
 
       var lines = DT.collect(box.querySelector('#own-lines'));
       if (lines.length !== 1 || lines[0].text !== 'Line one Brand\nLine two') return '分行 own 单元收集不对：' + JSON.stringify(lines.map(function (u) { return u.text; }));
-      if (!DT.inject(lines[0].el, '第一行 <k1>Brand</k1>\n第二行', 'zh-CN', true)) return '分行 inject 返回 false';
+      if (!DT.inject(lines[0], '第一行 <k1></k1>\n第二行', 'zh-CN')) return '分行 inject 返回 false';
       var p2 = box.querySelector('#own-lines');
       if (p2.querySelector('[translate="no"]').textContent !== 'Brand') return 'translate="no" 被清空：' + p2.textContent;
       if (p2.textContent.indexOf('第一行') < 0 || p2.textContent.indexOf('第二行') < 0) return '分行译文没写进去：' + p2.textContent;
@@ -4245,8 +4294,9 @@
       if (units.length !== 1) return '应为 1 个单元：' + JSON.stringify(units.map(function (u) { return u.text; }));
       var u = units[0];
       if (u.text !== 'Install Rimefox from the store today.') return '单元文本：' + u.text;
-      if (DT.wireText(u) !== 'Install <k1>Rimefox</k1> from the store today.') return '送翻文本：' + DT.wireText(u);
-      if (DT.keepText(u, '今天从商店安装 <k1>凛狐</k1>。') !== '今天从商店安装 Rimefox。') return 'keepText 没把标记换回原文';
+      if (wireWithoutFormats(u) !== 'Install <k1></k1> from the store today.') return '送翻文本：' + wireWithoutFormats(u);
+      if (DT.keepText(u, '今天从商店安装 <k1></k1>。') !== '今天从商店安装 Rimefox。') return 'keepText 没本地恢复原文';
+      if (DT.keepText(u, '今天从商店安装 <k1>凛狐</k1>。') !== '') return 'v1 不应接受模型在空保护标记中注入内容';
       return true;
     } finally {
       box.remove();
@@ -4260,7 +4310,7 @@
     try {
       return withMode('dual', function () {
         var u = DT.collect(box)[0];
-        if (!DT.inject(u, '今天从商店安装 <k1>Rimefox</k1>。', 'zh-CN')) return 'inject 返回 false';
+        if (!DT.inject(u, '今天从商店安装 <k1></k1>。', 'zh-CN')) return 'inject 返回 false';
         var target = p.querySelector('[data-dt-target]');
         if (!target || target.textContent !== '今天从商店安装 Rimefox。') return '译文节点：' + (target && target.textContent);
         if (p.querySelector('.notranslate').textContent !== 'Rimefox') return 'notranslate 被改：' + p.innerHTML;
@@ -4281,11 +4331,11 @@
     try {
       return withMode('translation', function () {
         var u = DT.collect(box)[0];
-        if (!DT.inject(u, '今天从商店安装 <k1>Rimefox</k1>。', 'zh-CN')) return 'inject 返回 false';
+        if (!DT.inject(u, '今天从商店安装 <k1></k1>。', 'zh-CN')) return 'inject 返回 false';
         var span = p.querySelector('.notranslate');
         if (span.textContent !== 'Rimefox' || span.style.display === 'none') return 'notranslate 被清空或隐藏：' + p.innerHTML;
         if (p.textContent !== '今天从商店安装 Rimefox。') return '页面文字：' + p.textContent;
-        if (p.firstChild.nodeValue !== '今天从商店安装 ') return '前半句没写在 notranslate 之前：' + p.innerHTML;
+        if (span.previousSibling.nodeValue !== '今天从商店安装 ') return '前半句没写在 notranslate 之前：' + p.innerHTML;
         if (DT.collect(box).length) return '注入后重扫又收到了单元';
         DT.restore();
         return p.innerHTML === before ? true : '还原不一致：' + p.innerHTML;
@@ -4302,7 +4352,7 @@
     var before = p.innerHTML;
     try {
       return withMode('translation', function () {
-        var u = DT.collect(box)[0];
+        var u = legacyCollect(box)[0];
         if (!DT.inject(u, '今天从商店安装凛狐。', 'zh-CN')) return 'inject 返回 false';
         var span = p.querySelector('.notranslate');
         if (span.textContent !== 'Rimefox') return 'notranslate 被清空：' + p.innerHTML;
@@ -4331,7 +4381,7 @@
       var before = p.innerHTML;
       try {
         var out = withMode('translation', function () {
-          var units = DT.collect(box);
+          var units = legacyCollect(box);
           if (units.length !== 1 || units[0].keep.length !== 2) return '收集：' + JSON.stringify(units.map(function (u) { return u.text; }));
           if (!DT.inject(units[0], cases[i][0], 'zh-CN')) return 'inject 返回 false';
           var spans = p.querySelectorAll('.notranslate, [translate="no"]');
@@ -4359,8 +4409,8 @@
       return withMode('translation', function () {
         var u = DT.collect(box)[0];
         if (!u || u.text !== 'Run npm test before pushing.') return '收集：' + (u && u.text);
-        if (DT.wireText(u) !== 'Run <k1>npm test</k1> before pushing.') return '送翻文本：' + DT.wireText(u);
-        if (!DT.inject(u, '推送前运行 <k1>npm test</k1>。', 'zh-CN')) return 'inject 返回 false';
+        if (wireWithoutFormats(u) !== 'Run <k1></k1> before pushing.') return '送翻文本：' + wireWithoutFormats(u);
+        if (!DT.inject(u, '推送前运行 <k1></k1>。', 'zh-CN')) return 'inject 返回 false';
         if (p.querySelector('code').textContent !== 'npm test') return 'code 被清空：' + p.innerHTML;
         if (p.textContent !== '推送前运行 npm test。') return '页面文字：' + p.textContent;
         DT.restore();
@@ -4380,7 +4430,7 @@
       return withMode('translation', function () {
         var u = DT.collect(box)[0];
         if (!u || u.text !== 'Line one with Brand and more\nLine two') return '收集：' + JSON.stringify(u && u.text);
-        if (!DT.inject(u, '第一行有 <k1>Brand</k1> 和更多\n第二行', 'zh-CN')) return 'inject 返回 false';
+        if (!DT.inject(u, '第一行有 <k1></k1> 和更多\n第二行', 'zh-CN')) return 'inject 返回 false';
         var span = p.querySelector('.notranslate');
         if (span.textContent !== 'Brand') return 'notranslate 被清空：' + p.innerHTML;
         if (visibleText(p) !== '第一行有 Brand 和更多第二行') return '看得见的字：' + visibleText(p);
@@ -4406,8 +4456,8 @@
         var units = DT.collect(box);
         var texts = units.map(function (u) { return u.text; });
         if (JSON.stringify(texts) !== JSON.stringify(['Thanks sue for this fix.', 'Hello world', 'Bye now'])) return '收集：' + JSON.stringify(texts);
-        if (DT.wireText(units[0]) !== 'Thanks <k1>sue</k1> for this fix.') return '送翻文本：' + DT.wireText(units[0]);
-        if (!DT.inject(units[0], '感谢 <k1>sue</k1> 的这次修复。', 'zh-CN')) return 'inject 返回 false';
+        if (wireWithoutFormats(units[0]) !== 'Thanks <k1></k1> for this fix.') return '送翻文本：' + wireWithoutFormats(units[0]);
+        if (!DT.inject(units[0], '感谢 <k1></k1> 的这次修复。', 'zh-CN')) return 'inject 返回 false';
         if (p.querySelector('.user-name').textContent !== 'sue') return '站点规则排除的元素被改：' + p.innerHTML;
         if (p.textContent !== '感谢 sue 的这次修复。') return '页面文字：' + p.textContent;
         DT.restore();
@@ -4426,7 +4476,7 @@
     var html =
       '<div id="n6-box">Use <code class="notranslate">--force</code> with <a href="#f">the <span class="notranslate">Rimefox</span> CLI</a> carefully.' +
       '<div>Block child text here.</div></div>';
-    var reply = '小心地将 <k1>--force</k1> 与 <k2>Rimefox</k2> 命令行一起使用。';
+    var reply = '小心地将 <k1></k1> 与 <k2></k2> 命令行一起使用。';
     var modes = ['translation', 'dual'];
     for (var i = 0; i < modes.length; i += 1) {
       var box = keepFixture(html);
@@ -4437,7 +4487,7 @@
           var units = DT.collect(box);
           var flow = units[0];
           if (units.length !== 2 || !flow || flow.whole) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, u.whole]; }));
-          if (DT.wireText(flow) !== 'Use <k1>--force</k1> with the <k2>Rimefox</k2> CLI carefully.') return '送翻文本：' + DT.wireText(flow);
+          if (wireWithoutFormats(flow) !== 'Use <k1></k1> with the <k2></k2> CLI carefully.') return '送翻文本：' + wireWithoutFormats(flow);
           if (modes[i] === 'translation') {
             // 这是一个带普通链接 / 块级兄弟的局部段落：不能为了链接退回双语。
             // 统一安全渲染器无法安全重建时保留原文并写明失败，不插入译文。
@@ -4471,7 +4521,7 @@
   // own 单元（子元素全被跳过）以前只收直接文本：模型只看到「Install today.」，仅译文时整句译文写在 span 前面
   check('保留区·own 单元：直接子级的 notranslate 随句送翻，双语 / 仅译文都原地不动，还原逐字一致', function () {
     var html = '<p id="n7-p">Install <span class="notranslate">Rimefox</span> today.</p>';
-    var reply = '今天就安装 <k1>Rimefox</k1>。';
+    var reply = '今天就安装 <k1></k1>。';
     var modes = ['dual', 'translation'];
     for (var i = 0; i < modes.length; i += 1) {
       var box = keepFixture(html);
@@ -4483,13 +4533,13 @@
           if (units.length !== 1 || !units[0].own) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, !!u.own]; }));
           var u = units[0];
           if (u.text !== 'Install Rimefox today.') return '单元文本：' + u.text;
-          if (DT.wireText(u) !== 'Install <k1>Rimefox</k1> today.') return '送翻文本：' + DT.wireText(u);
+          if (wireWithoutFormats(u) !== 'Install <k1></k1> today.') return '送翻文本：' + wireWithoutFormats(u);
           if (!DT.inject(u, reply, 'zh-CN')) return 'inject 返回 false';
           var span = p.querySelector('.notranslate');
           if (span.textContent !== 'Rimefox' || span.style.display === 'none' || span.hasAttribute('data-dt-keep-hidden')) return 'notranslate 被改或隐藏：' + p.innerHTML;
           if (modes[i] === 'translation') {
             if (p.textContent !== '今天就安装 Rimefox。') return '页面文字：' + p.textContent;
-            if (p.firstChild.nodeValue !== '今天就安装 ' || p.firstChild.nextSibling !== span) return '前半句没写在 notranslate 之前：' + p.innerHTML;
+            if (span.previousSibling.nodeValue !== '今天就安装 ') return '前半句没写在 notranslate 之前：' + p.innerHTML;
           } else {
             var target = p.querySelector('[data-dt-target]');
             if (!target || target.textContent !== '今天就安装 Rimefox。') return '译文节点：' + (target && target.textContent);
@@ -4510,7 +4560,7 @@
 
   check('保留区·局部段落（flowTokens）：容器直接子级的 notranslate 拼进文字流，原地不动，还原逐字一致', function () {
     var html = '<div id="n8-box">Install <span class="notranslate">Rimefox</span> today.<div>Block child text here.</div></div>';
-    var reply = '今天就安装 <k1>Rimefox</k1>。';
+    var reply = '今天就安装 <k1></k1>。';
     var modes = ['translation', 'dual'];
     for (var i = 0; i < modes.length; i += 1) {
       var box = keepFixture(html);
@@ -4523,7 +4573,7 @@
           var flow = units[0];
           if (units.length !== 2 || !flow || flow.whole || flow.own) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, u.whole, !!u.own]; }));
           if (flow.text !== 'Install Rimefox today.' || units[1].text !== 'Block child text here.') return '单元文本：' + JSON.stringify([flow.text, units[1].text]);
-          if (DT.wireText(flow) !== 'Install <k1>Rimefox</k1> today.') return '送翻文本：' + DT.wireText(flow);
+          if (wireWithoutFormats(flow) !== 'Install <k1></k1> today.') return '送翻文本：' + wireWithoutFormats(flow);
           if (!DT.inject(flow, reply, 'zh-CN')) return 'inject 返回 false';
           var span = outer.querySelector('.notranslate');
           if (span.textContent !== 'Rimefox' || span.style.display === 'none') return 'notranslate 被改或隐藏：' + outer.innerHTML;
@@ -4560,7 +4610,7 @@
     try {
       return withMode('translation', function () {
         var units = DT.collect(box);
-        var got = units.map(function (u) { return [u.text, DT.wireText(u), u.keep.length]; });
+        var got = units.map(function (u) { return [u.text, wireWithoutFormats(u), u.keep.length]; });
         var want = [
           ['Install today.', 'Install today.', 0],
           ['Install today.', 'Install today.', 0],
@@ -4599,12 +4649,12 @@
         if (units.length !== 1 || !units[0].own) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, !!u.own]; }));
         var u = units[0];
         if (u.text !== 'Read before installing Rimefox today.') return '单元文本：' + u.text;
-        if (DT.wireText(u) !== 'Read before installing <k1>Rimefox</k1> today.') return '送翻文本：' + DT.wireText(u);
-        if (!DT.inject(u, '先读完再安装 <k1>Rimefox</k1>。', 'zh-CN')) return 'inject 返回 false';
+        if (wireWithoutFormats(u) !== 'Read before installing <k1></k1> today.') return '送翻文本：' + wireWithoutFormats(u);
+        if (!DT.inject(u, '先读完再安装 <k1></k1>。', 'zh-CN')) return 'inject 返回 false';
         var span = p.querySelector('.notranslate');
         if (link.textContent !== '指南') return '已翻过的链接被覆盖：' + p.innerHTML;
         if (span.textContent !== 'Rimefox' || span.style.display === 'none') return 'notranslate 被改或隐藏：' + p.innerHTML;
-        if (p.firstChild.nodeValue !== '先读完再安装 ' || span.nextSibling.nodeValue !== '。') return '没按保留区原地分段写回：' + p.innerHTML;
+        if (span.previousSibling.nodeValue !== '先读完再安装 ' || span.nextSibling.nodeValue !== '。') return '没按保留区原地分段写回：' + p.innerHTML;
         if (DT.collect(box).length) return '注入后重扫又收到了单元';
         DT.restore();
         return p.innerHTML === before ? true : '还原不一致：' + p.innerHTML;
@@ -4656,7 +4706,7 @@
       ]);
       if (r !== true) return r;
       var keep = DT.collect(box.querySelector('#ph-d'))[0];
-      return DT.wireText(keep) === 'Install <k1>Rimefox</k1> today.' ? true : '块化的 notranslate span 应是保留区：' + DT.wireText(keep);
+      return wireWithoutFormats(keep) === 'Install <k1></k1> today.' ? true : '块化的 notranslate span 应是保留区：' + wireWithoutFormats(keep);
     } finally {
       box.remove();
     }
@@ -4759,7 +4809,7 @@
     var box = keepFixture('<p>' + filler + '<span class="notranslate">' + kept.trim() + '</span> and then ' + filler + '</p>');
     try {
       var u = DT.collect(box)[0];
-      var wire = DT.wireText(u);
+      var wire = wireWithoutFormats(u);
       var limits = [1200, 400, 200];
       for (var k = 0; k < limits.length; k += 1) {
         var parts = DT.splitLong(wire, limits[k]);
@@ -4788,7 +4838,7 @@
     var before = p.innerHTML;
     try {
       return withMode('translation', function () {
-        var u = DT.collect(box)[0];
+        var u = legacyCollect(box)[0];
         if (!DT.inject(u, '现在按快捷键保存你的工作。', 'zh-CN')) return 'inject 返回 false';
         var code = p.querySelector('code');
         if (getComputedStyle(code).display !== 'none') return '保留元素仍然显示：页面上同一句出现两遍';
@@ -4811,7 +4861,7 @@
     var before = p.innerHTML;
     try {
       return withMode('translation', function () {
-        var u = DT.collect(box)[0];
+        var u = legacyCollect(box)[0];
         if (!DT.inject(u, '今天从商店安装凛狐。', 'zh-CN')) return 'inject 返回 false';
         if (getComputedStyle(p.querySelector('span')).display !== 'none') return '兜底没有隐藏保留元素';
         DT.restore();
@@ -4830,7 +4880,7 @@
     );
     try {
       return withMode('translation', function () {
-        var units = DT.collect(box);
+        var units = legacyCollect(box);
         if (units.length !== 2) return '收集：' + JSON.stringify(texts(units));
         if (!DT.inject(units[0], '打开凛狐设置以继续。', 'zh-CN') || !DT.inject(units[1], '现在点一下本页的星标。', 'zh-CN')) return 'inject 返回 false';
         var keeps = box.querySelectorAll('.notranslate');
@@ -4857,7 +4907,7 @@
       var before = p.innerHTML;
       try {
         var out = withMode('translation', function () {
-          var u = DT.collect(box)[0];
+          var u = legacyCollect(box)[0];
           if (!u || u.text !== 'Call us now.\nACME-SUPPORT\nThanks for your patience.') return '收集：' + JSON.stringify(u && u.text);
           if (!DT.inject(u, cases[i][0], 'zh-CN')) return 'inject 返回 false';
           var span = p.querySelector('.notranslate');
@@ -4872,6 +4922,72 @@
         DT.restore();
         box.remove();
       }
+    }
+    return true;
+  });
+
+  check('控件行内格式：双语模式默认单语替换，可选界面双语仍追加且字体不进入仅译文策略', function () {
+    var previousConfig = DT.state.config;
+    var previousMode = DT.state.mode;
+    var button = document.createElement('button');
+    var originalText = document.createTextNode('Read ');
+    var strong = document.createElement('strong');
+    strong.textContent = 'now';
+    button.appendChild(originalText);
+    button.appendChild(strong);
+    document.body.appendChild(button);
+    var before = button.outerHTML;
+    try {
+      DT.state.mode = 'dual';
+      for (var i = 0; i < 2; i += 1) {
+        DT.state.config = Object.assign({}, previousConfig || {}, { chromeBilingual: !!i });
+        var unit = DT.collect(button)[0];
+        if (!unit || unit.formats.length !== 1) return '未收集控件局部格式';
+        var value = '请<f' + unit.formats[0].id + '>阅读</f' + unit.formats[0].id + '>';
+        if (!DT.inject(unit, value, 'zh-CN')) return '控件写入失败：' + JSON.stringify(unit.injectResult);
+        if (!i && (button.textContent !== '请阅读' || button.querySelector('[data-dt-target]') || unit.renderMode === 'dual')) return '默认控件意外追加了双语：' + button.textContent;
+        if (i && (button.textContent !== 'Read now请阅读' || button.querySelectorAll('[data-dt-target]').length !== 1)) return '界面双语未按设置追加';
+        if (button.querySelector('[data-dt-font]')) return '双语控件使用了仅译文字体壳';
+        var styled = button.querySelector('[data-dt-format]');
+        if (!styled || styled.textContent !== '阅读' || parseInt(getComputedStyle(styled).fontWeight, 10) < 600) return '控件局部格式丢失';
+        DT.restore();
+        if (button.outerHTML !== before || button.firstChild !== originalText || button.children[0] !== strong) return '控件节点或属性未精确恢复';
+      }
+      return true;
+    } finally {
+      DT.restore();
+      DT.state.config = previousConfig;
+      DT.state.mode = previousMode;
+      button.remove();
+    }
+  });
+
+  check('v1陈旧源结构：新增/移动源节点或格式class变化时旧结果零写入', function () {
+    for (var i = 0; i < 3; i += 1) {
+      var p = document.createElement('p');
+      var lead = document.createTextNode('Hello ');
+      var strong = document.createElement('strong');
+      strong.textContent = 'beautiful';
+      p.appendChild(lead);
+      p.appendChild(strong);
+      p.appendChild(document.createTextNode(' world.'));
+      document.body.appendChild(p);
+      try {
+        var unit = DT.collect(p)[0];
+        if (!unit || unit.inlineProtocol !== 'v1') return '未启用v1';
+        if (i === 0) p.insertBefore(document.createTextNode('New content. '), lead);
+        if (i === 1) { var wrapper = document.createElement('span'); p.insertBefore(wrapper, lead); wrapper.appendChild(lead); }
+        if (i === 2) strong.className = 'site-changed-emphasis';
+        var before = p.outerHTML;
+        if (!DT.sourceChanged(unit)) return '未发现源结构变化：' + i;
+        var observer = new MutationObserver(function () {});
+        observer.observe(p, { subtree: true, childList: true, characterData: true, attributes: true });
+        var inserted = DT.inject(unit, '你好<f1>美丽的</f1>世界。', 'zh-CN');
+        var writes = observer.takeRecords().length;
+        observer.disconnect();
+        if (inserted) return '旧结果写入了变化后的源：' + i;
+        if (p.outerHTML !== before || writes) return '拒绝路径发生写入：' + i;
+      } finally { p.remove(); }
     }
     return true;
   });
