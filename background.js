@@ -222,6 +222,8 @@ async function handleTranslate(msg, sender) {
     target,
     style,
     model: active.provider + ':' + active.model,
+    // 旧条目没有接口身份，不能推断它来自哪个地址；不复用，也不清空其他缓存。
+    endpoint: JSON.stringify([active.engine, active.baseUrl.trim().replace(/\/+$/, '')]),
     host: hostOf(sender),
     prompt: promptFingerprint(cfg.customPrompt)
   };
@@ -720,17 +722,19 @@ const ROUTES = {
     const one = msg || {};
     if (typeof one.source !== 'string' || typeof one.target !== 'string') return { ok: false, error: 'bad_value' };
     if (one.source.length > 200 || one.target.length > 200) return { ok: false, error: 'too_long' };
-    const cfg = await getConfig();
-    const res = upsertGlossaryEntry(
-      cfg.glossary,
-      { source: one.source, target: one.target },
-      { overwrite: one.overwrite === true }
-    );
+    let res;
+    await saveConfig((cfg) => {
+      res = upsertGlossaryEntry(
+        cfg.glossary,
+        { source: one.source, target: one.target },
+        { overwrite: one.overwrite === true }
+      );
+      return res.action === 'added' || res.action === 'updated' ? { glossary: res.list } : null;
+    });
     if (res.action === 'invalid') return { ok: false, error: 'bad_value' };
     if (res.action === 'full') return { ok: false, error: 'full', max: GLOSSARY_MAX };
     if (res.action === 'conflict') return { ok: true, action: 'conflict', current: res.current };
     if (res.action === 'same') return { ok: true, action: 'same' };
-    await saveConfig({ glossary: res.list });
     return { ok: true, action: res.action };
   },
   // 开发调试用的用量统计（设置页打开「输出调试日志」后才返回）

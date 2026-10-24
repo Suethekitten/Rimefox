@@ -17,6 +17,7 @@ const argv = process.argv.slice(2);
 const ROOT = argv.includes('--root')
   ? path.resolve(argv[argv.indexOf('--root') + 1])
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8')).version;
 const flag = (name) => argv.includes(name);
 const option = (name) => {
   const i = argv.indexOf(name);
@@ -1051,7 +1052,7 @@ async function koreanBoldChecks() {
     return { start: info('bold-start'), mid: info('bold-mid'), end: info('bold-end'), span: info('bold-span'), b: info('bold-b'), medium: info('bold-medium'), family: info('bold-family'), em: info('bold-em'), multi: info('multi-bold'), nested: info('nested-bold'), prewrap: info('prewrap'), whole: info('whole-strong'), heading: info('whole-heading'), link: info('link-strong'), linkCount: document.querySelectorAll('#link-strong a[href="#ref-1"]').length };
   })()`);
   const loaded = await contentEval(t, "({ version: window.__DT.VERSION, styleBoundaryAware: window.__DT.styleBoundaryAware, inspect: typeof window.__DT.inspectTextStyle })");
-  check('实际加载的扩展脚本：0.11.6 且包含样式边界修复 / 诊断器', loaded.version === '0.11.6' && loaded.styleBoundaryAware === 1 && loaded.inspect === 'function', JSON.stringify(loaded));
+  check('实际加载的扩展脚本：版本与 manifest 一致且包含样式边界修复 / 诊断器', loaded.version === VERSION && loaded.styleBoundaryAware === 1 && loaded.inspect === 'function', JSON.stringify(loaded));
   const fontApi = await contentEval(t, "(function(){var f=window.__DT.fonts;var el=document.getElementById('font-foreign');return {zh:!!f.stackFor('zh-CN','chosun-myeongjo, serif'),tw:!!f.stackFor('zh-TW','chosun-myeongjo, serif'),ja:!!f.stackFor('ja','Noto Sans KR'),ko:!!f.stackFor('ko','PingFang SC, sans-serif'),native:!!f.stackFor('zh-CN','PingFang SC, sans-serif'),sc:!f.stackFor('zh-CN','NotoSansSC, sans-serif'),krBold:!!f.stackFor('zh-CN','NotoSansKR-Bold, sans-serif'),generic:!!f.stackFor('zh-CN','Georgia, serif'),dual:f.policy({mode:'dual',target:'zh-CN',sourceElement:el}).adapt,translation:f.policy({mode:'translation',target:'zh-CN',sourceElement:el}).adapt};})()");
   check('目标语言字体：中简 / 中繁 / 日 / 韩档案与兼容性判定可扩展', fontApi.zh && fontApi.tw && fontApi.ja && fontApi.ko && fontApi.sc && fontApi.krBold && !fontApi.native && !fontApi.generic && !fontApi.dual && fontApi.translation, JSON.stringify(fontApi));
   const futureFont = await contentEval(t, "(function(){var f=window.__DT.fonts;var ok=f.register('th',{compatible:/thai/i,foreign:/myeongjo/i,stack:'\"Noto Sans Thai\", sans-serif'});return {ok:ok,stack:!!f.stackFor('th-TH','chosun-myeongjo, serif')};})()");
@@ -2250,6 +2251,73 @@ async function inputChecks() {
   await sleep(800);
   const pw = await valueOf('pw');
   check('密码框不翻译', pw === 'secret', pw);
+
+  // Hold a real background response until the page has changed. No timing race or
+  // slow paid API is needed to exercise the production input writer.
+  const holdInput = async () => {
+    await contentEval(tab, `(() => {
+      const dt = window.__DT;
+      const original = dt.send;
+      const state = window.__rimefoxInputPending = {};
+      dt.send = function (msg) {
+        if (msg.type !== 'translate') return original.apply(this, arguments);
+        dt.send = original;
+        return original.apply(this, arguments).then(response => new Promise(resolve => {
+          state.release = () => resolve(response);
+        }));
+      };
+      state.done = dt.inputTranslate();
+      return true;
+    })()`);
+    if (!await until(() => contentEval(tab, '!!window.__rimefoxInputPending.release'))) throw new Error('输入框竞态检查没有拿到后台响应');
+  };
+  const finishInput = () => contentEval(tab, '(window.__rimefoxInputPending.release(), window.__rimefoxInputPending.done)');
+  const selectRich = (start, end) => pageEval(tab, `
+    const el = document.getElementById('ce'); el.focus();
+    const range = document.createRange(); range.setStart(el.firstChild, ${start}); range.setEnd(el.firstChild, ${end});
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); return true;
+  `);
+
+  await setBox('ta', 'Old draft', 0, 0);
+  await holdInput();
+  await pageEval(tab, "const el=document.getElementById('ta'); el.select(); document.execCommand('insertText', false, 'New draft'); return el.value;");
+  const edited = await finishInput();
+  check('等待译文时继续输入：取消旧结果，保留新草稿', edited === false && (await valueOf('ta')) === 'New draft', await valueOf('ta'));
+
+  await pageEval(tab, "document.getElementById('ce').textContent='Hello world'; return true;");
+  await selectRich(0, 5);
+  await holdInput();
+  await selectRich(6, 11);
+  const moved = await finishInput();
+  const movedText = await pageEval(tab, "return document.getElementById('ce').textContent;");
+  check('等待译文时移动富文本选区：仍只替换最初选中的原文', moved === true && movedText === EN + ' world', movedText);
+
+  await pageEval(tab, "document.getElementById('ce').textContent='Hello world'; return true;");
+  await selectRich(0, 5);
+  await holdInput();
+  await pageEval(tab, "document.getElementById('ce').textContent='New rich draft'; return true;");
+  const richEdited = await finishInput();
+  check('等待译文时编辑富文本：取消旧结果，保留新正文', richEdited === false && (await pageEval(tab, "return document.getElementById('ce').textContent;")) === 'New rich draft');
+
+  await pageEval(tab, "document.getElementById('ce').textContent='Hello world'; return true;");
+  await selectRich(0, 5);
+  await holdInput();
+  await pageEval(tab, "const el=document.getElementById('ce'); el.replaceChildren(document.createTextNode('Hello world')); return true;");
+  const replacedNodes = await finishInput();
+  check('富文本被站点重建：即使文字相同，也不向旧选区写回', replacedNodes === false && (await pageEval(tab, "return document.getElementById('ce').textContent;")) === 'Hello world');
+
+  await setBox('ta', 'Focus draft', 0, 0);
+  await holdInput();
+  await pageEval(tab, "document.getElementById('tx').focus(); return true;");
+  const lostFocus = await finishInput();
+  check('等待译文时切换输入框：不抢焦点、不改任何草稿', lostFocus === false && (await valueOf('ta')) === 'Focus draft' && (await valueOf('tx')) === 'Another draft' && (await pageEval(tab, 'return document.activeElement.id;')) === 'tx');
+
+  await setBox('ta', 'Composition draft', 0, 0);
+  await holdInput();
+  await pageEval(tab, "document.getElementById('ta').dispatchEvent(new CompositionEvent('compositionstart', {bubbles:true})); return true;");
+  const ime = await finishInput();
+  await pageEval(tab, "document.getElementById('ta').dispatchEvent(new CompositionEvent('compositionend', {bubbles:true})); return true;");
+  check('译文返回时正在输入法组词：不打断当前输入', ime === false && (await valueOf('ta')) === 'Composition draft');
 }
 
 // ---------------- 0.9.3 悬浮入口拖拽 ----------------

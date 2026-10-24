@@ -150,7 +150,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本）。`config.page` 是后台按发送方网址算好的 `{accent, customCss, typo, site, night, provider}`（自定义 CSS 已清洗、站点规则已匹配） |
 | `mode:set` | `{mode}` | `{ok}` | 悬浮入口切显示方式后记进配置；只接受 `dual` / `translation`，内容脚本改不了别的配置项 |
 | `hover:set` | `{value: boolean}` | `{ok, value}` / `{ok:false,error}` | 悬浮入口切悬停对照；只接受严格布尔值，内容脚本不能改其他配置项 |
-| `glossary:add` | `{source, target, overwrite?}` | `{ok, action}` / `{ok:false,error}` | 划词气泡「加入术语表」。两个字符串各 ≤200 字，清洗 / 去重 / 限条数复用 upsertGlossaryEntry。action 是 added / updated / same（已有这条）/ conflict（同名原文另有译法，带 current 回去问用户，确认后带 overwrite: true 再来）。错误：too_long / bad_value / full（满 500 条）|
+| `glossary:add` | `{source, target, overwrite?}` | `{ok, action}` / `{ok:false,error}` | 划词气泡「加入术语表」。两个字符串各 ≤200 字，清洗 / 去重 / 限条数复用 upsertGlossaryEntry；读取、合并和保存都在 saveConfig 的同一队列内，按最新数据处理并发收录。action 是 added / updated / same（已有这条）/ conflict（同名原文另有译法，带 current 回去问用户，确认后带 overwrite: true 再来）。错误：too_long / bad_value / full（满 500 条）|
 | `test` | — | `{ok, ms, model, sample}` / `{ok:false,error}` | 测试连接 |
 | `cache:clear` | — | `{ok}` | 清空三层缓存（storage 里的 `dt.cache.v1.*` 分段和清单一并删掉） |
 | `cache:stats` | — | `{ok, stats: {memory, disk, hits, misses}, bytesInUse: {session, local}}` | 设置页「翻译缓存」卡片用；`bytesInUse` 是浏览器实际记的占用 |
@@ -171,7 +171,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | `dt:setStyle` | `{style}` | 快照 | 趣味翻译：`plain` / `classical` / `catgirl`，当前页按风格重建（没开翻译就顺带打开），不写进配置；还原后回到 `plain` |
 | `dt:retranslate` | — | 快照 | 清空重翻 |
 | `dt:diagnose` | — | 诊断报告对象 | 见第 7 节 |
-| `dt:translateInput` | — | 无 | 右键菜单「凛狐：翻译输入框内容」：翻译当前聚焦的输入框（有选区只翻选区），原地写回 |
+| `dt:translateInput` | — | 无 | 右键菜单「凛狐：翻译输入框内容」：翻译当前聚焦的输入框（有选区只翻最初选区），原地写回；等待期间内容、DOM 端点或焦点变化，以及返回时正在输入法组词，均取消写回 |
 | `dt:configChanged` | — | 无 | 后台在 `storage.onChanged` 时广播；内容脚本重拉配置、清零失败退避并补扫。内容脚本**不要**自己监听 `storage.onChanged`（事件里带完整配置含 Key） |
 
 ### 接口层（协议 / 服务商 / 思考模式）
@@ -763,34 +763,15 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
- ## 14. 本版技术记录（0.11.6）
+## 14. 本版技术记录（0.11.7）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
-> 0.11.5 的双向排版 / RichHTML 修复见提交 4c2784d。
 
-- **韩文随机加粗**：仅译文的 writeNodes 仍会优先复用第一个可写 TextNode。若该节点位于局部 strong / b / em / 粗体 span 内，完整译文会继承局部强调。新增 font-weight / font-style / font-family 样式边界：局部强调壳未覆盖整段时，在壳外创建 RenderTransaction 保护的 TextNode；整段强调壳或加粗标题保留原样式。
-- **字体族**：朝鲜日报等站点会用 NotoSansKR-Bold 等粗体字体族但 computed font-weight=400。styleOf 缓存之前漏掉 fontFamily，导致这一层无法识别；现在同时比较 fontWeight、fontStyle 和 bold/black/heavy 字体族。
-- **目标语言字体适配**：chrome 的 `DT.fonts` 按目标脚本注册字体栈（zh-CN / zh-TW / ja / ko，register 可扩展）；只有源字体命中其他文字系统的已知字体、且没有目标文字系统字体时才适配，不做站点 CSS 硬编码。目标文字用 inline `.dt-font` 壳（display:contents）承载 font-family；只用于仅译文，包原 TextNode。双语显式走 `policy({mode:'dual'})`，不碰 .dt-target 的 font-family，保留原站字体、CJK 标题缩放、行高和自定义 CSS。标题、code/pre、公式、控件和兼容字体跳过；字号 / 字重 / 行高 / 颜色继承，字体壳 insert+moving 全进 RenderTransaction，isOwnNode 忽略 data-dt-font 防止 MutationObserver 重扫。
-- **多行 / 混合**：injectLines 对只被一行使用的行首节点做壳外迁移；injectMixed 的 put 经过 styleSafeSlot；pre-wrap、嵌套 strong/em、行内链接和引用均有本地 fixture。
-- **诊断**：DT.inspectTextStyle(needle) 返回实际 computed font-weight / font-size / font-family / font-style、从文本节点到正文容器的祖先链、写入前 DOM / 样式与当前 DOM；DT.diagnose 增加 styleBoundaryAware / styleInspector。真实朝鲜日报地址可通过 tools/e2e-extension.mjs --chosun-live 使用本地假翻译检查，不发真实付费请求。
-- **字体 A/B 截图**：`--chosun-live` 使用本地假 API 返回统一中文，生成 docs/verification/2026-10-23-chosun-font-ab/ 的原文 / 中文适配 / 关闭还原三张截图；断言中文目标字体栈、原文 chosun-myeongjo 保留、关闭后字体壳和标记归零。
-- **测试**：Node、自检、完整 E2E、真实朝鲜日报实时页面检查通过；compare 翻译前后字重、粗体字族和目标字体栈，并覆盖还原 / 再次翻译。
-
-### 本次踩坑与心得
-
-- **computed font-weight 不等于肉眼字重**：韩文网页的 `font-weight:400` 仍可能因 `chosun-myeongjo` 缺少中文字形而逐字回退到不同中文字体；只看 weight 会把根因误判成 DOM 局部加粗。
-- **字体兼容和字号自适应是两件事**：目标文字系统字体解决字形回退；字号、行高、标题缩放和用户自定义排版仍由原 `.dt-target` 继承链负责，不能用一套全局字体覆盖同时接管两者。
-- **`font: inherit !important` 是简写**：它会同时设置 family / size / line-height 等；双语的旧行为依赖它和 `copyTypography`。给 `.dt-target` 再写内联 `font-family !important` 会改变双语字体质量，因此字体适配必须显式按渲染模式隔离。
-- **只包译文，不包原文**：仅译文用 `display:contents` 的 inline 字体壳，字符间距 / 行布局不新增盒子；标题、code/pre、公式、控件和已兼容字体跳过，字体壳 insert / move / 还原全部走 RenderTransaction。
-- **验收要看 computed + 截图 + 模式切换**：真实朝鲜日报用 `--chosun-live` 生成中文适配截图；双语用 `--dual-live` 与提交 `4c2784d` 同机位截图逐字节对比，并测试 双语 → 仅译文 → 双语 → 关闭 → 重新翻译，不能只看“翻译成功”或字符串断言。
-
- ### 已放弃：0.12 图片 / 表格翻译 WIP（2026-10-23）
-
-- 结论：backup/image-translation-wip（提交 9c7f35b，0.12.1 图片表格版面感知）及本地 bundle / worktree 备份已删除；当前主线不包含图片翻译代码。
-- 范围：该 WIP 从 4c2784d 分出，包含 content/image.js、lib/image-layout.js、图片 / 表格弹框、视觉缓存、选项面板、隐私说明和图片测试，约 2.8k 行新增；与当前 0.11.6 的字体 / 双语修复是两条不同基线。
-- 放弃原因：图片 OCR / 表格结构 / 合并单元格 / 数值校验的验证成本远高于当前收益；长生命周期分支持续偏离主线，继续维护会同时拖累图片和正文翻译。没有把它合回 main。
-- 后续约束：不要把 9c7f35b 或旧图片分支直接 cherry-pick / merge 回当前主线；若重启图片翻译，必须从当前 main 开短的垂直切片，单独做隐私、商店权限、视觉和质量验收。
-- 经验：先确定一个可验证的用户价值，再扩跨 content / lib / options / manifest / 隐私面的功能；不要用大而全的 WIP 分支同时改正文渲染、图片传输和设置界面。图片翻译与字体 / 双向排版分开验证，不能拿一套 DOM 事务假设覆盖所有渲染路径。
+- **输入框异步写回**：发送翻译前保存完整输入值或富文本 DOM 快照，以及最初选区的节点和偏移；不保存会随 DOM 更新漂移的 live Range。返回后检查连接状态、焦点、可编辑状态、输入法组词和内容快照，满足条件才重建选区并通过原生编辑命令写回；保留撤销栈与 input 事件。
+- **术语并发收录**：saveConfig 支持同步函数补丁，在原保存队列内读取最新配置、清洗、合并及落盘；函数返回 null 时不写存储。glossary:add 的新增、覆盖、冲突和容量判断均在该队列内执行，避免两个成功请求相互覆盖，原有分类和说明保留。
+- **接口缓存隔离**：后台为 scope 增加协议及规范化 API 地址，持久缓存、对齐旁路和在途去重共用此身份；没有接口身份的旧条目不猜测来源，也不主动清空，首次翻译可能重新请求，详见[请求与缓存约定](docs/TRANSLATION-ENGINE-HANDOFF.md#6-请求缓存与性能)。
+- **回归覆盖**：test/background-state.test.mjs 使用真实后台、假存储及假 API，验证术语并发新增、同名冲突、覆盖、容量、保存失败恢复、地址和协议切换、旧条目隔离及在途切换；tools/e2e-extension.mjs 在真实 Chrome 内延迟后台响应，验证新草稿、富文本选区移动及重建、失焦和输入法组词，并按 manifest 核对实际加载版本，避免发版后误报。
+- **发布验证**：按第 7 节执行完整 Node、浏览器 E2E 和离线自检，并校验发版说明和发布包；浏览器验证使用本地假 API，不调用真实付费服务，版本号由 manifest、core 和 package 同步。
 
 ## 15. 专业翻译引擎
 

@@ -66,18 +66,39 @@
   function readInput(el) {
     if (el.isContentEditable) {
       var sel = window.getSelection();
+      var range = document.createRange();
+      var text = String(el.innerText || el.textContent || '');
+      var where = 'all';
       if (sel && !sel.isCollapsed && sel.rangeCount && el.contains(sel.getRangeAt(0).commonAncestorContainer)) {
-        return { text: String(sel.toString() || ''), where: 'selection' };
+        range = sel.getRangeAt(0);
+        text = String(sel.toString() || '');
+        where = 'selection';
+      } else {
+        range.selectNodeContents(el);
       }
-      return { text: String(el.innerText || el.textContent || ''), where: 'all' };
+      // Range 本身会随 DOM 变化移动；保存原始端点，在确认内容未变后重新创建。
+      return {
+        text: text, where: where, rich: true, snapshot: el.innerHTML,
+        startNode: range.startContainer, start: range.startOffset,
+        endNode: range.endContainer, end: range.endOffset
+      };
     }
     var value = String(el.value || '');
     var start = Number(el.selectionStart);
     var end = Number(el.selectionEnd);
     if (isFinite(start) && isFinite(end) && end > start) {
-      return { text: value.slice(start, end), where: 'selection', start: start, end: end };
+      return { text: value.slice(start, end), where: 'selection', snapshot: value, start: start, end: end };
     }
-    return { text: value, where: 'all', start: 0, end: value.length };
+    return { text: value, where: 'all', snapshot: value, start: 0, end: value.length };
+  }
+
+  function canWriteBack(el, info) {
+    if (!el.isConnected || composing || document.activeElement !== el || isBlockedField(el)) return false;
+    if (info.rich) {
+      return el.isContentEditable && el.innerHTML === info.snapshot &&
+        el.contains(info.startNode) && el.contains(info.endNode);
+    }
+    return !el.isContentEditable && String(el.value || '') === info.snapshot;
   }
 
   function execInsert(text) {
@@ -90,21 +111,25 @@
 
   // 写回：走浏览器的原生编辑命令，可撤销、会发 input 事件
   function writeBack(el, info, text) {
+    if (!canWriteBack(el, info)) return false;
     try {
       el.focus();
     } catch (err) {
       /* 拿不到焦点也继续试 */
     }
-    if (el.isContentEditable) {
+    // focus 事件也可能触发站点更新；写入前再确认一次。
+    if (!canWriteBack(el, info)) return false;
+    if (info.rich) {
       var sel = window.getSelection();
-      if (info.where !== 'selection' || !sel || !sel.rangeCount) {
-        // 整段替换：选中整个可编辑区域的内容再写入
+      if (!sel) return false;
+      try {
         var range = document.createRange();
-        range.selectNodeContents(el);
-        if (sel) {
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
+        range.setStart(info.startNode, info.start);
+        range.setEnd(info.endNode, info.end);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (err) {
+        return false;
       }
       return execInsert(text);
     }
@@ -175,6 +200,10 @@
       var out = value.trim();
       if (out === text) {
         say('译文和原文一样，没有改动', 'Same as the original; nothing changed');
+        return false;
+      }
+      if (!canWriteBack(el, info)) {
+        say('输入框内容或焦点已变化，已取消写回，请重新翻译', 'Text or focus changed; translation was not inserted. Please translate again', 3200);
         return false;
       }
       if (!writeBack(el, info, out)) {

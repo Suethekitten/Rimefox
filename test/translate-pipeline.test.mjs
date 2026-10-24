@@ -61,6 +61,7 @@ const scope = {
   target: 'en',
   style: 'plain',
   model: 'deepseek:fake',
+  endpoint: '["openai","https://fake.local/v1"]',
   host: HOST,
   glossary: glossaryFingerprint(normalizeGlossary([])),
   prompt: promptFingerprint('')
