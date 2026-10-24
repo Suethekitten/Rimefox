@@ -11,6 +11,7 @@
 | 工作树 | `/Users/apxs/Documents/Claude-workspace/_worktrees/rimfox-language-style-context` |
 | 版本号 | `manifest.json` / `content/core.js` / `package.json` 均保持 `0.11.7` |
 | 配置版本 | `CONFIG_VERSION = 8`（只新增字段；不清缓存、不覆盖旧值） |
+| 本地提交 | `a229900`（功能实现与测试）+ `de0d544`（配置版本文档同步）；未 push |
 | 隔离 | 未修改 `edge-bilingual` 的 0.12.0 工作树、未 push、未创建 Release、未合并 |
 
 开发前基线：Node 测试全绿、离线自检 256/256。开发完成后同一套检查见 §7；本轮新增了自检用例，因此自检总数变为 259。
@@ -180,7 +181,7 @@ node test/translate-pipeline.test.mjs# 39 通过
 - 导入时若语言因重名或数量上限被丢弃，导入结果会明确报告数量。
 - 诊断在 AI 开启但本次没有上下文时报告 `omitted: 'no-context'`，不再虚报字符数。
 
-复核同时确认：只改了 `test/config.test.mjs` 的配置版本期望（7→8），没有删除或弱化既有测试；`manifest.json` / `package.json` / `DT.VERSION` 仍为 0.11.7；diff 中没有密钥或无关文件。
+复核同时确认：只改了 `test/config.test.mjs` 的配置版本期望（7→8），没有删除或弱化既有测试；`manifest.json` / `package.json` / `DT.VERSION` 仍为 0.11.7；diff 中没有密钥或无关文件。修复后再次请两位复核者只看剩余 blocker/high，均回复「no remaining blocker/high」。
 
 ## 10. 集成建议
 
