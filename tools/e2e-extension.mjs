@@ -39,6 +39,7 @@ const VERBOSE = flag('--verbose');
 const SHADOW_ONLY = flag('--shadow-only');
 const MEDICAL_ONLY = flag('--medical-only');
 const SELFTEST_ONLY = flag('--selftest-only');
+const GLOSSARY_ONLY = flag('--glossary-only');
 const SCIENCE_LIVE = flag('--science-live');
 const DUAL_LIVE = flag('--dual-live')
   ? (() => {
@@ -1406,8 +1407,100 @@ async function optionsChecks() {
   await sleep(800);
   const cacheText = await evaluate(o, "(document.getElementById('cacheStats') || {}).textContent || ''");
   check('缓存统计能读出', /\d+ 条/.test(cacheText) && !/读取失败/.test(cacheText), cacheText.slice(0, 120));
+  await glossaryNotesChecks(o);
   // 后面的检查不要带着这张术语表跑
   await patchConfig({ glossary: [] });
+}
+
+async function glossaryNotesChecks(o) {
+  console.log('\n[术语说明 / 设置界面]');
+  const initial = '肿瘤研究中使用；\n日常答复按实际含义翻译。';
+  await patchConfig({ glossary: [{ source: 'response', target: '治疗反应', category: '医学', note: initial }, { source: 'charge', target: '电荷', category: '物理' }] });
+  const rowExpr = source => `Array.from(document.querySelectorAll('.glossary-row')).find(row=>row.querySelector('input').value===${JSON.stringify(source)})`;
+  const inRow = (source, code) => evaluate(o, `(async()=>{const row=${rowExpr(source)};if(!row)throw Error('missing term');const textarea=row.querySelector('textarea');const details=row.querySelector('details');${code}})()`);
+  await until(() => evaluate(o, "Array.from(document.querySelectorAll('.glossary-cat')).some(node=>node.textContent==='医学')"));
+  await evaluate(o, "for(let i=0;i<3;i++){const closed=document.querySelector('.glossary-group-head[aria-expanded=false]');if(closed)closed.click();}true");
+  await until(() => inRow('response', 'return textarea.value===' + JSON.stringify(initial)));
+  const compact = await inRow('response', "return !details.open && !row.querySelector('.glossary-note-indicator').hidden && document.querySelector('.glossary-head').textContent.includes('首选译法')");
+  check('说明：已有说明显示标识，默认折叠；首选译法和分类布局保留', compact === true);
+  const empty = await inRow('charge', "return !details.open && row.querySelector('.glossary-note-indicator').hidden");
+  check('说明：空词条保持折叠且无已填写标识', empty === true);
+  const setNote = async (source, value) => {
+    await inRow(source, `details.open=true;textarea.value=${JSON.stringify(value)};textarea.dispatchEvent(new Event('input',{bubbles:true}));return true;`);
+    await until(() => evaluate(o, "!document.getElementById('save').disabled"));
+  };
+  const saveNote = async (source, expected) => {
+    await evaluate(o, "document.getElementById('save').click();true");
+    return until(async () => {
+      const cfg = await readConfig();
+      const item = cfg.glossary.find(one => one.source === source);
+      return item && item.note === expected ? item : null;
+    }, 8000);
+  };
+  const edited = '首选治疗反应；逗号, 引号 "response"。\n日常答复可使用其他准确译法。';
+  await setNote('response', edited);
+  check('说明：中文、标点、引号与换行可编辑保存', !!(await saveNote('response', edited)));
+  await evaluate(o, 'location.reload();true');
+  await until(() => inRow('response', 'return textarea.value===' + JSON.stringify(edited)));
+  check('说明：重新加载设置页后文本完整', (await inRow('response', 'return textarea.value')) === edited);
+  await setNote('response', '中'.repeat(501));
+  await evaluate(o, "document.getElementById('save').click();true");
+  await until(() => evaluate(o, "document.getElementById('saveResult').classList.contains('bad')"));
+  const oversized = await inRow('response', "return {length:Array.from(textarea.value).length,invalid:textarea.getAttribute('aria-invalid'),open:details.open,feedback:row.querySelector('.glossary-note-count').textContent}");
+  const stored = (await readConfig()).glossary.find(one => one.source === 'response');
+  check('说明：超长保存被拒绝，草稿不截断、原配置不变且反馈可见', oversized.length === 501 && oversized.invalid === 'true' && oversized.open && /501 \/ 500/.test(oversized.feedback) && stored.note === edited, JSON.stringify(oversized));
+  await setNote('response', '中'.repeat(500));
+  check('说明：500 字符边界可保存', !!(await saveNote('response', '中'.repeat(500))));
+  await setNote('response', '');
+  const deleted = await saveNote('response', undefined);
+  check('说明：删除说明后持久化对象不保留空 note', !!deleted && !Object.prototype.hasOwnProperty.call(deleted, 'note'));
+  await setNote('response', edited);
+  await saveNote('response', edited);
+  let fileIndex = 0;
+  async function importFile(selector, text, extension) {
+    const file = path.join(WORK, 'notes-import-' + (++fileIndex) + '.' + extension);
+    fs.writeFileSync(file, text);
+    const { root } = await send('DOM.getDocument', {}, o);
+    const { nodeId } = await send('DOM.querySelector', { nodeId: root.nodeId, selector }, o);
+    await send('DOM.setFileInputFiles', { files: [file], nodeId }, o);
+  }
+  await importFile('#glossaryFile', 'source,target\nresponse,答复\n', 'csv');
+  await until(() => inRow('response', "return row.querySelectorAll('input')[1].value==='答复'"));
+  check('CSV：旧两列更新首选译法，保留已有分类与说明', (await inRow('response', 'return textarea.value')) === edited && (await inRow('response', "return row.querySelectorAll('input')[2].value")) === '医学');
+  await saveNote('response', edited);
+  await importFile('#glossaryFile', 'source,target,category,note\nresponse,答复,,\n', 'csv');
+  await until(() => inRow('response', "return textarea.value===''") );
+  check('CSV：明确的空说明可清空', !!(await saveNote('response', undefined)));
+  await importFile('#glossaryFile', 'source,target,category,note\nresponse,治疗反应,医学,"' + edited.replace(/"/g, '""') + '"\n', 'csv');
+  await until(() => inRow('response', 'return textarea.value===' + JSON.stringify(edited)));
+  check('CSV：含逗号、引号及换行的四列说明完整导入', !!(await saveNote('response', edited)));
+  const downloadPath = path.join(WORK, 'downloads');
+  fs.mkdirSync(downloadPath, { recursive: true });
+  await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath });
+  await evaluate(o, "document.getElementById('glossaryExport').click();true");
+  const csvFile = await until(() => fs.readdirSync(downloadPath).find(name => /^rimefox-glossary-.*\.csv$/.test(name)));
+  const csvText = csvFile ? fs.readFileSync(path.join(downloadPath, csvFile), 'utf8') : '';
+  check('CSV：界面导出四列表头与完整转义说明', csvText.includes('source,target,category,note') && csvText.includes(edited.replace(/"/g, '""')));
+  await evaluate(o, "document.getElementById('exportCfg').click();true");
+  const jsonFile = await until(() => fs.readdirSync(downloadPath).find(name => /^rimefox-config-.*\.json$/.test(name)));
+  const exported = jsonFile ? JSON.parse(fs.readFileSync(path.join(downloadPath, jsonFile), 'utf8')) : null;
+  check('JSON：界面导出保留说明且默认不带 API Key', exported?.config?.glossary?.find(one => one.source === 'response')?.note === edited && !exported?.config?.providerConfig?.__custom__?.apiKey);
+  await importFile('#importFile', JSON.stringify({ app: 'rimefox', schema: 1, config: { targetLang: 'zh-CN', mode: 'dual', theme: 'underline', glossary: [{ source: 'response', target: 'JSON首选译法' }] } }), 'json');
+  const jsonImported = await until(async () => { const cfg = await readConfig(); return cfg.glossary.find(one => one.source === 'response' && one.target === 'JSON首选译法'); });
+  check('JSON：旧条目未提供说明时保留原说明与 Key', jsonImported?.note === edited && (await readConfig()).providerConfig.__custom__.apiKey === 'sk-test');
+  await inRow('response', "details.open=true;details.scrollIntoView({block:'center'});return true;");
+  const screenshot = await send('Page.captureScreenshot', { format: 'png' }, o);
+  fs.writeFileSync(path.join(WORK, 'glossary-notes-wide.png'), Buffer.from(screenshot.data, 'base64'));
+  await send('Emulation.setDeviceMetricsOverride', { width: 520, height: 900, deviceScaleFactor: 1, mobile: false }, o);
+  const narrow = await inRow('response', "const box=textarea.getBoundingClientRect();const parent=row.getBoundingClientRect();return {width:box.width,inside:box.left>=parent.left&&box.right<=parent.right+1,overflow:document.documentElement.scrollWidth>innerWidth}");
+  check('说明：窄屏 textarea 独占整行且不横向溢出', narrow.width > 250 && narrow.inside && !narrow.overflow, JSON.stringify(narrow));
+  const narrowScreenshot = await send('Page.captureScreenshot', { format: 'png' }, o);
+  fs.writeFileSync(path.join(WORK, 'glossary-notes-narrow.png'), Buffer.from(narrowScreenshot.data, 'base64'));
+  await send('Emulation.clearDeviceMetricsOverride', {}, o);
+  await patchConfig({ uiLang: 'en' });
+  const english = await until(() => inRow('response', "return row.querySelector('summary').textContent.includes('Term note') && document.querySelector('.glossary-head').textContent.includes('Preferred translation')"));
+  check('说明：英文界面的标签与说明提示可翻译', english === true);
+  await patchConfig({ uiLang: 'zh' });
 }
 
 // ---------------- YouTube 真实页面 ----------------
@@ -2325,6 +2418,8 @@ try {
     await scienceLiveChecks();
   } else if (SELFTEST_ONLY) {
     await selftestChecks();
+  } else if (GLOSSARY_ONLY) {
+    await optionsChecks();
   } else if (MEDICAL_ONLY) {
     await popupChecks();
     await medicalChecks();

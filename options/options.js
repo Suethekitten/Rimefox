@@ -50,6 +50,7 @@ import {
   renderProviderPills
 } from './provider-list.js';
 import { createGlossaryEditor } from './glossary.js';
+import { mergeGlossaryEntries } from '../lib/glossary.js';
 
 // 思考模式的三种取值（与 lib/config.js 的 DEFAULTS.thinkingMode 对应）
 const THINKING_MODES = [
@@ -451,7 +452,9 @@ function readForm() {
       id: p.id,
       name: p.name || '自定义'
     })),
-    glossary: ((currentCfg && currentCfg.glossary) || []).slice(),
+    // Saved-form snapshots must not share mutable editor entries; otherwise typing
+    // a note also changes the comparison baseline and Save stays disabled.
+    glossary: ((currentCfg && currentCfg.glossary) || []).map(one => ({ ...one })),
     thinkingMode: fields.thinkingMode.value,
     thinkingExtra: fields.thinkingExtra.value.trim(),
     customPrompt: fields.customPrompt.value.trim().slice(0, 2000),
@@ -919,6 +922,10 @@ $('save').addEventListener('click', async () => {
   // 站点规则 / 自定义 CSS 写错时不保存：坏数据不该落盘，也不该让网页里的规则悄悄失效
   const ruleErrors = showSiteRulesResult(fields.siteRules.value);
   const cssErrors = showCustomCssResult(fields.customCss.value);
+  if (!glossaryEditor.validate()) {
+    setResult($('saveResult'), '术语说明有错误，改好再保存', 'bad');
+    return;
+  }
   if (ruleErrors.length || cssErrors.length) {
     setResult($('saveResult'), ruleErrors.length ? '站点规则有错误，改好再保存' : '译文自定义 CSS 有错误，改好再保存', 'bad');
     (ruleErrors.length ? fields.siteRules : fields.customCss).scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -926,7 +933,12 @@ $('save').addEventListener('click', async () => {
   }
   const patch = readForm();
   const active = activeConfig(patch);
-  currentCfg = await saveConfig(patch);
+  try {
+    currentCfg = await saveConfig(patch);
+  } catch (err) {
+    setResult($('saveResult'), err.message, 'bad');
+    return;
+  }
   rememberSaved(currentCfg);
   markSaved(currentCfg);
   glossaryEditor.render(); // 清洗后的结果（去空行 / 去重）反映到表格
@@ -1131,6 +1143,7 @@ function buildExport(includeKey) {
 
 $('exportCfg').addEventListener('click', () => {
   try {
+    if (!glossaryEditor.validate()) throw new Error('术语说明有错误，改好再保存');
     const includeKey = $('exportKey').checked;
     const payload = buildExport(includeKey);
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1175,6 +1188,7 @@ $('importFile').addEventListener('change', async (event) => {
 
     const parsed = pickImportedConfig(raw);
     const patch = parsed.config;
+    if (patch.glossary) patch.glossary = mergeGlossaryEntries((currentCfg && currentCfg.glossary) || [], patch.glossary, { noteUpdates: parsed.glossaryNoteUpdates, replace: true });
     // 自定义服务商按列表决定去留：补进本机已有的，不让导入顺带删掉它们
     if (patch.customProviders) {
       patch.customProviders = mergeCustomProviderLists((currentCfg && currentCfg.customProviders) || [], patch.customProviders);

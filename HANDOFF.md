@@ -649,7 +649,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `professionalProfile` | `general` | 通用 / 医学专业策略；架构、质量与缓存规则见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
 | `professionalOptions` | 见配置默认值 | 质量等级、子领域与有限严格复核预算，见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
 | `medicalMode` | false | 医学开关的旧版兼容别名，与 `professionalProfile` 同步。|
-| `glossary` | `[]` | 术语表 `[{source, target, category?}]`，全局一份，命中才注入提示词；缓存键只带这段原文命中的术语的指纹（没命中是 `none`），加 / 改一条只让用到它的段落重翻。设置页可编辑 / CSV 导入导出，网页里划词气泡也能「加入术语表」（走后台 `glossary:add`）|
+| `glossary` | `[]` | 术语表 `[{source, target, category?, note?}]`，全局一份。说明、固定/语境译法、CSV/JSON 兼容和按命中失效的缓存规则见 [术语表帮助](docs/GLOSSARY.md)。划词收录仍走 `glossary:add`，覆盖译法保留原分类和说明。|
 | `debug` | false | 输出调试日志 |
 | `_v` | 7 | 配置版本（迁移逻辑在 `migrateConfig`） |
 

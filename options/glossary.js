@@ -2,7 +2,7 @@
 // 编辑直接改 currentCfg.glossary（保存时由 mergeConfig 统一清洗）
 
 import { $, setResult } from './ui.js';
-import { normalizeGlossary, parseGlossaryCsv, toGlossaryCsv } from '../lib/glossary.js';
+import { normalizeGlossary, parseGlossaryCsvImport, toGlossaryCsv, mergeGlossaryEntries, normalizeGlossaryNote, validateGlossaryNotes, GLOSSARY_NOTE_MAX } from '../lib/glossary.js';
 import { STARTER } from '../lib/glossary-sample.js';
 
 // 文件名用的时间戳：不带冒号和加号（Windows 不允许，会被替换成下划线，看起来像乱码）
@@ -36,6 +36,8 @@ export function createGlossaryEditor(opts) {
 
   const DEFAULT_CAT = '未分类';
   const openCats = new Set();
+  const openNotes = new WeakSet();
+  let noteId = 0;
   let renderedOnce = false;
 
   function categoryOf(item) {
@@ -67,7 +69,8 @@ export function createGlossaryEditor(opts) {
     const dst = document.createElement('input');
     dst.type = 'text';
     dst.className = 'glossary-input';
-    dst.placeholder = '译法，如 战令';
+    dst.placeholder = '首选译法，如 战令';
+    dst.setAttribute('aria-label', '首选译法');
     dst.value = item.target || '';
     dst.addEventListener('input', () => {
       item.target = dst.value;
@@ -102,19 +105,74 @@ export function createGlossaryEditor(opts) {
       const list = current();
       const at = list.indexOf(item);
       if (at >= 0) list.splice(at, 1);
+      openNotes.delete(item);
       render();
       message('已删除 1 条（点「保存」后生效）', 'ok');
       changed();
     });
 
     row.append(src, dst, cat, del);
+    const details = document.createElement('details');
+    details.className = 'glossary-note';
+    details.open = openNotes.has(item);
+    details.addEventListener('toggle', () => {
+      if (details.open) openNotes.add(item);
+      else openNotes.delete(item);
+    });
+    const summary = document.createElement('summary');
+    summary.className = 'glossary-note-toggle';
+    const title = document.createElement('span');
+    title.textContent = '术语说明';
+    const indicator = document.createElement('span');
+    indicator.className = 'glossary-note-indicator';
+    indicator.textContent = '已填写';
+    summary.append(title, indicator);
+    const body = document.createElement('div');
+    body.className = 'glossary-note-body';
+    const editor = document.createElement('textarea');
+    editor.className = 'glossary-note-input';
+    editor.rows = 3;
+    editor.id = 'glossary-note-' + (++noteId);
+    editor.setAttribute('aria-label', '术语说明');
+    editor.value = item.note || '';
+    const help = document.createElement('p');
+    help.className = 'glossary-note-help';
+    help.id = editor.id + '-help';
+    help.textContent = '可选。告诉 AI 首选译法适用于什么语境，以及什么时候可以使用其他表达。';
+    const feedback = document.createElement('span');
+    feedback.className = 'glossary-note-count';
+    feedback.id = editor.id + '-count';
+    feedback.setAttribute('aria-live', 'polite');
+    editor.setAttribute('aria-describedby', help.id + ' ' + feedback.id);
+    function updateNoteState() {
+      const count = Array.from(normalizeGlossaryNote(editor.value)).length;
+      const invalid = count > GLOSSARY_NOTE_MAX;
+      indicator.hidden = !normalizeGlossaryNote(editor.value);
+      details.classList.toggle('has-note', !indicator.hidden);
+      details.classList.toggle('invalid', invalid);
+      editor.setAttribute('aria-invalid', invalid ? 'true' : 'false');
+      editor.setCustomValidity(invalid ? '术语说明不能超过 500 个字符；输入内容未被截断。' : '');
+      feedback.textContent = count + ' / ' + GLOSSARY_NOTE_MAX;
+      feedback.classList.toggle('bad', invalid);
+      if (invalid) feedback.textContent += ' · 术语说明不能超过 500 个字符；输入内容未被截断。';
+      if (window.__rimefoxI18nRefresh) window.__rimefoxI18nRefresh();
+    }
+    editor.addEventListener('input', () => {
+      item.note = editor.value;
+      updateNoteState();
+      changed();
+    });
+    updateNoteState();
+    body.append(help, editor, feedback);
+    details.append(summary, body);
+    row.appendChild(details);
     return row;
   }
 
   function headRow() {
     const head = document.createElement('div');
     head.className = 'glossary-head';
-    ['原文', '译法', '分类', ''].forEach((text) => {
+    ['原文', '首选译法', '分类', ''].forEach((text) => {
       const cell = document.createElement('span');
       cell.textContent = text;
       head.appendChild(cell);
@@ -200,28 +258,11 @@ export function createGlossaryEditor(opts) {
   }
 
   // 合并导入：同一原文以导入的为准，其余追加；两列 CSV 不会冲掉已有分类
-  function merge(entries) {
-    const byKey = new Map();
-    current().forEach((one) => {
-      const s = String(one.source || '').trim();
-      if (s) byKey.set(s.toLowerCase(), { source: one.source, target: one.target, category: one.category });
-    });
-    let added = 0;
-    entries.forEach((one) => {
-      const s = String(one.source || '').trim();
-      if (!s) return;
-      const key = s.toLowerCase();
-      if (!byKey.has(key)) added += 1;
-      const old = byKey.get(key);
-      const cat = String((one && one.category) || '').trim();
-      byKey.set(key, {
-        source: one.source,
-        target: one.target,
-        category: cat || (old && old.category) || ''
-      });
-    });
+  function merge(entries, noteUpdates) {
+    const keys = new Set(current().map(one => String(one.source || '').trim().toLowerCase()));
+    const added = entries.filter(one => !keys.has(one.source.toLowerCase())).length;
     const cfg = opts.getConfig();
-    cfg.glossary = normalizeGlossary(Array.from(byKey.values()));
+    cfg.glossary = mergeGlossaryEntries(current(), entries, { noteUpdates });
     resetOpen(cfg.glossary);
     render();
     message('已导入 ' + entries.length + ' 条（新增 ' + added + ' 条，点「保存」后生效）', 'ok');
@@ -246,7 +287,7 @@ export function createGlossaryEditor(opts) {
   let sampleAfterKey = ''; // 导入后的内容指纹，用来判断用户有没有改过
 
   function keyOf(list) {
-    return JSON.stringify(normalizeGlossary(list).map((one) => [one.source, one.target, one.category || '']));
+    return JSON.stringify(normalizeGlossary(list).map((one) => [one.source, one.target, one.category || '', one.note || '']));
   }
 
   // 列表骤然变短（收起 / 清空）时页面高度会缩掉一大截，滚动位置不变就会“跳”到下面几节；
@@ -298,18 +339,19 @@ export function createGlossaryEditor(opts) {
     if (!file) return;
     try {
       const text = await file.text();
-      const entries = parseGlossaryCsv(text);
+      const { entries, noteUpdates } = parseGlossaryCsvImport(text);
       if (!entries.length) {
-        message('这个 CSV 里没有可用的原文 / 译法两列（第三列分类可选）。', 'bad');
+        message('这个 CSV 里没有可用的原文 / 首选译法两列（分类与术语说明可选）。', 'bad');
         return;
       }
-      merge(entries);
+      merge(entries, noteUpdates);
     } catch (err) {
       message('读取失败：' + (err && err.message), 'bad');
     }
   });
 
   $('glossaryExport').addEventListener('click', () => {
+    if (!validate()) return;
     const list = normalizeGlossary(current());
     if (!list.length) {
       message('术语表是空的，没有可导出的内容。', 'bad');
@@ -325,8 +367,24 @@ export function createGlossaryEditor(opts) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    message('已导出 ' + list.length + ' 条（含分类）。', 'ok');
+    message('已导出 ' + list.length + ' 条（含分类与术语说明）。', 'ok');
   });
 
-  return { render };
+  function validate() {
+    const error = validateGlossaryNotes(current())[0];
+    if (!error) return true;
+    const item = current()[error.index];
+    openCats.add(categoryOf(item));
+    openNotes.add(item);
+    render();
+    message('术语说明不能超过 500 个字符；输入内容未被截断。', 'bad');
+    const textarea = wrap.querySelector('textarea[aria-invalid="true"]');
+    if (textarea) {
+      textarea.scrollIntoView({ block: 'center' });
+      textarea.focus();
+    }
+    return false;
+  }
+
+  return { render, validate };
 }

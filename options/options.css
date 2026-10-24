@@ -1246,6 +1246,46 @@ textarea::placeholder {
   padding: 0 4px 4px;
 }
 
+.glossary-row > .glossary-note {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  padding: 0 8px 2px;
+}
+.glossary-note-toggle {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 20px;
+}
+.glossary-note-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.glossary-note.has-note .glossary-note-toggle { color: var(--text-2); }
+.glossary-note-indicator {
+  margin-left: 8px;
+  color: var(--accent);
+  font-size: 10.5px;
+}
+.glossary-note-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0 8px;
+}
+.glossary-note-help { margin: 0; color: var(--text-2); font-size: 12px; }
+.glossary-note-input {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
+}
+.glossary-note-count { color: var(--text-3); font-size: 11px; align-self: flex-end; }
+.glossary-note.invalid .glossary-note-input { border-color: var(--accent); }
+
 .glossary-empty {
   padding: 10px 0;
   font-size: 12.5px;
@@ -1289,6 +1329,7 @@ textarea::placeholder {
     grid-column: 2;
     grid-row: 1;
   }
+  .glossary-row > .glossary-note { grid-column: 1 / -1; grid-row: auto; }
 
   .glossary-del {
     opacity: 1;

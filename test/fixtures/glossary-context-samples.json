@@ -1,0 +1,38 @@
+{
+  "method": "mock",
+  "provenance": "人工编写的多义词语境和预设译文，仅验证请求数据及模拟协议，不来自真实 AI，也不证明语境消歧成功率。",
+  "terms": [
+    {
+      "source": "response", "target": "治疗反应", "category": "医学",
+      "note": "肿瘤治疗研究中优先译为治疗反应；日常回应、问卷答复应按实际含义翻译。",
+      "contexts": [
+        { "text": "The tumor response was measured after treatment.", "expected": "治疗后测量了肿瘤的治疗反应。" },
+        { "text": "Her response to the survey arrived today.", "expected": "她对问卷的答复今天送达。" }
+      ]
+    },
+    {
+      "source": "charge", "target": "电荷", "category": "物理",
+      "note": "物理学名词指电荷；给手机充电、收费或指控应按上下文另译。",
+      "contexts": [
+        { "text": "The particle has a positive electric charge.", "expected": "该粒子带正电荷。" },
+        { "text": "Please charge the phone before leaving.", "expected": "离开前请给手机充电。" }
+      ]
+    },
+    {
+      "source": "cell", "target": "细胞", "category": "生物",
+      "note": "生物语境优先用细胞；监狱房间、表格格子和电池单元按实际含义处理。",
+      "contexts": [
+        { "text": "The cell divided during the experiment.", "expected": "实验过程中该细胞发生了分裂。" },
+        { "text": "The prisoner returned to his cell.", "expected": "囚犯回到了牢房。" }
+      ]
+    },
+    {
+      "source": "model", "target": "模型", "category": "计算机",
+      "note": "计算、统计及机器学习中优先用模型；时装展示者应译为模特。",
+      "contexts": [
+        { "text": "The statistical model predicted the outcome.", "expected": "统计模型预测了结果。" },
+        { "text": "The fashion model walked onto the runway.", "expected": "时装模特走上了伸展台。" }
+      ]
+    }
+  ]
+}

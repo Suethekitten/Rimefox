@@ -86,9 +86,9 @@ t('parseGlossaryCsv：引号里的逗号 / 换行 / 双引号', () => {
   ]);
 });
 
-t('parseGlossaryCsv：第三列是分类，第四列忽略，缺列跳过', () => {
+t('parseGlossaryCsv：表头明确指定说明列，缺列跳过', () => {
   const text = 'source,target,category,note\nCamouflage,涂装,战争雷霆,涂装样式\nOnlySource\n';
-  assert.deepEqual(parseGlossaryCsv(text), [{ source: 'Camouflage', target: '涂装', category: '战争雷霆' }]);
+  assert.deepEqual(parseGlossaryCsv(text), [{ source: 'Camouflage', target: '涂装', category: '战争雷霆', note: '涂装样式' }]);
 });
 
 t('toGlossaryCsv：往返一致，含逗号的单元格加引号', () => {
@@ -97,7 +97,7 @@ t('toGlossaryCsv：往返一致，含逗号的单元格加引号', () => {
     { source: 'say "hi"', target: '说“嗨”' }
   ];
   const csv = toGlossaryCsv(list);
-  assert.match(csv, /^source,target,category\n/);
+  assert.match(csv, /^source,target,category,note\n/);
   assert.match(csv, /"Hello, world",你好，世界/);
   assert.deepEqual(parseGlossaryCsv(csv), list);
 });
