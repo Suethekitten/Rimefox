@@ -8,6 +8,8 @@ export function fillSelect(select, items) {
     const opt = document.createElement('option');
     opt.value = item.value;
     opt.textContent = item.label;
+    if (item.title) opt.title = item.title;
+    if (item.skipI18n) opt.setAttribute('data-i18n-skip', '1');
     if (item.disabled) opt.disabled = true;
     select.appendChild(opt);
   });

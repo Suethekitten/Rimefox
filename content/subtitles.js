@@ -72,7 +72,9 @@
       track.failedAt = [];
       track.warned = false;
       if (next && next.target !== undefined) track.target = next.target;
+      if (next && next.targetCode !== undefined) track.targetCode = next.targetCode;
       if (next && next.style !== undefined) track.style = next.style;
+      if (next && next.intensity !== undefined) track.intensity = next.intensity;
       if (next && next.key !== undefined) track.key = next.key;
       shown = '';
       shownOverlay = null;
@@ -108,7 +110,7 @@
 
       // 字幕本来就是目标语言：照样解析、留着轨道，只是不接管（tick 里交还原生字幕）；
       // 用户之后改了目标语言就能直接接着翻，不用等 YouTube 再请求一次
-      var key = [p.v, lang, p.kind, env.target()].join('|');
+      var key = [p.v, lang, p.kind, env.target(), env.targetCode ? env.targetCode() : env.target()].join('|');
       if (track && track.key === key) return; // 播放器重复拉同一条轨道（拖动进度时会）
 
       var json;
@@ -126,7 +128,9 @@
         lang: lang,
         kind: p.kind,
         target: env.target(),
+        targetCode: env.targetCode ? env.targetCode() : env.target(),
         style: env.styleId(),
+        intensity: env.intensity ? env.intensity() : 'standard',
         units: units,
         trans: new Array(units.length),
         failedAt: [],
@@ -145,8 +149,8 @@
     function pump(nowMs) {
       if (!track) return;
       if (!env.enabled()) return;
-      if (track.target !== env.target() || track.style !== env.styleId()) return; // 由 tick 先失效
-      if (subs.sameLanguage(track.lang, track.target)) return; // 字幕本来就是目标语言：不翻
+      if (track.target !== env.target() || track.targetCode !== (env.targetCode ? env.targetCode() : env.target()) || track.style !== env.styleId() || track.intensity !== (env.intensity ? env.intensity() : 'standard')) return; // 由 tick 先失效
+      if (subs.sameLanguage(track.lang, env.targetCode ? env.targetCode() : env.target())) return; // 字幕本来就是目标语言：不翻
       if (track.inflight > 0) return; // 只限制同一代任务；旧视频/旧语言的请求不算
 
       var units = track.units;
@@ -180,7 +184,9 @@
       var mine = track;
       var gen = mine.gen;
       var batchStyle = mine.style;
+      var batchIntensity = mine.intensity;
       var batchTarget = mine.target;
+      var batchTargetCode = mine.targetCode;
       mine.inflight += 1;
       batch.forEach(function (i) {
         mine.pending[i] = true;
@@ -188,14 +194,16 @@
 
       var request;
       try {
-        request = env.send({
+        var requestMessage = {
           type: 'translate',
           texts: batch.map(function (i) {
             return mine.units[i].text;
           }),
           target: batchTarget,
           style: batchStyle
-        });
+        };
+        if (batchStyle !== 'plain') requestMessage.intensity = batchIntensity;
+        request = env.send(requestMessage);
       } catch (err) {
         request = Promise.reject(err);
       }
@@ -204,7 +212,7 @@
         .then(
           function (res) {
             // 代际/轨道/语言/风格任何一项变了，结果都作废；旧视频的请求不能污染新视频
-            if (track !== mine || mine.gen !== gen || mine.target !== batchTarget || mine.style !== batchStyle) return;
+            if (track !== mine || mine.gen !== gen || mine.target !== batchTarget || mine.targetCode !== batchTargetCode || mine.style !== batchStyle || mine.intensity !== batchIntensity) return;
             var results = (res && res.results) || [];
             batch.forEach(function (i, k) {
               var value = results[k];
@@ -217,7 +225,7 @@
             }
           },
           function () {
-            if (track !== mine || mine.gen !== gen || mine.target !== batchTarget || mine.style !== batchStyle) return;
+            if (track !== mine || mine.gen !== gen || mine.target !== batchTarget || mine.targetCode !== batchTargetCode || mine.style !== batchStyle || mine.intensity !== batchIntensity) return;
             batch.forEach(function (i) {
               mine.failedAt[i] = now();
             });
@@ -375,11 +383,15 @@
           key: [track.v, track.lang, track.kind, tgt].join('|')
         });
       }
+      var code = env.targetCode ? env.targetCode() : env.target();
+      if (track.targetCode !== code) invalidate({ targetCode: code });
       var style = env.styleId();
       if (track.style !== style) invalidate({ style: style });
+      var strength = env.intensity ? env.intensity() : 'standard';
+      if (track.intensity !== strength) invalidate({ intensity: strength });
 
       // 字幕本来就是目标语言：不接管，交还原生字幕；改回别的语言时上面的 invalidate 会重新调度
-      if (subs.sameLanguage(track.lang, tgt)) {
+      if (subs.sameLanguage(track.lang, env.targetCode ? env.targetCode() : env.target())) {
         render(null);
         return;
       }
@@ -454,10 +466,20 @@
     return DT.state.target || cfg().targetLang || 'zh-CN';
   }
 
-  // 当前页面的趣味风格（弹窗里选的，只对当前页生效）
+  // 字幕轨道语言是 BCP 47；自定义语言的内部 id 不能拿去比较，用后台下发的 code。
+  function targetCode() {
+    return (DT.state && DT.state.targetCode) || target();
+  }
+
+  // 当前页面实际生效的趣味风格（选而未应用的风格不在此列；字幕跟随整页，避免同页两种文风）
   function styleId() {
     var s = DT.state && DT.state.style;
     return DT.STYLE_IDS && DT.STYLE_IDS.indexOf(s) >= 0 ? s : 'plain';
+  }
+
+  function intensity() {
+    if (styleId() === 'plain') return 'standard';
+    return DT.normalizeIntensity ? DT.normalizeIntensity(DT.state && DT.state.intensity) : 'standard';
   }
 
   function currentVideoId() {
@@ -470,7 +492,9 @@
     source: source,
     enabled: enabled,
     target: target,
+    targetCode: targetCode,
     styleId: styleId,
+    intensity: intensity,
     videoId: currentVideoId,
     now: function () {
       return Date.now();

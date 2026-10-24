@@ -316,6 +316,58 @@
       check('reserved:protected-source-fails-closed', literalUnit.inlineIssue === 'reserved-marker-source' && !ok && literalWrites.length === 0 && literal.outerHTML === literalBefore && sameNodes(literalNodes, allNodes(literal)), JSON.stringify(literalUnit.injectResult));
       DT.restore(); literal.remove();
 
+      // QA P2-1：段落内控件标签不能被仅译文清空；标签保留、按钮仍可见、译文写在控件外。
+      var controls = document.createElement('p');
+      controls.appendChild(document.createTextNode('Press '));
+      var controlButton = document.createElement('button');
+      controlButton.type = 'button';
+      controlButton.textContent = 'Continue';
+      controls.appendChild(controlButton);
+      controls.appendChild(document.createTextNode(' when the upload finishes.'));
+      box.appendChild(controls);
+      var controlBefore = controls.outerHTML, controlNodes = allNodes(controls);
+      var controlUnit = collect(controls)[0];
+      var controlWire = controlUnit && (controlUnit.wire || controlUnit.text) || '';
+      var controlValue = controlWire
+        .replace('Press ', '按下 ')
+        .replace(' when the upload finishes.', '，等待上传完成。');
+      var controlOk = controlUnit && inject(controlUnit, controlValue);
+      var controlAfter = controls.querySelector('button');
+      check(
+        'visual:control-label-preserved',
+        controlOk && controlAfter && controlAfter.textContent === 'Continue' && controlAfter.getClientRects().length > 0 && controls.textContent.indexOf('按下') >= 0,
+        controlUnit ? JSON.stringify({ wire: controlUnit.wire, result: controlUnit.injectResult }) : 'no-unit'
+      );
+      DT.restore();
+      check('visual:control-exact-restore', controls.outerHTML === controlBefore && sameNodes(controlNodes, allNodes(controls)));
+      controls.remove();
+
+      // QA P2-2：带背景 / 边框的局部 strong 译后不能留下空药丸；原格式元素事务内隐藏，可精确恢复。
+      var decorated = document.createElement('p');
+      decorated.innerHTML = 'Status <strong style="background:#ffe0e0;border:1px solid #c00;padding:2px 6px">critical</strong> now.';
+      box.appendChild(decorated);
+      var decoratedBefore = decorated.outerHTML, decoratedNodes = allNodes(decorated);
+      var decoratedUnit = collect(decorated)[0];
+      var decoratedValue = translated(decoratedUnit, [['Status ', '状态 '], ['critical', '关键'], [' now.', '现在。']]);
+      var decoratedOk = inject(decoratedUnit, decoratedValue);
+      var sourceShell = decoratedUnit.formats && decoratedUnit.formats[0] && decoratedUnit.formats[0].el;
+      var sourceRect = sourceShell ? sourceShell.getBoundingClientRect() : null;
+      var sourceDisplay = sourceShell ? getComputedStyle(sourceShell).display : '';
+      var newShells = decorated.querySelectorAll('[data-dt-format]');
+      check(
+        'visual:decorated-source-empty-shell-hidden',
+        decoratedOk && sourceShell && sourceDisplay === 'none' && sourceRect && sourceRect.width === 0 && sourceRect.height === 0,
+        JSON.stringify({ display: sourceDisplay, rect: sourceRect && [sourceRect.width, sourceRect.height], text: sourceShell && sourceShell.textContent, kids: sourceShell && sourceShell.children.length, result: decoratedUnit && decoratedUnit.injectResult })
+      );
+      check(
+        'visual:translated-format-shell-kept',
+        newShells.length > 0 && newShells[0].textContent.indexOf('关键') >= 0,
+        decorated.outerHTML.slice(0, 500)
+      );
+      DT.restore();
+      check('visual:decorated-exact-restore', decorated.outerHTML === decoratedBefore && sameNodes(decoratedNodes, allNodes(decorated)));
+      decorated.remove();
+
       // Each simple formatted paragraph produces nine transaction operations.
       // Keeping completed operations below 4000, then adding 255 more records,
       // puts a write fault across the historical 5000-operation compaction edge.

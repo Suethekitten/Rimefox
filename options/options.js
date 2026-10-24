@@ -2,8 +2,13 @@ import {
   DEFAULTS,
   getConfig,
   saveConfig,
-  LANGUAGES,
   THEMES,
+  languageOptions,
+  normalizeCustomLanguages,
+  customLanguageError,
+  makeCustomLanguageId,
+  mergeCustomLanguageLists,
+  normalizeIntensity,
   IS_MAC,
   hotkeyLabel,
   browserShortcut,
@@ -20,7 +25,7 @@ import {
 import { listModels, engineList } from '../lib/provider.js';
 import { providerById } from '../lib/providers.js';
 import { $, fillSelect, setResult } from './ui.js';
-import { applyI18n } from '../lib/i18n.js';
+import { applyI18n, t } from '../lib/i18n.js';
 import { applyUiTheme, applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig, runWhenIdle } from '../lib/ui-appearance.js';
 import { normalizeHosts } from '../lib/site-rules.js';
 import {
@@ -71,6 +76,11 @@ const fields = {
   thinkingExtra: $('thinkingExtra'),
   customPrompt: $('customPrompt'),
   targetLang: $('targetLang'),
+  customLangName: $('customLangName'),
+  customLangCode: $('customLangCode'),
+  customLangNote: $('customLangNote'),
+  funIntensity: $('funIntensity'),
+  aiContextEnabled: $('aiContextEnabled'),
   theme: $('theme'),
   batchSize: $('batchSize'),
   maxCharsPerBatch: $('maxCharsPerBatch'),
@@ -352,6 +362,188 @@ function updateThinkingUI() {
   $('thinkingExtraField').hidden = fields.thinkingMode.value !== 'custom';
 }
 
+// ---------------- 自定义目标语言（表单内编辑，点「保存」才落盘） ----------------
+let draftLanguages = [];
+let editingLanguageId = '';
+
+function languageSelectItems() {
+  return languageOptions(draftLanguages).map((one) => ({
+    value: one.value,
+    // 内置语言名走界面词典；自定义名称是用户数据，保持原文并跳过 i18n。
+    label: one.kind === 'custom' ? one.label : t(one.label),
+    title: one.code && one.kind === 'custom' ? one.code : '',
+    skipI18n: one.kind === 'custom'
+  }));
+}
+
+function refreshLanguageSelects() {
+  const targetValue = fields.targetLang.value;
+  const inputValue = fields.inputTargetLang.value;
+  const items = languageSelectItems();
+  fillSelect(fields.targetLang, items);
+  fillSelect(fields.inputTargetLang, [{ value: 'auto', label: t('跟随页面语言') }].concat(items));
+  const has = (value) => items.some((one) => one.value === value);
+  fields.targetLang.value = has(targetValue) ? targetValue : (has('zh-CN') ? 'zh-CN' : items[0] && items[0].value);
+  fields.inputTargetLang.value = inputValue === 'auto' || has(inputValue) ? inputValue : 'auto';
+}
+
+function languageResult(text, kind) {
+  const node = $('customLangResult');
+  node.textContent = text || '';
+  node.classList.remove('ok', 'bad');
+  if (kind) node.classList.add(kind);
+}
+
+function renderCustomLanguages() {
+  const list = $('customLangList');
+  list.textContent = '';
+  if (!draftLanguages.length) {
+    const empty = document.createElement('div');
+    empty.className = 'custom-lang-empty';
+    empty.textContent = t('还没有自定义语言。添加后会出现在整页翻译、输入框翻译和弹窗的语言选择器里。');
+    list.appendChild(empty);
+    return;
+  }
+  draftLanguages.forEach((one) => {
+    const row = document.createElement('div');
+    row.className = 'custom-lang-item';
+    row.dataset.customLangId = one.id;
+    const main = document.createElement('div');
+    main.className = 'custom-lang-item-main';
+    const name = document.createElement('span');
+    name.className = 'custom-lang-name';
+    name.setAttribute('data-i18n-skip', '1');
+    name.textContent = one.name;
+    main.appendChild(name);
+    if (one.code) {
+      const code = document.createElement('span');
+      code.className = 'custom-lang-code';
+      code.setAttribute('data-i18n-skip', '1');
+      code.textContent = one.code;
+      main.appendChild(code);
+    }
+    if (one.note) {
+      const note = document.createElement('span');
+      note.className = 'custom-lang-note';
+      note.setAttribute('data-i18n-skip', '1');
+      note.textContent = one.note;
+      main.appendChild(note);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'custom-lang-item-actions';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'btn soft';
+    edit.textContent = t('编辑');
+    edit.addEventListener('click', () => editCustomLanguage(one.id));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn danger';
+    del.textContent = t('删除');
+    del.addEventListener('click', () => deleteCustomLanguage(one.id));
+    actions.appendChild(edit);
+    actions.appendChild(del);
+    row.appendChild(main);
+    row.appendChild(actions);
+    list.appendChild(row);
+  });
+}
+
+function resetCustomLanguageForm() {
+  editingLanguageId = '';
+  fields.customLangName.value = '';
+  fields.customLangCode.value = '';
+  fields.customLangNote.value = '';
+  $('customLangSave').textContent = t('添加');
+  $('customLangCancel').hidden = true;
+  languageResult('');
+}
+
+function editCustomLanguage(id) {
+  const one = draftLanguages.find((row) => row.id === id);
+  if (!one) return;
+  editingLanguageId = id;
+  fields.customLangName.value = one.name;
+  fields.customLangCode.value = one.code || '';
+  fields.customLangNote.value = one.note || '';
+  $('customLangSave').textContent = t('保存修改');
+  $('customLangCancel').hidden = false;
+  languageResult(t('正在编辑「' + one.name + '」'));
+  fields.customLangName.focus();
+}
+
+function deleteCustomLanguage(id) {
+  const one = draftLanguages.find((row) => row.id === id);
+  if (!one) return;
+  draftLanguages = draftLanguages.filter((row) => row.id !== id);
+  let message = '已删除「' + one.name + '」';
+  if (fields.targetLang.value === id) {
+    fields.targetLang.value = DEFAULTS.targetLang;
+    message += '；目标语言已回到' + (languageSelectItems().find((x) => x.value === DEFAULTS.targetLang) || {}).label;
+  }
+  if (fields.inputTargetLang.value === id) {
+    fields.inputTargetLang.value = 'auto';
+    message += '；输入框目标语言已回到跟随页面语言';
+  }
+  if (editingLanguageId === id) resetCustomLanguageForm();
+  refreshLanguageSelects();
+  renderCustomLanguages();
+  languageResult(t(message + '（点「保存」后生效）'), 'ok');
+  scheduleDirty();
+}
+
+function languageErrorText(code) {
+  const map = {
+    bad_value: '语言信息格式不正确',
+    bad_id: '语言内部 ID 无效',
+    name_required: '请填写显示名称',
+    name_too_long: '显示名称不能超过 40 个字符',
+    code_too_long: '语言代码不能超过 35 个字符',
+    bad_code: '语言代码不是有效的 BCP 47 标签',
+    note_too_long: '翻译说明不能超过 300 个字符',
+    duplicate_name: '已有同名语言',
+    duplicate_code: '已有相同语言代码',
+    full: '最多添加 20 种自定义语言'
+  };
+  return t(map[code] || '语言信息不合法');
+}
+
+function saveCustomLanguage() {
+  const entry = {
+    id: editingLanguageId || makeCustomLanguageId(draftLanguages),
+    name: fields.customLangName.value,
+    code: fields.customLangCode.value,
+    note: fields.customLangNote.value
+  };
+  const error = customLanguageError(entry, draftLanguages, { ignoreId: editingLanguageId });
+  if (error) {
+    languageResult(languageErrorText(error), 'bad');
+    return;
+  }
+  draftLanguages = normalizeCustomLanguages(
+    editingLanguageId
+      ? draftLanguages.map((row) => (row.id === editingLanguageId ? entry : row))
+      : draftLanguages.concat(entry)
+  );
+  refreshLanguageSelects();
+  renderCustomLanguages();
+  resetCustomLanguageForm();
+  languageResult(t('已加入表单；点「保存」后生效'), 'ok');
+  scheduleDirty();
+}
+
+
+function activeIntensity() {
+  const active = fields.funIntensity.querySelector('button.active');
+  return normalizeIntensity(active && active.dataset.intensity);
+}
+
+function renderIntensity(value) {
+  const wanted = normalizeIntensity(value);
+  fields.funIntensity.querySelectorAll('button').forEach((button) => {
+    button.classList.toggle('active', button.dataset.intensity === wanted);
+  });
+}
 function applyConfig(cfg) {
   refreshProviderList();
 
@@ -366,7 +558,14 @@ function applyConfig(cfg) {
   fields.thinkingExtra.value = cfg.thinkingExtra || '';
   fields.customPrompt.value = cfg.customPrompt || '';
 
+  draftLanguages = normalizeCustomLanguages(cfg.customLanguages);
+  editingLanguageId = '';
+  refreshLanguageSelects();
   fields.targetLang.value = cfg.targetLang || 'zh-CN';
+  fields.inputTargetLang.value = cfg.inputTargetLang || 'auto';
+  renderCustomLanguages();
+  renderIntensity(cfg.funIntensity);
+  fields.aiContextEnabled.checked = cfg.aiContextEnabled === true;
   fields.theme.value = cfg.theme || 'underline';
   fields.batchSize.value = cfg.batchSize;
   fields.maxCharsPerBatch.value = cfg.maxCharsPerBatch;
@@ -374,7 +573,6 @@ function applyConfig(cfg) {
   fields.concurrency.value = cfg.concurrency;
   setHotkeyValue(cfg.hotkey);
   setInputHotkeyValue(cfg.inputHotkey);
-  fields.inputTargetLang.value = cfg.inputTargetLang || 'auto';
   fields.skipSameLang.checked = cfg.skipSameLang !== false;
   fields.translateOnLoad.checked = !!cfg.translateOnLoad;
   fields.lazy.checked = cfg.lazy !== false;
@@ -460,6 +658,9 @@ function readForm() {
     customPrompt: fields.customPrompt.value.trim().slice(0, 2000),
 
     targetLang: fields.targetLang.value,
+    customLanguages: draftLanguages.map((one) => ({ ...one })),
+    funIntensity: activeIntensity(),
+    aiContextEnabled: fields.aiContextEnabled.checked,
     theme: fields.theme.value,
     uiTheme: fields.uiTheme.value,
     uiLang: fields.uiLang.value,
@@ -880,9 +1081,7 @@ async function init() {
   refreshProviderList();
   fillSelect(fields.engine, engineList().map((e) => ({ value: e.id, label: e.label })));
   fillSelect(fields.thinkingMode, THINKING_MODES);
-  fillSelect(fields.targetLang, LANGUAGES);
   fillSelect(fields.theme, THEMES);
-  fillSelect(fields.inputTargetLang, [{ value: 'auto', label: '跟随页面语言' }].concat(LANGUAGES));
   hotkeyRecorder.render();
   inputHotkeyRecorder.render();
   const cfg = await getConfig();
@@ -939,6 +1138,12 @@ $('save').addEventListener('click', async () => {
     setResult($('saveResult'), err.message, 'bad');
     return;
   }
+  // 语言列表 / 目标语言可能被 mergeConfig 清洗或回退：以保存后的结果为准，避免表单还显示无效值。
+  draftLanguages = normalizeCustomLanguages(currentCfg.customLanguages);
+  refreshLanguageSelects();
+  fields.targetLang.value = currentCfg.targetLang;
+  fields.inputTargetLang.value = currentCfg.inputTargetLang;
+  renderCustomLanguages();
   rememberSaved(currentCfg);
   markSaved(currentCfg);
   glossaryEditor.render(); // 清洗后的结果（去空行 / 去重）反映到表格
@@ -952,7 +1157,9 @@ $('reset').addEventListener('click', () => {
   currentCfg = mergeConfig(currentCfg, {
     ...DEFAULTS,
     currentProvider: currentCfg.currentProvider,
-    customProviders: (currentCfg && currentCfg.customProviders) || []
+    customProviders: (currentCfg && currentCfg.customProviders) || [],
+    // 自定义语言是用户数据，恢复默认只恢复翻译 / 显示设置，不能把它清掉。
+    customLanguages: draftLanguages
   });
   applyConfig(currentCfg);
   updateDirty();
@@ -1186,8 +1393,20 @@ $('importFile').addEventListener('change', async (event) => {
       throw new Error('不是合法的 JSON 文件');
     }
 
-    const parsed = pickImportedConfig(raw);
+    const parsed = pickImportedConfig(raw, {
+      currentLanguages: (currentCfg && currentCfg.customLanguages) || []
+    });
     const patch = parsed.config;
+    // 语言按 id 合并：文件里的同 id 语言更新，本机独有的语言保留，不因一次导入被清掉。
+    let droppedLanguages = 0;
+    if (patch.customLanguages) {
+      const beforeIds = new Set(
+        ((currentCfg && currentCfg.customLanguages) || []).concat(patch.customLanguages).map((one) => one.id)
+      );
+      const merged = mergeCustomLanguageLists((currentCfg && currentCfg.customLanguages) || [], patch.customLanguages);
+      droppedLanguages = Array.from(beforeIds).filter((id) => !merged.some((one) => one.id === id)).length;
+      patch.customLanguages = merged;
+    }
     if (patch.glossary) patch.glossary = mergeGlossaryEntries((currentCfg && currentCfg.glossary) || [], patch.glossary, { noteUpdates: parsed.glossaryNoteUpdates, replace: true });
     // 自定义服务商按列表决定去留：补进本机已有的，不让导入顺带删掉它们
     if (patch.customProviders) {
@@ -1204,6 +1423,13 @@ $('importFile').addEventListener('change', async (event) => {
     if (fields.baseUrl.value && fields.apiKey.value) fetchModels();
 
     let msg = '已导入 ' + Object.keys(patch).length + ' 项设置';
+    // 自定义目标语言在合并 / 清洗后可能不可用：明确告诉用户回退到了哪里，不能静默变成空值。
+    if (patch.targetLang && next.targetLang !== patch.targetLang) {
+      msg += '；目标语言不可用，已回到' + (languageSelectItems().find((x) => x.value === next.targetLang) || {}).label;
+    }
+    if (droppedLanguages > 0) {
+      msg += '；' + droppedLanguages + ' 个自定义语言因重名或数量上限未导入';
+    }
     if (parsed.rejected.length) {
       msg += '；' + parsed.rejected.length + ' 项取值不合法已忽略（' + parsed.rejected.join('、') + '）';
     }
@@ -1215,6 +1441,25 @@ $('importFile').addEventListener('change', async (event) => {
   } catch (err) {
     setResult($('cfgResult'), '导入失败：' + err.message, 'bad');
   }
+});
+
+// 自定义语言：表单内增删改，点「保存」才写入配置。
+$('customLangSave').addEventListener('click', saveCustomLanguage);
+$('customLangCancel').addEventListener('click', () => {
+  resetCustomLanguageForm();
+  languageResult(t('已取消编辑'));
+});
+fields.customLangName.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    saveCustomLanguage();
+  }
+});
+fields.funIntensity.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-intensity]');
+  if (!button) return;
+  renderIntensity(button.dataset.intensity);
+  scheduleDirty();
 });
 
 init();

@@ -64,14 +64,31 @@ t('英文目标：中文里夹足够多英文 → 放行', () => {
   assert.equal(looksForeignForTarget('这是 API 返回的错误信息，please check the GitHub issue 或者 README 文档后再试。', 'en'), false);
 });
 
-t('其它拉丁字母目标（fr / de / es / pt）同样适用；中文 / 日文目标不判', () => {
+t('其它拉丁字母目标（fr / de / es / pt）同样适用；正常中文 / 日文目标不判', () => {
   assert.equal(looksForeignForTarget(ZH_PROSE, 'fr'), true);
   assert.equal(looksForeignForTarget(ZH_PROSE, 'de'), true);
   assert.equal(looksForeignForTarget(ZH_PROSE, 'es'), true);
   assert.equal(looksForeignForTarget(ZH_PROSE, 'pt-BR'), true);
   assert.equal(looksForeignForTarget(ZH_PROSE, 'zh-CN'), false);
   assert.equal(looksForeignForTarget(ZH_PROSE, 'ja'), false);
-  assert.equal(looksForeignForTarget(EN_PROSE, 'zh-CN'), false);
+});
+
+t('中日韩目标：整段英文回包 → 判为异常（不写缓存）', () => {
+  assert.equal(looksForeignForTarget(EN_PROSE, 'zh-CN'), true);
+  assert.equal(looksForeignForTarget(EN_PROSE, 'zh-TW'), true);
+  assert.equal(looksForeignForTarget(EN_PROSE, 'ja'), true);
+  assert.equal(looksForeignForTarget(EN_PROSE, 'ko'), true);
+});
+
+t('中日韩目标：短英文 / 无句末标点 / 中英混排不误杀', () => {
+  assert.equal(looksForeignForTarget('Continue', 'zh-CN'), false);
+  assert.equal(looksForeignForTarget('This is a short English label', 'zh-CN'), false);
+  assert.equal(looksForeignForTarget('This is a long English sentence without a final punctuation mark that should still be treated conservatively', 'zh-CN'), false);
+  assert.equal(
+    looksForeignForTarget('这是 API 返回的错误信息，please check the GitHub issue 或者 README 文档后再试。', 'zh-CN'),
+    false
+  );
+  assert.equal(looksForeignForTarget('正常中文译文，保留 GitHub、API、COVID-19 等专名和缩写。', 'zh-CN'), false);
 });
 
 t('空值 / 非字符串 / 坏目标语言：不抛异常，一律放行', () => {

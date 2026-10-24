@@ -14,8 +14,16 @@
     enabled: false,
     mode: 'dual',
     theme: 'underline',
-    target: 'zh-CN',
-    style: 'plain', // 趣味翻译：只对当前页生效（弹窗选），还原后回到 plain
+    target: 'zh-CN', // 当前页面译文实际使用的目标语言
+    configTarget: null, // 配置里待生效的目标语言（删除在用语言回退时可能与 target 不同）
+    targetPending: false, // 配置目标已变，但页面仍有旧目标译文，等用户明确重译
+    langInfo: null, // 当前页面实际使用语言的元数据（内部 id 与 BCP 47 code 分开）
+    configLangInfo: null, // 配置里待生效语言的元数据
+    contextStale: false, // AI 精翻上下文已更新，但现有译文仍用旧上下文；重译后清掉
+    style: 'plain', // 当前实际生效的趣味风格（只对当前页生效）
+    selectedStyle: 'plain', // 用户在弹窗里选中、尚未应用的风格
+    intensity: 'standard', // 当前页面实际生效的趣味强度
+    contextStatus: null, // AI 精翻只记录模式 / 条数，不记录上下文正文
     config: null,
     total: 0,
     translated: 0,
@@ -25,6 +33,27 @@
   // 趣味翻译风格的 id（文案与提示词在 lib/config.js 的 STYLES，内容脚本只认 id）
   DT.STYLE_IDS = ['plain', 'classical', 'catgirl'];
   DT.STYLE_MIN_CHARS = 12;
+  // 风格强度 id（提示词在 lib/config.js 的 FUN_INTENSITIES；内容脚本只认 id）
+  DT.INTENSITY_IDS = ['light', 'standard', 'exaggerated'];
+  DT.normalizeIntensity = function (id) {
+    var value = String(id == null ? '' : id).trim();
+    return DT.INTENSITY_IDS.indexOf(value) >= 0 ? value : 'standard';
+  };
+
+  // 自定义目标语言的配置值（cl_…）不是 BCP 47：方向 / 字体 / lang 属性只拿后台下发的 code。
+  DT.langCode = function (lang) {
+    var value = String(lang == null ? '' : lang);
+    var info = DT.state && DT.state.langInfo;
+    if (info && info.value === DT.state.target && (!value || value === DT.state.target)) return String(info.code || '');
+    return value;
+  };
+
+  // 当前目标语言的元数据：只有 value 与当前 target 对得上才算数，避免弹窗 setTarget
+  // 与配置广播之间的窗口把旧语言的 code 用到新一轮。
+  DT.targetInfo = function () {
+    var info = DT.state && DT.state.langInfo;
+    return info && info.value === DT.state.target ? info : null;
+  };
 
   // 这个单元按什么风格翻：只改写正文里够长的段落；导航、按钮、短标签照常普通翻译，
   // 免得菜单也变成文言文 / 带「喵」。area 是 DT.areaOf 的结果
@@ -281,36 +310,52 @@
   // 规则：要同时满足「CJK 占绝对多数」且「拉丁字母很少」才算已达标；
   // 另外必须排除假名 / 谚文 —— 日文常混大量汉字（「進捗状況」「無料」），
   // 只看汉字比例会把日文判成中文，然后被"跳过已是目标语言"漏掉。
-  DT.looksLikeTarget = function (text, lang) {
+  // info（可选）= 后台 config:get 的 activeLanguage：{ kind, code, detect, script, cjk }。
+  // 自定义语言的 detect 只有 zh / ja / ko / en 这类高置信度才参与「已是目标语言」判定；
+  // yue / lzh / wuu / 未知代码一律 none —— 宁可多翻，也不因误判跳过本应翻译的文字。
+  function detectOf(code, info) {
+    if (info && info.value === code && info.detect) return info.detect;
+    var s = String(code || '');
+    if (s.indexOf('zh') === 0 || s.indexOf('cmn') === 0) return 'zh';
+    if (s.indexOf('ja') === 0) return 'ja';
+    if (s.indexOf('ko') === 0) return 'ko';
+    if (s.indexOf('en') === 0) return 'en';
+    return 'none';
+  }
+
+  DT.looksLikeTarget = function (text, lang, info) {
     if (!text) return false;
     var letters = (text.match(/\p{L}/gu) || []).length;
     if (letters < 4) return false;
 
     var code = String(lang || '');
+    var detect = detectOf(code, info);
+    if (detect === 'none') return false; // 没有高置信度识别：安全降级为照常翻译
+    var scriptCode = info && info.code ? String(info.code) : code;
     var cjk = (text.match(/[\u3400-\u9fff]/g) || []).length;
     var kana = (text.match(/[\u3040-\u30ff]/g) || []).length;
     var hangul = (text.match(/[\uac00-\ud7af\u1100-\u11ff]/g) || []).length;
     var latin = (text.match(/[A-Za-z]/g) || []).length;
 
-    if (code.indexOf('zh') === 0) {
+    if (detect === 'zh') {
       if (kana > 0 || hangul > 0) return false; // 有假名/谚文就不是中文
       if (cjk / letters <= 0.75) return false;
       if (latin / letters > 0.15) return false;
-      return !wrongScript(text, code); // 简体 ≠ 繁体：简体页面选了繁體中文也要翻
+      return !wrongScript(text, scriptCode); // 简体 ≠ 繁体：简体页面选了繁體中文也要翻
     }
-    if (code.indexOf('ja') === 0) {
+    if (detect === 'ja') {
       if (kana === 0) return false; // 没有假名的不当日语（否则中文会被判成"已是日语"）
       if ((kana + cjk) / letters <= 0.6) return false;
       if (latin / letters > 0.2) return false;
       return true;
     }
-    if (code.indexOf('ko') === 0) {
+    if (detect === 'ko') {
       if (hangul === 0) return false; // 没有谚文的不当韩语
       if (hangul / letters <= 0.6) return false;
       if (latin / letters > 0.2) return false;
       return true;
     }
-    if (code.indexOf('en') === 0) {
+    if (detect === 'en') {
       return latin / letters > 0.9;
     }
     return false;
@@ -320,7 +365,7 @@
   // 这段文字是不是「主要已经是目标语言」：比 looksLikeTarget 宽松（中英混排也算），只给近似重复闸门用。
   // 收集阶段不能用它 —— 中英混排的段落会被当成已是中文整段不翻（HANDOFF 记过的坑）。
   // 中文目标同样排除假名 / 谚文：日文原文和中文译文共用大量汉字，相似度会虚高
-  DT.isMostlyTargetLanguage = function (text, lang) {
+  DT.isMostlyTargetLanguage = function (text, lang, info) {
     var s = String(text || '');
     var letters = (s.match(/\p{L}/gu) || []).length;
     if (letters < 4) return false;
@@ -328,9 +373,11 @@
     var kana = (s.match(/[\u3040-\u30ff]/g) || []).length;
     var hangul = (s.match(/[\uac00-\ud7af\u1100-\u11ff]/g) || []).length;
     var code = String(lang || '');
-    if (code.indexOf('zh') === 0) return kana === 0 && hangul === 0 && han / letters >= 0.4 && !wrongScript(s, code);
-    if (code.indexOf('ja') === 0) return kana > 0 && (kana + han) / letters >= 0.4;
-    if (code.indexOf('ko') === 0) return hangul / letters >= 0.4;
+    var detect = detectOf(code, info);
+    var scriptCode = info && info.code ? String(info.code) : code;
+    if (detect === 'zh') return kana === 0 && hangul === 0 && han / letters >= 0.4 && !wrongScript(s, scriptCode);
+    if (detect === 'ja') return kana > 0 && (kana + han) / letters >= 0.4;
+    if (detect === 'ko') return hangul / letters >= 0.4;
     return false;
   };
 
@@ -362,11 +409,11 @@
   // （GitHub 提交列表里 "feat: 界面美化" 被改成 "新功能: 界面美化"）—— 插进去就是一行几乎一样的字。
   // 原文不是目标语言时只认完全相同：Settings → 设置（Settings）这类合法译文和原文很像，不能误杀
   DT.NEAR_DUP_THRESHOLD = 0.75;
-  DT.isNearDuplicate = function (source, output, lang) {
+  DT.isNearDuplicate = function (source, output, lang, info) {
     var a = DT.normalizeText(source);
     var b = DT.normalizeText(output);
     if (a === b) return true;
-    return DT.isMostlyTargetLanguage(a, lang) && DT.similarity(a, b) >= DT.NEAR_DUP_THRESHOLD;
+    return DT.isMostlyTargetLanguage(a, lang, info) && DT.similarity(a, b) >= DT.NEAR_DUP_THRESHOLD;
   };
 
   // 保留区（dom.js 的 attachKeep）：段落里有 notranslate 等行内内容时，送翻文本带 <kN> 标记
@@ -536,10 +583,14 @@
 
   // 拼回译文用的分隔：换行照原样；行内切点按目标语言定——中文 / 日文句子之间不加空格，其它语言加一个空格。
   // 原文切点有没有空白不能照搬：中文原文译成英文，句子之间要有空格；英文原文译成中文则不要
-  DT.translationSeps = function (seps, target) {
-    var cjk = /^(zh|ja)/i.test(String(target || ''));
+  DT.translationSeps = function (seps, target, info) {
+    var custom = info && info.kind === 'custom';
+    var cjk = custom ? info.cjk === true : /^(zh|ja)/i.test(String(target || ''));
     return (seps || []).map(function (sep) {
-      return String(sep).indexOf('\n') >= 0 ? sep : cjk ? '' : ' ';
+      if (String(sep).indexOf('\n') >= 0) return sep;
+      // 没有标准代码的虚构语言：不猜测是否需要空格，保留原文切点处的空白形态。
+      if (custom && !info.code) return /\s/.test(String(sep)) ? ' ' : '';
+      return cjk ? '' : ' ';
     });
   };
 

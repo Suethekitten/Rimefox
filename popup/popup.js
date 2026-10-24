@@ -1,7 +1,7 @@
 import {
   getConfig,
   saveConfig,
-  LANGUAGES,
+  languageOptions,
   hotkeyLabel,
   KEYS,
   EXTENSIONS_PAGE,
@@ -12,7 +12,7 @@ import {
   DEFAULTS
 } from '../lib/config.js';
 import { providerById } from '../lib/providers.js';
-import { applyI18n, t } from '../lib/i18n.js';
+import { applyI18n, t, translateText } from '../lib/i18n.js';
 import { normalizeHosts, hostListed } from '../lib/site-rules.js';
 import { applyUiTheme, applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig } from '../lib/ui-appearance.js';
 import { openWelcomePage } from '../lib/welcome.js';
@@ -67,7 +67,7 @@ let injectFailed = false;
 let currentCfg = { targetLang: 'zh-CN' };
 // 浏览器实际分配的快捷键（空 = 没分配到，多半被其它扩展占用）；null = 还没查
 let shortcut = null;
-let status = { enabled: false, mode: 'dual', target: 'zh-CN', total: 0, translated: 0, failed: 0, busy: false };
+let status = { enabled: false, mode: 'dual', target: 'zh-CN', style: 'plain', selectedStyle: 'plain', intensity: 'standard', total: 0, translated: 0, failed: 0, busy: false };
 
 function sendToTab(msg) {
   return new Promise((resolve, reject) => {
@@ -183,9 +183,15 @@ function render() {
     btn.classList.toggle('active', btn.dataset.mode === status.mode);
   });
   el.styleSelect.disabled = false;
-  el.styleSelect.value = status.style || 'plain';
+  // 显示用户「选中」的风格（可能尚未应用）；实际生效风格仍在 status.style，切换下拉框不触发翻译。
+  el.styleSelect.value = status.selectedStyle || status.style || 'plain';
   el.target.disabled = false;
-  el.target.value = status.target || 'zh-CN';
+  // 删除在用语言后，配置目标（configTarget）与页面实际译文目标（target）不同：
+  // 下拉框显示待生效目标，状态的 detail 说明当前译文仍是什么。
+  const targetValue = status.targetPending && status.configTarget ? status.configTarget : (status.target || 'zh-CN');
+  if (Array.from(el.target.options).some((opt) => opt.value === targetValue)) el.target.value = targetValue;
+  else if (currentCfg && Array.from(el.target.options).some((opt) => opt.value === currentCfg.targetLang)) el.target.value = currentCfg.targetLang;
+  else if (el.target.options.length) el.target.value = el.target.options[0].value;
   renderQuickTarget();
 
   if (status.busy) {
@@ -217,6 +223,14 @@ function render() {
     const warning = t('专业翻译有 ' + status.qualityWarnings + ' 段需要核对；请对照原文确认数值与结论。');
     detail = detail ? detail + '\n' + warning : warning;
   }
+  if (status.targetPending) {
+    const pending = t('目标语言已更新；当前页面译文保持不变，点「重新翻译」后应用。');
+    detail = detail ? detail + '\n' + pending : pending;
+  }
+  if (status.contextStale) {
+    const stale = t('页面上下文已更新；已译内容保持不变，重新翻译后使用新上下文。');
+    detail = detail ? detail + '\n' + stale : stale;
+  }
   paintStatus(title, count, detail);
 }
 
@@ -225,6 +239,33 @@ function paintStatus(title, count, detail) {
   el.statusCount.textContent = count;
   el.statusCount.hidden = !count;
   el.stat.textContent = detail;
+}
+
+// 内置语言 + 用户自定义语言（同一个显示名，设置页 / 弹窗一致）。
+// 自定义名称是用户数据：不让 i18n 改写它。
+function refreshStyleLabels() {
+  STYLES.forEach((style, i) => {
+    const opt = el.styleSelect.options[i];
+    if (opt) opt.textContent = translateText(style.label);
+  });
+}
+
+function fillTargetOptions(cfg) {
+  const wanted = el.target.value || (cfg && cfg.targetLang) || (status && status.target) || 'zh-CN';
+  el.target.textContent = '';
+  let hasWanted = false;
+  languageOptions(cfg && cfg.customLanguages).forEach((lang) => {
+    const opt = document.createElement('option');
+    opt.value = lang.value;
+    opt.textContent = lang.label;
+    if (lang.kind === 'custom') {
+      opt.setAttribute('data-i18n-skip', '1');
+      if (lang.code) opt.title = lang.code;
+    }
+    if (lang.value === wanted) hasWanted = true;
+    el.target.appendChild(opt);
+  });
+  el.target.value = hasWanted ? wanted : (cfg && cfg.targetLang) || 'zh-CN';
 }
 
 // 随手翻译的目标语言提示（跟「译成」下拉框同一个值，文字已经过界面语言翻译）
@@ -478,6 +519,7 @@ function onConfigElsewhere(next) {
   syncGlassDock();
   if (currentCfg.uiLang !== langBefore) {
     applyI18n(document, currentCfg.uiLang);
+    refreshStyleLabels();
     if (glassDock) {
       glassDock.syncLabels();
       // 标签变了要换一个透镜元素，否则 Chrome 的 backdrop 纹理可能还停在旧语言。
@@ -490,6 +532,12 @@ function onConfigElsewhere(next) {
   renderNight();
   renderHover();
   renderMedical();
+  fillTargetOptions(currentCfg);
+  const shownTarget = status && status.targetPending && status.configTarget ? status.configTarget : (status && status.target);
+  if (shownTarget && Array.from(el.target.options).some((opt) => opt.value === shownTarget)) {
+    el.target.value = shownTarget;
+  }
+  render();
 }
 
 async function init() {
@@ -501,17 +549,11 @@ async function init() {
   applyUiAppearance(cfg);
   shortcut = await browserShortcut();
 
-  LANGUAGES.forEach((lang) => {
-    const opt = document.createElement('option');
-    opt.value = lang.value;
-    opt.textContent = lang.label;
-    el.target.appendChild(opt);
-  });
-  el.target.value = cfg.targetLang || 'zh-CN';
+  fillTargetOptions(cfg);
   STYLES.forEach((style) => {
     const opt = document.createElement('option');
     opt.value = style.value;
-    opt.textContent = style.label;
+    opt.textContent = translateText(style.label);
     el.styleSelect.appendChild(opt);
   });
   el.styleSelect.value = 'plain';
@@ -529,9 +571,11 @@ async function init() {
   }
 
   await refresh();
-  if (status.target) el.target.value = status.target;
+  const initialTarget = status.targetPending && status.configTarget ? status.configTarget : status.target;
+  if (initialTarget && Array.from(el.target.options).some((opt) => opt.value === initialTarget)) el.target.value = initialTarget;
   if (status.busy) startPolling();
   applyI18n(document, cfg.uiLang);
+  refreshStyleLabels();
   // 状态文案是在切语言之前拼的，重画一遍才会按新语言走
   render();
   renderMeta();
@@ -575,12 +619,15 @@ el.modeSeg.addEventListener('click', async (event) => {
   if (status && status.busy) startPolling();
 });
 
-// 趣味翻译：当前页按风格重翻（不保存到配置，还原后回到普通）
+// 趣味翻译：只记录「选中」的风格，不翻译、不重翻、不清缓存。
+// 页面已翻译时继续用当前生效风格；下次点「翻译此页」或「重新翻译」才应用。
 el.styleSelect.addEventListener('change', async () => {
+  const wanted = el.styleSelect.value;
   try {
-    status = await sendToTab({ type: 'dt:setStyle', style: el.styleSelect.value });
-    stopPolling();
+    status = await sendToTab({ type: 'dt:setStyle', style: wanted });
+    supported = true;
   } catch (err) {
+    el.styleSelect.value = status.selectedStyle || status.style || 'plain';
     el.stat.textContent = t('切换失败：') + err.message;
   }
   render();
@@ -660,7 +707,7 @@ async function runQuickTranslate() {
     const res = await sendToBg({
       type: 'translate',
       texts: [text],
-      target: (status && status.target) || currentCfg.targetLang || 'zh-CN'
+      target: (status && (status.configTarget || status.target)) || currentCfg.targetLang || 'zh-CN'
     });
     if (res && res.ok && res.results && typeof res.results[0] === 'string' && res.results[0]) {
       el.quickOut.textContent = res.results[0];
@@ -725,6 +772,7 @@ el.langToggle.addEventListener('click', async () => {
   el.langToggle.disabled = false;
   if (!saved) return;
   applyI18n(document, next);
+  refreshStyleLabels();
   if (glassDock) {
     glassDock.syncLabels();
     glassDock.reset();

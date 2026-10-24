@@ -564,17 +564,31 @@
   function keepElOf(node, root, withLinks, withRuby) {
     var found = null;
     for (var cur = node.parentNode; cur && cur !== root && cur.nodeType === 1; cur = cur.parentNode) {
-      if (isProtectedEl(cur) || isCitationEl(cur) || isMentionEl(cur) || isXrefEl(cur) || (withLinks && isPlainLinkEl(cur)) || (withRuby && tagOf(cur) === 'RUBY')) found = cur;
+      if (isProtectedEl(cur) || isCitationEl(cur) || isMentionEl(cur) || isXrefEl(cur) || (withLinks && isPlainLinkEl(cur)) || (withRuby && tagOf(cur) === 'RUBY')) {
+        found = cur;
+      } else if (isControlTextEl(cur) && !found) {
+        // 控件标签本身也是原子；但 label/summary 里已有引用 / notranslate 时，
+        // 内层更具体的保留区优先，不能把引用编号吞进控件原子。
+        found = cur;
+      }
     }
     return found;
   }
 
-  // 保留区的种类：protect（notranslate）/ cite / mention / xref（图表链接）/ link（混合段落里的普通链接）
+  // 控件文字单独成原子：按钮 / label / summary 的可见标签不能被段落译文清空。
+  // <a> 仍走链接逻辑，避免把普通链接当控件重复保护。
+  function isControlTextEl(el) {
+    var tag = tagOf(el);
+    return tag === 'BUTTON' || tag === 'LABEL' || tag === 'SUMMARY';
+  }
+
+  // 保留区的种类：protect（notranslate）/ cite / mention / xref（图表链接）/ link（混合段落里的普通链接）/ control（控件标签）
   function keepKind(el) {
     if (isProtectedEl(el)) return 'protect';
     if (isCitationEl(el)) return 'cite';
     if (isMentionEl(el)) return 'mention';
     if (isXrefEl(el)) return 'xref';
+    if (isControlTextEl(el)) return 'control';
     if (tagOf(el) === 'RUBY') return 'ruby';
     return 'link';
   }
@@ -646,9 +660,15 @@
     return !!(el.querySelector && el.querySelector('ruby'));
   }
 
+  function hasControlInside(el) {
+    if (!el || !el.querySelector) return false;
+    return !!el.querySelector('button,label,summary');
+  }
+
   function hasKeepInside(el) {
     // 普通链接混合段落要先于 notranslate / mention / cite 判断，避免同一段还有别的保留区时漏掉普通链接。
     if (hasMixedPlainLinkInside(el)) return 'links';
+    if (hasControlInside(el)) return 'controls';
     if (el.querySelector && el.querySelector(siteExclude ? KEEP_SELECTOR + ',' + siteExclude : KEEP_SELECTOR)) return true;
     return hasMentionInside(el) || hasCitationInside(el) || hasXrefInside(el);
   }
@@ -936,6 +956,8 @@
     (unit.keep || []).forEach(function (k) {
       if (seen.has(k.el) || (except && except.has(k.el))) return;
       seen.add(k.el);
+      // 控件标签不能隐藏：keepPlan 失败时译文写在控件外，按钮仍要保留可读标签 / 事件。
+      if (k.kind === 'control' || isControlTextEl(k.el)) return;
       if (k.el.matches(KEEP_SOLID) || k.el.querySelector(KEEP_SOLID)) return;
       var op = setStyle(k.el, 'display', 'none', ops);
       var cs = null;
@@ -1905,9 +1927,15 @@
     };
 
     function keyFor(lang) {
-      var s = String(lang || DT.state.target || '').toLowerCase().replace(/_/g, '-');
+      var s = String(lang || DT.state.targetCode || DT.state.target || '').toLowerCase().replace(/_/g, '-');
+      var base = s.split('-')[0];
+      var chineseFamily = /^(zh|yue|lzh|cmn|wuu|nan|hak)$/.test(base);
       if (/^zh-(tw|hk|mo|hant)/.test(s)) return 'zh-tw';
       if (/^zh/.test(s)) return 'zh-cn';
+      // 自定义中文变体（yue-Hant-HK / zh-Hant / lzh 等）：按 script 子标签选繁 / 简字体档案。
+      // 只有中文系语言才吃地区 / script 启发式：en-HK、ko-CN、ja-SG 不能被误配成中文字体。
+      if (chineseFamily && /(^|-)(hant|tw|hk|mo)(-|$)/.test(s)) return 'zh-tw';
+      if (chineseFamily && /(^|-)(hans|cn|sg)(-|$)/.test(s)) return 'zh-cn';
       if (/^ja/.test(s)) return 'ja';
       if (/^ko/.test(s)) return 'ko';
       // 未来文字系统：优先完整 key，再退化到主语言标签（th-TH -> th）。
@@ -1947,7 +1975,7 @@
     function policy(opts) {
       var args = opts || {};
       var mode = args.mode || DT.state.mode || 'translation';
-      var lang = args.target || args.lang || DT.state.target;
+      var lang = args.target || args.lang || DT.state.targetCode || DT.state.target;
       var source = args.sourceElement || null;
       var family = source ? familyOf(source) : (args.fontFamily || '');
       var key = keyFor(lang);
@@ -2000,11 +2028,11 @@
       // 导航 / 按钮 / 输入框等控件的 direct text node 不要加 inline 壳，避免 flex 布局多一项。
       if (DT.areaOf && DT.areaOf(parent) !== 'content') return null;
       var family = familyOf(parent);
-      var stack = stackFor(unit && unit.lang ? unit.lang : DT.state.target, family);
+      var stack = stackFor(unit && unit.lang ? unit.lang : (DT.state.targetCode || DT.state.target), family);
       if (!stack) return null;
       var span = document.createElement('span');
       span.className = 'dt-font';
-      span.setAttribute('data-dt-font', keyFor(unit && unit.lang ? unit.lang : DT.state.target));
+      span.setAttribute('data-dt-font', keyFor(unit && unit.lang ? unit.lang : (DT.state.targetCode || DT.state.target)));
       try {
         span.style.setProperty('font-family', stack, 'important');
         // 只承载字体族，不生成额外盒模型；包裹后不改变原行内 / 行布局。
@@ -2046,7 +2074,8 @@
     }
     var node = document.createElement('span');
     node.setAttribute('data-dt-target', '1');
-    node.setAttribute('data-dt-lang', lang || '');
+    // 没有标准代码的虚构语言不写空属性，避免 QA 看到 data-dt-lang="" 误以为语言标签存在。
+    if (lang) node.setAttribute('data-dt-lang', lang);
     node.className = 'dt-target ' + (inline ? 'dt-inline' : 'dt-block');
     node.textContent = text;
     node.style.cssText = [
@@ -2121,7 +2150,8 @@
     span.className = 'dt-dir';
     span.setAttribute('data-dt-dir', 'wrap');
     span.setAttribute('dir', meta.target);
-    if (meta.lang) span.setAttribute('lang', meta.lang);
+    // 只写 BCP 47 形态的 code；内部 id（cl_…）绝不能进 lang 属性。
+    if (meta.lang && /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(meta.lang)) span.setAttribute('lang', meta.lang);
     try {
       span.style.setProperty('direction', meta.target, 'important');
       span.style.setProperty('unicode-bidi', 'isolate', 'important');
@@ -2759,6 +2789,21 @@
   // 单行保留区原地写回的计划：模型按原顺序留下了 N 个保留区 → N+1 段译文，
   // 第 g 段写进第 g 个保留元素之前（g = N 时是最后一个之后）的文本节点。
   // 返回 [{ nodes, text }]；有一段非空译文那一侧没有文本节点可写，返回 null（走兜底）
+  // v1 用本地语义壳重建译文后，原 strong / code / sup 的文字会被清空，但站点给的
+  // background / border / padding 仍会画出一个空药丸。事务内隐藏已经无字的原格式元素；
+  // restore 会恢复原样。链接标签 / 控件 / 含图标或子结构的元素不碰。
+  function hideEmptyFormatShells(unit, ops) {
+    (unit.formats || []).forEach(function (format) {
+      var el = format && format.el;
+      if (!el || el.nodeType !== 1 || !el.isConnected) return;
+      if (format.kind === 'link') return;
+      if (keepIndexOf(unit, el) >= 0) return;
+      if (el.children && el.children.length) return;
+      if (String(el.textContent || '').replace(/\s+/g, '')) return;
+      setStyle(el, 'display', 'none', ops);
+    });
+  }
+
   function keepPlan(unit, segs) {
     var keep = unit.keep;
     var group = (unit.groups.filled || [])[0];
@@ -3070,7 +3115,7 @@
     var at = marks.at.slice();
     keep.forEach(function (k, i) {
       if (at[i] >= 0 || k.kind !== 'xref') return;
-      var labels = [k.text, xrefLabel(k.text, DT.state.target)].filter(Boolean);
+      var labels = [k.text, xrefLabel(k.text, DT.state.targetCode || DT.state.target)].filter(Boolean);
       for (var j = 0; j < labels.length; j += 1) {
         var hit = stripped.indexOf(labels[j]);
         if (hit < 0 || stripped.indexOf(labels[j], hit + 1) >= 0) continue;
@@ -3169,7 +3214,7 @@
 
   // 图表链接 / 补充材料普通链接的可见标签本地化：只写唯一文本节点，进事务，还原时放回原文
   function relabelAtom(k, ops, saved) {
-    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.target) : '';
+    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.targetCode || DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.targetCode || DT.state.target) : '';
     if (!label || label === k.text) return k.text;
     var texts = [];
     var walker = document.createTreeWalker(k.el, NodeFilter.SHOW_TEXT);
@@ -3396,6 +3441,7 @@
       } else if (k.kind === 'xref' || k.kind === 'link') relabelAtom(k, ops, saved);
       tokensOf(k.el).forEach(function (token) { if (token.node) targetNodes.push(token.node); });
     });
+    hideEmptyFormatShells(unit, ops);
     seq.forEach(function (item) {
       if (item.nl || item.br) targetNodes.push(item.node);
     });
@@ -3541,7 +3587,8 @@
   // 原子的副本：图表链接的标签按 xrefLabel 换成「图 1」（只有一个文本节点时）
   function atomClone(k, unit, index) {
     var copy = citeClone(k.el);
-    var label = k.kind === 'xref' ? xrefLabel(k.text, DT.state.target) : k.kind === 'link' ? linkLabel(k.text, DT.state.target) : '';
+    var labelTarget = DT.state.targetCode || DT.state.target;
+    var label = k.kind === 'xref' ? xrefLabel(k.text, labelTarget) : k.kind === 'link' ? linkLabel(k.text, labelTarget) : '';
     if (unit && unit.inlineResult && k.kind === 'link') label = inlineLabel(unit, unit.inlineResult, index);
     if (label) {
       var texts = [];
@@ -4059,7 +4106,7 @@
           fallback: ranges.fallback || ''
         };
         u.skipByLength = DT.skipText(text);
-        u.alreadyTarget = DT.looksLikeTarget(text, DT.state.target);
+        u.alreadyTarget = DT.looksLikeTarget(text, DT.state.target, DT.state.langInfo);
         report.units.push(u);
       });
     }

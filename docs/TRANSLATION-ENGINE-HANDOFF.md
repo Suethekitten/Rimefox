@@ -88,6 +88,7 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 - `translate` 消息：`results[i]` 仍是**字符串 = 译文**、`'' = 无需翻译`、`null = 失败`；与 `texts` 按下标一一对应。
   `alignments[i]` 是 0.9.1 新增的**可选**字段：`[{n,t}, …]` 或 `null`；没有它页面照常显示。
 - 缓存键 `makeKey(scope, text)` 与 `SCHEMA` 不变；缓存值仍是字符串。对齐信息**不进缓存**，只在 service worker 内存里，重启丢失就降级。
+  0.12.0 合并后 scope 只按需追加可选身份：行内协议 `:inline-v1`、自定义语言 `lang-v1`、趣味风格 / 强度 `style-v2`、AI 上下文 `ai-v1` 和专业身份。内置语言 + plain + AI 关闭时这些段都不出现，旧普通缓存键逐字不变。
 - `DT.splitLong` 返回数组 + `seps`；`DT.joinSlots(slots, DT.translationSeps(seps, target))`。请求分片与页面段落是两件事。
 - `DT.inject(unit, text, lang, align)`：unit 必须是 `collect` 返回的段落单元；旧签名 `DT.inject(el, text, lang, own)` 仍兼容（内部临时造独占单元）。
 - RenderTransaction 的真相在 `DT.tx` / `rendered`；`DT.replaced` 保留为 0.9.0 兼容视图（`DT.replacedOf` 用），不要把它当唯一真相。

@@ -387,6 +387,17 @@ ${LINK_FIXTURE}
 </body></html>`,
   '/frame.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body>
 <p id="fp">Text inside the embedded frame should stay original after reload.</p></body></html>`,
+  '/context.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Context title</title></head><body>
+<article><h1>Context title</h1><h2>Methods and cohort</h2>
+<p id="c1">The first context paragraph describes the study cohort and the treatment schedule.</p>
+<p id="c2">An adjacent context paragraph explains how progression-free survival was assessed.</p>
+<nav>NAVSECRET navigation should never enter context.</nav>
+<aside>ASIDESECRET sidebar should never enter context.</aside>
+<div class="comment">COMMENTSECRET reader comment should never enter context.</div>
+<p hidden>HIDDENSECRET hidden text should never enter context.</p>
+<p style="display:none">HIDDEN2SECRET display-none text should never enter context.</p>
+</article><article><h1>Other paper</h1><p>OTHERSECRET other article should never enter context.</p></article>
+</body></html>`,
   '/simp.html': `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>简体</title></head><body>
 <p id="s1">这是一个完整的中文句子，用于测试简繁转换的效果。</p>
 <p id="s2">我们发现这个问题以后，马上开始处理相关的工作。</p>
@@ -473,7 +484,11 @@ const server = http.createServer((req, res) => {
       const targetCode = targetCodeOf(sys);
       const english = /^en/i.test(targetCode);
       const hant = /^zh-(tw|hk|mo)/i.test(targetCode);
+      const zhTarget = /^zh/i.test(targetCode);
       const prefix = hant ? '繁:' : '译:';
+      // 中文目标要回真正中文占多数的假译文：只回「译:English」会被语言守卫判为
+      // 错误语言而不写缓存，缓存回归就会误报。尾部中文不改变开头的源文断言。
+      const zhFake = (text) => prefix + text + '译:' + '汉'.repeat(Math.max(2, Math.ceil(String(text).length * 0.35))) + '。';
       const CHOSUN_ZH = '韩国电力公司已启动下一任社长的重新公开招募。这是选拔李在明政府任命的首位韩电掌门人的程序，新任社长将负责为湖南、龙仁半导体集群和人工智能数据中心等三大超大型项目扩充所需电网。';
       const wantsAlign = sys.includes('"parts"');
       if (wantsAlign) {
@@ -495,7 +510,7 @@ const server = http.createServer((req, res) => {
         if (stats.aozoraLive && /[\u3040-\u30ff]/.test(String(text))) {
           return { parts: list.map((one) => ({ n: 1, t: '汉'.repeat(Math.max(4, one.length)) })) };
         }
-        return { parts: list.map((one) => ({ n: 1, t: prefix + one })) };
+        return { parts: list.map((one) => ({ n: 1, t: zhTarget ? zhFake(one) : prefix + one })) };
       };
       if (texts.length === 1 && texts[0].includes('CITE')) content = '巴黎是首都[1]。';
       else if (texts.length === 1 && texts[0].includes('SPLIT')) content = '["Hello.","How are you?"]';
@@ -523,7 +538,7 @@ const server = http.createServer((req, res) => {
             if (english) return 'EN translation ' + (i + 1);
             if (stats.aozoraLive && /[\u3040-\u30ff]/.test(String(t))) return '汉'.repeat(Math.max(4, String(t).length));
             if (stats.chosunLive && /^zh/i.test(targetCode) && /[\uac00-\ud7af]/.test(String(t))) return CHOSUN_ZH;
-            return prefix + t;
+            return zhTarget ? zhFake(String(t)) : prefix + t;
           })
         );
       }
@@ -1149,7 +1164,7 @@ async function koreanBoldChecks() {
 
 async function directionChecks() {
   console.log('\n[双向文字排版]');
-  await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false, dockEnabled: false });
+  await patchConfig({ targetLang: 'zh-CN', customLanguages: [], mode: 'translation', lazy: false, hoverCompare: false, dockEnabled: false });
   let t = await openTab(ORIGIN + '/direction.html');
   await tabMsg(t.tabId, { type: 'dt:toggle' });
   const ready = await until(() => pageEval(t, "return !!document.querySelector('#dir-ar[data-dt-replaced]') && !!document.querySelector('#dir-links[data-dt-replaced]')"), 20000);
@@ -1169,16 +1184,20 @@ async function directionChecks() {
   await tabMsg(t.tabId, { type: 'dt:toggle' });
   await until(() => pageEval(t, "return document.querySelector('#dir-ar[data-dt-replaced]') ? '' : 'restored'"), 8000);
 
-  await patchConfig({ targetLang: 'ar' });
+  // 'ar' 不是 0.11.7 内置语言，也不是当前配置契约允许的直接 targetLang 值。
+  // 走正式公开接口：先注册自定义阿拉伯语，再把目标设为它的内部 id。
+  const arabic = { id: 'cl_arabic1', name: 'العربية', code: 'ar', note: '' };
+  await patchConfig({ customLanguages: [arabic], targetLang: arabic.id });
   t = await openTab(ORIGIN + '/direction.html');
   await tabMsg(t.tabId, { type: 'dt:toggle' });
   const readyRtl = await until(() => pageEval(t, "return !!document.querySelector('#dir-en[data-dt-replaced]')"), 20000);
   await settled(t);
   const rtl = await pageEval(t, "const p = document.getElementById('dir-en'); return { dir: p.getAttribute('dir'), computed: getComputedStyle(p).direction, target: !!p.querySelector('[data-dt-target]') };");
-  check('英语 LTR → 阿拉伯语 RTL：目标段落从右到左显示，原文方向被正确替换', !!readyRtl && rtl.dir === 'rtl' && rtl.computed === 'rtl' && !rtl.target, JSON.stringify(rtl));
+  check('英语 LTR → 自定义阿拉伯语 RTL：目标段落从右到左显示，原文方向被正确替换', !!readyRtl && rtl.dir === 'rtl' && rtl.computed === 'rtl' && !rtl.target, JSON.stringify(rtl));
+  check('自定义阿拉伯语走公开配置：提示词使用标准代码 ar', String(stats.lastSystem).includes('العربية (ar)'), String(stats.lastSystem).slice(0, 120));
   await tabMsg(t.tabId, { type: 'dt:toggle' });
-  // 后续语言用例从默认双语模式开始；不要把 translation 留在配置里。
-  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', dockEnabled: false });
+  // 后续语言用例从默认双语模式开始；不要把 translation / ar 留在配置里。
+  await patchConfig({ targetLang: 'zh-CN', customLanguages: [], mode: 'dual', dockEnabled: false });
 }
 
 async function paragraphChecks() {
@@ -1361,6 +1380,101 @@ async function popupChecks() {
   await send('Target.closeTarget', { targetId }, pop);
 }
 
+async function customLanguageUiChecks() {
+  console.log('\n[自定义目标语言：设置页 / 弹窗 / 持久化]');
+  await patchConfig({ customLanguages: [], targetLang: 'zh-CN', inputTargetLang: 'auto' });
+  const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
+  const o = await attach(targetId);
+  await until(() => evaluate(o, "!!document.getElementById('customLangName')"));
+  await sleep(600);
+  const added = await evaluate(o, `(function(){
+    const set = (id, value) => { const el = document.getElementById(id); el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('customLangName', '粤语（香港）');
+    set('customLangCode', 'yue-Hant-HK');
+    set('customLangNote', '使用自然的香港粤语书面表达，以繁体字为主。');
+    document.getElementById('customLangSave').click();
+    return {
+      row: !!document.querySelector('.custom-lang-item'),
+      text: document.querySelector('.custom-lang-item') ? document.querySelector('.custom-lang-item').textContent : '',
+      result: document.getElementById('customLangResult').textContent
+    };
+  })()`);
+  check('设置页：新增自定义语言进入表单列表', added.row && /粤语（香港）/.test(added.text) && /yue-Hant-HK/.test(added.text), JSON.stringify(added));
+  await until(() => evaluate(o, "!document.getElementById('save').disabled"));
+  await evaluate(o, "document.getElementById('save').click(); true");
+  await until(async () => {
+    const cfg = await readConfig();
+    return cfg && cfg.customLanguages && cfg.customLanguages.length === 1 ? cfg : null;
+  }, 5000);
+  const saved = await readConfig();
+  check('设置页：保存后写入独立 customLanguages，不改内置语言表', saved.customLanguages.length === 1 && saved.customLanguages[0].name === '粤语（香港）' && saved.customLanguages[0].code === 'yue-Hant-HK', JSON.stringify(saved.customLanguages));
+  const customId = saved.customLanguages[0].id;
+  const selected = await evaluate(o, `(function(){
+    const sel = document.getElementById('targetLang');
+    const has = Array.from(sel.options).some((opt) => opt.value === ${JSON.stringify(customId)} && opt.textContent === '粤语（香港）');
+    sel.value = ${JSON.stringify(customId)};
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return { has, value: sel.value };
+  })()`);
+  check('设置页：自定义语言出现在目标语言选择器里，名称与用户输入一致', selected.has && selected.value === customId, JSON.stringify(selected));
+  await until(() => evaluate(o, "!document.getElementById('save').disabled"));
+  await evaluate(o, "document.getElementById('save').click(); true");
+  await until(async () => {
+    const cfg = await readConfig();
+    return cfg && cfg.targetLang === customId ? cfg : null;
+  }, 5000);
+  check('设置页：可以把自定义语言设为全局目标语言', (await readConfig()).targetLang === customId);
+  const { targetId: popId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/popup/index.html' });
+  const pop = await attach(popId);
+  await until(() => evaluate(pop, "!!document.getElementById('target') && document.getElementById('target').options.length > 3"));
+  const popupLabel = await evaluate(pop, "Array.from(document.getElementById('target').options).map((o) => o.textContent).filter((x) => x === '粤语（香港）').length");
+  check('弹窗：同一自定义语言显示名称与设置页一致', popupLabel === 1, 'count=' + popupLabel);
+  await send('Target.closeTarget', { targetId: popId }, pop);
+  const { targetId: againId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
+  const again = await attach(againId);
+  await until(() => evaluate(again, "!!document.querySelector('.custom-lang-item')"));
+  const persisted = await evaluate(again, `(function(){
+    const row = document.querySelector('.custom-lang-item');
+    const sel = document.getElementById('targetLang');
+    return { text: row ? row.textContent : '', selected: sel ? sel.value : '', has: sel ? Array.from(sel.options).some((o) => o.value === sel.value && o.textContent === '粤语（香港）') : false };
+  })()`);
+  check('设置页：重新打开后语言列表 / 选择器仍保留', /粤语（香港）/.test(persisted.text) && persisted.has, JSON.stringify(persisted));
+  await evaluate(again, `(function(){
+    const row = document.querySelector('.custom-lang-item');
+    row.querySelector('button').click();
+    const note = document.getElementById('customLangNote');
+    note.value = '改用简体字，保持口语。';
+    note.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('customLangSave').click();
+    return true;
+  })()`);
+  await until(() => evaluate(again, "!document.getElementById('save').disabled"));
+  await evaluate(again, "document.getElementById('save').click(); true");
+  const edited = await until(async () => {
+    const cfg = await readConfig();
+    return cfg && cfg.customLanguages[0] && cfg.customLanguages[0].note === '改用简体字，保持口语。' ? cfg : null;
+  }, 5000);
+  check('设置页：编辑说明后保存', !!edited && edited.customLanguages[0].note === '改用简体字，保持口语。');
+  await evaluate(again, `(function(){
+    const row = document.querySelector('.custom-lang-item');
+    const buttons = row.querySelectorAll('button');
+    buttons[buttons.length - 1].click();
+    return true;
+  })()`);
+  await until(() => evaluate(again, "!document.getElementById('save').disabled"));
+  await evaluate(again, "document.getElementById('save').click(); true");
+  const fallback = await until(async () => {
+    const cfg = await readConfig();
+    return cfg && Array.isArray(cfg.customLanguages) && cfg.customLanguages.length === 0 ? cfg : null;
+  }, 5000);
+  check('设置页：删除正在使用的自定义语言，目标语言回退到简体中文', fallback && fallback.targetLang === 'zh-CN' && fallback.inputTargetLang === 'auto', JSON.stringify(fallback && { target: fallback.targetLang, input: fallback.inputTargetLang, langs: fallback.customLanguages }));
+  const fallbackMessage = await evaluate(again, "document.getElementById('customLangResult').textContent");
+  check('设置页：删除正在使用的语言有可理解的回退提示', /回退|回到|简体/.test(fallbackMessage), fallbackMessage);
+  await send('Target.closeTarget', { targetId: againId }, again);
+  await send('Target.closeTarget', { targetId }, o);
+  await patchConfig({ customLanguages: [], targetLang: 'zh-CN', inputTargetLang: 'auto' });
+}
+
 async function optionsChecks() {
   console.log('\n[设置页]');
   const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
@@ -1433,6 +1547,7 @@ async function optionsChecks() {
   await glossaryNotesChecks(o);
   // 后面的检查不要带着这张术语表跑
   await patchConfig({ glossary: [] });
+  await customLanguageUiChecks();
 }
 
 async function glossaryNotesChecks(o) {
@@ -1621,7 +1736,7 @@ async function youtubeChecks(url) {
   const overlay = first.shown;
   check(
     '打开 CC：双语字幕叠层出现（原文 + 译文）',
-    overlay && overlay.orig && overlay.trans === '译:' + overlay.orig,
+    overlay && overlay.orig && overlay.trans && overlay.trans.startsWith('译:' + overlay.orig),
     overlay ? overlay.orig + ' / ' + overlay.trans : emptyOnly ? '3 次打开 YouTube 都回了空字幕（不是扩展的问题，换个时间或加 --headed 重跑）' : '2 分钟内没有出现带译文的字幕'
   );
   const hidden = await evaluate(yt.s, "!!document.querySelector('.html5-video-player.rimefox-subs-on')");
@@ -2099,6 +2214,110 @@ async function languageChecks() {
   await sleep(300);
 }
 
+// ---------------- 趣味风格 / AI 精翻 / 删除在用语言：真实浏览器回归 ----------------
+async function styleUiChecks() {
+  console.log('\n[趣味风格：真实浏览器零请求]');
+  await patchConfig({ targetLang: 'zh-CN', customLanguages: [], mode: 'dual', lazy: false, aiContextEnabled: false, privacyEnabled: false, funIntensity: 'standard' });
+  const tab = await openTab(ORIGIN + '/page.html');
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(tab, "return document.querySelectorAll('[data-dt-target]').length >= 3"), 20000);
+  await settled(tab);
+  const before = stats.requests;
+  const first = await tabMsg(tab.tabId, { type: 'dt:setStyle', style: 'catgirl' });
+  check('真实浏览器：切换趣味风格不产生翻译请求', !!ready && first && first.style === 'plain' && first.selectedStyle === 'catgirl' && stats.requests === before, JSON.stringify({ ready: !!ready, first: first && { style: first.style, selected: first.selectedStyle }, requests: stats.requests - before }));
+  for (const style of ['classical', 'catgirl', 'plain', 'catgirl', 'classical']) {
+    await tabMsg(tab.tabId, { type: 'dt:setStyle', style: style });
+  }
+  await sleep(500);
+  check('真实浏览器：连续快速切换 5 次仍为 0 请求', stats.requests === before, 'requests=' + (stats.requests - before));
+  await tabMsg(tab.tabId, { type: 'dt:retranslate' });
+  await sleep(250);
+  await settled(tab);
+  const after = await tabMsg(tab.tabId, { type: 'dt:status' });
+  check('真实浏览器：只有明确重译才应用新风格并发请求', stats.requests > before && after && after.style === 'classical', JSON.stringify({ requests: stats.requests - before, style: after && after.style }));
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
+}
+
+async function customLanguageLifecycleChecks() {
+  console.log('\n[自定义语言：删除在用语言不触发重译]');
+  const yue = { id: 'cl_yue0001', name: '粤语（香港）', code: 'yue-Hant-HK', note: '使用自然的香港粤语书面表达。' };
+  await patchConfig({ customLanguages: [yue], targetLang: yue.id, mode: 'dual', lazy: false, aiContextEnabled: false, privacyEnabled: false });
+  const tab = await openTab(ORIGIN + '/page.html');
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(tab, "return document.querySelectorAll('[data-dt-target]').length >= 3"), 20000);
+  await settled(tab);
+  const langBefore = await pageEval(tab, "var n=document.querySelector('[data-dt-target]'); return n ? n.getAttribute('lang') : null;");
+  check('删除前：自定义粤语译文带标准代码 lang', !!ready && langBefore === 'yue-Hant-HK', String(langBefore));
+  const before = stats.requests;
+  await patchConfig({ customLanguages: [], targetLang: 'zh-CN' });
+  await sleep(900);
+  const status = await tabMsg(tab.tabId, { type: 'dt:status' });
+  const langAfter = await pageEval(tab, "var n=document.querySelector('[data-dt-target]'); return n ? n.getAttribute('lang') : null;");
+  check('删除在用语言：不重新请求，旧译文保持原语言', stats.requests === before && status && status.target === yue.id && status.configTarget === 'zh-CN' && status.targetPending === true && langAfter === 'yue-Hant-HK', JSON.stringify({ requests: stats.requests - before, target: status && status.target, configTarget: status && status.configTarget, pending: status && status.targetPending, lang: langAfter }));
+  await pageEval(tab, "var p=document.createElement('p'); p.textContent='A new paragraph after deletion should wait for an explicit retranslate.'; document.body.appendChild(p); return true;");
+  await sleep(900);
+  check('删除后：动态补翻暂停，不会用新目标偷偷重译', stats.requests === before, 'requests=' + (stats.requests - before));
+  await tabMsg(tab.tabId, { type: 'dt:retranslate' });
+  const switched = await until(async () => {
+    const st = await tabMsg(tab.tabId, { type: 'dt:status' });
+    return st && !st.busy && st.target === 'zh-CN' && st.targetPending === false ? st : null;
+  }, 20000);
+  const langNew = await pageEval(tab, "var n=document.querySelector('[data-dt-target]'); return n ? n.getAttribute('lang') : null;");
+  check('明确重译后：才应用回退后的 zh-CN 并产生请求', !!switched && stats.requests > before && langNew === 'zh-CN', JSON.stringify({ switched: !!switched, requests: stats.requests - before, lang: langNew }));
+  await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
+  await patchConfig({ customLanguages: [], targetLang: 'zh-CN' });
+}
+
+async function aiContextChecks() {
+  console.log('\n[AI 精翻：真实浏览器上下文 / 标题变化成本]');
+  await patchConfig({ targetLang: 'zh-CN', customLanguages: [], mode: 'dual', lazy: false, aiContextEnabled: true, privacyEnabled: false });
+  let tab = await openTab(ORIGIN + '/context.html');
+  const systemsBefore = stats.systems.length;
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  const ready = await until(() => pageEval(tab, "return document.querySelectorAll('[data-dt-target]').length >= 2"), 20000);
+  await settled(tab);
+  const status = await tabMsg(tab.tabId, { type: 'dt:status' });
+  const sys = stats.systems.slice(systemsBefore).join('\n');
+  check('AI 精翻：同一请求带标题 / 章节，导航 / 广告 / 评论 / 隐藏 / 另一篇文章不进上下文', !!ready && sys.includes('AI 精翻参考上下文') && sys.includes('Context title') && !/NAVSECRET|ASIDESECRET|COMMENTSECRET|HIDDENSECRET|HIDDEN2SECRET|OTHERSECRET/.test(sys), sys.slice(0, 200));
+  check('AI 精翻：状态立即显示实际上下文模式 / 字符数', !!status && status.context && status.context.mode === 'ai' && status.context.chars > 0, JSON.stringify(status && status.context));
+
+  const beforeTitle = stats.requests;
+  await pageEval(tab, "document.title='Changed context title'; return true;");
+  await sleep(1200);
+  const stale = await tabMsg(tab.tabId, { type: 'dt:status' });
+  check('只改 document.title：不重新请求已翻译正文', stats.requests === beforeTitle, 'requests=' + (stats.requests - beforeTitle));
+  check('只改 document.title：上下文标记过期，供用户重译', !!stale && stale.contextStale === true && stale.context && stale.context.stale === true, JSON.stringify({ stale: stale && stale.contextStale, context: stale && stale.context }));
+
+  // 章节文字本身变了属于正文变化：允许只翻这一个新章节标题，但不能把已译正文整页重发。
+  const sentBeforeHeading = stats.sent.length;
+  const beforeHeading = stats.requests;
+  await pageEval(tab, "var h2=document.querySelector('h2'); if (h2) h2.textContent='Changed section heading'; return true;");
+  await sleep(1200);
+  const newSent = stats.sent.slice(sentBeforeHeading);
+  check('只改章节文字：最多只请求新章节，不重新请求已译正文', stats.requests <= beforeHeading + 1 && !newSent.some((text) => /first context paragraph|adjacent context paragraph/i.test(String(text))), JSON.stringify({ requests: stats.requests - beforeHeading, sent: newSent.slice(0, 3) }));
+
+  await tabMsg(tab.tabId, { type: 'dt:retranslate' });
+  const refreshed = await until(async () => {
+    const st = await tabMsg(tab.tabId, { type: 'dt:status' });
+    return st && !st.busy && st.contextStale === false && stats.requests > beforeTitle ? st : null;
+  }, 25000);
+  check('用户明确重译后：新标题进入上下文并重新请求', !!refreshed && stats.lastSystem.includes('Changed context title'), JSON.stringify({ requests: stats.requests - beforeTitle, stale: refreshed && refreshed.contextStale, title: stats.lastSystem.indexOf('Changed context title') >= 0 }));
+  await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
+
+  await patchConfig({ targetLang: 'zh-CN', aiContextEnabled: true, privacyEnabled: true });
+  tab = await openTab(ORIGIN + '/context.html');
+  const privacyBefore = stats.systems.length;
+  await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  await until(() => pageEval(tab, "return document.querySelectorAll('[data-dt-target]').length >= 2"), 20000);
+  await settled(tab);
+  const privacyStatus = await tabMsg(tab.tabId, { type: 'dt:status' });
+  const privacySystems = stats.systems.slice(privacyBefore).join('\n');
+  check('AI 精翻 + 隐私：上下文整段不发送且状态记录 privacy', !!privacyStatus && privacyStatus.context && privacyStatus.context.omitted === 'privacy' && !privacySystems.includes('AI 精翻参考上下文') && !/NAVSECRET|ASIDESECRET|COMMENTSECRET|HIDDENSECRET|HIDDEN2SECRET|OTHERSECRET/.test(privacySystems), JSON.stringify(privacyStatus && privacyStatus.context));
+  await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
+  await patchConfig({ targetLang: 'zh-CN', customLanguages: [], aiContextEnabled: false, privacyEnabled: false });
+}
+
 // ---------------- 0.9.6 _locales：manifest 的 __MSG_*__ 在浏览器里解析成本地化文案 ----------------
 async function localeChecks() {
   console.log('\n[_locales]');
@@ -2559,6 +2778,9 @@ try {
     await koreanBoldChecks();
     await directionChecks();
     await languageChecks();
+    await styleUiChecks();
+    await customLanguageLifecycleChecks();
+    await aiContextChecks();
     await localeChecks();
     await dockChecks();
     await dockHideChecks();

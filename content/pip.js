@@ -69,7 +69,7 @@
     card.appendChild(el(doc, 'p', 'out', entry.result));
     main.appendChild(card);
     var lang = doc.getElementById('dt-pip-lang');
-    if (lang) lang.textContent = (DT.state && DT.state.target) || '';
+    if (lang) lang.textContent = (DT.state && ((DT.state.langInfo && DT.state.langInfo.label) || DT.state.target)) || '';
   }
 
   function build(target) {
@@ -93,7 +93,7 @@
     header.appendChild(logo);
     header.appendChild(el(doc, 'span', 'title', DT.uiText('置顶译文', 'Pinned translation')));
     // 目标语言小胶囊（例如 zh-CN）
-    var lang = el(doc, 'span', 'lang', (DT.state && DT.state.target) || '');
+    var lang = el(doc, 'span', 'lang', (DT.state && ((DT.state.langInfo && DT.state.langInfo.label) || DT.state.target)) || '');
     lang.id = 'dt-pip-lang';
     header.appendChild(lang);
     var copy = el(doc, 'button', '', DT.uiText('复制', 'Copy'));

@@ -57,15 +57,16 @@ edge-bilingual/
 ├── _locales/              manifest 文案（zh_CN / en）：名称、简介按浏览器界面语言显示
 ├── background.js          service worker：消息中枢、并发闸门、批处理、缓存、重试
 ├── lib/
-│   ├── config.js          配置默认值 + 存储读写 + 版本迁移（v7）
+│   ├── config.js          配置默认值 + 存储读写 + 版本迁移（v8）
 │   ├── professional/      专业 Registry、策略、上下文、本地校验与有限严格复核；医学适配现有 medical/
+│   ├── ai-context.js      AI 精翻的上下文预算 / 提示词 / 缓存指纹（纯函数，复用 professional/context 的规范化）
 │   ├── provider.js        接口门面：chat() / listModels()，按 engine 分发
 │   ├── engines/           各协议实现（openai / anthropic / gemini）
 │   ├── providers.js       内置提供商模板（地址 + 协议 + 关闭思考的参数）
 │   ├── parse.js           模型返回值解析（JSON 数组容错）+ 换行规范化 + 写入前校验 + 输出长度护栏
 │   ├── inline-protocol.js  classic / ESM 共用的有限格式校验，inline.js 为 ESM 导出入口
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格 / 结构化对齐共用目标语言约束），纯函数
-│   ├── lang-guard.js      目标语言保守校验：英文等拉丁字母目标却整段回中日韩正文（缓存定向失效用），纯函数
+│   ├── lang-guard.js      目标语言保守校验：拉丁目标回中日韩、CJK 目标回整段英文（缓存定向失效用），纯函数
 │   ├── cache.js           三层翻译缓存：内存 + storage.session+ storage.local（短文本，512 KB）
 │   ├── privacy.js         可选的本地脱敏 / 恢复（纯 JS，无依赖）：识别、占位符、fail-closed 恢复
 │   ├── usage.js           仅调试用的用量计数：HTTP、usage token、缓存、重试、拆批、失败、finish_reason
@@ -147,7 +148,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
-| `translate` | `{texts: string[], target: string, style?: string, noCache?: boolean, pageLang?: string, documentContext?: object}` | `{ok, results: (string\|null)[], alignments, validations, failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败。`target: 'auto'` 跟随 `pageLang`；`noCache` 不读写缓存。可选专业上下文与质量结果见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
+| `translate` | `{texts: string[], target: string, style?: string, intensity?: string, noCache?: boolean, pageLang?: string, documentContext?: object}` | `{ok, results: (string\|null)[], alignments, validations, context, failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败。`target: 'auto'` 跟随 `pageLang`；`noCache` 不读写缓存。`style` 是趣味风格，`intensity` 是 light / standard / exaggerated（只对非 plain 生效）。`context` 只回报上下文模式 / 字符数 / 条数，不含正文。可选专业上下文与质量结果见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
 | `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本）。`config.page` 是后台按发送方网址算好的 `{accent, customCss, typo, site, night, provider}`（自定义 CSS 已清洗、站点规则已匹配） |
 | `mode:set` | `{mode}` | `{ok}` | 悬浮入口切显示方式后记进配置；只接受 `dual` / `translation`，内容脚本改不了别的配置项 |
 | `hover:set` | `{value: boolean}` | `{ok, value}` / `{ok:false,error}` | 悬浮入口切悬停对照；只接受严格布尔值，内容脚本不能改其他配置项 |
@@ -166,10 +167,10 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
 | `dt:toggle` | `{source?}` | 状态快照 | 开/关翻译（**立即返回**，不等翻完）。`source: 'command'` = 浏览器快捷键触发，0.5 秒内和页面内快捷键去重 |
-| `dt:status` | — | 状态快照 | `{enabled, mode, target, total, translated, failed, skipped, lastError, busy}` |
+| `dt:status` | — | 状态快照 | `{enabled, mode, target, configTarget, targetPending, style, selectedStyle, intensity, context, contextStale, total, translated, failed, skipped, lastError, busy}`；`target` 是页面实际译文语言，`configTarget` 是配置里待生效目标，删除在用语言时会不同；`style` 是实际生效风格，`selectedStyle` 是待应用选择；`context` 只含模式 / 字符数 / 条数 |
 | `dt:setMode` | `{mode}` | 快照 | `dual` / `translation`，会重建 |
 | `dt:setTarget` | `{target}` | 快照 | 切换目标语言，会重建 |
-| `dt:setStyle` | `{style}` | 快照 | 趣味翻译：`plain` / `classical` / `catgirl`，当前页按风格重建（没开翻译就顺带打开），不写进配置；还原后回到 `plain` |
+| `dt:setStyle` | `{style}` | 快照 | 趣味翻译：只记录本页「选中」的风格（`plain` / `classical` / `catgirl`），不翻译、不重翻、不取消在途请求、不清缓存、不写配置。下次 `dt:toggle` 开启或 `dt:retranslate` 时才应用；状态里的 `style` 是实际生效风格，`selectedStyle` 是待应用选择 |
 | `dt:retranslate` | — | 快照 | 清空重翻 |
 | `dt:diagnose` | — | 诊断报告对象 | 见第 7 节 |
 | `dt:translateInput` | — | 无 | 右键菜单「凛狐：翻译输入框内容」：翻译当前聚焦的输入框（有选区只翻最初选区），原地写回；等待期间内容、DOM 端点或焦点变化，以及返回时正在输入法组词，均取消写回 |
@@ -217,7 +218,7 @@ lib/
 
 > 为什么不能按协议：DeepSeek 与硅基流动都走 OpenAI 协议，按协议存会让两家的 Key 互相覆盖（0.4.9 踩过这个坑）。
 
-**迁移**：`lib/config.js` 的 `migrateConfig()` 是纯函数，v3 → v4 → v5 → v6 逐级升级；迁移前把原配置备份到 `storage.config_backup_v3`。加字段只加不删。
+**迁移**：`lib/config.js` 的 `migrateConfig()` 是纯函数，v3 → … → v8 逐级升级；迁移前把原配置备份到 `storage.config_backup_v3`。加字段只加不删。
 
 **思考模式**（`thinkingMode`）三态，**默认 `off`**（0.5.1 起；翻译不需要推理，开着既慢又可能把预算用光）：
 
@@ -593,7 +594,10 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `customProviders` | `[]` | 用户保存并命名的自定义服务商 `[{id, name}]` |
 | `thinkingMode` | `off` | `auto` / `off` / `custom`，见接口层一节（0.5.1 前默认 `auto`） |
 | `thinkingExtra` | `''` | `custom` 时合并进请求体的 JSON 字符串 |
-| `targetLang` | `zh-CN` | |
+| `targetLang` | `zh-CN` | 内置语言代码或 `customLanguages` 里的自定义语言 id |
+| `customLanguages` | `[]` | 用户目标语言 `[{id, name, code?, note?}]`；内置语言仍在 `LANGUAGES`。id 以 `cl_` 开头；有标准代码时 `code` 是规范 BCP 47，没有代码时只存内部 id，不把内部 id 当语言标签 |
+| `funIntensity` | `standard` | 趣味风格强度：`light` / `standard` / `exaggerated`；只对非 plain 风格生效，通过提示词而非 temperature 实现 |
+| `aiContextEnabled` | `false` | AI 精翻：在正常翻译请求中附带有限的相关上下文（标题 / 章节 / 缩写 / 同文章相邻正文）；不额外发起复核；隐私脱敏开启时不发送上下文；开启 / 关闭与上下文内容都进入缓存身份 |
 | `batchSize` | 8 | 单批条数（屏幕外的批次用。按离屏幕距离分级：屏幕内 ≤3 条 / ≤500 字符，一屏以内 ≤1000 字符，见 `takeBatch`） |
 | `maxCharsPerBatch` | 2000 | 单批字符上限 |
 | `maxUnitChars` | 1200 | 长段落拆分阈值 |
@@ -642,7 +646,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `medicalMode` | false | 医学开关的旧版兼容别名，与 `professionalProfile` 同步。|
 | `glossary` | `[]` | 术语表 `[{source, target, category?, note?}]`，全局一份。说明、固定/语境译法、CSV/JSON 兼容和按命中失效的缓存规则见 [术语表帮助](docs/GLOSSARY.md)。划词收录仍走 `glossary:add`，覆盖译法保留原分类和说明。|
 | `debug` | false | 输出调试日志 |
-| `_v` | 7 | 配置版本（迁移逻辑在 `migrateConfig`） |
+| `_v` | 8 | 配置版本（迁移逻辑在 `migrateConfig`；v8 只新增自定义语言 / 趣味强度 / AI 精翻字段，专业字段与旧值保留） |
 
 ---
 
@@ -651,7 +655,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 > 这里只记**技术上的硬限制与坑**。用户能感觉到的「不支持什么」在 [docs/ROADMAP.md](docs/ROADMAP.md) §7 与 README「支持范围」。
 
 1. **仅译文模式下短中文会留下空白** —— 站点给容器写了固定高度，中文比英文短 40%，填不满。无通用解，只能按站点写规则或改用双语。
-2. **行内标签不在译文里保留** —— 段落里的 `<b>` / `<a>` 会被整段重写，译文是纯文本，不带原格式。
+2. **行内格式只做有限保真** —— `strong` / `em` / `code` / `small` / `sup` / `sub` 的局部语义可随译文对应；复杂链接、分行失配或无法可靠映射时保留原文。站点背景 / 边框不复制，已清空的原格式壳在事务内隐藏。
 3. **`<br>` 分隔的长帖**：0.8.4 起译文保留分行（双语、仅译文都是），但双语仍是整段译文追加在段末，没做「一行原文一行译文」的逐行穿插对照。
 4. ~~没有图标~~（0.4.7 已加：`icons/`，源文件是 `icon.svg` / `icon-small.svg`，PNG 用无头 Chrome 渲染）
 5. **站点规则库还很小**：内置规则只有 GitHub 文件列表和 Wikipedia 语言列表两条，其余靠通用启发式和用户自己写的规则；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
@@ -664,7 +668,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 12. **Ruby 段落仅译文**：普通 Ruby 段落仍用独立译文容器（`injectRuby`）；Ruby 与引用 / 链接混排时把 `<ruby>` 整体当原子保留、周围正文重建，Ruby 基字本身不翻译，局部排版可能略有差异；竖排（縦書き）/ `writing-mode: vertical-*` 未验证
 13. **真实网站覆盖**：0.9.2 只对青空文库《罗生门》做了真实页面验收；Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，不能当成已验证
 13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
-14. **目标语言校验是保守的定向失效**：只覆盖「英文等拉丁字母目标却整段回中日韩正文」这种高置信度情况；短文本、专名 / 术语清单不做自动失效，旧缓存里的这类条目可能保留，重新翻译即可覆盖；中文 / 日文目标方向没有做自动校验
+14. **目标语言校验是保守的定向失效**：覆盖「拉丁目标却整段回中日韩」和「中日韩目标却整段回拉丁」两种高置信度情况；短文本、专名 / 术语清单、合法中英混排不做自动失效。坏结果仍显示一次但不写缓存，下次重新请求；旧缓存里的这类条目可能保留，重新翻译即可覆盖
 15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式保留原文引用节点并重建文本节点；普通链接混合段落、注音 + 引用 / 链接、pre-wrap 文本里的硬换行都走混合行内渲染，原地翻成译文。仍不支持原地重建的：模型把分行合并 / 拆开后行数对不上、或结构确实无法安全重建（保持原文，注入结果写明原因，不退回双语）。混合段落里的普通链接默认保留原文字，只有图表 / 补充材料等可靠标签做本地化（任意链接文字翻译仍需链接级标记，见 ROADMAP P1-2）。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
 
 ---
@@ -763,6 +767,11 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **保护与失败**：保护文字只保留在本地；专业章节跳过保护祖先，保护页和 Shadow 适配页省略无法可靠映射的 title。源标记冲突零请求；结构失败按原文和结构签名固定，页面未变时不再请求。
 - **事务与生命周期**：新增格式壳纳入自身节点识别；失败回滚写入、注册与记录，活跃注入暂停事务压缩；混合段落目标映射只包含本单元，站点改写目标文字会释放旧记录。旧请求取消、模式/语言切换和纯 Ruby 安全路径保留。
 - **验证**：固定夹具由 selftest 与现有 inline-layout 工具共用，Node 测真实后台和调度，扩展 E2E 测本地假接口完整链路；版本准备同步三处，运行方法见第 7 节，测试证据与限制见[本地开发报告](docs/archive/2026-10-24-inline-fidelity-0.12.0.md)。
+- **自定义语言（B）**：配置升到 v8；内置语言之外可添加 / 删除自定义目标，内部 id 与规范 BCP 47 code 分离，无 code 的虚构语言不写 `lang` / `data-dt-lang`。目标解析、方向 / 字体、提示词数据边界、输入框跟随和导入合并共用 `lib/config.js`，纯函数见 `test/language-context.test.mjs`。
+- **趣味风格（B）**：下拉框只写 `selectedStyle`，`dt:setStyle` 不发请求、不取消在途；`enable` / `dt:retranslate` 才应用风格与三档强度。强度走提示词，不单独发请求。
+- **AI 精翻（B）**：默认关闭；开启时上下文只并进正常翻译请求，不额外复核。上下文按批次参与缓存身份（`ai-v1`）；隐私脱敏开启时整段不发。标题 / 章节变化只标记 `contextStale`，不重翻已完成正文；明确重译后使用新上下文。
+- **语言守卫与保真修复**：`lib/lang-guard.js` 两个方向对称；中文目标整段英文仍显示但不写缓存。仅译文下的按钮 / label / summary 文字作为控件原子保留；带背景 / 边框的空格式壳事务内隐藏，关闭后逐字恢复。
+- **联合验证**：合并后 Node、自检、扩展 E2E、inline-layout 与发版检查均重跑；两分支的测试保留在同一 `test/` / `selftest/` 中，没有删除或弱化断言。证据见 [A 报告](docs/archive/2026-10-24-inline-fidelity-0.12.0.md) 与 [B 报告](docs/archive/2026-10-24-language-style-context.md)。
 
 ## 15. 专业翻译引擎
 
