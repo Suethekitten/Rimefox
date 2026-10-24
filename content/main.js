@@ -39,6 +39,10 @@
   // 模型回包本身不可用（wrong-language / empty-output / runaway-output）：
   // 与 DOM 注入失败分开计数，页面和源文本都没变时不重发、不进入付费退避。
   var outputFails = new WeakMap();
+  // 仅存储在内存里的开发诊断摘要：不保存正文 / 回包 / API Key，只保存失败类别、源文长度、
+  // 标记数量和本地时间，供 dt:diagnose 关联“模型错误”与“DOM 注入错误”。
+  var failureLog = [];
+  var FAILURE_LOG_MAX = 20;
   var CHURN_MAX = 3;
   var retryTimer = 0;
   var retryAt = 0;
@@ -816,7 +820,22 @@
 
       DT.log('segments', pending.length);
 
+      function rememberFailure(kind, unit, code, reason) {
+        var text = String((unit && unit.text) || '');
+        var markerSource = String((unit && (unit.wire || unit.text)) || '');
+        failureLog.push({
+          kind: kind,
+          code: code,
+          reason: reason || '',
+          sourceLength: text.length,
+          sourceMarkers: (markerSource.match(/<\/?[fk]\d+>/g) || []).length,
+          at: Date.now()
+        });
+        if (failureLog.length > FAILURE_LOG_MAX) failureLog.shift();
+      }
+
       function noteRenderFailure(unit, code, reason) {
+        rememberFailure('render', unit, code, reason);
         if (!unitState(renderFails, unit)) DT.state.renderFailed = (DT.state.renderFailed || 0) + 1;
         setUnitState(renderFails, unit, {
           text: unit.text,
@@ -831,6 +850,7 @@
 
       // 模型回包不可用：页面保持不变，记录独立类别；同一源文本 / DOM 不再重发。
       function noteOutputFailure(unit, code) {
+        rememberFailure('output', unit, code, '');
         if (!unitState(outputFails, unit)) DT.state.outputFailed = (DT.state.outputFailed || 0) + 1;
         setUnitState(outputFails, unit, {
           text: unit.text,
@@ -1211,6 +1231,7 @@
     DT.state.lastOutputError = '';
     DT.state.lastError = '';
     outputFails = new WeakMap();
+    failureLog = [];
     applyChrome();
     // 注意：这里故意不 await —— 弹窗要能立刻拿到状态并开始轮询
     translatePage({ reset: true });
@@ -1238,6 +1259,7 @@
     churn = new WeakMap();
     renderFails = new WeakMap();
     outputFails = new WeakMap();
+    failureLog = [];
     resetFailures();
     applyChrome();
     DT.toast('已还原原文');
@@ -1514,6 +1536,7 @@
     churn = new WeakMap();
     renderFails = new WeakMap();
     outputFails = new WeakMap();
+    failureLog = [];
     resetFailures();
     DT.state.total = 0;
     DT.state.translated = 0;
@@ -1740,7 +1763,8 @@
           outputFailed: DT.state.outputFailed || 0,
           lastError: DT.state.lastError || '',
           lastRenderError: DT.state.lastRenderError || '',
-          lastOutputError: DT.state.lastOutputError || ''
+          lastOutputError: DT.state.lastOutputError || '',
+          recentFailures: failureLog.slice(-10)
         };
       } catch (err) {
         report = { error: String(err) };
@@ -1774,6 +1798,7 @@
         // 换了服务商 / Key / 模型后，上一批“模型输出语言错误”不应永久挡住这段；
         // 只清输出失败记录，不清别的缓存，也不会自动发起请求。
         outputFails = new WeakMap();
+        failureLog = [];
         DT.state.outputFailed = 0;
         DT.state.lastOutputError = '';
         scheduleIncremental();

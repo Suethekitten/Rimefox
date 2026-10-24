@@ -816,6 +816,12 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **缓存/解析边界**：cache 增加 epoch，清空后旧请求不能把结果重新写回；截断的 JSON 数组/对象只按解析失败处理；配置广播会清输出失败记录，允许换 Key/服务商后再试。新增 test/output-acceptance.test.mjs、english-wikipedia.html、replay-inline.html 和 Chrome 重放夹具。
 - **限制**：真实付费模型未调用；假 API 只验证处理链路。同脚本源文回显（如日文→中文且输出仍日文）仍可能漏过脚本守卫；模型只回部分中文/混合语言、或漏 k 标记时仍按安全策略拒绝，需要用户明确重译。真实维基导航/列表等非正文区域按既有规则跳过。
 
+- **0.12.1 兼容性补充（本轮）**：h4 > button > h2、h4 > button、li > button 等“纯控件外壳”在整块非空文本都属于同一个 button/label/summary 时，继续下钻到控件内部收集；段落里除控件外还有正文时仍保留 control 原子。新增 FAQ、控件矩阵、脚注 fixture 和真实 Chrome 键盘 / 鼠标 / aria / 事件 / 恢复检查。
+- **脚注比例**：formatStyle 对 SUP/SUB 使用父级计算字号的真实比例（10px / 24px → 0.416667em）；只有无法取得比例时才回退 0.833333em，不再无条件放大脚注。
+- **语言守卫边界**：语言判断改用 inline 协议去掉 k 原子后的可翻译正文，中文译文保留英文链接标签 / 专名时不再误判；整段源文回显仍拒绝。
+- **开发诊断**：dt:diagnose 增加最近失败的内存摘要（类别、code、源文长度、标记数、时间），不保存正文、完整提示词或 API Key；真实供应商随机性仍需录制回包继续取证。
+- **限制**：未调用真实付费模型；同脚本回显、混合语言和合法但语义错位的数组仍未完全覆盖；真实维基导航 / 列表等非正文区域按既有规则跳过。
+
 ## 15. 专业翻译引擎
 
 专业策略通过静态 Registry 接入共用翻译管线，医学是首个实现；配置迁移、数据、上下文、质量与费用边界统一见 [专业引擎文档](docs/PROFESSIONAL-TRANSLATION.md)。当前本地实施与验收证据见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)。DOM 引用的插入安全独立于专业模式，见 [翻译引擎渲染契约](docs/TRANSLATION-ENGINE-HANDOFF.md#33-仅译文)。

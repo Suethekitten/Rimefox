@@ -177,5 +177,16 @@ await t('部分行内格式缺失：安全拒绝，不写缓存；全部缺失�
   assert.equal(calls.length, 2);
 });
 
+await t('中文译文保留英文链接标签：语言守卫忽略 k 原子，不误杀', async () => {
+  const source = '<f1>Read</f1> the <k1>OpenAI</k1> documentation and <k2>DeepMind</k2> report.';
+  const translated = '<f1>阅读</f1> <k1>OpenAI</k1> 文档和 <k2>DeepMind</k2> 报告。';
+  reply = () => JSON.stringify([translated]);
+  calls = [];
+  const res = await translate([source + '〔k-atoms〕'], { inlineProtocol: 'v1' });
+  assert.equal(res.results[0], translated);
+  assert.equal(res.outputErrors[0], null);
+  assert.equal(calls.length, 1);
+});
+
 console.log(`\n${pass} 通过 / ${fail} 失败`);
 if (fail) process.exit(1);

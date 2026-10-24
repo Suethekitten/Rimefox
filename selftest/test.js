@@ -404,6 +404,29 @@
     return true;
   });
 
+  check('collect: h4/li 纯 button 外壳继续收集内部标题，混排段落按钮仍受保护', function () {
+    var root = document.createElement('div');
+    root.innerHTML = '<h4 id="fx-w1"><button id="fx-w1b"><h2 id="fx-w1h">FAQ question inside button</h2></button></h4>' +
+      '<h4 id="fx-w2"><button id="fx-w2b">Button text directly</button></h4>' +
+      '<li id="fx-w3"><button id="fx-w3b">List button text</button></li>' +
+      '<p id="fx-w4">Read <button id="fx-w4b">button text</button> inline.</p>';
+    document.body.appendChild(root);
+    try {
+      var q = DT.collect(root.querySelector('#fx-w1'));
+      if (!q.length || !/FAQ question inside button/.test(q[0].text)) return 'h4>button>h2 没有继续收集：' + JSON.stringify(q);
+      var direct = DT.collect(root.querySelector('#fx-w2'));
+      if (!direct.length || !/Button text directly/.test(direct[0].text)) return 'h4>button 直文没有收集：' + JSON.stringify(direct);
+      var li = DT.collect(root.querySelector('#fx-w3'));
+      if (!li.length || !/List button text/.test(li[0].text)) return 'li>button 没有收集：' + JSON.stringify(li);
+      var mixed = DT.collect(root.querySelector('#fx-w4'));
+      if (!mixed.length || !mixed[0].keep || !mixed[0].keep.some(function (k) { return k.kind === 'control'; })) return '混排段落按钮没有保持 control 原子：' + JSON.stringify(mixed);
+      if (!/<k\d+>/.test(mixed[0].wire || '')) return '混排段落按钮应保留在 wire 的 k 原子中';
+      return true;
+    } finally {
+      root.remove();
+    }
+  });
+
   check('collect: 隐藏子树不产出单元', function () {
     var hidden = DT.collect(document.getElementById('fx-hidden-only'));
     return hidden.length === 0 ? true : '隐藏元素不该产出单元，实际 ' + hidden.length;

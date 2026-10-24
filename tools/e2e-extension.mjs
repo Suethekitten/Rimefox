@@ -41,6 +41,7 @@ const SHADOW_ONLY = flag('--shadow-only');
 const ARABIC_ONLY = flag('--arabic-only');
 const MODEL_REPLAY_ONLY = flag('--model-replay-only');
 const INLINE_REPLAY_ONLY = flag('--inline-replay-only');
+const CONTROL_ONLY = flag('--control-only');
 const LANGUAGE_ONLY = flag('--language-only');
 const STYLE_PERSIST_ONLY = flag('--style-persist-only');
 const MEDICAL_ONLY = flag('--medical-only');
@@ -386,6 +387,9 @@ ${LINK_FIXTURE}
   '/arabic.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/arabic-wikipedia.html'), 'utf8'),
   '/english.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/english-wikipedia.html'), 'utf8'),
   '/replay-inline.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/replay-inline.html'), 'utf8'),
+  '/fm-faq.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/fm-faq.html'), 'utf8'),
+  '/control-matrix.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/control-matrix.html'), 'utf8'),
+  '/fm-footnote.html': fs.readFileSync(path.join(ROOT, 'test/fixtures/fm-footnote.html'), 'utf8'),
   '/page.html': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Article</title></head><body>
 <h1>Rimefox release test page</h1>
 <p id="p1">This is the first paragraph of the article with enough words to translate.</p>
@@ -2449,6 +2453,144 @@ async function styleUiChecks() {
   await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
 }
 
+
+// ---------------- FAQ 控件 / 控件矩阵 / 脚注字号 ----------------
+async function clickAt(tab, selector) {
+  const at = await pageEval(
+    tab,
+    `return (function(){var e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;e.scrollIntoView({block:'center'});var r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};})()`
+  );
+  if (!at) return false;
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(at.x), y: Math.round(at.y), button: 'left', clickCount: 1, pointerType: 'mouse' }, tab.s);
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: Math.round(at.x), y: Math.round(at.y), button: 'left', clickCount: 1, pointerType: 'mouse' }, tab.s);
+  return true;
+}
+
+async function keyAt(tab, selector, key) {
+  await pageEval(tab, `return (function(){var e=document.querySelector(${JSON.stringify(selector)});if(e)e.focus();return true;})()`);
+  const isSpace = key === ' ';
+  const code = isSpace ? 'Space' : 'Enter';
+  const vk = isSpace ? 32 : 13;
+  const ev = { key: isSpace ? ' ' : 'Enter', code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, text: isSpace ? ' ' : '\r' };
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', ...ev }, tab.s);
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', ...ev }, tab.s);
+}
+
+async function controlChecks() {
+  console.log('\n[FAQ 控件 / 控件矩阵 / 脚注字号]');
+  await patchConfig({ targetLang: 'zh-CN', customLanguages: [], mode: 'dual', lazy: false, hoverCompare: false, dockEnabled: false, aiContextEnabled: false, privacyEnabled: false, professionalProfile: 'general', medicalMode: false });
+
+  const sentBefore = stats.sent.length;
+  const faq = await openTab(ORIGIN + '/fm-faq.html');
+  await tabMsg(faq.tabId, { type: 'dt:toggle' });
+  const faqReady = await until(() => pageEval(faq, "return document.querySelectorAll('[data-dt-target]').length >= 4"), 20000);
+  await settled(faq);
+  const faqText = await pageEval(
+    faq,
+    `return {
+      q: (document.querySelector('#fmq') || {}).textContent || '',
+      btn: (document.querySelector('#fmbtn') || {}).textContent || '',
+      target: !!document.querySelector('#fmq [data-dt-target]'),
+      aria: document.querySelector('#fmbtn') && document.querySelector('#fmbtn').getAttribute('aria-expanded'),
+      svg: !!document.querySelector('#fmcarrot svg')
+    };`
+  );
+  const qName = "What’s included in Freedom Mobile’s Roam Beyond Travel Data eSIM?";
+  const qSent = stats.sent.slice(sentBefore).filter((t) => String(t).includes(qName)).length;
+  check('FAQ 问题实际发送给模型', qSent >= 1, 'sent=' + JSON.stringify(stats.sent.slice(sentBefore).filter((t) => String(t).includes('What’s included')).map((t) => String(t).slice(0, 80))));
+  check('FAQ 问题翻译为中文（控件内部标题）', !!faqReady && /[\u4e00-\u9fff]/.test(faqText.q) && faqText.target, JSON.stringify(faqText));
+  check('FAQ 控件保留 aria / SVG 图标', faqText.aria === 'false' && faqText.svg, JSON.stringify({ aria: faqText.aria, svg: faqText.svg }));
+
+  const requestsBefore = stats.requests;
+  const qCountBefore = stats.sent.filter((t) => String(t).includes(qName)).length;
+  check('FAQ 点击：真实鼠标展开', await clickAt(faq, '#fmbtn'), 'clicked');
+  await sleep(220);
+  const opened = await pageEval(faq, "return {expanded:document.querySelector('#fmbtn').getAttribute('aria-expanded'),hidden:document.querySelector('#fmpanel').hidden,carrot:getComputedStyle(document.querySelector('#fmcarrot')).transform,svg:!!document.querySelector('#fmcarrot svg')};");
+  check('FAQ 鼠标展开：aria-expanded / panel / 图标正确', opened.expanded === 'true' && opened.hidden === false && opened.svg, JSON.stringify(opened));
+  check('FAQ 标题再次展开不重复请求', stats.requests === requestsBefore && stats.sent.filter((t) => String(t).includes(qName)).length === qCountBefore, JSON.stringify({ requests: stats.requests - requestsBefore, q: stats.sent.length }));
+
+  await clickAt(faq, '#fmbtn');
+  await sleep(160);
+  check('FAQ 鼠标收起：aria-expanded / panel 正确', await pageEval(faq, "return document.querySelector('#fmbtn').getAttribute('aria-expanded') === 'false' && document.querySelector('#fmpanel').hidden === true;"), 'collapsed');
+
+  await keyAt(faq, '#fmbtn', 'Enter');
+  await sleep(180);
+  check('FAQ 键盘 Enter 展开', await pageEval(faq, "return document.querySelector('#fmbtn').getAttribute('aria-expanded') === 'true' && document.querySelector('#fmpanel').hidden === false;"), 'enter');
+  await keyAt(faq, '#fmbtn', ' ');
+  await sleep(180);
+  check('FAQ 键盘 Space 收起', await pageEval(faq, "return document.querySelector('#fmbtn').getAttribute('aria-expanded') === 'false' && document.querySelector('#fmpanel').hidden === true;"), 'space');
+
+  await clickAt(faq, '#plainbtn');
+  await clickAt(faq, '#sum');
+  await sleep(120);
+  const events = await pageEval(faq, "return {plain:window.__plainClicks||0,det:window.__detToggles||0};");
+  check('FAQ 原有 click / toggle 监听器继续生效', events.plain >= 1 && events.det >= 1, JSON.stringify(events));
+
+  await tabMsg(faq.tabId, { type: 'dt:toggle' });
+  await until(async () => { const st = await tabMsg(faq.tabId, { type: 'dt:status' }); return st && st.enabled === false && !st.busy; }, 15000);
+  const restored = await pageEval(faq, "return {targets:document.querySelectorAll('[data-dt-target]').length,markers:document.querySelectorAll('[data-dt-src]').length,format:document.querySelectorAll('[data-dt-format]').length,attrs:document.querySelectorAll('[data-dt-lang]').length,q:document.querySelector('#fmq').textContent,svg:!!document.querySelector('#fmcarrot svg'),html:document.querySelector('#fmq').outerHTML};");
+  check('FAQ 恢复原文：译文 / 标记 / 格式清零', restored.targets === 0 && restored.markers === 0 && restored.format === 0 && restored.attrs === 0, JSON.stringify(restored));
+  check('FAQ 恢复原文逐字一致且 SVG 保留', restored.q === qName && restored.svg && !/data-dt-/.test(restored.html), JSON.stringify({ q: restored.q, html: restored.html.slice(0, 160) }));
+  // 仅译文模式：FAQ 控件仍然是可翻译的标题，不是被整体放弃的单元。
+  await patchConfig({ mode: 'translation' });
+  await tabMsg(faq.tabId, { type: 'dt:toggle' });
+  const onlyReady = await until(() => pageEval(faq, "return !!document.querySelector('#fmq [data-dt-target]') || (document.querySelector('#fmq') && document.querySelector('#fmq').hasAttribute('data-dt-replaced'))") , 20000);
+  await settled(faq);
+  const onlyFaq = await pageEval(faq, "return {q:(document.querySelector('#fmq')||{}).textContent||'',replaced:!!(document.querySelector('#fmq')||{}).hasAttribute,aria:document.querySelector('#fmbtn')&&document.querySelector('#fmbtn').getAttribute('aria-expanded'),svg:!!document.querySelector('#fmcarrot svg')};");
+  check('FAQ 仅译文模式：控件标题翻译且图标保留', !!onlyReady && /[\u4e00-\u9fff]/.test(onlyFaq.q) && onlyFaq.aria === 'false' && onlyFaq.svg, JSON.stringify(onlyFaq));
+  await tabMsg(faq.tabId, { type: 'dt:toggle' });
+  await until(async () => { const st = await tabMsg(faq.tabId, { type: 'dt:status' }); return st && st.enabled === false && !st.busy; }, 15000);
+  await patchConfig({ mode: 'dual' });
+  await send('Target.closeTarget', { targetId: faq.targetId }, faq.s);
+
+  // 控件矩阵：纯控件外壳可翻译，混排段落的 button 仍是原子。
+  const matrix = await openTab(ORIGIN + '/control-matrix.html');
+  const matrixSent = stats.sent.length;
+  await tabMsg(matrix.tabId, { type: 'dt:toggle' });
+  const matrixReady = await until(() => pageEval(matrix, "return document.querySelectorAll('[data-dt-target]').length >= 6"), 20000);
+  await settled(matrix);
+  const matrixText = await pageEval(matrix, `const ids=['v1h2','v2b','v3h2','v4s','v5','v6','v6h','v7b','v8p','v8b','v9a','v9h','v10','v11s']; const out={}; ids.forEach(function(id){var e=document.getElementById(id);out[id]=e?e.textContent.trim():'';}); return {text:out,href:document.querySelector('#v9a').getAttribute('href')};`);
+  const chinese = (s) => /[\u4e00-\u9fff]/.test(s);
+  check('控件矩阵：h4/li 纯控件外壳翻译（V1/V2/V7/V11）', !!matrixReady && ['v1h2', 'v2b', 'v7b', 'v11s'].every((id) => chinese(matrixText.text[id])), JSON.stringify(matrixText));
+  check('控件矩阵：div 控件与 role 控件翻译（V3/V4/V5/V6/V9/V10）', ['v3h2', 'v4s', 'v5', 'v6h', 'v9h', 'v10'].every((id) => chinese(matrixText.text[id])), JSON.stringify(matrixText));
+  const hiddenInfo = await pageEval(matrix, "return {hidden:(document.querySelector('#hiddenb')||{}).textContent||'',hiddenTargets:document.querySelectorAll('#hiddenwrap [data-dt-target]').length,notr:(document.querySelector('#notr')||{}).textContent||'',keep:(document.querySelector('#notr .notranslate')||{}).textContent||''};");
+  check('控件矩阵：hidden 控件不翻译、notranslate 保留', hiddenInfo.hidden === 'Hidden button must not translate' && hiddenInfo.hiddenTargets === 0 && hiddenInfo.keep === 'KeepMe' && !stats.sent.slice(matrixSent).some((x) => String(x).includes('Hidden button must not translate')), JSON.stringify(hiddenInfo));
+  const labelInfo = await pageEval(matrix, "return {mix:(document.querySelector('#labmix')||{}).textContent||'',label:(document.querySelector('#labx')||{}).textContent||''};");
+  check('控件矩阵：混排段落 label 文字受保护、周围正文翻译', /[一-鿿]/.test(labelInfo.mix) && labelInfo.label === 'this option', JSON.stringify(labelInfo));
+  check('控件矩阵：混排段落 button 文字不被清空（V8）', matrixText.text.v8b === 'button text' && chinese(matrixText.text.v8p) && matrixText.href === '#x', JSON.stringify({ v8b: matrixText.text.v8b, v8p: matrixText.text.v8p, href: matrixText.href }));
+  check('控件矩阵：所有新标题已进入请求', ['V1 heading wraps button wraps h2 question', 'V2 heading wraps button text directly', 'V7 li wraps button text', 'V11 heading button span label'].every((t) => stats.sent.slice(matrixSent).some((x) => String(x).includes(t))), 'sent=' + JSON.stringify(stats.sent.slice(matrixSent).map((x) => String(x).slice(0, 40))));
+  await tabMsg(matrix.tabId, { type: 'dt:toggle' });
+  await until(async () => { const st = await tabMsg(matrix.tabId, { type: 'dt:status' }); return st && st.enabled === false && !st.busy; }, 15000);
+  check('控件矩阵：恢复后没有格式标记残留', await pageEval(matrix, "return document.querySelectorAll('[data-dt-target],[data-dt-format],[data-dt-src],[data-dt-replaced]').length === 0"), 'clean');
+  await send('Target.closeTarget', { targetId: matrix.targetId }, matrix.s);
+
+  // 脚注比例：10px / 24px 必须保持约 0.4167em，而不是 0.8333em。
+  const foot = await openTab(ORIGIN + '/fm-footnote.html');
+  const footBefore = await pageEval(foot, `return (function(){var h=document.getElementById('sup1');var p=document.querySelector('#plainp sup');return {font:parseFloat(getComputedStyle(h).fontSize),width:h.getBoundingClientRect().width,plain:parseFloat(getComputedStyle(p).fontSize)};})()`);
+  await tabMsg(foot.tabId, { type: 'dt:toggle' });
+  const footReady = await until(() => pageEval(foot, "return document.querySelectorAll('#price1 [data-dt-format]').length >= 1"), 20000);
+  await settled(foot);
+  const footAfter = await pageEval(foot, `return (function(){var t=document.querySelector('#price1 sup[data-dt-format]');var p=document.querySelector('#plainp sup[data-dt-format]');return {font:t?parseFloat(getComputedStyle(t).fontSize):-1,width:t?t.getBoundingClientRect().width:-1,plain:p?parseFloat(getComputedStyle(p).fontSize):-1,text:t?t.textContent:'',vertical:t?getComputedStyle(t).verticalAlign:'',targets:document.querySelectorAll('#price1 [data-dt-target]').length};})()`);
+  check('脚注：原始 10px / 24px 比例被识别', !!footReady && Math.abs(footBefore.font - 10) < 0.2 && Math.abs(footBefore.width - footAfter.width) < 1.5, JSON.stringify({ before: footBefore, after: footAfter }));
+  check('脚注：译文脚注约 10px，不放大到 20px', footAfter.font > 9.5 && footAfter.font < 10.6 && footAfter.font < 15, JSON.stringify(footAfter));
+  check('脚注：原生普通 sup 的比例仍保留（不是统一 0.8333em）', Math.abs(footAfter.plain - footBefore.plain) < 0.2 && footAfter.plain < 18, JSON.stringify({ before: footBefore, after: footAfter }));
+  check('脚注文本不被误译', footAfter.text.includes('2, 12') || footAfter.text.includes('2,12'), JSON.stringify(footAfter.text));
+  await tabMsg(foot.tabId, { type: 'dt:toggle' });
+  await until(async () => { const st = await tabMsg(foot.tabId, { type: 'dt:status' }); return st && st.enabled === false && !st.busy; }, 15000);
+  const footRestored = await pageEval(foot, "return {targets:document.querySelectorAll('[data-dt-target],[data-dt-format]').length,font:parseFloat(getComputedStyle(document.getElementById('sup1')).fontSize)};");
+  check('脚注：恢复后原样式与 10px 脚注一致', footRestored.targets === 0 && Math.abs(footRestored.font - 10) < 0.2, JSON.stringify(footRestored));
+  await patchConfig({ mode: 'translation' });
+  await tabMsg(foot.tabId, { type: 'dt:toggle' });
+  const onlyFootReady = await until(() => pageEval(foot, "return document.querySelectorAll('#price1 [data-dt-format]').length >= 1"), 20000);
+  await settled(foot);
+  const onlyFoot = await pageEval(foot, "var t=document.querySelector('#price1 sup[data-dt-format]'); return {font:t?parseFloat(getComputedStyle(t).fontSize):-1,text:t?t.textContent:'',targets:document.querySelectorAll('[data-dt-target]').length};");
+  check('脚注仅译文：10px 比例仍保持', !!onlyFootReady && onlyFoot.font > 9.5 && onlyFoot.font < 10.6, JSON.stringify(onlyFoot));
+  await tabMsg(foot.tabId, { type: 'dt:toggle' });
+  await until(async () => { const st = await tabMsg(foot.tabId, { type: 'dt:status' }); return st && st.enabled === false && !st.busy; }, 15000);
+  await patchConfig({ mode: 'dual' });
+  await send('Target.closeTarget', { targetId: foot.targetId }, foot.s);
+}
+
 async function inlineReplayChecks() {
   console.log('\n[行内协议重放：缺部分标记 / 全缺标记 / 切片拼接损坏]');
   await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false, aiContextEnabled: false, privacyEnabled: false, customLanguages: [], professionalProfile: 'general', medicalMode: false });
@@ -2462,6 +2604,9 @@ async function inlineReplayChecks() {
   await until(async () => { const st = await state(); return st && !st.busy; }, 25000);
   const partial = await state();
   const partialDom = await dom('#replay-inline');
+  const diag = await tabMsg(tab.tabId, { type: 'dt:diagnose' });
+  const recent = (diag && diag.failures && diag.failures.recentFailures) || [];
+  check('开发诊断：最近失败只含类别 / 长度 / 标记数，不含正文', recent.some((x) => x.code === 'invalid-inline' && x.kind === 'render' && x.sourceLength > 0 && x.sourceMarkers > 0 && !Object.prototype.hasOwnProperty.call(x, 'text')), JSON.stringify(recent.slice(-3)));
   check('行内重放：只缺一个 <f> → invalid-inline / renderFailed，不写页面', partial && partial.renderFailed > 0 && partial.outputFailed === 0 && partial.skipped === 0 && partialDom.replaced === false, JSON.stringify({ status: partial && { renderFailed: partial.renderFailed, outputFailed: partial.outputFailed, skipped: partial.skipped }, dom: partialDom }));
   await tabMsg(tab.tabId, { type: 'dt:toggle' });
 
@@ -3046,6 +3191,8 @@ try {
     await modelReplayChecks();
   } else if (INLINE_REPLAY_ONLY) {
     await inlineReplayChecks();
+  } else if (CONTROL_ONLY) {
+    await controlChecks();
   } else if (LANGUAGE_ONLY) {
     await languageChecks();
   } else if (STYLE_PERSIST_ONLY) {
@@ -3069,6 +3216,7 @@ try {
     await arabicChecks();
     await modelReplayChecks();
     await inlineReplayChecks();
+    await controlChecks();
     stats.outputMode = '';
     stats.arabicFixture = false;
     await languageChecks();

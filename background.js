@@ -73,6 +73,12 @@ function inlineVisible(text) {
   return checked.ok ? checked.text : '';
 }
 
+// 语言判断只看可翻译正文，不把 <kN> 里的链接标签 / 引用 / notranslate 当成译文。
+function inlineStripped(text) {
+  const checked = inspectInline(text, text);
+  return checked.ok ? checked.stripped : '';
+}
+
 // 明显是一段正文（而不是按钮 / 标签 / 缩写）才把空回包、超长回包算模型失败。
 // 长度和句末标点都要有：短文本可能本来就不需要翻译，不能因此报错。
 function isSubstantialSource(text) {
@@ -356,7 +362,10 @@ async function handleTranslate(msg, sender) {
     // 残留 JSON 包装的旧译文当作没命中，重新翻（不整体清缓存）
     if (typeof hit === 'string') {
       const fixed = normalizeTranslationBreaks(text, hit);
-      const cacheSource = inlineProtocol ? inlineVisible(text) : text;
+      const cacheSource = inlineProtocol ? inlineStripped(text) : text;
+      const cacheOutput = inlineProtocol
+        ? (() => { const checked = inspectInline(text, fixed); return checked.ok ? checked.stripped : fixed; })()
+        : fixed;
       if (leaksWrapper(text, fixed)) {
         cache.remove(keyOf(text));
         alignCache.delete(keyOf(text));
@@ -369,7 +378,7 @@ async function handleTranslate(msg, sender) {
         alignCache.delete(keyOf(text));
         hit = undefined;
         hitAlign = null;
-      } else if (looksUntranslatedForTarget(cacheSource, fixed, languageInfo.code || target)) {
+      } else if (looksUntranslatedForTarget(cacheSource, cacheOutput, languageInfo.code || target)) {
         // 目标语言是英文（或其它拉丁字母语系），缓存里却是整段中文：0.9.5 之前 align 提示词
         // 的中文示例把模型带偏后留下的坏结果。只失效这一条，不清整层、不动其它正常缓存，
         // 下次照常请求；对齐旁路一起丢掉，避免继续拿错译文做句级对应。
@@ -565,7 +574,7 @@ async function handleTranslate(msg, sender) {
           value = normalizeTranslationBreaks(text, value);
           if (value !== beforeBreaks) parts = null;
           const targetCode = languageInfo.code || target;
-          const sourceVisible = inlineProtocol ? inlineVisible(text) : text;
+          const sourceVisible = inlineProtocol ? inlineStripped(text) : text;
           const sourceSubstantial = isSubstantialSource(sourceVisible);
           // 空正文 / 失控长文先于行内解析：空回包没有 <fN>，如果先跑 inspectInline
           // 会被误判成 invalid-inline，用户看到的是结构错误而不是模型空回包。
@@ -587,7 +596,7 @@ async function handleTranslate(msg, sender) {
             settle(text, null, new ApiError('模型返回的译文里混进了 JSON 格式，已丢弃', 0, ''));
             continue;
           }
-          const outputVisible = inlineProtocol && inlineState ? inlineState.text : String(value == null ? '' : value);
+          const outputVisible = inlineProtocol && inlineState ? inlineState.stripped : String(value == null ? '' : value);
           // 语言守卫必须在写缓存和交给页面之前执行。旧实现只阻止坏结果进缓存，
           // 仍会把整段英文 / 阿拉伯语当作译文注入，页面看起来就是“漏翻但成功”。
           if (typeof value === 'string' && looksUntranslatedForTarget(sourceVisible, outputVisible, targetCode)) {
@@ -607,14 +616,15 @@ async function handleTranslate(msg, sender) {
                   const checked = inspectInline(text, candidate);
                   if (!checked.ok || checked.formatMissing) return false;
                 }
-                return !leaksWrapper(text, candidate) && !isRunaway(text, candidate) && !looksUntranslatedForTarget(sourceVisible, candidate, targetCode);
+                const candidateVisible = inlineProtocol ? (inspectInline(text, candidate).stripped || candidate) : candidate;
+                return !leaksWrapper(text, candidate) && !isRunaway(text, candidate) && !looksUntranslatedForTarget(sourceVisible, candidateVisible, targetCode);
               }
             });
             value = reviewed.translation;
             validation = reviewed.report;
             if (reviewed.changed) parts = null; // A new translation invalidates the old model offsets.
             if (inlineProtocol) inlineState = inspectInline(text, value);
-            const finalVisible = inlineProtocol && inlineState ? inlineState.text : value;
+            const finalVisible = inlineProtocol && inlineState ? inlineState.stripped : value;
             // 复核模型也可能把语言改回原文；同样在写页面 / 缓存前拒绝。
             if (looksUntranslatedForTarget(sourceVisible, finalVisible, targetCode)) {
               usageStats.languageMismatch();

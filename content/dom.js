@@ -676,6 +676,30 @@
     return !!el.querySelector('button,label,summary');
   }
 
+  // 纯控件包装块：当整个容器的非空文本全部属于同一个 button/label/summary，
+  // 这个控件就不是“混排段落里的原子”，而是标题/列表项的外壳；继续下钻到控件内部收集。
+  // 混排段落（控件外仍有正文）返回 null，保留原来的 control 原子保护。
+  function soleControlRoot(el) {
+    if (!el || !el.querySelectorAll || isControlTextEl(el)) return null;
+    var controls = el.querySelectorAll('button,label,summary');
+    // 大容器里有多个控件时不可能“整块都是同一个控件外壳”，直接返回，避免长页面 O(n²)。
+    if (!controls.length || controls.length > 8) return null;
+    for (var i = 0; i < controls.length; i += 1) {
+      var control = controls[i];
+      if (!control.textContent || !/\S/.test(control.textContent)) continue;
+      var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      var seen = false;
+      var all = true;
+      for (var t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (!/\S/.test(t.nodeValue || '')) continue;
+        seen = true;
+        if (!control.contains(t)) { all = false; break; }
+      }
+      if (seen && all) return control;
+    }
+    return null;
+  }
+
   function hasKeepInside(el) {
     // 普通链接混合段落要先于 notranslate / mention / cite 判断，避免同一段还有别的保留区时漏掉普通链接。
     if (hasMixedPlainLinkInside(el)) return 'links';
@@ -817,11 +841,13 @@
     var size = parseFloat(cs.fontSize);
     var baseSize = parseFloat(base.fontSize);
     var ratio = baseSize > 0 ? size / baseSize : 1;
-    if (ratio >= 0.5 && ratio <= 1.5 && Math.abs(ratio - 1) > 0.01) out.size = String(ratio) + 'em';
+    // 脚注常见 0.2–0.85em，不能被旧的 0.5–1.5 区间过滤掉；实际的 10px/24px
+    // 必须保留为 0.4167em，而不是统一放大成 0.8333em（那会把脚注放大一倍）。
+    if (ratio >= 0.2 && ratio <= 1.5 && Math.abs(ratio - 1) > 0.01) out.size = String(ratio) + 'em';
     if (cs.verticalAlign !== base.verticalAlign && /^(super|sub)$/.test(cs.verticalAlign)) out.vertical = cs.verticalAlign;
     if (tag === 'SMALL' && !out.size) out.size = '0.833333em';
     if (tag === 'SUP' || tag === 'SUB') {
-      out.size = '0.833333em';
+      if (!out.size) out.size = '0.833333em';
       out.vertical = tag === 'SUP' ? 'super' : 'sub';
     }
     if (tag === 'CODE') out.code = true;
@@ -1751,6 +1777,17 @@
         for (var ai = 0; ai < assigned.length; ai += 1) {
           if (assigned[ai] && assigned[ai].nodeType === 1) walk(assigned[ai], out);
         }
+        return;
+      }
+    }
+
+    // h4 > button > h2 / li > button / h4 > button > span+svg：控件是标题/正文的唯一外壳。
+    // 继续下钻到控件内部（不是把控件当不可变原子），否则 attachKeep 会把整段丢弃。
+    // 段落里除控件外还有正文时（breaks 非空或 own 非空）不走这里，保留按钮文字保护。
+    if (!own && !breaks.length) {
+      var wrappedControl = soleControlRoot(el);
+      if (wrappedControl) {
+        walk(wrappedControl, out);
         return;
       }
     }
