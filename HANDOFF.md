@@ -784,6 +784,14 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **只包译文，不包原文**：仅译文用 `display:contents` 的 inline 字体壳，字符间距 / 行布局不新增盒子；标题、code/pre、公式、控件和已兼容字体跳过，字体壳 insert / move / 还原全部走 RenderTransaction。
 - **验收要看 computed + 截图 + 模式切换**：真实朝鲜日报用 `--chosun-live` 生成中文适配截图；双语用 `--dual-live` 与提交 `4c2784d` 同机位截图逐字节对比，并测试 双语 → 仅译文 → 双语 → 关闭 → 重新翻译，不能只看“翻译成功”或字符串断言。
 
- ## 15. 专业翻译引擎
+ ### 已放弃：0.12 图片 / 表格翻译 WIP（2026-10-23）
+
+- 结论：backup/image-translation-wip（提交 9c7f35b，0.12.1 图片表格版面感知）及本地 bundle / worktree 备份已删除；当前主线不包含图片翻译代码。
+- 范围：该 WIP 从 4c2784d 分出，包含 content/image.js、lib/image-layout.js、图片 / 表格弹框、视觉缓存、选项面板、隐私说明和图片测试，约 2.8k 行新增；与当前 0.11.6 的字体 / 双语修复是两条不同基线。
+- 放弃原因：图片 OCR / 表格结构 / 合并单元格 / 数值校验的验证成本远高于当前收益；长生命周期分支持续偏离主线，继续维护会同时拖累图片和正文翻译。没有把它合回 main。
+- 后续约束：不要把 9c7f35b 或旧图片分支直接 cherry-pick / merge 回当前主线；若重启图片翻译，必须从当前 main 开短的垂直切片，单独做隐私、商店权限、视觉和质量验收。
+- 经验：先确定一个可验证的用户价值，再扩跨 content / lib / options / manifest / 隐私面的功能；不要用大而全的 WIP 分支同时改正文渲染、图片传输和设置界面。图片翻译与字体 / 双向排版分开验证，不能拿一套 DOM 事务假设覆盖所有渲染路径。
+
+## 15. 专业翻译引擎
 
 专业策略通过静态 Registry 接入共用翻译管线，医学是首个实现；配置迁移、数据、上下文、质量与费用边界统一见 [专业引擎文档](docs/PROFESSIONAL-TRANSLATION.md)。当前本地实施与验收证据见 [开发报告](docs/archive/2026-10-23-professional-engine-v2.md)。DOM 引用的插入安全独立于专业模式，见 [翻译引擎渲染契约](docs/TRANSLATION-ENGINE-HANDOFF.md#33-仅译文)。
