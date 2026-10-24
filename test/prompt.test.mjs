@@ -127,6 +127,26 @@ t('promptFingerprint：空为 none，去空白后稳定，改内容变化', () =
 });
 
 
+t('组合：自定义语言 + 行内标记 + 强度 + AI 上下文不互相覆盖', () => {
+  const info = {
+    value: 'cl_yue', label: '粤语（香港）', name: '粤语（香港）', kind: 'custom',
+    code: 'yue-Hant-HK', script: 'hant', cjk: true, note: '自然的香港粤语书面语。'
+  };
+  const p = systemPrompt('cl_yue', 'catgirl', [], '', false, true, true, null, {
+    languageInfo: info,
+    intensity: 'exaggerated',
+    contextInstructions: 'AI 精翻参考上下文：标题和相邻段落只用于消歧。',
+    inlineMarked: true
+  });
+  assert.match(p, /唯一目标语言：粤语（香港） \(yue-Hant-HK\)/);
+  assert.match(p, /【风格要求】/);
+  assert.match(p, /行内语义标记/);
+  assert.match(p, /保留标记/);
+  assert.match(p, /AI 精翻参考上下文/);
+  assert.match(p, /"parts"/);
+  assert.ok(!p.includes('唯一目标语言：简体中文'));
+});
+
 t('普通提示词字节稳定（golden）：改动默认普通翻译提示词会在这里失败', () => {
   const hash = (text) => {
     let h = 0x811c9dc5;
