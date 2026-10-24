@@ -8,6 +8,8 @@
 - 版本号三处同步：`manifest.json` 的 `version`、`content/core.js` 的 `DT.VERSION`（这两处 CI 会校验）、`package.json` 的 `version`；怎么取号见下面「版本号规则」
 - 内容脚本用 ES5 风格；译文只用 `textContent` 写入，不用 `innerHTML`；其余约定见 HANDOFF「代码约定」
 - 跨 `content/`（ES5 全局脚本）和 `lib/`（ESM）都要用的纯函数**允许存在两份**，但必须在 `test/` 里加一条**差分测试**（同一组输入喂两个实现、断言输出一致）；没有差分测试就不许新增第二份
+- 涉及下拉框、翻译生命周期、请求次数或缓存身份的改动，必须补真实 Chrome + 假 API 的 E2E；Node / 自检不能单独证明「切换不产生请求」或「旧译文仍保留」
+- E2E 假接口必须按目标语言回包。新增语言校验后，先确认产品行为正确，再调整测试夹具；不要为了让缓存测试变绿而放宽生产校验
 - 提交用 GitHub 的 noreply 邮箱（`<ID>+<用户名>@users.noreply.github.com`），不要把个人邮箱写进提交记录
 
 ## 提交与推送
@@ -20,12 +22,14 @@
    - `selftest/index.html` 全部通过（按 HANDOFF §7 的无头 Chrome 命令）
    - 如果发版：`python3 tools/check-release-notes.py <版本号>`
    - 改设置页 / 字幕 / 划词：在真实页面各过一遍（设置页、YouTube 字幕、普通文章页）
+   - 改扩展行为：确认 Chrome 实际加载的目录 / 扩展 ID，并在 `chrome://extensions` 重新加载后检查至少一个新入口；版本号相同不等于代码已更新（见 HANDOFF §7.1d）
 3. `git fetch origin && git rebase origin/main`，确认没有落后；远端有新提交就 rebase，不要 force push
 4. `git diff --check`、`git log origin/main..HEAD` 自审：没有密钥、没有无关文件、没有覆盖别人的改动
 5. **停下来汇报并询问，不要自己 push**。汇报里写清：改了什么、跑了哪些检查、哪些没测、建议的版本号和 CHANGELOG 摘要、是否会触发 Release；然后问：
    - 「还有要继续做的吗？还是可以按 x.y.z 推送新版本了？」
 6. 得到「可以推送」后才定稿版本号 / CHANGELOG（如还没定），再跑一次检查，**一次 `git push origin main`** 推完所有本地 commit。
    得到「继续做」就继续在本地改；没有回复就保持本地，不推。
+7. 推送后核对 `origin/main`、Actions 和 Release 的实际结果；发布失败要如实报告，不能把「已 push」当成「已发布」。
 
 测试失败、有未解释的 diff、或手动检查没做：不推，先修。测试通过不等于发布许可，不要把「全绿」当成「可以发」。
 如果对方只想同步代码、不想发版，按对方说的保持 `manifest.json` 版本不变再推。

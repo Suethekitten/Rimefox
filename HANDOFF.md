@@ -519,7 +519,7 @@ node test/parse.test.mjs       # 回包解析 parseArray / parseAlignedArray（�
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空、分段落盘与旧格式迁移
 node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动、glossary:add、命中术语才注入提示词、输入框 noCache、align 对齐 / 旧缓存降级、目标语言（align / 普通 / 坏缓存定向失效 / 不写坏缓存）、文献引用不命中旧的压平缓存且旧条目不被清空
 node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、align 结构化输出、温度、保留分行规则、简繁转写、两种模式共用的唯一目标语言、保留标记（含文献引用编号）只在带标记的批次出现
-node test/lang-guard.test.mjs  # 目标语言保守校验：英文目标回中文 / 正常英文 / 专名清单 / 短文本 / 中文目标不判
+node test/lang-guard.test.mjs  # 目标语言保守校验：拉丁目标回中文 / CJK 目标回整段英文 / 正常混排 / 专名清单 / 短文本
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息、记住服务端不认的思考参数
 node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹 / 按命中算的缓存指纹 / 一键收录 upsert
 node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖
@@ -555,6 +555,47 @@ node tools/stability-audit.mjs                # 真实 Chrome 长文 / 大量段
 真实 Chrome（`--browser` 或环境变量 `RIMEFOX_BROWSER` 可换成 Edge）+ CDP `Extensions.loadUnpacked` 加载工作树 + 本地假 OpenAI 兼容接口，不需要 API Key，不进 CI（要真实浏览器，YouTube 还要能上网）。
 `--verbose` 打印扩展调试日志、YouTube 字幕请求 / 响应、钩子消息和广告开始 / 结束；`--youtube-only` 跳过文章页和设置页；`--headed` 显示窗口。
 YouTube 检查固定切到英文字幕轨再翻成简体中文（YouTube 会按地区自动选中文字幕，和目标语言相同时扩展按设计不接管），遇到广告能跳就跳、跳不过就等它播完；YouTube 每次的加载情况不同，失败时先加 `--verbose` 重跑看是哪一步
+
+Chrome 156 在部分 DSH / 沙箱环境里需要只加 `--no-sandbox` 的包装脚本才能稳定加载未打包扩展。示例：
+
+```sh
+cat >/tmp/rimfox-chrome-nosandbox.sh <<'SH'
+#!/bin/sh
+exec "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --no-sandbox "$@"
+SH
+chmod +x /tmp/rimfox-chrome-nosandbox.sh
+node tools/e2e-extension.mjs --browser /tmp/rimfox-chrome-nosandbox.sh
+```
+
+真实网页验收加 `--evidence-dir /tmp/...`，避免把临时截图写进仓库。
+
+### 7.1d 确认 Chrome 加载的是最新代码
+
+未打包扩展按**目录路径**加载，扩展 ID 由路径决定；切换分支、切换工作树或拉取新代码都不会自动更新已经加载的扩展。扩展页显示 manifest 版本号也不能证明代码包含当前分支的全部改动。
+
+排查顺序：
+
+1. 在 `chrome://extensions` 打开卡片详情，确认「已加载来源」目录；或打开扩展自己的 options 页，从地址栏 `chrome-extension://<id>/...` 读 ID。
+2. 用 Python 算目标目录的未打包 ID，和地址栏对比（不一致就是加载了别的目录）：
+
+```bash
+python3 - <<'PY'
+import hashlib
+path = '/absolute/path/to/edge-bilingual'
+h = hashlib.sha256(path.encode()).hexdigest()[:32]
+print(''.join(chr(97 + int(c, 16)) for c in h))
+PY
+```
+
+3. 在 `chrome://extensions` 点「重新加载」，关闭并重新打开设置的 options 页；至少确认一个新功能入口。仍是旧界面就再点一次重新加载。
+4. 换到另一个目录加载会得到**新的扩展 ID**，原 ID 的 API Key / 配置不会共享；要保留设置就切换原目录所在分支，不要换路径。
+
+### 7.1e 独立 QA 与假接口约定
+
+- 独立 QA 使用隔离 clone，固定验收 HEAD；QA 不修改源码、不 commit、不 push，记录每条命令的退出码和日志。
+- 不使用真实付费模型。扩展 E2E 使用本地假 OpenAI 兼容接口和独立 `user-data-dir`；真实网页（青空文库 / 朝鲜日报等）也只接假接口，用它们验证 DOM、结构和还原，不宣称真实译文质量。
+- 假接口必须按目标语言回包。例如目标为中文时不能只回 `译:English`，否则新语言守卫会正确判为错误语言而不写缓存，缓存回归会被误报为产品缺陷。先确认产品行为，再调整夹具；不要为了测试变绿放宽生产校验。
+- 新增下拉框、翻译生命周期、请求次数、缓存身份的改动，必须有真实 Chrome E2E 证据；Node 单测和离线自检不能单独证明「切换 0 请求」或「旧译文仍保留」。
 
 ### 7.2 诊断按钮
 弹窗底部「诊断」→ 生成 JSON 并复制到剪贴板，包含：
@@ -655,7 +696,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 > 这里只记**技术上的硬限制与坑**。用户能感觉到的「不支持什么」在 [docs/ROADMAP.md](docs/ROADMAP.md) §7 与 README「支持范围」。
 
 1. **仅译文模式下短中文会留下空白** —— 站点给容器写了固定高度，中文比英文短 40%，填不满。无通用解，只能按站点写规则或改用双语。
-2. **行内格式只做有限保真** —— `strong` / `em` / `code` / `small` / `sup` / `sub` 的局部语义可随译文对应；复杂链接、分行失配或无法可靠映射时保留原文。站点背景 / 边框不复制，已清空的原格式壳在事务内隐藏。
+2. **行内格式只做有限保真** —— `strong` / `em` / `code` / `small` / `sup` / `sub` 的局部语义可随译文对应；复杂链接、分行失配或无法可靠映射时保留原文。站点背景 / 边框不复制，已清空的原格式壳在事务内隐藏。段落里的 `button` / `label` / `summary` 文字是控件原子，仅译文下不能清空，否则会留下无标签按钮。
 3. **`<br>` 分隔的长帖**：0.8.4 起译文保留分行（双语、仅译文都是），但双语仍是整段译文追加在段末，没做「一行原文一行译文」的逐行穿插对照。
 4. ~~没有图标~~（0.4.7 已加：`icons/`，源文件是 `icon.svg` / `icon-small.svg`，PNG 用无头 Chrome 渲染）
 5. **站点规则库还很小**：内置规则只有 GitHub 文件列表和 Wikipedia 语言列表两条，其余靠通用启发式和用户自己写的规则；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
@@ -668,8 +709,9 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 12. **Ruby 段落仅译文**：普通 Ruby 段落仍用独立译文容器（`injectRuby`）；Ruby 与引用 / 链接混排时把 `<ruby>` 整体当原子保留、周围正文重建，Ruby 基字本身不翻译，局部排版可能略有差异；竖排（縦書き）/ `writing-mode: vertical-*` 未验证
 13. **真实网站覆盖**：0.9.2 只对青空文库《罗生门》做了真实页面验收；Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，不能当成已验证
 13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
-14. **目标语言校验是保守的定向失效**：覆盖「拉丁目标却整段回中日韩」和「中日韩目标却整段回拉丁」两种高置信度情况；短文本、专名 / 术语清单、合法中英混排不做自动失效。坏结果仍显示一次但不写缓存，下次重新请求；旧缓存里的这类条目可能保留，重新翻译即可覆盖
+14. **目标语言校验是保守的定向失效**：覆盖「拉丁目标却整段回中日韩」和「中日韩目标却整段回拉丁」两种高置信度情况；短文本、专名 / 术语清单、合法中英混排不做自动失效；无标准代码的自定义语言没有可靠语言标签，仍可能漏判。坏结果仍显示一次但不写缓存，下次重新请求；旧缓存里的这类条目可能保留，重新翻译即可覆盖
 15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式保留原文引用节点并重建文本节点；普通链接混合段落、注音 + 引用 / 链接、pre-wrap 文本里的硬换行都走混合行内渲染，原地翻成译文。仍不支持原地重建的：模型把分行合并 / 拆开后行数对不上、或结构确实无法安全重建（保持原文，注入结果写明原因，不退回双语）。混合段落里的普通链接默认保留原文字，只有图表 / 补充材料等可靠标签做本地化（任意链接文字翻译仍需链接级标记，见 ROADMAP P1-2）。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
+16. **0.12.0 独立 QA 的剩余低优先项**：模型自然语言前言、普通文本里的形似 `<fN>` / `<kN>`、截断输出提示、无链接纯数字上标、仅由 `font-family` 表达的局部差异尚未自动处理；当前分别按保留原文 / 保守失败处理，不引入高误杀启发式，也不因此追加付费请求。Chrome 156 的 E2E 仍可能需要 `--no-sandbox` 包装脚本，见 §7.1c。
 
 ---
 
