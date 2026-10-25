@@ -4,16 +4,16 @@
 
 判断标准：**「现在该怎么做」不在这里**。仓库里其余文档只写现状与流程，历史证据都在本目录和 git 里。
 
-| 文件 | 是什么 | 归档时的版本 |
+| 文件 | 是什么 | 版本 / 状态 |
 |---|---|---|
-| [2026-10-25-0.12.3-release-verification.md](2026-10-25-0.12.3-release-verification.md) | 0.12.3 发布前最终验证：P3 计数修复、全量测试、发布包与发布门槛 | 0.12.3，本地已提交待推送 |
-| [2026-10-25-link-reorder-0.12.3.md](2026-10-25-link-reorder-0.12.3.md) | 仅译文同父普通链接的事务化语序重排、边界、固定回放与 QA 交接 | 0.12.3，本地未推送 |
-| [2026-10-25-link-order-0.12.2.md](2026-10-25-link-order-0.12.2.md) | 仅译文链接顺序专项：安全失败、录制响应、截图、独立复核与重排研究 | 0.12.2，本地未推送 |
-| [2026-10-24-0120-a-b-integration.md](2026-10-24-0120-a-b-integration.md) | A+B 直接合入本地 main 的冲突处理、缺陷修复、联合回归与 QA 交接 | 0.12.0，本地未推送 |
-| [2026-10-24-inline-fidelity-0.12.0.md](2026-10-24-inline-fidelity-0.12.0.md) | 行内格式本地开发、独立复核、基线/性能证据与待验收交接 | 0.12.0，本地未推送 |
-| [2026-10-24-language-style-context.md](2026-10-24-language-style-context.md) | 自定义目标语言、趣味风格零误触、傲娇猫娘 / 强度、AI 精翻的开发报告与验证证据 | 0.11.7 基线，本地分支未发布 |
-| [2026-10-23-glossary-notes.md](2026-10-23-glossary-notes.md) | 可选术语说明、语境首选译法、CSV/JSON 兼容和本地验证记录 | 0.11.6，本地未发布 |
-| [2026-10-23-professional-engine-v2.md](2026-10-23-professional-engine-v2.md) | 专业引擎 v2 / JAMA 本地开发报告及链接的精简验证证据 | 0.11.3，本地未发布 |
+| [2026-10-25-0.12.3-release-verification.md](2026-10-25-0.12.3-release-verification.md) | 0.12.3 发布前最终验证：P3 计数修复、全量测试、发布包与发布结果 | 0.12.3，已发布 |
+| [2026-10-25-link-reorder-0.12.3.md](2026-10-25-link-reorder-0.12.3.md) | 仅译文同父普通链接的事务化语序重排、边界、固定回放与 QA 交接 | 0.12.3，已发布 |
+| [2026-10-25-link-order-0.12.2.md](2026-10-25-link-order-0.12.2.md) | 仅译文链接顺序专项：安全失败、录制响应、截图、独立复核与重排研究 | 0.12.2，已发布 |
+| [2026-10-24-0120-a-b-integration.md](2026-10-24-0120-a-b-integration.md) | A+B 直接合入本地 main 的冲突处理、缺陷修复、联合回归与 QA 交接 | 0.12.0，已发布 |
+| [2026-10-24-inline-fidelity-0.12.0.md](2026-10-24-inline-fidelity-0.12.0.md) | 行内格式本地开发、独立复核、基线/性能证据与验收交接 | 0.12.0，已发布 |
+| [2026-10-24-language-style-context.md](2026-10-24-language-style-context.md) | 自定义目标语言、趣味风格零误触、傲娇猫娘 / 强度、AI 精翻的开发报告与验证证据 | 0.11.7，已发布 |
+| [2026-10-23-glossary-notes.md](2026-10-23-glossary-notes.md) | 可选术语说明、语境首选译法、CSV/JSON 兼容和本地验证记录 | 0.11.6，已发布 |
+| [2026-10-23-professional-engine-v2.md](2026-10-23-professional-engine-v2.md) | 专业引擎 v2 / JAMA 本地开发报告及链接的精简验证证据 | 0.11.3，已发布 |
 | [STORE-READINESS.md](STORE-READINESS.md) | Chrome 商店上架审计与「差哪 5 项」 | 0.8.5 |
 | [STORE-VALIDATION.md](STORE-VALIDATION.md) | 每次上架材料验证的流水记录 | 0.7.1–0.8.5 |
 | [STABILITY-AUDIT-0.9.2.md](STABILITY-AUDIT-0.9.2.md) | 稳定性 / 性能 / 恶性 bug 审计 | 0.9.2 |

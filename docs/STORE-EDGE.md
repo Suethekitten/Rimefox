@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Microsoft Edge 加载项商店上架材料
 
-最后更新：2026-10-22，对应 `main`（Rimefox 0.10.0）；商店里 0.9.6 已上线、0.9.7 审核中，0.10.0 未提审。
+最后更新：2026-10-25，对应 `main`（Rimefox 0.12.3）；商店线上 0.9.6，本次未更新；下一次商店更新用 0.12.3。
 
 > **分工**：提交状态、差哪几项、待办清单在 [STORE.md](STORE.md)（唯一主人）。
 > 本文只写 **Edge 与 Chrome 的差异**、Partner Center 的提交流程，以及只给 Edge 控制台用的粘贴文案（≥250 字符描述、search terms、notes for certification）。
@@ -9,7 +9,7 @@
 ## 结论
 
 - **代码不需要为 Edge 改**：MV3、无 `update_url`、无远程代码、无混淆，`lib/config.js` 已经区分 `edge://` 与 `chrome://`，`world: "MAIN"` 和 `minimum_chrome_version` 都是 Edge 支持的字段。
-- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线，0.9.7 随后提交、审核中（最长 7 个工作日）。
+- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线；0.9.7 随后提交，审核结果以 Partner Center 为准，本次未更新线上版本。
 - Edge 注册**免费**（Chrome 收一次性 $5）；后续更新用 **Packages → 上传新包**，版本号必须比线上大。
 
 ## 商店标识
@@ -269,7 +269,7 @@ Notes:
 | `<all_urls>` 被质疑过宽 | 用上表的权限理由；强调页面和接口都由用户选择 |
 | YouTube `world: "MAIN"` 被当成侵入页面 | 说明只在 manifest 列出的 3 个 YouTube 域读取播放器已加载的字幕，默认关闭，非官方 |
 | 隐私政策与实际行为不一致 | 本次补了输入框翻译；以后改数据流必须同步 `PRIVACY.md` / `privacy.en.md` / 本文 |
-| API Key 明文存 `chrome.storage.local`（政策 1.5.5「认证信息要安全」） | 已是 `TRUSTED_CONTEXTS`、网页脚本读不到；更彻底的做法是会话级存储（ROADMAP 0.11.0）。真被问到，按现状如实说明 |
+| API Key 明文存 `chrome.storage.local`（政策 1.5.5「认证信息要安全」） | 已是 `TRUSTED_CONTEXTS`、网页脚本读不到；更彻底的做法是会话级存储（ROADMAP P2-1）。真被问到，按现状如实说明 |
 | 只声明一种语言却宣传中英双语界面（政策 1.7） | 0.9.6 起 `_locales` 带 `zh_CN` + `en`，两种语言各一份 listing，已解决 |
 | 审核环境版本差异 | `documentPictureInPicture` 有特性检测并回退，不阻塞 |
 
@@ -277,8 +277,8 @@ Notes:
 
 提交状态见 [STORE.md](STORE.md)「当前状态」；Edge 这边只剩：
 
-1. 等 0.9.7 认证结果（最长 7 个工作日）；被驳回就按报告改完重提，可能要求先升版本号。
-2. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大（当前线上 0.9.6；0.10.0 是最新未提审版本）。
+1. 确认 0.9.7 的认证结果（以 Partner Center 为准）；被驳回就按报告改完重提，可能要求先升版本号。
+2. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大（当前线上 0.9.6，目标 0.12.3）。
 3. 可选：补 440×280 小宣传图、1400×560 大宣传图。
 
 ## 八、官方依据（2026-10-20 查询）
