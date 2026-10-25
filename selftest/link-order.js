@@ -31,6 +31,16 @@
       var attrs = links.map(function (a) { return a.outerHTML.replace(/>[\s\S]*<\/a>$/, '>'); });
       var hits = 0;
       links.forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); hits += 1; }); });
+      if (options.reorder && links[0]) {
+        links[0].focus();
+        var sel = window.getSelection();
+        if (sel) {
+          var range = document.createRange();
+          range.selectNodeContents(links[0]);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
       DT.state.mode = options.mode || 'translation'; DT.state.target = options.target || 'zh-CN';
       var unit = DT.collect(p)[0];
       check(name + ':single-paragraph-unit', !!unit && DT.collect(p).length === 1, unit && unit.wire);
@@ -58,6 +68,19 @@
       } else {
         check(name + ':successful-render', ok && result.code === (options.citationFallback ? 'safe-degraded' : 'success'), JSON.stringify(result));
         if (!options.citationFallback) check(name + ':exact-visible-token-order', compact(view.textContent) === compact(expected), JSON.stringify({ expected: expected, actual: view.textContent }));
+        if (options.reorder) {
+          check(name + ':reordered-status', ok && result.code === 'success' && !!unit.inlineReordered, JSON.stringify({ result: result, links: unit.inlineReordered }));
+          var wantedHrefs = [], token = /<k(\d+)>/g, hit;
+          while ((hit = token.exec(value))) wantedHrefs.push(links[Number(hit[1]) - 1] && links[Number(hit[1]) - 1].getAttribute('href'));
+          var actualHrefs = Array.prototype.map.call(view.querySelectorAll('a'), function (a) { return a.getAttribute('href'); });
+          check(name + ':reordered-href-correspondence', JSON.stringify(actualHrefs) === JSON.stringify(wantedHrefs), JSON.stringify({ actual: actualHrefs, wanted: wantedHrefs }));
+          check(name + ':reordered-focus-preserved', document.activeElement === links[0], document.activeElement && (document.activeElement.outerHTML || document.activeElement.tagName));
+          var activeSel = window.getSelection();
+          check(name + ':reordered-selection-preserved', !!activeSel && !!activeSel.anchorNode && links[0].contains(activeSel.anchorNode), activeSel && activeSel.anchorNode && activeSel.anchorNode.nodeValue);
+          check(name + ':reordered-visible-hit-areas', links.every(function (a) { return a.getClientRects().length > 0; }), links.map(function (a) { return a.getClientRects().length; }).join(','));
+          var ids = Array.prototype.map.call(view.querySelectorAll('[id]'), function (n) { return n.id; });
+          check(name + ':reordered-no-duplicate-ids', ids.length === new Set(ids).size, ids.join('|'));
+        }
         if (options.hrefOrder) check(name + ':href-order-at-equal-offset', Array.prototype.map.call(view.querySelectorAll('a'), function (a) { return a.getAttribute('href'); }).join('|') === options.hrefOrder.join('|'), view.outerHTML);
         if (options.warning) check(name + ':explicit-placement-warning', !!warning && warning.code === options.warning, JSON.stringify(warning));
         if (options.noWarning) check(name + ':normal-adjacency-no-warning', !warning, JSON.stringify(warning));
@@ -75,15 +98,15 @@
       DT.setSiteRule(null);
       var ordinary = 'The article compares <a href="/alpha" title="Alpha">alpha</a> with <a href="/beta" title="Beta">beta</a> before drawing a conclusion.';
       record('links:control', ordinary, function (u) { return '文章比较' + atom(u, 0, '甲') + '与' + atom(u, 1, '乙') + '之后得出结论。'; }, { noWarning: true });
-      record('links:swap-two', ordinary, function (u) { return '文章比较' + atom(u, 1, '乙') + '与' + atom(u, 0, '甲') + '之后得出结论。'; }, { fail: true });
+      record('links:swap-two', ordinary, function (u) { return '文章比较' + atom(u, 1, '乙') + '与' + atom(u, 0, '甲') + '之后得出结论。'; }, { reorder: true });
       record('legacy:forced-dual-positioned-swap', ordinary, function (u) { return '文章比较' + atom(u, 1) + '与' + atom(u, 0) + '之后得出结论。'; }, { fail: true, mode: 'dual', fixed: true, legacy: true });
       var triple = 'The article compares <a href="/alpha">alpha</a>, <a href="/beta">beta</a> and <a href="/gamma">gamma</a> before drawing a conclusion.';
-      record('links:move-one', triple, function (u) { return '文章比较' + atom(u, 1, '乙') + '、' + atom(u, 2, '丙') + '与' + atom(u, 0, '甲') + '之后得出结论。'; }, { fail: true });
+      record('links:move-one', triple, function (u) { return '文章比较' + atom(u, 1, '乙') + '、' + atom(u, 2, '丙') + '与' + atom(u, 0, '甲') + '之后得出结论。'; }, { reorder: true });
       record('links:model-tail', triple, function (u) { return '文章在比较之后得出结论。' + atom(u, 0, '甲') + atom(u, 1, '乙') + atom(u, 2, '丙'); }, { warning: 'suspicious-inline-placement' });
       var adjacent = 'The comparison uses <a href="/alpha">alpha</a><a href="/beta">beta</a> together before drawing the final conclusion.';
       record('links:source-adjacent', adjacent, function (u) { return '比较使用' + atom(u, 0, '甲') + atom(u, 1, '乙') + '一起得出最终结论。'; }, { noWarning: true });
       record('links:three-source-adjacent', 'The comparison uses <a href="/alpha">alpha</a><a href="/beta">beta</a><a href="/gamma">gamma</a> together before drawing the final conclusion.', function (u) { return '比较使用' + atom(u, 0, '甲') + atom(u, 1, '乙') + atom(u, 2, '丙') + '一起得出最终结论。'; }, { noWarning: true });
-      record('links:adjacent-swap', adjacent, function (u) { return '比较使用' + atom(u, 1, '乙') + atom(u, 0, '甲') + '一起得出最终结论。'; }, { fail: true });
+      record('links:adjacent-swap', adjacent, function (u) { return '比较使用' + atom(u, 1, '乙') + atom(u, 0, '甲') + '一起得出最终结论。'; }, { reorder: true });
       record('dual:adjacent-swap', adjacent, function (u) { return '比较使用' + atom(u, 1, '乙') + atom(u, 0, '甲') + '一起得出最终结论。'; }, { mode: 'dual', hrefOrder: ['/beta', '/alpha'] });
       var equal = 'The comparison uses <a href="/first">item</a><a href="/second">item</a> together before drawing the final conclusion.';
       record('dual:equal-labels-swap', equal, function (u) { return '比较使用' + atom(u, 1, '项目') + atom(u, 0, '项目') + '一起得出最终结论。'; }, { mode: 'dual', hrefOrder: ['/second', '/first'] });
@@ -117,8 +140,13 @@
       record('rtl:nested-swap', rtl, function (u) { return '这项研究说明' + atom(u, 1, '第二结果') + '与' + atom(u, 0, '第一结果') + '并给出充分补充信息。'; }, { dir: 'rtl', fail: true });
       var chinese = '这篇文章比较<a href="/first">第一个结果</a>以及<a href="/second">第二个结果</a>，然后对这两种方法进行详细解释。';
       record('zh-en:control', chinese, function (u) { return 'The article compares ' + atom(u, 0, 'the first result') + ' and ' + atom(u, 1, 'the second result') + ' before explaining both methods in detail.'; }, { target: 'en', noWarning: true });
-      record('zh-en:swap', chinese, function (u) { return 'The article compares ' + atom(u, 1, 'the second result') + ' and ' + atom(u, 0, 'the first result') + ' before explaining both methods in detail.'; }, { target: 'en', fail: true });
+      record('zh-en:swap', chinese, function (u) { return 'The article compares ' + atom(u, 1, 'the second result') + ' and ' + atom(u, 0, 'the first result') + ' before explaining both methods in detail.'; }, { target: 'en', reorder: true });
       record('zh-en:dual-swap', chinese, function (u) { return 'The article compares ' + atom(u, 1, 'the second result') + ' and ' + atom(u, 0, 'the first result') + ' before explaining both methods in detail.'; }, { target: 'en', mode: 'dual', hrefOrder: ['/second', '/first'] });
+      record('zh-ja:swap', chinese, function (u) { return 'この記事は' + atom(u, 1, '第二の結果') + 'と' + atom(u, 0, '第一の結果') + 'を比較し、両方の方法を詳しく説明します。'; }, { target: 'ja', reorder: true });
+      var crossSentence = 'First read <a href="/alpha">alpha</a> before continuing. Then review <a href="/beta">beta</a> with care.';
+      record('links:cross-sentence-swap', crossSentence, function (u) { return '先仔细复核' + atom(u, 1, '乙') + '。然后在继续前阅读' + atom(u, 0, '甲') + '。'; }, { reorder: true });
+      var rtlDirect = 'الدراسة تشرح <a href="/first">النتيجة الأولى</a> و<a href="/second">النتيجة الثانية</a> مع معلومات كافية.';
+      record('rtl:direct-swap', rtlDirect, function (u) { return '这项研究说明' + atom(u, 1, '第二结果') + '与' + atom(u, 0, '第一结果') + '并给出充分信息。'; }, { dir: 'rtl', reorder: true });
       record('rtl-ltr:mixed-direction', 'The LTR explanation contains <span dir="rtl"><a href="/arabic">الدليل</a></span> and <a href="/english">English evidence</a> before its final conclusion.', function (u) { return '从左到右的说明包含' + atom(u, 0, '阿文指南') + '与' + atom(u, 1, '英文证据') + '然后得出最终结论。'; }, { noWarning: true });
       // A site can fill an existing empty element while the model request is pending.
       // Checking only snapshots of old Text nodes misses the newly added fact.

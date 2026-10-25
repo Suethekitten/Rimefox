@@ -255,15 +255,16 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 协议有效性与 DOM 可实现性分层：inline-v1 允许目标语言重排，不因当前渲染器的能力限制修改协议、清缓存或拒绝服务商响应。仅译文及控件强制替换统一进入 `injectMixed`，不能走旧 `keepPlacement` 的正文句末吸附或暗中改双语。
 
 - `keepMarks.order` 与 `inlineResult.atoms` 保留实际 token 顺序；仅比较去原子后的偏移不够，交换两个相邻链接时它们偏移可完全相同。双语 `fillCited` 同偏移也按目标 token 序排序。
-- link / xref / mention / protect / control / ruby 的逆序、无法确定落点或跨硬行均返回 `unsupported-inline-order`，原段落保留；不将它们当引用编号。正常同序相邻原子和正常引用共址可注入。
+- 0.12.3 起，同一父元素下连续的一段普通正文链接可按模型目标 token 顺序，用 RenderTransaction 的 move 操作移动原 A 节点；不克隆、不重建 href/title/id/事件，不移动引用 / xref / mention / protect / control / ruby。链接嵌套在 span/strong、与引用交错、跨行、contenteditable 或已知框架根时继续安全失败。
+- 除上述可重排普通链接外，xref / mention / protect / control / ruby 的逆序、无法确定落点或跨硬行均返回 `unsupported-inline-order`，原段落保留；不将它们当引用编号。正常同序相邻原子和正常引用共址可注入。
 - 只有文献引用的同句兼容定位可安全降级，不跨句/硬行把引用归给另一条陈述；返回 `safe-degraded`、保留 true 返回值并附 placement warning。普通成功仍是 `success`。
 - 源中分散的多个正文链接被模型连续放在句末时，不猜测模型语言意图、不改变输出，只附 `suspicious-inline-placement` 质量提示。正常相邻链接与引用共址不因位置相同被拒绝。
-- safeSlot / styleSafeSlot 规划后，还在事务内核对实际目标节点身份顺序与计划正文、原子标签/目标对应；共享强调外壳等造成错位时整笔 rollback，不能以节点数和href存在代替顺序正确。模型 HTML 不解析、不插入，原 A 不移动、不重建。
+- safeSlot / styleSafeSlot 规划后，还在事务内核对实际目标节点身份顺序与计划正文、原子标签/目标对应；共享强调外壳等造成错位时整笔 rollback，不能以节点数和href存在代替顺序正确。模型 HTML 不解析、不插入，原 A 只在可证明安全的同父链接区重排路径内移动，其他路径不重建。
 - 等待期间源 token 全集也须保持一致，含既有空元素中新添的文字；局部单元按段界限制预检，不能读兄弟段后误判本段。仅用于首次写入前，不把自身渲染误判为站点改动。
 - `renderFailed` / `inlineOrderFailed` / `lastRenderError` 与诊断区分结构失败；`qualityWarnings` / `inlinePlacementWarnings` 与 `safeDegraded` 区分可疑模型布局及安全引用调整。popup和toast给出保留原文及可切双语的说明，失败不计 translated/skipped，也不自动请求模型。
 - 当前顺序失败另有只含元素/段键的内存索引；原节点被框架替换、源段变化、关闭或重建时释放过期计数，不复制正文到诊断。有效模型响应仍由原缓存持有，主动切双语可复用。
 
-这是保守的可实现性限制，并未提供通用原链接重排。未来如增加原节点移动或独立译文视图，应独立验证框架、事件委托、CSS、焦点和观察器边界，并由用户明确选择，不作为隐式仅译文降级。
+这是有限、可证明安全的原节点重排，不是任意 DOM 重排；只支持同父平坦链接区，不能保证所有 SPA / 框架、嵌套链接、交错引用或跨行结构。未来如扩大原节点移动范围或增加独立译文视图，应独立验证框架、事件委托、CSS、焦点和观察器边界，并由用户明确选择，不作为隐式仅译文降级。
 
 ---
 

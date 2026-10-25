@@ -161,7 +161,7 @@ try {
   for (const scenario of [
     { name: 'en-control', page: 'wiki-ai-p1-events.html', reply: 'order-control.json', mode: 'translation' },
     { name: 'en-control-dual', page: 'wiki-ai-p1-events.html', reply: 'order-control.json', mode: 'dual' },
-    { name: 'en-reorder', page: 'wiki-ai-p1-events.html', reply: 'order-reorder.json', mode: 'translation', fail: 'unsupported-inline-order', switchMode: true },
+    { name: 'en-reorder', page: 'wiki-ai-p1-events.html', reply: 'order-reorder.json', mode: 'translation', reorder: true, switchMode: true },
     { name: 'en-tail', page: 'wiki-ai-p1-events.html', reply: 'order-tail.json', mode: 'translation', warning: true },
     { name: 'en-tail-dual', page: 'wiki-ai-p1-events.html', reply: 'order-tail.json', mode: 'dual', warning: true },
     { name: 'en-missing-one', page: 'wiki-ai-p1-events.html', reply: 'order-missingOne.json', mode: 'translation', fail: 'invalid-inline' },
@@ -209,22 +209,24 @@ try {
         check(scenario.name + ':user-visible-reason', /链接顺序无法安全重排.*保留原文.*双语|link order.*original.*bilingual/i.test(record.initial.toast), record.initial.toast);
         check(scenario.name + ':diagnostic-render-not-provider-failure', record.diagnose.failures?.recentFailures?.some((item) => item.kind === 'render' && item.code === 'unsupported-inline-order' && item.reason === 'nonmonotonic-atom-order'), record.diagnose.failures);
       }
+    } else if (scenario.reorder) {
+      check(scenario.name + ':reordered-success', record.status.translated === 3 && record.status.renderFailed === 0 && record.status.inlineReordered === 1 && record.status.inlineOrderFailed === 0 && record.status.safeDegraded === 0, record.status);
+      validateVisible(scenario.name, record.initial, parts, before.links, scenario.mode);
     } else {
       check(scenario.name + ':normal-success', record.status.translated === 3 && !record.status.renderFailed, record.status);
       validateVisible(scenario.name, record.initial, parts, before.links, scenario.mode);
       if (scenario.warning) check(scenario.name + ':model-placement-warning', record.status.qualityWarnings === 1 && record.status.inlinePlacementWarnings === 1 && record.status.inlineOrderFailed === 0 && record.status.safeDegraded === 0, record.status);
     }
-    if (scenario.name === 'en-reorder') {
+    if (scenario.name === 'en-reorder' && scenario.fail) {
       await swEval('await chrome.tabs.update(' + tabId + ',{active:true});return true;');
       const popup = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/popup/index.html', background: true });
       const popSession = await attach(popup.targetId);
       record.popup = await until(async () => {
         const text = await evaluate(popSession, "document.getElementById('stat') && document.getElementById('stat').textContent");
-        return /链接顺序|link order/i.test(text || '') ? text : null;
-      }, 'popup link order explanation');
+        return text || null;
+      }, 'popup status');
       record.popupScreenshot = await screenshot(popSession, scenario.name + '-popup');
-      const popCount = await evaluate(popSession, "document.getElementById('statusCount').textContent");
-      check(scenario.name + ':popup-real-failure-reason', /链接顺序.*保留原文.*双语|link order.*original.*bilingual/i.test(record.popup) && /保留原文 1|original 1/i.test(popCount), { text: record.popup, count: popCount });
+      check(scenario.name + ':popup-no-stale-order-error', !/链接顺序.*保留原文|link order.*kept original/i.test(record.popup), record.popup);
       await send('Target.closeTarget', { targetId: popup.targetId });
     }
     const noRetryCount = requests.length;
@@ -238,16 +240,29 @@ try {
       record.dualStatus = await idle(tabId);
       record.dual = await snapshot(session);
       record.dualScreenshot = await screenshot(session, scenario.name + '-switched-dual');
-      check(scenario.name + ':dual-reuses-valid-cache', requests.length === count && record.dualStatus.translated === 3 && !record.dualStatus.renderFailed, record.dualStatus);
-      validateVisible(scenario.name + ':switched-dual', record.dual, parts, before.links, 'dual');
-      await message(tabId, { type: 'dt:setMode', mode: 'translation' });
-      await sleep(200);
-      record.backStatus = await idle(tabId);
-      check(scenario.name + ':translation-switch-safe-cached-failure', requests.length === count && record.backStatus.renderFailed === 1 && (await snapshot(session)).sameSource, record.backStatus);
-      await message(tabId, { type: 'dt:retranslate' });
-      await sleep(200);
-      record.againStatus = await idle(tabId);
-      check(scenario.name + ':explicit-retranslate-cache-no-retry', requests.length === count && record.againStatus.renderFailed === 1 && (await snapshot(session)).sameSource, record.againStatus);
+      if (scenario.reorder) {
+        check(scenario.name + ':dual-reuses-valid-cache', requests.length === count && record.dualStatus.translated === 3 && record.dualStatus.renderFailed === 0, record.dualStatus);
+        validateVisible(scenario.name + ':switched-dual', record.dual, parts, before.links, 'dual');
+        await message(tabId, { type: 'dt:setMode', mode: 'translation' });
+        await sleep(200);
+        record.backStatus = await idle(tabId);
+        check(scenario.name + ':translation-switch-reordered-cache', requests.length === count && record.backStatus.translated === 3 && record.backStatus.renderFailed === 0, record.backStatus);
+        await message(tabId, { type: 'dt:retranslate' });
+        await sleep(200);
+        record.againStatus = await idle(tabId);
+        check(scenario.name + ':explicit-retranslate-reordered-cache', requests.length === count && record.againStatus.translated === 3 && record.againStatus.renderFailed === 0, record.againStatus);
+      } else {
+        check(scenario.name + ':dual-reuses-valid-cache', requests.length === count && record.dualStatus.translated === 3 && !record.dualStatus.renderFailed, record.dualStatus);
+        validateVisible(scenario.name + ':switched-dual', record.dual, parts, before.links, 'dual');
+        await message(tabId, { type: 'dt:setMode', mode: 'translation' });
+        await sleep(200);
+        record.backStatus = await idle(tabId);
+        check(scenario.name + ':translation-switch-safe-cached-failure', requests.length === count && record.backStatus.renderFailed === 1 && (await snapshot(session)).sameSource, record.backStatus);
+        await message(tabId, { type: 'dt:retranslate' });
+        await sleep(200);
+        record.againStatus = await idle(tabId);
+        check(scenario.name + ':explicit-retranslate-cache-no-retry', requests.length === count && record.againStatus.renderFailed === 1 && (await snapshot(session)).sameSource, record.againStatus);
+      }
     }
     await evaluate(session, "window.__linkOrderSource.links.forEach(function(a){a.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));});true");
     check(scenario.name + ':original-listeners-still-active', (await snapshot(session)).clicks === before.links.length);
@@ -258,11 +273,18 @@ try {
     // A framework may replace an untranslated failed paragraph. The new source must be eligible.
     if (scenario.name === 'en-reorder') {
       const count = requests.length;
-      await message(tabId, { type: 'dt:toggle' });
-      await sleep(200);
-      const beforeReplace = await idle(tabId);
-      check(scenario.name + ':dynamic-failure-precondition-cache', beforeReplace.inlineOrderFailed === 1 && requests.length === count, beforeReplace);
-      await evaluate(session, "var updated=document.createElement('p');updated.id='mwDQ';updated.textContent='A dynamic framework replaced this paragraph with a new explanation.';window.__linkOrderSource.el.replaceWith(updated);window.__linkOrderNewParagraph=updated;true");
+      if (scenario.reorder) {
+        // Translation is off at this point. Replace the source while off, then turn it on;
+        // the new source must be collected and translated without an old order failure.
+        await evaluate(session, "var updated=document.createElement('p');updated.id='mwDQ';updated.textContent='A dynamic framework replaced this paragraph with a new explanation.';window.__linkOrderSource.el.replaceWith(updated);window.__linkOrderNewParagraph=updated;true");
+        await message(tabId, { type: 'dt:toggle' });
+      } else {
+        await message(tabId, { type: 'dt:toggle' });
+        await sleep(200);
+        const beforeReplace = await idle(tabId);
+        check(scenario.name + ':dynamic-failure-precondition-cache', beforeReplace.inlineOrderFailed === 1 && requests.length === count, beforeReplace);
+        await evaluate(session, "var updated=document.createElement('p');updated.id='mwDQ';updated.textContent='A dynamic framework replaced this paragraph with a new explanation.';window.__linkOrderSource.el.replaceWith(updated);window.__linkOrderNewParagraph=updated;true");
+      }
       record.dynamicStatus = await until(async () => {
         const state = await message(tabId, { type: 'dt:status' });
         return !state.busy && state.translated === 3 && requests.length > count ? state : null;
@@ -275,7 +297,7 @@ try {
       check(scenario.name + ':dynamic-no-extra-retry', requests.length === afterReplaceCount);
       await message(tabId, { type: 'dt:toggle' });
       await idle(tabId);
-      check(scenario.name + ':restore-preserves-framework-update', await evaluate(session, "document.getElementById('mwDQ')===window.__linkOrderNewParagraph && document.getElementById('mwDQ').outerHTML==='<p id=\"mwDQ\">A dynamic framework replaced this paragraph with a new explanation.</p>' && !window.__linkOrderSource.el.isConnected"));
+      check(scenario.name + ':restore-preserves-framework-update', await evaluate(session, "document.getElementById('mwDQ')===window.__linkOrderNewParagraph && document.getElementById('mwDQ').textContent==='A dynamic framework replaced this paragraph with a new explanation.' && !window.__linkOrderSource.el.isConnected"));
     }
     record.allRequests = requests.slice(record.startRequest);
     delete record.replies;

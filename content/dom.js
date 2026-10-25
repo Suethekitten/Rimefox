@@ -3281,6 +3281,76 @@
     return marks.order || [];
   }
 
+  // 有限的“原链接节点重排”：只处理同一父元素下的普通正文链接，且链接是一段连续区；
+  // 非链接原子只能在它前面或后面（常见结构：p 里若干 <a>，末尾一个文献引用）。链接仍是原来的 DOM 节点，只改变同一父级内的
+  // childNodes 顺序；事件、href、title、id 都不重建。其他结构继续走安全失败，不能猜。
+  function reorderPlan(unit, marks, order, area, multi) {
+    if (multi || area !== 'content' || !unit.inlineResult || !unit.keep || unit.keep.length < 2) return null;
+    if (unit.el && unit.el.isContentEditable) return null;
+    if (unit.el && unit.el.closest && unit.el.closest('[contenteditable]')) return null;
+    if (unit.el && unit.el.closest && unit.el.closest('[data-reactroot],[data-reactid]')) return null;
+    var keep = unit.keep;
+    var links = [];
+    var nonlinks = [];
+    var i;
+    for (i = 0; i < keep.length; i += 1) {
+      if (keep[i].kind === 'link') links.push(i);
+      else nonlinks.push(i);
+    }
+    if (links.length < 2) return null;
+    var linkFirst = links[0];
+    var linkLast = links[links.length - 1];
+    // 源链接必须是一段连续的正文链接区；引用 / notranslate 等只能在它前面或后面。
+    for (i = 0; i < nonlinks.length; i += 1) {
+      if (nonlinks[i] > linkFirst && nonlinks[i] < linkLast) return null;
+    }
+    // 目标顺序里链接也必须是一段连续区，非链接原子相对顺序不变。
+    var targetLinks = [];
+    var targetNon = [];
+    var targetLinkFirst = -1;
+    var targetLinkLast = -1;
+    for (i = 0; i < order.length; i += 1) {
+      var index = order[i];
+      if (keep[index].kind === 'link') {
+        if (targetLinkFirst < 0) targetLinkFirst = i;
+        targetLinkLast = i;
+        targetLinks.push(index);
+      } else {
+        targetNon.push(index);
+        if (targetLinkFirst >= 0 && i < targetLinkLast) return null;
+      }
+    }
+    if (targetLinks.length !== links.length || targetNon.length !== nonlinks.length) return null;
+    if (targetNon.join(',') !== nonlinks.join(',')) return null;
+    // 目标标记位置必须随目标 token 顺序单调。
+    var prev = -1;
+    for (i = 0; i < order.length; i += 1) {
+      var at = marks.at[order[i]];
+      if (!(at >= 0) || at < prev) return null;
+      prev = at;
+    }
+    for (i = 0; i < links.length; i += 1) {
+      var el = keep[links[i]].el;
+      if (!el || tagOf(el) !== 'A' || el.parentNode !== unit.el) return null;
+      if (el.isContentEditable) return null;
+      if (el.querySelector && el.querySelector('a,button,input,textarea,select,[contenteditable]')) return null;
+    }
+    // 链接块后面第一个非链接原子是稳定边界；没有后缀时追加到父级末尾。
+    var boundary = null;
+    for (i = 0; i < nonlinks.length; i += 1) {
+      if (nonlinks[i] > linkLast) {
+        boundary = keep[nonlinks[i]].el;
+        if (!boundary || boundary.parentNode !== unit.el) return null;
+        break;
+      }
+    }
+    if (boundary && boundary.parentNode !== unit.el) return null;
+    var same = true;
+    for (i = 0; i < links.length; i += 1) if (links[i] !== targetLinks[i]) { same = false; break; }
+    if (same) return null;
+    return { links: targetLinks, boundary: boundary };
+  }
+
   // 一行里各原子的落点（行内偏移，按页面顺序单调不减）。
   // 只有文献引用可以在同一句内吸附；正文链接 / 图表 / 提及 / 保护内容 / 控件 / Ruby 不能猜位置。
   function atomPlacement(srcLine, dstLine, items) {
@@ -3457,6 +3527,23 @@
     var ranks = [];
     order.forEach(function (index, rank) { ranks[index] = rank; });
     var stripped = fixed.stripped;
+    var reorder = reorderPlan(unit, fixed, order, area, multi);
+    var activeBefore = reorder ? document.activeElement : null;
+    var selectionBefore = null;
+    var selectionLink = null;
+    if (reorder && window.getSelection) {
+      var initialSel = window.getSelection();
+      if (initialSel.rangeCount) {
+        var initialRange = initialSel.getRangeAt(0);
+        if (unit.el.contains(initialRange.startContainer) && unit.el.contains(initialRange.endContainer)) {
+          selectionBefore = initialRange.cloneRange();
+          for (var sl = 0; sl < reorder.links.length; sl += 1) {
+            var selEl = keep[reorder.links[sl]].el;
+            if (selEl && (selEl.contains(initialRange.startContainer) || selEl.contains(initialRange.endContainer))) { selectionLink = selEl; break; }
+          }
+        }
+      }
+    }
     var srcOff = [];
     var dstOff = [];
     function filledLines(value, offsets) {
@@ -3483,44 +3570,54 @@
       return li;
     });
     var at = new Array(keep.length);
-    var mode = 'exact';
-    for (l = 0; l < srcLines.length; l += 1) {
-      var idx = [];
-      var items = [];
-      var crossedLine = false;
-      keep.forEach(function (k, i) {
-        if (lineOf[i] !== l) return;
-        var p = fixed.at[i];
-        var inLine = p >= dstOff[l] && p <= dstOff[l] + dstLines[l].length;
-        // 已在别行出现的标记不是「漏标记」。不能按源行补回，否则会把引用换给另一句。
-        if (p >= 0 && !inLine) crossedLine = true;
-        idx.push(i);
-        items.push({ start: k.start - srcOff[l], at: inLine ? p - dstOff[l] : -1, kind: k.kind, order: ranks[i] == null ? -1 : ranks[i] });
-      });
-      if (crossedLine) return failInject(unit, 'unsupported-inline-order', 'cross-line-atom-position');
-      var placed = atomPlacement(srcLines[l], dstLines[l], items);
-      if (!placed) return failInject(unit, 'invalid-placement', 'no-sentence');
-      if (placed.error) return failInject(unit, 'unsupported-inline-order', placed.error);
-      if (placed.mode !== 'exact') mode = 'sentence';
-      idx.forEach(function (i, n) {
-        at[i] = dstOff[l] + placed.at[n];
-      });
+    var mode = reorder ? 'reordered' : 'exact';
+    if (reorder) {
+      keep.forEach(function (k, i) { at[i] = fixed.at[i]; });
+    } else {
+      for (l = 0; l < srcLines.length; l += 1) {
+        var idx = [];
+        var items = [];
+        var crossedLine = false;
+        keep.forEach(function (k, i) {
+          if (lineOf[i] !== l) return;
+          var p = fixed.at[i];
+          var inLine = p >= dstOff[l] && p <= dstOff[l] + dstLines[l].length;
+          // 已在别行出现的标记不是「漏标记」。不能按源行补回，否则会把引用换给另一句。
+          if (p >= 0 && !inLine) crossedLine = true;
+          idx.push(i);
+          items.push({ start: k.start - srcOff[l], at: inLine ? p - dstOff[l] : -1, kind: k.kind, order: ranks[i] == null ? -1 : ranks[i] });
+        });
+        if (crossedLine) return failInject(unit, 'unsupported-inline-order', 'cross-line-atom-position');
+        var placed = atomPlacement(srcLines[l], dstLines[l], items);
+        if (!placed) return failInject(unit, 'invalid-placement', 'no-sentence');
+        if (placed.error) return failInject(unit, 'unsupported-inline-order', placed.error);
+        if (placed.mode !== 'exact') mode = 'sentence';
+        idx.forEach(function (i, n) {
+          at[i] = dstOff[l] + placed.at[n];
+        });
+        }
     }
     if (mode === 'sentence') unit.renderWarning = { code: 'citation-placement-fallback', reason: 'citation-same-sentence-placement' };
     else noteModelAtomCluster(unit, fixed);
 
     // 页面顺序的落点序列：第 l 行开头的 <br>，再是这一行的原子
     var seq = [];
-    for (l = 0; l < groups.length || l < 1; l += 1) {
-      if (l > 0) {
-        var boundary = groups[l].br
-          ? { node: groups[l].br, pos: dstOff[l] - 1, br: true }
-          : { node: document.createTextNode('\n'), nl: true, pos: dstOff[l] - 1 };
-        seq.push(boundary);
-      }
-      keep.forEach(function (k, i) {
-        if (lineOf[i] === l) seq.push({ node: k.el, pos: at[i], keep: i, cite: k.kind === 'cite' });
+    if (reorder) {
+      order.forEach(function (index) {
+        seq.push({ node: keep[index].el, pos: at[index], keep: index, cite: keep[index].kind === 'cite' });
       });
+    } else {
+      for (l = 0; l < groups.length || l < 1; l += 1) {
+        if (l > 0) {
+          var boundary = groups[l].br
+            ? { node: groups[l].br, pos: dstOff[l] - 1, br: true }
+            : { node: document.createTextNode('\n'), nl: true, pos: dstOff[l] - 1 };
+          seq.push(boundary);
+        }
+        keep.forEach(function (k, i) {
+          if (lineOf[i] === l) seq.push({ node: k.el, pos: at[i], keep: i, cite: k.kind === 'cite' });
+        });
+      }
     }
     var texts = [];
     var textStarts = [];
@@ -3539,6 +3636,15 @@
     textStarts.push(from);
     textEnds.push(stripped.length);
 
+    // 只移动普通链接节点本身，仍在同一个父元素里；非链接保留区、格式壳和正文都不动。
+    // 先移动再取 safeSlot，后续 gap 才会围绕正确顺序写入；失败时事务会按逆序把节点放回。
+    var ops = [];
+    var saved = [];
+    if (reorder) {
+      order.forEach(function (index) {
+        if (keep[index].kind === 'link') moveNode(keep[index].el, unit.el, reorder.boundary || null, ops);
+      });
+    }
     // 先计划、再写入。多个原子共享同一包装时，固定的 before 让外移后的文字仍按页面顺序追加。
     var slotMemo = new Map();
     var firstConnected = null;
@@ -3564,8 +3670,6 @@
       emptySlot = styleSafeSlot(unit, safeSlot(unit, firstSource, false, false));
       if (!emptySlot) return failInject(unit, 'unsafe-structure', 'no-text-slot');
     }
-    var ops = [];
-    var saved = [];
     var seen = new Set();
     // 混合段落同样记录写入前样式，供诊断区分源站强调 / 注入污染。
     var firstMixed = null;
@@ -3709,6 +3813,7 @@
       setAttr(unit.el, 'data-dt-sig', unit.sig, ops);
     }
     unit.citeMode = mode;
+    if (reorder) unit.inlineReordered = reorder.links.length;
     unit.renderMode = 'cited';
     unit.targetNode = null;
     unit.renderedText = rendered;
@@ -3716,6 +3821,31 @@
     fillSnapshot(unit);
     pushRendered({ unit: unit, mode: 'cited', ops: ops, saved: saved, replaced: item });
     linkUnit(unit);
+    // insertBefore 移动链接可能让焦点落回 body；原节点仍然连接时把焦点还给用户。
+    if (reorder && activeBefore && activeBefore.isConnected && document.activeElement !== activeBefore) {
+      try { activeBefore.focus({ preventScroll: true }); } catch (err) { /* 老浏览器忽略 */ }
+    }
+    if (reorder && selectionBefore) {
+      try {
+        var finalSel = window.getSelection();
+        var startNode = selectionBefore.startContainer;
+        var endNode = selectionBefore.endContainer;
+        if (finalSel && startNode && endNode && startNode.isConnected && endNode.isConnected && unit.el.contains(startNode) && unit.el.contains(endNode)) {
+          if (startNode.nodeType === 3 && selectionBefore.startOffset > startNode.nodeValue.length) selectionBefore.setStart(startNode, startNode.nodeValue.length);
+          if (endNode.nodeType === 3 && selectionBefore.endOffset > endNode.nodeValue.length) selectionBefore.setEnd(endNode, endNode.nodeValue.length);
+          finalSel.removeAllRanges();
+          finalSel.addRange(selectionBefore);
+        }
+        // 端点落在被清空/改写的链接文本上时 Range 可能失效：退回到同一链接的可见文字，
+        // 至少让键盘用户不会从链接里丢到 body（不猜测字符级位置）。
+        if (finalSel && !(finalSel.anchorNode && selectionLink && selectionLink.contains(finalSel.anchorNode)) && selectionLink) {
+          var linkRange = document.createRange();
+          linkRange.selectNodeContents(selectionLink);
+          finalSel.removeAllRanges();
+          finalSel.addRange(linkRange);
+        }
+      } catch (err) { /* range 失效时保持浏览器默认 */ }
+    }
     record('replace', null, unit.el, rendered, area, unit.citeMode);
     return true;
   }
