@@ -30,7 +30,6 @@
     translated: 0,
     failed: 0,
     outputFailed: 0, // 模型回包语言错误 / 空正文 / 失控长文；不自动重试
-    inlineReordered: 0, // 通过同父原链接节点的安全语序重排
     lastOutputError: ''
   };
 

@@ -4641,6 +4641,23 @@
     });
   }
 
+  // 当前页面上仍由「同父链接语序重排」渲染的译文段落数（诊断用）。
+  // 从 rendered 记录实时统计，不单独累加：还原 / 模式切换 / 重译 / 站点替换节点后自然归零，
+  // 不会把历史重排次数留在诊断里。
+  DT.reorderedCount = function () {
+    var seen = new Set();
+    var count = 0;
+    for (var i = 0; i < rendered.length; i += 1) {
+      var rec = rendered[i];
+      var unit = rec && rec.unit;
+      if (!unit || !unit.inlineReordered || !unit.el || !unit.el.isConnected) continue;
+      if (!stillOurs(rec) || seen.has(unit)) continue;
+      seen.add(unit);
+      count += 1;
+    }
+    return count;
+  };
+
   // 对外：还原原文。逆序回放 RenderTransaction：
   // 只撤销仍是我们写入的值 / 仍是我们的节点；站点已经改过 / 删除的，保留站点的新状态。
   DT.restore = function () {

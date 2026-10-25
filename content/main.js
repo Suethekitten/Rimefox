@@ -542,6 +542,12 @@
     return DT.state.config;
   }
 
+  // 重排诊断来自页面当前的渲染记录（dom.js 的 DT.reorderedCount），不是会话累加值：
+  // 还原 / 模式切换 / 显式重译 / 站点替换段落 / 注入失败回滚后都自动归零。
+  function reorderedCount() {
+    return DT.reorderedCount ? DT.reorderedCount() : 0;
+  }
+
   function summarize() {
     pruneOrderFailures();
     return {
@@ -563,7 +569,7 @@
       skipped: DT.state.skipped || 0,
       renderFailed: DT.state.renderFailed || 0,
       inlineOrderFailed: DT.state.inlineOrderFailed || 0,
-      inlineReordered: DT.state.inlineReordered || 0,
+      inlineReordered: reorderedCount(),
       inlinePlacementWarnings: DT.state.inlinePlacementWarnings || 0,
       safeDegraded: DT.state.safeDegraded || 0,
       outputFailed: DT.state.outputFailed || 0,
@@ -1000,7 +1006,6 @@
             forgetOrderRef(unit);
           }
           DT.state.translated += 1;
-          if (unit.inlineReordered) DT.state.inlineReordered = (DT.state.inlineReordered || 0) + 1;
           if (code === 'safe-degraded') DT.state.safeDegraded = (DT.state.safeDegraded || 0) + 1;
           if (unit.renderWarning) {
             DT.state.inlinePlacementWarnings = (DT.state.inlinePlacementWarnings || 0) + 1;
@@ -1303,7 +1308,6 @@
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
     DT.state.inlineOrderFailed = 0;
-    DT.state.inlineReordered = 0;
     DT.state.inlinePlacementWarnings = 0;
     DT.state.safeDegraded = 0;
     DT.state.outputFailed = 0;
@@ -1627,7 +1631,6 @@
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
     DT.state.inlineOrderFailed = 0;
-    DT.state.inlineReordered = 0;
     DT.state.inlinePlacementWarnings = 0;
     DT.state.safeDegraded = 0;
     DT.state.outputFailed = 0;
@@ -1847,7 +1850,7 @@
           skipped: DT.state.skipped || 0,
           renderFailed: DT.state.renderFailed || 0,
           inlineOrderFailed: DT.state.inlineOrderFailed || 0,
-          inlineReordered: DT.state.inlineReordered || 0,
+          inlineReordered: reorderedCount(),
           inlinePlacementWarnings: DT.state.inlinePlacementWarnings || 0,
           safeDegraded: DT.state.safeDegraded || 0,
           outputFailed: DT.state.outputFailed || 0,
@@ -1890,7 +1893,6 @@
         outputFails = new WeakMap();
         failureLog = [];
         DT.state.outputFailed = 0;
-        DT.state.inlineReordered = 0;
         DT.state.lastOutputError = '';
         scheduleIncremental();
       });

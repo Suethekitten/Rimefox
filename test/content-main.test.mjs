@@ -112,6 +112,7 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
   DT.restore = () => {
     page.rebuilds += 1;
   };
+  DT.reorderedCount = () => 0; // dom.js 的实时统计；测试按需覆盖
   DT.releaseReplaced = () => 0;
   DT.refreshStale = () => 0;
   DT.collectAll = () => [];
@@ -1418,6 +1419,31 @@ await t('框架移除失败原节点后状态不继续声称旧段保留原文�
   assert.equal(status.qualityWarnings, 0);
   assert.equal(status.lastRenderError, '');
   assert.equal(requests, 1);
+});
+
+await t('重排诊断计数跟随当前渲染记录：还原或站点移除后归零，不累加历史次数', async () => {
+  const env = await boot({ config: { mode: 'translation', lazy: false, skipSameLang: false } });
+  const unit = { el: contextElement('p', 'Source paragraph with links to reorder.'), text: 'Source paragraph with links to reorder.', sentences: [], style: 'plain' };
+  let live = 0;
+  env.DT.reorderedCount = () => live;
+  installTranslationFixture(env, unit, () => ({ ok: true, results: ['需要移动链接的目标语序译文。'] }));
+  env.DT.inject = (item) => {
+    item.inlineReordered = 2;
+    live = 1;
+    item.injectResult = { code: 'success' };
+    return true;
+  };
+  await env.message({ type: 'dt:toggle' });
+  let status = await env.message({ type: 'dt:status' });
+  assert.equal(status.translated, 1);
+  assert.equal(status.inlineReordered, 1, '当前页面确实有一段重排译文');
+  live = 0; // 还原 / 模式切换 / 站点替换后，dom.js 的实时统计已经归零
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.inlineReordered, 0, '不能保留历史累加值');
+  assert.equal(status.translated, 1, '归零只影响诊断计数，不影响已翻译段落');
+  live = 1; // 再次出现重排译文时恢复为 1，而不是停在旧值
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.inlineReordered, 1);
 });
 
 await t('模型链接聚簇与安全引用降级：成功但明确质量警告，和结构失败分别计数', async () => {

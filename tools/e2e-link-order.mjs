@@ -202,6 +202,7 @@ try {
     if (scenario.fail) {
       check(scenario.name + ':explicit-render-failure', record.status.renderFailed === 1 && String(record.status.lastRenderError || '').includes(scenario.fail), record.status);
       check(scenario.name + ':not-counted-as-translated', record.status.translated === 2, record.status);
+      check(scenario.name + ':failed-render-no-reordered-count', record.status.inlineReordered === 0, record.status);
       check(scenario.name + ':whole-paragraph-unmodified', record.initial.sameSource && record.initial.sourceNodesSame && record.initial.targets === 0 && record.initial.residue === 0, record.initial.html);
       if (scenario.fail === 'invalid-inline') check(scenario.name + ':missing-marker-still-rejected', /missing-marker/.test(record.status.lastRenderError), record.status);
       if (scenario.fail === 'unsupported-inline-order') {
@@ -211,6 +212,7 @@ try {
       }
     } else if (scenario.reorder) {
       check(scenario.name + ':reordered-success', record.status.translated === 3 && record.status.renderFailed === 0 && record.status.inlineReordered === 1 && record.status.inlineOrderFailed === 0 && record.status.safeDegraded === 0, record.status);
+      check(scenario.name + ':diagnose-reordered-count', record.diagnose.failures?.inlineReordered === 1, record.diagnose.failures);
       validateVisible(scenario.name, record.initial, parts, before.links, scenario.mode);
     } else {
       check(scenario.name + ':normal-success', record.status.translated === 3 && !record.status.renderFailed, record.status);
@@ -241,16 +243,16 @@ try {
       record.dual = await snapshot(session);
       record.dualScreenshot = await screenshot(session, scenario.name + '-switched-dual');
       if (scenario.reorder) {
-        check(scenario.name + ':dual-reuses-valid-cache', requests.length === count && record.dualStatus.translated === 3 && record.dualStatus.renderFailed === 0, record.dualStatus);
+        check(scenario.name + ':dual-reuses-valid-cache', requests.length === count && record.dualStatus.translated === 3 && record.dualStatus.renderFailed === 0 && record.dualStatus.inlineReordered === 0, record.dualStatus);
         validateVisible(scenario.name + ':switched-dual', record.dual, parts, before.links, 'dual');
         await message(tabId, { type: 'dt:setMode', mode: 'translation' });
         await sleep(200);
         record.backStatus = await idle(tabId);
-        check(scenario.name + ':translation-switch-reordered-cache', requests.length === count && record.backStatus.translated === 3 && record.backStatus.renderFailed === 0, record.backStatus);
+        check(scenario.name + ':translation-switch-reordered-cache', requests.length === count && record.backStatus.translated === 3 && record.backStatus.renderFailed === 0 && record.backStatus.inlineReordered === 1, record.backStatus);
         await message(tabId, { type: 'dt:retranslate' });
         await sleep(200);
         record.againStatus = await idle(tabId);
-        check(scenario.name + ':explicit-retranslate-reordered-cache', requests.length === count && record.againStatus.translated === 3 && record.againStatus.renderFailed === 0, record.againStatus);
+        check(scenario.name + ':explicit-retranslate-reordered-cache', requests.length === count && record.againStatus.translated === 3 && record.againStatus.renderFailed === 0 && record.againStatus.inlineReordered === 1, record.againStatus);
       } else {
         check(scenario.name + ':dual-reuses-valid-cache', requests.length === count && record.dualStatus.translated === 3 && !record.dualStatus.renderFailed, record.dualStatus);
         validateVisible(scenario.name + ':switched-dual', record.dual, parts, before.links, 'dual');
@@ -269,11 +271,21 @@ try {
     await message(tabId, { type: 'dt:toggle' });
     await idle(tabId);
     record.restored = await snapshot(session);
+    record.restoredStatus = await message(tabId, { type: 'dt:status' });
     check(scenario.name + ':exact-restore-original-node-tree', record.restored.sameSource && record.restored.sourceNodesSame && record.restored.residue === 0 && record.restored.targets === 0, record.restored.html);
+    check(scenario.name + ':toggle-off-clears-reordered-diagnostic', record.restoredStatus.inlineReordered === 0, record.restoredStatus);
     // A framework may replace an untranslated failed paragraph. The new source must be eligible.
     if (scenario.name === 'en-reorder') {
       const count = requests.length;
       if (scenario.reorder) {
+        // Toggle off/on twice: the diagnostic must follow the current page, not accumulate history.
+        const toggleCount = requests.length;
+        await message(tabId, { type: 'dt:toggle' });
+        record.secondOnStatus = await idle(tabId);
+        check('en-reorder:second-enable-reordered-diagnostic', record.secondOnStatus.inlineReordered === 1 && requests.length === toggleCount, record.secondOnStatus);
+        await message(tabId, { type: 'dt:toggle' });
+        record.secondOffStatus = await idle(tabId);
+        check('en-reorder:second-toggle-off-clears-reordered-diagnostic', record.secondOffStatus.inlineReordered === 0 && requests.length === toggleCount, record.secondOffStatus);
         // Translation is off at this point. Replace the source while off, then turn it on;
         // the new source must be collected and translated without an old order failure.
         await evaluate(session, "var updated=document.createElement('p');updated.id='mwDQ';updated.textContent='A dynamic framework replaced this paragraph with a new explanation.';window.__linkOrderSource.el.replaceWith(updated);window.__linkOrderNewParagraph=updated;true");
@@ -291,6 +303,7 @@ try {
       }, 'framework replacement translates');
       check(scenario.name + ':dynamic-new-source-can-translate', requests.length === count + 1 && record.dynamicStatus.translated === 3, record.dynamicStatus);
       check(scenario.name + ':removed-failure-state-pruned', !record.dynamicStatus.renderFailed && !record.dynamicStatus.inlineOrderFailed && !record.dynamicStatus.qualityWarnings && !record.dynamicStatus.lastRenderError, record.dynamicStatus);
+      if (scenario.reorder) check(scenario.name + ':framework-replacement-clears-reordered-diagnostic', record.dynamicStatus.inlineReordered === 0, record.dynamicStatus);
       const afterReplaceCount = requests.length;
       await evaluate(session, "window.__linkOrderNewParagraph.dispatchEvent(new MouseEvent('click',{bubbles:true}));true");
       await sleep(900);

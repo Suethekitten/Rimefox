@@ -808,7 +808,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **仅译文链接重排**：普通正文中，同一个父元素下连续的一段普通链接可以在目标语言语序变化时，用 RenderTransaction 的 move 操作移动原始 A 节点；不克隆 A，不重建 href/title/id/事件监听，不把译文写进链接。只处理非链接原子在链接区之前和/或之后的平坦结构；链接区外有交错引用、链接嵌套在 span/strong 内、多行、contenteditable 或已知框架根时继续安全失败。实现入口是 content/dom.js 的 reorderPlan 与 injectMixed；返回值区分成功、reordered 诊断和安全失败。
 - **安全回退保留**：找不到可证明安全的插入区域、标签写不进可见节点、移动后节点顺序/正文校验不一致、源结构变化或事务校验失败时整段回滚，保留原文；renderFailed / inlineOrderFailed 计数和 toast/popup 说明仍保留，不把失败当 translated，也不追加模型请求。
 - **协议与缓存**：inline-v1 的原子顺序仍来自模型真实 token 顺序；链接重排不改变 wire 协议、缓存身份或双语 fillCited 的克隆路径。双语和仅译文切换复用同一有效缓存；普通行内缺标记、错误语言、空回包等旧拒绝规则不变。
-- **诊断与测试**：状态新增 inlineReordered 计数；固定回放覆盖英文维基首段、阿拉伯语密集链接、交换/跨链接/跨句/中英/中日/RTL 直接链接，以及嵌套 span/strong、引用、notranslate、xref、动态替换、事件、aria、精确恢复和零额外请求。阿拉伯语现有多引用与嵌套链接结构仍走安全失败，双语可读。
+- **诊断与测试**：inlineReordered 诊断按当前渲染记录实时统计（DT.reorderedCount），还原、模式切换、重译、站点替换段落或注入回滚后自动归零，不再累加历史次数；固定回放覆盖英文维基首段、阿拉伯语密集链接、交换/跨链接/跨句/中英/中日/RTL 直接链接，以及嵌套 span/strong、引用、notranslate、xref、动态替换、重复开关、事件、aria、精确恢复和零额外请求。阿拉伯语现有多引用与嵌套链接结构仍走安全失败，双语可读。
 - **限制**：没有实现通用任意 DOM 重排或克隆译文视图；不宣称所有 React/Vue 页面安全；真实供应商语义质量仍需独立 QA。来源与完整证据见 [0.12.3 归档报告](docs/archive/2026-10-25-link-reorder-0.12.3.md)。
 
 ## 15. 专业翻译引擎

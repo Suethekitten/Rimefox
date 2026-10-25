@@ -251,6 +251,31 @@
       DT.restore();
       check('labels:hidden-prefix-exact-restore', hiddenP.outerHTML === hiddenBefore && sameNodes(hiddenNodes, hiddenP));
       hiddenP.remove();
+
+      // 诊断计数只反映「当前仍在页面上的重排译文」：还原、再次重排、站点替换节点后必须归零。
+      var countP = document.createElement('p');
+      countP.innerHTML = 'The article compares <a href="/alpha">alpha</a> with <a href="/beta">beta</a> before drawing a conclusion.';
+      box.appendChild(countP); DT.state.mode = 'translation'; DT.state.target = 'zh-CN';
+      check('diagnostic:no-reorder-count-before-render', DT.reorderedCount() === 0);
+      var countUnit = DT.collect(countP)[0];
+      var countValue = '文章比较' + atom(countUnit, 1, '乙') + '与' + atom(countUnit, 0, '甲') + '之后得出结论。';
+      var countOk = DT.inject(countUnit, countValue, 'zh-CN');
+      check('diagnostic:reordered-count-tracks-render', countOk && DT.reorderedCount() === 1, JSON.stringify({ result: countUnit.injectResult, count: DT.reorderedCount() }));
+      DT.restore();
+      check('diagnostic:restore-clears-reordered-count', DT.reorderedCount() === 0);
+      var secondUnit = DT.collect(countP)[0];
+      check('diagnostic:re-render-reordered-count', DT.inject(secondUnit, countValue, 'zh-CN') && DT.reorderedCount() === 1, JSON.stringify(secondUnit.injectResult));
+      // 站点用新节点替换整段：旧重排译文已不在当前页面
+      var replacement = document.createElement('p');
+      replacement.textContent = 'A framework replaced this paragraph.';
+      countP.replaceWith(replacement);
+      check('diagnostic:detached-reordered-count-clears', DT.reorderedCount() === 0);
+      DT.pruneDetached();
+      check('diagnostic:pruned-reordered-count-stays-zero', DT.reorderedCount() === 0);
+      replacement.replaceWith(countP);
+      DT.restore();
+      check('diagnostic:restore-after-replacement-zero', DT.reorderedCount() === 0);
+      replacement.remove(); countP.remove();
     } catch (err) {
       check('link-order:unexpected-exception', false, err && (err.stack || err.message) || String(err));
     } finally {
