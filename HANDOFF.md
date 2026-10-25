@@ -385,7 +385,7 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
   未启用 v1 的兼容单元渲染走 `injectCited`：先用 `DT.units.keepMarks` 取每个标记在「去掉标记和标记内容」的译文里的落点（同号重复只认第一次；不按原文逐字找 —— 引用只是几个数字，译文里本来就可能有同样的数字）。
   **仅译文**（`injectMixed`，混合行内安全渲染，取代 0.11.1 的 `injectCitedOnly`）：DOM 结构和可翻译文字分开 —— 原子（引用、图表链接、混合段落里的普通链接、提及、notranslate）原地不动，节点身份 / href / id / 事件监听都不变；
   原子之外的文字节点（含空白）全部清空，译文按原子的落点切成 N+1 段，作为新文本节点插在原子之间；新节点永远不进单元内部的链接（`safeSlot`），中文正文不会继承超链接。不移动原有节点，所有改动走 RenderTransaction。
-  落点：先后与页面一致 → 词级；模型换了先后 → `keepPlacement` 挪到所在那一句的句末标点前（`sentenceEndAt`）；模型漏了标记 → 按原文所在句映射到译文句末（`atomPlacement`）；
+  落点以[引擎 §3.6](docs/TRANSLATION-ENGINE-HANDOFF.md#36-原子顺序与渲染成功契约)为准：正文原子须保持目标token序与可信落点，不能句末吸附；仅文献引用可在同句内受限兼容定位，跨句或硬行不兼容时保留原文并报错；
   图表链接的标记丢了 → 按它的标签（Fig. 1 / 图 1）在译文里唯一定位、从正文里去掉（`recoverXrefMarks`）。`<br>` 分行或 `white-space: pre-wrap` 文本节点里的 `\n` 都逐行对齐（第 2 行起以 `<br>` 或新建的换行文本节点为边界，译文行数一致）。
   图表链接的可见标签在中文目标下按 `xrefLabel` 写成「图 1 / 表 1 / 式 1」；补充材料标签按 `linkLabel` 把 Supplement 3 写成「补充材料 3」（只对可靠标签、标签只有一个文本节点时；进事务，还原放回原文），对应不上就保留原标签。
   两组引用在原文里隔着字、译文里挨着 → 中间补一个逗号。注音元素（`kind: 'ruby'`）作为原子保留，周围正文照常翻译；模型把分行合并 / 拆开或落点定不下来时保持原文、注入结果写明原因，**不会降级成双语**；只有用户选择双语模式才走 `injectDual`。
@@ -395,8 +395,8 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
   诊断按钮的 `placements` 记 `cite`：`exact` / `sentence` / `failed-only`（仅译文无法安全重建） / `dropped`（双语标记缺失）。
   缓存键是送翻文本：旧版本把引用压平进译文的条目（键里没有标记）不会被带标记的段落命中，不清用户缓存，旧条目随容量淘汰。
   提示词只在本批带标记时多一句「文献引用编号的标记紧跟所引词句，不另写、合并或删掉引用编号」，标记说明里点名「文献引用编号、图表编号、链接文字」。
-- **注入结果分类**（`DT.inject` 写 `unit.injectResult` / `DT.lastInject`，返回值仍是 true / false）：`success` / `already-rendered` / `not-applicable` / `empty` / `stale-generation` / `stale-source` / `unsafe-structure` / `invalid-placement` / `invalid-inline`。
-  `main.js` 的 `tryInject`：`unsafe-structure` / `invalid-placement` / `invalid-inline` 是「模型给了译文、但写不进页面」，记进 `renderFails`（`{ text, stamp: DT.unitStamp(unit), code, reason }`），`DT.state.renderFailed` / `lastRenderError` 进 `dt:status`，
+- **注入结果分类**（`DT.inject` 写 `unit.injectResult` / `DT.lastInject`，返回值仍是 true / false）：`success` / `already-rendered` / `not-applicable` / `empty` / `stale-generation` / `stale-source` / `unsafe-structure` / `invalid-placement` / `invalid-inline` / `unsupported-inline-order` / `safe-degraded`。
+  `main.js` 的 `tryInject`：`unsafe-structure` / `invalid-placement` / `invalid-inline` / `unsupported-inline-order` 是「模型给了译文、但写不进页面」，记进 `renderFails`（`{ text, stamp: DT.unitStamp(unit), code, reason }`），`DT.state.renderFailed` / `lastRenderError` 进 `dt:status`，
   **不算跳过、不记成已处理**；源文本和 DOM 状态（`DT.unitStamp` = 源节点签名）都没变时下一轮不再收、不再请求（确定性错误不无限重试、不重复计费），页面变了才重新收集；有效译文可命中缓存，协议失败不缓存且不自动追加付费重试。
   `stale-source` 标脏、本轮结束后重收；`stale-generation` 什么都不记；`already-rendered` / `not-applicable` / `empty` 照旧记成已处理。`DT.releaseReplaced` 也释放 `cited` 记录：站点改写后放回原文、按新内容重翻。
 - **多译文节点**：同一个容器里多个 `[data-dt-target]` 是正常的；`cleanupDuplicateTargets` 只清理
@@ -410,7 +410,7 @@ own 单元（第 3 步，只翻了直接文本）不覆盖子元素，不走整�
 - **仅译文**：完整独占正文块（`unit.whole`）在 `injectReplace` / `injectLines` / `injectMixed` 成功后用事务设置块 `dir` / `direction` / `text-align`；部分 / 共享容器不改父级，把写过的文本节点移进 inline `[data-dt-dir="wrap"]` 隔离壳（节点身份保留，`move` + `insert` 都进 RenderTransaction）。
 - **混合内容**：`injectMixed` 的每段新译文在方向不一致时放入隔离壳，原始引用 / 链接 / Ruby / 图片保持自己的方向；完整混合段落可改整块方向。不要在用户译文里插不可见方向控制字符，也不使用 `bidi-override` / `html,body { direction:ltr !important }`。
 - **样式 / 还原**：`content/styles/inject.css` 的 `.dt-target` 改为 `text-align:start` + `unicode-bidi:isolate`，inline 边距用 `margin-inline-start`。方向壳由事务移除并先把原文本节点放回；块方向的 `dir` / style 也由事务还原。悬停气泡保留原文方向，划词气泡用目标方向。
-- **诊断**：`data-dt-dir` 的壳不进入切分 / 签名；已知限制是局部共享段落中普通链接仍可能走旧的双语兜底，纯 Ruby 段落仍走 `injectRuby` 的独立容器。
+- **诊断**：`data-dt-dir` 的壳不进入切分 / 签名；局部混合结构无法安全保持顺序时明确失败，不自动改双语；纯 Ruby 段落仍走 `injectRuby` 的独立容器。
 
 ### 5.2.3 稳定正文：不因链接回退双语，不被自身 DOM 操作打断
 
@@ -811,6 +811,10 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **开发诊断**：dt:diagnose 增加内存中的最近失败摘要（类别、code、源文长度、标记数、时间），不保存正文、完整提示词或 API Key；真实供应商随机性仍需录制回包继续取证。
 - **验证**：新增 FAQ、控件矩阵、脚注 fixture；真实 Chrome 覆盖鼠标 / 键盘 / aria / 事件 / 双语 / 仅译文 / 恢复。全量 Node、自检、E2E 和 inline-layout 都保留。
 - **限制**：未调用真实付费模型；同脚本回显、混合语言和合法但语义错位的数组仍未完全覆盖；真实维基导航 / 列表等非正文区域按既有规则跳过。
+
+### 本地未发布修复：链接语序
+
+基于 `813c87f` 的专项修复，版本号与发布安排保持不变。正文链接不可实现的目标顺序不再吸附句末；预检或事务后置顺序不符时整段保留原文，状态和用户提示说明原因，缓存仍保留有效模型响应。合法同点引用、模型自身尾置、双语同偏移token序及动态源/失败计数分别处理，唯一实现契约见[引擎 §3.6](docs/TRANSLATION-ENGINE-HANDOFF.md#36-原子顺序与渲染成功契约)。专项命令为 `node tools/e2e-link-order.mjs`；基线、截图、回放与独立复核见[本地报告](docs/archive/2026-10-25-link-order-0.12.2.md)。
 
 ## 15. 专业翻译引擎
 

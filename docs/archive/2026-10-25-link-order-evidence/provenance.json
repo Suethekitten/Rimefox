@@ -1,0 +1,25 @@
+{
+  "baseline": "813c87f6a2703aa88c42ec8480a79ff0490efc58",
+  "date": "2026-10-25",
+  "sourceClone": "edge-bilingual-qa-0122",
+  "fixtureSha256": {
+    "pages/wiki-ai-p1-events.html": "8db8ccc8151277c49c7deef75a58aa188a25fdd1b1993c21572ac5d26e5edce0",
+    "pages/wiki-ai-p1.html": "934566fed63bb73fc3d2c94a2f81b2342de57b9b393e473ecb6c9cb67aa7870b",
+    "pages/wiki-ar-p1.html": "a28108a09779570467305919bb4775ea0b09d0881fa252b0e465440170dd62a2",
+    "replies/ar-control.json": "d2da86d5d8465bd23af13eca1855cb46d6b44a3824a422fafcc1de7f3009acee",
+    "replies/ar-reorder.json": "c019bc44ef831d6022606c1e68f4b9a6bc2bbea0d02f1d53657a890e28da08e0",
+    "replies/order-control.json": "ed1e6e6df56dd17830a869a193124412b163aa8f1b6b316921f920a2cd044ebc",
+    "replies/order-missingOne.json": "92066b62c36757896c765935b52410a32a63cb3a91a76e2a1b181402b14d422c",
+    "replies/order-reorder.json": "7988241e8194fb3a12d0d373c1e1e7af710d7eeca7270b3b3b27bc18ec055970",
+    "replies/order-tail.json": "9af42f51f054760d160105d629c71c255a82e00f0d62d5b957b92eac852c231c"
+  },
+  "sourceFiles": {
+    "content/dom.js": "192be5285c988812b485e296ff801c922bccfbeaa5e436eecb27039313dc5639",
+    "content/main.js": "552fe2562423f705a095c7a5a0454df82d52857a7e6cadb545724ddf153c2bdd",
+    "content/units.js": "ac19f4cb99306cf970ecbe88e042130b2c5b85fe78757ffce12a5c40791bd679",
+    "popup/popup.js": "2a6e20758b283041a9806e87e1fb42ed3847c473a6a6884a8e6bfccfdf5512d6",
+    "lib/i18n.js": "761057b5eccca183b13bb4aa150d852230aed90964db02c6cb81bd25cd69f6e3"
+  },
+  "implementationCommit": "0de4616f767ff7829272f75cd413a6e1f8611c3f",
+  "runnerSha256": "72a18fc9699cdc9582e6670fc8eca5a5f8a2921131cfc65ff2e476bc41cedbc1"
+}

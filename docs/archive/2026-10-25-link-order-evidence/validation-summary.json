@@ -1,0 +1,63 @@
+{
+  "baseline": "813c87f6a2703aa88c42ec8480a79ff0490efc58",
+  "implementationCommit": "0de4616f767ff7829272f75cd413a6e1f8611c3f",
+  "version": "0.12.2",
+  "published": false,
+  "date": "2026-10-25",
+  "node": {
+    "files": 41,
+    "result": "All sequential Node test scripts passed",
+    "mainCases": 55
+  },
+  "selftest": {
+    "passed": 267,
+    "total": 267,
+    "fileMode": "file:// headless Chrome, 5000ms virtual budget"
+  },
+  "extension": {
+    "browser": "Chrome/156.0.8078.48",
+    "passed": 277,
+    "total": 277,
+    "failures": [],
+    "stats": {
+      "requests": 165,
+      "texts": 328,
+      "withEffort": 2
+    },
+    "exceptions": []
+  },
+  "inlineLayout": {
+    "scenarios": [
+      {
+        "width": 1000,
+        "zoom": 1,
+        "passed": 557,
+        "total": 557
+      },
+      {
+        "width": 390,
+        "zoom": 1.25,
+        "passed": 557,
+        "total": 557
+      },
+      {
+        "width": 1280,
+        "zoom": 1.75,
+        "passed": 557,
+        "total": 557
+      }
+    ]
+  },
+  "linkOrder": {
+    "passed": 368,
+    "total": 368,
+    "scenarios": 12,
+    "directCases": 245,
+    "httpRequests": 29,
+    "exceptions": [],
+    "modeSwitchAdditionalRequests": 0,
+    "automaticRetryAdditionalRequests": 0
+  },
+  "paidApiCalls": 0,
+  "scope": "Recorded QA responses and frozen public HTML; not real paid-model semantic-quality evaluation."
+}

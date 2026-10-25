@@ -160,11 +160,15 @@ try {
   sw = await attach(swTarget.targetId);
   for (const scenario of [
     { name: 'en-control', page: 'wiki-ai-p1-events.html', reply: 'order-control.json', mode: 'translation' },
+    { name: 'en-control-dual', page: 'wiki-ai-p1-events.html', reply: 'order-control.json', mode: 'dual' },
     { name: 'en-reorder', page: 'wiki-ai-p1-events.html', reply: 'order-reorder.json', mode: 'translation', fail: 'unsupported-inline-order', switchMode: true },
     { name: 'en-tail', page: 'wiki-ai-p1-events.html', reply: 'order-tail.json', mode: 'translation', warning: true },
+    { name: 'en-tail-dual', page: 'wiki-ai-p1-events.html', reply: 'order-tail.json', mode: 'dual', warning: true },
     { name: 'en-missing-one', page: 'wiki-ai-p1-events.html', reply: 'order-missingOne.json', mode: 'translation', fail: 'invalid-inline' },
+    { name: 'en-missing-one-dual', page: 'wiki-ai-p1-events.html', reply: 'order-missingOne.json', mode: 'dual', fail: 'invalid-inline' },
     { name: 'en-reorder-dual', page: 'wiki-ai-p1-events.html', reply: 'order-reorder.json', mode: 'dual' },
     { name: 'ar-control', page: 'wiki-ar-p1.html', reply: 'ar-control.json', mode: 'translation' },
+    { name: 'ar-control-dual', page: 'wiki-ar-p1.html', reply: 'ar-control.json', mode: 'dual' },
     { name: 'ar-reorder', page: 'wiki-ar-p1.html', reply: 'ar-reorder.json', mode: 'translation', fail: 'unsupported-inline-order', switchMode: true },
     { name: 'ar-reorder-dual', page: 'wiki-ar-p1.html', reply: 'ar-reorder.json', mode: 'dual' }
   ]) {
