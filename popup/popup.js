@@ -215,12 +215,20 @@ function render() {
     const parts = [];
     if (status.skipped) parts.push(t('跳过 ' + status.skipped));
     if (status.failed) parts.push(t('失败 ' + status.failed));
+    if (status.renderFailed) parts.push(t('保留原文 ' + status.renderFailed));
+    if (status.safeDegraded) parts.push(t('安全调整 ' + status.safeDegraded));
     if (!parts.length && status.total) parts.push(t('共 ' + status.total + ' 段'));
     count = parts.join(' · ');
     if (status.failed && status.lastError) detail = t('失败原因：') + status.lastError;
   }
+  if (status.enabled && status.inlineOrderFailed) {
+    const order = t('链接顺序无法安全重排，已保留原文。可切换双语模式查看译文。');
+    detail = detail ? detail + '\n' + order : order;
+  }
   if (status.enabled && status.qualityWarnings) {
-    const warning = t('专业翻译有 ' + status.qualityWarnings + ' 段需要核对；请对照原文确认数值与结论。');
+    const warning = status.inlineOrderFailed || status.inlinePlacementWarnings
+      ? t('译文有 ' + status.qualityWarnings + ' 段需要核对；请对照原文确认链接、引用与语义。')
+      : t('专业翻译有 ' + status.qualityWarnings + ' 段需要核对；请对照原文确认数值与结论。');
     detail = detail ? detail + '\n' + warning : warning;
   }
   if (status.targetPending) {

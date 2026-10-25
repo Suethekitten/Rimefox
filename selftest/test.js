@@ -96,6 +96,12 @@
     return failed.length ? failed.map(function (item) { return item.name + ': ' + item.detail; }).join('；') : true;
   });
 
+  check('链接语序：可见文字与目标对应、相邻标记换序、引用共址、跨语言与完整还原', function () {
+    var report = window.runLinkOrderChecks();
+    var failed = report.checks.filter(function (item) { return !item.ok; });
+    return failed.length ? failed.map(function (item) { return item.name + ': ' + item.detail; }).join('；') : true;
+  });
+
   checkAsync('通用行内语义格式：固定夹具、链接交互、异常回滚与精确还原', function () {
     return fetch('../test/fixtures/inline-fidelity.html').then(function (response) {
       if (!response.ok) throw new Error('无法读取本地行内格式夹具');

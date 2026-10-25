@@ -897,17 +897,22 @@
     var count = keep ? keep.length : 0;
     var at = [];
     for (var i = 0; i < count; i += 1) at.push(-1);
-    if (!count) return { stripped: s, at: at };
+    if (!count) return { stripped: s, at: at, order: [] };
     var out = '';
     var pos = 0;
+    var order = [];
     keepDrops(s, count, source).forEach(function (d) {
       if (d.start < pos) return;
       out += s.slice(pos, d.start);
-      if (d.id && at[d.id - 1] < 0) at[d.id - 1] = out.length;
+      if (d.id && at[d.id - 1] < 0) {
+        at[d.id - 1] = out.length;
+        order.push(d.id - 1);
+      }
       pos = d.end;
     });
     out += s.slice(pos);
-    return { stripped: out, at: at };
+    // stripped 偏移相同仍可能交换了两个原子；原始标记顺序不能从 at 反推。
+    return { stripped: out, at: at, order: order };
   };
 
   // 译文里位置 at 所在那一句的句末（句末标点和收尾引号之前）：模型换了引用的先后顺序时，

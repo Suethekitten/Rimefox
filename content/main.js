@@ -36,6 +36,9 @@
   // 不算「跳过」也不算「已处理」：源文本和 DOM 状态（DT.unitStamp）都没变就不再收、不再请求；
   // 页面变了才重新收集（译文在后台缓存里，重新注入不会再调用模型）
   var renderFails = new WeakMap();
+  // Only current order failures need an iterable index, so framework node
+  // replacement can retire their visible counts. No source text is copied here.
+  var orderFailureRefs = [];
   // 模型回包本身不可用（wrong-language / empty-output / runaway-output）：
   // 与 DOM 注入失败分开计数，页面和源文本都没变时不重发、不进入付费退避。
   var outputFails = new WeakMap();
@@ -91,6 +94,29 @@
   function dropUnitState(map, unit) {
     var bucket = map.get(unit.el);
     if (bucket) bucket.delete(unitKey(unit));
+  }
+
+  function retireOrderFailure(keepRenderFailure) {
+    DT.state.inlineOrderFailed = Math.max(0, (DT.state.inlineOrderFailed || 0) - 1);
+    if (!keepRenderFailure) DT.state.renderFailed = Math.max(0, (DT.state.renderFailed || 0) - 1);
+    DT.state.qualityWarnings = Math.max(0, (DT.state.qualityWarnings || 0) - 1);
+    if (!DT.state.renderFailed) DT.state.lastRenderError = '';
+    if (!DT.state.qualityWarnings) DT.state.lastQualityWarning = '';
+  }
+
+  function forgetOrderRef(unit) {
+    var key = unitKey(unit);
+    orderFailureRefs = orderFailureRefs.filter(function (ref) { return ref.el !== unit.el || ref.index !== key; });
+  }
+
+  function pruneOrderFailures() {
+    orderFailureRefs = orderFailureRefs.filter(function (ref) {
+      var failure = unitState(renderFails, ref);
+      if (ref.el.isConnected && failure && failure.code === 'unsupported-inline-order') return true;
+      retireOrderFailure(!!failure && failure.code !== 'unsupported-inline-order' && ref.el.isConnected);
+      if (failure && failure.code === 'unsupported-inline-order') dropUnitState(renderFails, ref);
+      return false;
+    });
   }
 
   // 滚动 / 改窗口大小：待翻队列按新位置重排；懒翻译时还要补翻新进入范围的内容。
@@ -517,6 +543,7 @@
   }
 
   function summarize() {
+    pruneOrderFailures();
     return {
       enabled: DT.state.enabled,
       mode: DT.state.mode,
@@ -535,6 +562,9 @@
       failed: DT.state.failed,
       skipped: DT.state.skipped || 0,
       renderFailed: DT.state.renderFailed || 0,
+      inlineOrderFailed: DT.state.inlineOrderFailed || 0,
+      inlinePlacementWarnings: DT.state.inlinePlacementWarnings || 0,
+      safeDegraded: DT.state.safeDegraded || 0,
       outputFailed: DT.state.outputFailed || 0,
       lastRenderError: DT.state.lastRenderError || '',
       lastOutputError: DT.state.lastOutputError || '',
@@ -606,6 +636,7 @@
   async function translatePage(opts) {
     var options = opts || {};
     if (running || !DT.state.enabled) return;
+    pruneOrderFailures();
     // 配置目标已回退但页面还是旧目标译文：暂停动态补翻，避免两种目标语言混排；
     // 明确点「重新翻译」或「开始翻译」后 applyConfigTarget() 会清掉这个标记。
     if (DT.state.targetPending) return;
@@ -691,6 +722,13 @@
       var pageStyle = DT.state.style || 'plain';
       var pageIntensity = DT.normalizeIntensity(DT.state.intensity || 'standard');
       var queue = DT.collectAll(function (unit) {
+        var priorOrderFailure = unitState(renderFails, unit);
+        if (priorOrderFailure && priorOrderFailure.code === 'unsupported-inline-order' &&
+            (priorOrderFailure.text !== unit.text || priorOrderFailure.stamp !== (DT.unitStamp ? DT.unitStamp(unit) : ''))) {
+          retireOrderFailure(false);
+          forgetOrderRef(unit);
+          dropUnitState(renderFails, unit);
+        }
         if (DT.skipText(unit.text)) return false;
         // 趣味翻译：正文里够长的段落按风格改写；中文页面也要改写，所以风格单元不跳过「已是目标语言」
         unit.style = pageStyle === 'plain' ? 'plain' : DT.unitStyle(pageStyle, unit.text, DT.areaOf(unit.el));
@@ -836,7 +874,21 @@
 
       function noteRenderFailure(unit, code, reason) {
         rememberFailure('render', unit, code, reason);
-        if (!unitState(renderFails, unit)) DT.state.renderFailed = (DT.state.renderFailed || 0) + 1;
+        var previous = unitState(renderFails, unit);
+        if (previous && previous.code === 'unsupported-inline-order' && code !== previous.code) {
+          retireOrderFailure(true);
+          forgetOrderRef(unit);
+        }
+        if (!previous) DT.state.renderFailed = (DT.state.renderFailed || 0) + 1;
+        if (code === 'unsupported-inline-order' && (!previous || previous.code !== code)) {
+          orderFailureRefs.push({ el: unit.el, index: unitKey(unit) });
+          DT.state.inlineOrderFailed = (DT.state.inlineOrderFailed || 0) + 1;
+          DT.state.qualityWarnings = (DT.state.qualityWarnings || 0) + 1;
+          DT.state.lastQualityWarning = DT.uiText(
+            '链接顺序无法安全重排，已保留原文。可切换双语模式查看译文。',
+            'Link order could not be preserved safely. The original was kept; switch to bilingual mode to view the translation.'
+          );
+        }
         setUnitState(renderFails, unit, {
           text: unit.text,
           stamp: DT.unitStamp ? DT.unitStamp(unit) : '',
@@ -939,12 +991,24 @@
           : target;
         var injected = DT.inject(unit, raw, renderTarget, align);
         var outcome = unit.injectResult || null;
-        var code = injected ? 'success' : outcome ? outcome.code : 'already-rendered';
+        var code = outcome ? outcome.code : injected ? 'success' : 'already-rendered';
         if (injected) {
+          var oldFailure = unitState(renderFails, unit);
+          if (oldFailure && oldFailure.code === 'unsupported-inline-order') {
+            retireOrderFailure(false);
+            forgetOrderRef(unit);
+          }
           DT.state.translated += 1;
-          if (unit.qualityWarning) {
+          if (code === 'safe-degraded') DT.state.safeDegraded = (DT.state.safeDegraded || 0) + 1;
+          if (unit.renderWarning) {
+            DT.state.inlinePlacementWarnings = (DT.state.inlinePlacementWarnings || 0) + 1;
+            DT.state.lastQualityWarning = /citation/.test(unit.renderWarning.code || '')
+              ? DT.uiText('引用位置已作安全调整，请对照原文核对。', 'Citation placement was adjusted safely; check it against the original.')
+              : DT.uiText('模型把多个正文链接集中在一处，请对照原文核对译文。', 'The model grouped several body links together; check the translation against the original.');
+          }
+          if (unit.qualityWarning || unit.renderWarning) {
             DT.state.qualityWarnings = (DT.state.qualityWarnings || 0) + 1;
-            DT.state.lastQualityWarning = unit.qualityWarning;
+            if (!unit.renderWarning) DT.state.lastQualityWarning = unit.qualityWarning;
           }
           dropUnitState(renderFails, unit);
         } else if (code === 'stale-generation' || unit.gen !== DT.generation) {
@@ -952,7 +1016,7 @@
         } else if (code === 'stale-source') {
           // 源节点已经不在页面上：页面更新了，本轮结束后重新收集
           dirty = true;
-        } else if (code === 'unsafe-structure' || code === 'invalid-placement' || code === 'invalid-inline') {
+        } else if (code === 'unsafe-structure' || code === 'invalid-placement' || code === 'invalid-inline' || code === 'unsupported-inline-order') {
           // 模型已经给了译文，只是写不进页面：不算跳过、不记成已处理，记下原因；
           // 源文本和 DOM 状态都没变就不再重试（不重复请求），页面变了再收（后台缓存里有译文）
           noteRenderFailure(unit, code, outcome && outcome.reason);
@@ -1147,6 +1211,11 @@
           DT.toast('翻译失败：' + (DT.state.lastError || '未知错误'), 5000);
         } else if (DT.state.failed > 0) {
           DT.toast('新增 ' + (DT.state.translated) + ' 段译文，' + DT.state.failed + ' 段失败');
+        } else if (DT.state.inlineOrderFailed > 0) {
+          DT.toast(DT.uiText(
+            '已翻译 ' + DT.state.translated + ' 段；有 ' + DT.state.inlineOrderFailed + ' 段因链接顺序无法安全重排而保留原文。可切换双语模式查看译文。',
+            'Translated ' + DT.state.translated + ' paragraphs; ' + DT.state.inlineOrderFailed + ' kept original because link order could not be preserved safely. Switch to bilingual mode to view the translation.'
+          ), 7000);
         } else if (DT.state.outputFailed > 0) {
           DT.toast(DT.uiText(
             '已翻译 ' + DT.state.translated + ' 段，' + DT.state.outputFailed + ' 段模型输出异常，已保留原文且未自动重试',
@@ -1157,6 +1226,11 @@
             '已翻译 ' + DT.state.translated + ' 段，' + DT.state.renderFailed + ' 段因格式或结构问题保留原文',
             'Translated ' + DT.state.translated + ' paragraphs; ' + DT.state.renderFailed + ' kept original because formatting or structure could not be verified'
           ), 5000);
+        } else if (DT.state.inlinePlacementWarnings > 0) {
+          DT.toast(DT.uiText(
+            '已翻译 ' + DT.state.translated + ' 段；有 ' + DT.state.inlinePlacementWarnings + ' 段链接或引用位置需要核对，请对照原文确认。',
+            'Translated ' + DT.state.translated + ' paragraphs; check link or citation placement in ' + DT.state.inlinePlacementWarnings + ' paragraphs against the original.'
+          ), 7000);
         } else {
           DT.toast('已翻译 ' + queue.length + ' 段' + (deferred ? '，往下滚动会接着翻' : ''));
         }
@@ -1226,6 +1300,9 @@
     resetFailures();
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
+    DT.state.inlineOrderFailed = 0;
+    DT.state.inlinePlacementWarnings = 0;
+    DT.state.safeDegraded = 0;
     DT.state.outputFailed = 0;
     DT.state.lastRenderError = '';
     DT.state.lastOutputError = '';
@@ -1258,6 +1335,7 @@
     settled = new WeakMap();
     churn = new WeakMap();
     renderFails = new WeakMap();
+    orderFailureRefs = [];
     outputFails = new WeakMap();
     failureLog = [];
     resetFailures();
@@ -1535,6 +1613,7 @@
     settled = new WeakMap();
     churn = new WeakMap();
     renderFails = new WeakMap();
+    orderFailureRefs = [];
     outputFails = new WeakMap();
     failureLog = [];
     resetFailures();
@@ -1544,6 +1623,9 @@
     DT.state.lastQualityWarning = '';
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
+    DT.state.inlineOrderFailed = 0;
+    DT.state.inlinePlacementWarnings = 0;
+    DT.state.safeDegraded = 0;
     DT.state.outputFailed = 0;
     DT.state.lastRenderError = '';
     DT.state.lastOutputError = '';
@@ -1760,6 +1842,9 @@
           failed: DT.state.failed || 0,
           skipped: DT.state.skipped || 0,
           renderFailed: DT.state.renderFailed || 0,
+          inlineOrderFailed: DT.state.inlineOrderFailed || 0,
+          inlinePlacementWarnings: DT.state.inlinePlacementWarnings || 0,
+          safeDegraded: DT.state.safeDegraded || 0,
           outputFailed: DT.state.outputFailed || 0,
           lastError: DT.state.lastError || '',
           lastRenderError: DT.state.lastRenderError || '',

@@ -1363,5 +1363,86 @@ await t('AI 精翻开关：contextStatus 立即更新，不等到下一次请求
   assert.equal(status.context.mode, 'off');
 });
 
+await t('链接顺序不兼容：保留原文、不成功不跳过、可见提示且稳定页面不重试', async () => {
+  const hooks = { timers: [], listeners: {} };
+  const env = await boot({ hooks, config: { mode: 'translation', lazy: true, skipSameLang: false } });
+  const DT = env.DT;
+  const el = contextElement('p', 'A source paragraph with several links.');
+  const messages = [];
+  let requests = 0;
+  let stamp = 'old';
+  let resolved = false;
+  DT.toast = (message) => messages.push(message);
+  DT.unitStamp = () => stamp;
+  DT.collectAll = (accept) => [{ el, text: el.textContent, style: 'plain', sentences: [], index: 0, gen: DT.generation }].filter(accept);
+  DT.sourceChanged = () => false;
+  DT.inject = (unit) => {
+    unit.injectResult = { code: resolved ? 'success' : 'unsupported-inline-order', reason: 'model-atom-order' };
+    return resolved;
+  };
+  DT.send = async (msg) => {
+    if (msg.type === 'translate') { requests += 1; return { ok: true, results: ['这是合法模型译文，但链接需要重新排列。'] }; }
+    return { ok: true };
+  };
+  await env.message({ type: 'dt:toggle' });
+  let status = await env.message({ type: 'dt:status' });
+  assert.equal(status.translated, 0);
+  assert.equal(status.skipped, 0);
+  assert.equal(status.renderFailed, 1);
+  assert.equal(status.inlineOrderFailed, 1);
+  assert.equal(status.qualityWarnings, 1);
+  assert.match(status.lastRenderError, /unsupported-inline-order/);
+  assert.ok(messages.some((message) => message.includes('保留原文') && message.includes('双语模式')));
+  await rescan(hooks); await rescan(hooks);
+  assert.equal(requests, 1, '渲染不兼容不是模型失败，不自动追加付费请求');
+  resolved = true; stamp = 'changed';
+  await rescan(hooks);
+  status = await env.message({ type: 'dt:status' });
+  assert.equal(status.inlineOrderFailed, 0);
+  assert.equal(status.renderFailed, 0);
+  assert.equal(status.translated, 1);
+});
+
+await t('框架移除失败原节点后状态不继续声称旧段保留原文，也不请求模型', async () => {
+  const env = await boot({ config: { mode: 'translation', lazy: false, skipSameLang: false } });
+  const unit = { el: contextElement('p', 'Source paragraph with links to reorder.'), text: 'Source paragraph with links to reorder.', sentences: [], style: 'plain' };
+  let requests = 0;
+  installTranslationFixture(env, unit, () => { requests += 1; return { ok: true, results: ['目标语序与链接不一致的完整译文。'] }; });
+  env.DT.inject = (item) => { item.injectResult = { code: 'unsupported-inline-order', reason: 'model-atom-order' }; return false; };
+  await env.message({ type: 'dt:toggle' });
+  assert.equal((await env.message({ type: 'dt:status' })).inlineOrderFailed, 1);
+  unit.el.isConnected = false;
+  const status = await env.message({ type: 'dt:status' });
+  assert.equal(status.inlineOrderFailed, 0);
+  assert.equal(status.renderFailed, 0);
+  assert.equal(status.qualityWarnings, 0);
+  assert.equal(status.lastRenderError, '');
+  assert.equal(requests, 1);
+});
+
+await t('模型链接聚簇与安全引用降级：成功但明确质量警告，和结构失败分别计数', async () => {
+  for (const code of ['success', 'safe-degraded']) {
+    const env = await boot({ config: { mode: 'translation', lazy: false, skipSameLang: false } });
+    const unit = { el: contextElement('p', 'Another source with several links.'), text: 'Another source with several links.', style: 'plain', sentences: [] };
+    const messages = [];
+    installTranslationFixture(env, unit, () => ({ ok: true, results: ['这是一段包含多个链接的译文。'] }));
+    env.DT.toast = (message) => messages.push(message);
+    env.DT.inject = (item) => {
+      item.injectResult = { code };
+      item.renderWarning = { code: code === 'safe-degraded' ? 'citation-placement-fallback' : 'suspicious-inline-cluster' };
+      return true;
+    };
+    await env.message({ type: 'dt:toggle' });
+    const status = await env.message({ type: 'dt:status' });
+    assert.equal(status.translated, 1);
+    assert.equal(status.renderFailed, 0);
+    assert.equal(status.inlineOrderFailed, 0);
+    assert.equal(status.inlinePlacementWarnings, 1);
+    assert.equal(status.qualityWarnings, 1);
+    assert.equal(status.safeDegraded, code === 'safe-degraded' ? 1 : 0);
+    assert.ok(messages.some((message) => message.includes('需要核对')));
+  }
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

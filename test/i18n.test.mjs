@@ -79,6 +79,10 @@ t('专业质量、严格模式费用与批次上限说明有完整英文', () =>
     '每个翻译批次最多允许 0–3 次额外请求（含网络重试）；整页可能包含多个批次。0 表示不额外调用。快速与标准模式不增加复核请求。'
   ].forEach((key) => assert.notEqual(translateText(key), key));
   assert.match(translateText('专业翻译有 2 段需要核对；请对照原文确认数值与结论。'), /^2 professional translation segment\(s\) need review/);
+  assert.match(translateText('译文有 2 段需要核对；请对照原文确认链接、引用与语义。'), /^2 translated segment\(s\) need review/);
+  assert.equal(translateText('保留原文 1'), '1 kept original');
+  assert.equal(translateText('安全调整 1'), '1 safely adjusted');
+  assert.match(translateText('链接顺序无法安全重排，已保留原文。可切换双语模式查看译文。'), /switch to bilingual mode/);
 });
 
 t('悬停对照相关文案已覆盖', () => {

@@ -932,7 +932,70 @@
       });
       unit.inlineProtocol = 'v1';
       unit.wire = DT.units.inlineWrap(unit.text, keep, formats);
+      var sourceNodes = chars.filter(function (c) { return c && c.node; });
+      unit.inlinePendingFirst = sourceNodes.length ? sourceNodes[0].node : null;
+      unit.inlinePendingLast = sourceNodes.length ? sourceNodes[sourceNodes.length - 1].node : null;
+      unit.inlinePendingTokens = pendingInlineTokens(unit);
     }
+  }
+
+  // 只用于等待回包到首次写入之间。旧Text快照不会发现既有空span里新增的正文。
+  // whole重读该单元，局部段落只遍历首尾源Text之间，避免把兄弟段落更新算进来或反复扫描长容器。
+  function pendingInlineTokens(unit) {
+    var nodes = [];
+    var first = unit.inlinePendingFirst;
+    var last = unit.inlinePendingLast;
+    var bounds = unit.inlinePendingBounds;
+    if (!first || !last || !unit.el.contains(first) || !unit.el.contains(last)) return null;
+    if (unit.whole || unit.own) {
+      var tokens = unit.own ? ownTokens(unit.el) : tokensOf(unit.el);
+      tokens.forEach(function (token) {
+        var node = token.node || token.br;
+        if (!node) return;
+        if (!unit.whole) {
+          if (bounds) {
+            if ((bounds.startAfter && !(bounds.startAfter.compareDocumentPosition(node) & 4)) ||
+                (bounds.endBefore && !(node.compareDocumentPosition(bounds.endBefore) & 4))) return;
+          } else if (node !== first && node !== last &&
+              (!(first.compareDocumentPosition(node) & 4) || !(node.compareDocumentPosition(last) & 4))) return;
+        }
+        nodes.push({ node: node, value: node.nodeType === 3 ? node.nodeValue : null });
+      });
+      return nodes;
+    }
+    function afterNode(node) {
+      while (node && node !== unit.el && !node.nextSibling) node = node.parentNode;
+      return node && node !== unit.el ? node.nextSibling : null;
+    }
+    var cur = bounds ? (bounds.startAfter ? afterNode(bounds.startAfter) : unit.el.firstChild) : first;
+    while (cur) {
+      if (bounds && cur === bounds.endBefore) return nodes;
+      var descend = true;
+      if (cur.nodeType === 3) {
+        if (cur.nodeValue && !(ownNodes.has(cur) && DT.isOwnWrite(cur))) nodes.push({ node: cur, value: cur.nodeValue });
+      } else if (cur.nodeType === 1) {
+        if (cur.hasAttribute('data-dt-target') || cur.hasAttribute('data-dt-ui') || cur.hasAttribute('data-dt-dir') ||
+            cur.hasAttribute('data-dt-format') || cur.hasAttribute('data-dt-font') || NON_TEXT_TAGS[tagOf(cur)] || cur.hidden) descend = false;
+        else if (tagOf(cur) === 'BR') nodes.push({ node: cur, value: null });
+        else {
+          var cs = styleOf(cur);
+          if (cs && cs.display === 'none') descend = false;
+        }
+      }
+      if (!bounds && cur === last) return nodes;
+      if (descend && cur.firstChild) { cur = cur.firstChild; continue; }
+      cur = afterNode(cur);
+    }
+    return bounds && !bounds.endBefore ? nodes : null;
+  }
+
+  function pendingInlineChanged(unit) {
+    if (unit.renderMode || !unit.inlinePendingTokens) return false;
+    var now = pendingInlineTokens(unit);
+    var before = unit.inlinePendingTokens;
+    return !now || now.length !== before.length || now.some(function (entry, index) {
+      return entry.node !== before[index].node || entry.value !== before[index].value;
+    });
   }
 
   function inlineProtocol() {
@@ -1710,6 +1773,22 @@
         fallback: ranges.fallback || '',
         ruby: rubyAnnotationsFor(el, map.chars.slice(range.start, range.end), rubyBounds, own, assignedRuby)
       };
+      unit.inlinePendingBounds = rubyBounds;
+      if (!rubyBounds && partial && firstNode) {
+        // 只有一个行内段落时，首尾仍可能夹着独立子块；使用同一flow边界纳入段首/尾空壳。
+        var scope = el.__dtScope;
+        var firstTop = topChild(el, firstNode);
+        var lastSource = firstNode;
+        for (var ps = range.end - 1; ps >= range.start; ps -= 1) {
+          if (map.chars[ps] && map.chars[ps].node) { lastSource = map.chars[ps].node; break; }
+        }
+        var lastTop = topChild(el, lastSource);
+        var prior = firstTop && firstTop.previousSibling;
+        var next = lastTop && lastTop.nextSibling;
+        while (prior && !(scope && scope.has(prior))) prior = prior.previousSibling;
+        while (next && !(scope && scope.has(next))) next = next.nextSibling;
+        unit.inlinePendingBounds = { startAfter: prior, endBefore: next };
+      }
       if (keepInside === null) keepInside = hasKeepInside(el);
       if (!attachKeep(unit, el, keepInside)) return; // 这段只有 notranslate 的内容
       fillSnapshot(unit);
@@ -3146,21 +3225,11 @@
   //   原子（unit.keep 里的元素：文献引用、图表链接、混合段落里的普通链接、@提及、notranslate）原样留在原位，
   //   节点身份、href / id / 事件都不动；原子之外的文字节点全部清空；译文按原子的落点切成 N+1 段，
   //   作为新文本节点插在原子之间（永远不进单元内部的链接），<br> 分行时逐行对齐。不移动原有节点，所有改动走 RenderTransaction。
-  //   落点：模型留下的标记位置（词级）→ 换了先后就挪到各自那一句的句末 → 标记丢了按原文所在句对到译文句末；
+  //   落点：正文原子必须能保持模型标记顺序；只有文献引用允许同句句末兼容定位，并明确记录安全降级；
   //   图表链接的标记丢了时按它的标签（Fig. 1 / 图 1）在译文里唯一定位。定不下来就失败（保持原文、报原因），绝不退回双语。
-  // 双语（含绝对定位 / 界面区域导致的 replaceMode）：保持 keepPlan / 副本逻辑
+  // 所有原地替换（含双语模式下绝对定位 / 界面区域）共用安全检查；只有追加译文才走副本逻辑。
   function injectCited(unit, marks, plain, lang, area, replaceMode) {
-    if (replaceMode && (DT.state.mode === 'translation' || unit.inlineResult)) return injectMixed(unit, marks, area);
-    if (replaceMode) {
-      var single = (unit.groups.filled || []).length < 2 && !(unit.ruby && unit.ruby.length);
-      var place = single ? DT.units.keepPlacement(marks.stripped, marks.at) : null;
-      var segs = place ? citeSegs(unit, marks.stripped, place.at) : null;
-      if (segs && keepPlan(unit, segs)) {
-        unit.citeMode = place.snapped ? 'sentence' : 'exact';
-        return injectReplace(unit, citeRendered(unit, segs), area, segs);
-      }
-      unit.citeMode = 'fallback-dual';
-    }
+    if (replaceMode) return injectMixed(unit, marks, area);
     return injectDual(unit, plain, lang, area, marks);
   }
 
@@ -3172,27 +3241,6 @@
     var lo = Math.min(ka.end, kb.end);
     var hi = Math.max(ka.start, kb.start);
     return /\S/.test(unit.text.slice(lo, hi)) ? ',' : '';
-  }
-
-  // 落点 → keepPlan 要的 N+1 段译文（按页面顺序）
-  function citeSegs(unit, stripped, at) {
-    var segs = [];
-    var from = 0;
-    for (var i = 0; i < at.length; i += 1) {
-      var seg = stripped.slice(from, at[i]);
-      if (i > 0 && !/\S/.test(seg)) seg += citeSeparator(unit, i - 1, i);
-      segs.push(seg);
-      from = at[i];
-    }
-    segs.push(stripped.slice(from));
-    return segs;
-  }
-
-  // 页面上实际显示的译文（各段 + 原地的引用编号）：悬停对照和 renderedText 都按它算
-  function citeRendered(unit, segs) {
-    var out = segs[0] || '';
-    for (var i = 0; i < unit.keep.length; i += 1) out += unit.keep[i].text + (segs[i + 1] || '');
-    return out;
   }
 
 
@@ -3224,37 +3272,107 @@
         return;
       }
     });
-    return { stripped: stripped, at: at };
+    return { stripped: stripped, at: at, order: marks.order };
   }
 
-  // 一行里各原子的落点（行内偏移，按页面顺序单调不减）。items：[{ start: 原文行内偏移, at: 译文行内偏移或 -1 }]。
-  // 标记都在 → keepPlacement（词级，换序时挪句末）；有标记丢了 / 仍对不上 → 按原文所在句对到译文句末（只保证不跨句）
+  // 模型标记的实际顺序。两个相邻链接去掉标记后偏移一样，仍必须保留它们的先后。
+  function atomOrder(unit, marks) {
+    if (unit.inlineResult) return unit.inlineResult.atoms.map(function (atom) { return atom.id - 1; });
+    return marks.order || [];
+  }
+
+  // 一行里各原子的落点（行内偏移，按页面顺序单调不减）。
+  // 只有文献引用可以在同一句内吸附；正文链接 / 图表 / 提及 / 保护内容 / 控件 / Ruby 不能猜位置。
   function atomPlacement(srcLine, dstLine, items) {
     if (!items.length) return { at: [], mode: 'exact' };
     var at = items.map(function (it) {
       return it.at;
     });
-    if (at.every(function (p) { return p >= 0; })) {
-      var placed = DT.units.keepPlacement(dstLine, at);
-      if (placed) return { at: placed.at, mode: placed.snapped ? 'sentence' : 'exact' };
+    var max = -1;
+    var minAfter = [];
+    var minAtAfter = [];
+    var min = Infinity;
+    var minAt = Infinity;
+    var maxAt = -1;
+    var inverted = [];
+    var displaced = [];
+    var needsFallback = false;
+    var i;
+    // 逆序涉及哪些原子：前缀最大值和后缀最小值避免长段落逐对比较。
+    for (i = items.length - 1; i >= 0; i -= 1) {
+      minAfter[i] = min;
+      minAtAfter[i] = minAt;
+      if (items[i].order >= 0) min = Math.min(min, items[i].order);
+      if (items[i].at >= 0) minAt = Math.min(minAt, items[i].at);
     }
+    for (i = 0; i < items.length; i += 1) {
+      var one = items[i];
+      inverted[i] = one.order >= 0 && (one.order < max || one.order > minAfter[i]);
+      displaced[i] = one.at >= 0 && (one.at < maxAt || one.at > minAtAfter[i]);
+      if (inverted[i] && one.kind !== 'cite') return { error: 'nonmonotonic-atom-order' };
+      if (displaced[i] && one.kind !== 'cite') return { error: 'nonmonotonic-atom-position' };
+      if (one.at < 0 && one.kind !== 'cite') return { error: 'unresolved-atom-position' };
+      if (inverted[i] || displaced[i] || one.at < 0) needsFallback = true;
+      if (one.order >= 0) max = Math.max(max, one.order);
+      if (one.at >= 0) maxAt = Math.max(maxAt, one.at);
+    }
+    if (!needsFallback) return { at: at, mode: 'exact' };
     var dst = DT.units.sentencesOf(dstLine);
-    if (!dst.length) {
-      return /\S/.test(dstLine) ? null : { at: items.map(function () { return 0; }), mode: 'sentence' };
-    }
     var src = DT.units.sentencesOf(srcLine);
-    var out = [];
-    var prev = 0;
-    items.forEach(function (it) {
-      var si = 0;
-      while (si + 1 < src.length && it.start >= src[si + 1][0]) si += 1;
-      var di = Math.min(si, dst.length - 1);
-      var end = DT.units.sentenceEndAt(dstLine, dst[di][0]);
-      if (end < prev) end = prev;
-      out.push(end);
-      prev = end;
+    var mode = 'exact';
+    for (i = 0; i < items.length; i += 1) {
+      if (at[i] >= 0 && !inverted[i] && !displaced[i]) continue;
+      mode = 'sentence';
+      // 同落点的引用只是交换编号次序，不需要把引文从所引词语移到句末。
+      if (at[i] >= 0) {
+        if (displaced[i]) {
+          // 去掉原子后，句号后的引用与下一句开头可以共享偏移；引用归前一句。
+          // 不能让 sentenceEndAt 把这个边界当成下一句，从而掩盖跨句引用交换。
+          var ci = 0;
+          while (ci + 1 < dst.length && at[i] > dst[ci + 1][0]) ci += 1;
+          at[i] = DT.units.sentenceEndAt(dstLine, dst.length ? dst[ci][0] : at[i]);
+        }
+      }
+      else {
+        if (!dst.length && /\S/.test(dstLine)) return null;
+        var si = 0;
+        while (si + 1 < src.length && items[i].start >= src[si + 1][0]) si += 1;
+        var di = Math.min(si, dst.length - 1);
+        at[i] = di < 0 ? 0 : DT.units.sentenceEndAt(dstLine, dst[di][0]);
+      }
+    }
+    for (i = 1; i < at.length; i += 1) {
+      if (at[i] < at[i - 1]) return { error: 'citation-sentence-order' };
+    }
+    return { at: at, mode: mode };
+  }
+
+  // 协议有效不代表模型语义可靠。只提示窄而可证的聚簇：至少三个原本隔着正文的普通链接，
+  // 被模型连续放到同一句末。不改变模型输出；正常相邻链接、共同落点的上标引用不触发。
+  function noteModelAtomCluster(unit, marks) {
+    var keep = unit.keep || [];
+    var order = atomOrder(unit, marks);
+    var run = [];
+    function inspectRun() {
+      if (run.length < 3) return;
+      var pos = marks.at[run[0]];
+      var prefix = marks.stripped.slice(0, pos);
+      if (pos !== marks.stripped.length && DT.units.sentenceEndAt(marks.stripped, pos) !== pos &&
+          !/[。．.!?！？；;…]["'”’」』]*\s*$/.test(prefix)) return;
+      var lexicalGap = false;
+      for (var i = 1; i < run.length; i += 1) {
+        var a = keep[run[i - 1]];
+        var b = keep[run[i]];
+        if (a.end <= b.start && /[A-Za-z0-9\u00c0-\u052f\u0600-\u06ff\u3040-\u30ff\u3400-\u9fff]/.test(unit.text.slice(a.end, b.start))) lexicalGap = true;
+      }
+      if (lexicalGap) unit.renderWarning = { code: 'suspicious-inline-placement', reason: 'model-body-links-clustered-at-sentence-end' };
+    }
+    order.forEach(function (index) {
+      if (!keep[index] || keep[index].kind !== 'link' || marks.at[index] < 0) { inspectRun(); run = []; return; }
+      if (run.length && marks.at[index] !== marks.at[run[0]]) { inspectRun(); run = []; }
+      run.push(index);
     });
-    return { at: out, mode: 'sentence' };
+    inspectRun();
   }
 
   // CSS 上标没有统一标签。只有「已经确认是引用的原子」才看排版证据；字号小本身不是引用证据。
@@ -3335,6 +3453,9 @@
       if (!groups[g].br && !groups[g].nl) return failInject(unit, 'unsafe-structure', 'line-boundary');
     }
     var fixed = recoverXrefMarks(unit, marks);
+    var order = atomOrder(unit, fixed);
+    var ranks = [];
+    order.forEach(function (index, rank) { ranks[index] = rank; });
     var stripped = fixed.stripped;
     var srcOff = [];
     var dstOff = [];
@@ -3366,20 +3487,27 @@
     for (l = 0; l < srcLines.length; l += 1) {
       var idx = [];
       var items = [];
+      var crossedLine = false;
       keep.forEach(function (k, i) {
         if (lineOf[i] !== l) return;
         var p = fixed.at[i];
         var inLine = p >= dstOff[l] && p <= dstOff[l] + dstLines[l].length;
+        // 已在别行出现的标记不是「漏标记」。不能按源行补回，否则会把引用换给另一句。
+        if (p >= 0 && !inLine) crossedLine = true;
         idx.push(i);
-        items.push({ start: k.start - srcOff[l], at: inLine ? p - dstOff[l] : -1 });
+        items.push({ start: k.start - srcOff[l], at: inLine ? p - dstOff[l] : -1, kind: k.kind, order: ranks[i] == null ? -1 : ranks[i] });
       });
+      if (crossedLine) return failInject(unit, 'unsupported-inline-order', 'cross-line-atom-position');
       var placed = atomPlacement(srcLines[l], dstLines[l], items);
       if (!placed) return failInject(unit, 'invalid-placement', 'no-sentence');
+      if (placed.error) return failInject(unit, 'unsupported-inline-order', placed.error);
       if (placed.mode !== 'exact') mode = 'sentence';
       idx.forEach(function (i, n) {
         at[i] = dstOff[l] + placed.at[n];
       });
     }
+    if (mode === 'sentence') unit.renderWarning = { code: 'citation-placement-fallback', reason: 'citation-same-sentence-placement' };
+    else noteModelAtomCluster(unit, fixed);
 
     // 页面顺序的落点序列：第 l 行开头的 <br>，再是这一行的原子
     var seq = [];
@@ -3481,8 +3609,11 @@
       inserted.push(item.node);
     });
     var targetNodes = [];
+    var gapNodes = [];
+    var atomNodes = [];
+    var labelMismatch = false;
     function put(text, slot, start, end) {
-      if (!text || !slot || !slot.parent) return;
+      if (!text || !slot || !slot.parent) return [];
       slot = styleSafeSlot(unit, slot);
       var fragment = document.createDocumentFragment();
       var leaves;
@@ -3508,10 +3639,11 @@
         inserted.push(node);
       });
       leaves.forEach(function (node) { nodeUnit.set(node, unit); ownNodes.add(node); ownWrites.set(node, node.nodeValue); targetNodes.push(node); });
+      return leaves;
     }
     // 第 0 段在序列第一个之前；无原子的格式段仍复用同一个 gap 插入路径。
-    put(texts[0], seq.length ? seq[0].beforeSlot : emptySlot, textStarts[0], textEnds[0]);
-    for (var n = 1; n < texts.length; n += 1) put(texts[n], seq[n - 1].afterSlot, textStarts[n], textEnds[n]);
+    gapNodes.push(put(texts[0], seq.length ? seq[0].beforeSlot : emptySlot, textStarts[0], textEnds[0]));
+    for (var n = 1; n < texts.length; n += 1) gapNodes.push(put(texts[n], seq[n - 1].afterSlot, textStarts[n], textEnds[n]));
     keep.forEach(function (k, index) {
       if (unit.inlineResult && k.kind === 'link') {
         var label = inlineLabel(unit, unit.inlineResult, index);
@@ -3519,8 +3651,17 @@
           // 已写入模型返回的链接标签（可能嵌在 <span>/<sup> 里）。
         } else relabelAtom(k, ops, saved);
       } else if (k.kind === 'xref' || k.kind === 'link') relabelAtom(k, ops, saved);
-      tokensOf(k.el).forEach(function (token) { if (token.node) targetNodes.push(token.node); });
+      atomNodes[index] = tokensOf(k.el).filter(function (token) { return !!token.node; }).map(function (token) { return token.node; });
+      atomNodes[index].forEach(function (node) { targetNodes.push(node); });
+      if (k.kind === 'link') {
+        var wanted = unit.inlineResult ? inlineLabel(unit, unit.inlineResult, index) : k.text;
+        // 同原标签时仍可能使用既有的可靠Supplement本地化规则。
+        if (wanted === k.text) wanted = linkLabel(k.text, DT.state.targetCode || DT.state.target) || wanted;
+        var actual = atomNodes[index].map(function (node) { return node.nodeValue || ''; }).join('');
+        if (DT.normalizeText(actual) !== DT.normalizeText(wanted)) labelMismatch = true;
+      }
     });
+    if (labelMismatch) return failInject(unit, 'unsafe-structure', 'inline-link-label-unwritable');
     hideEmptyFormatShells(unit, ops);
     seq.forEach(function (item) {
       if (item.nl || item.br) targetNodes.push(item.node);
@@ -3546,6 +3687,20 @@
 
     var targetMap = DT.targetMapOf(unit);
     var rendered = targetMap ? targetMap.text : shownTextOf(unit.el);
+    // safeSlot / 强调外壳可能把计划中的 gap 放到原子的另一侧。按节点身份核对真实阅读顺序，
+    // 不只比较文字（两个链接可以同名）；若不一致，外层事务会撤销本次所有清空、方向壳与格式壳。
+    var plannedNodes = (gapNodes[0] || []).slice();
+    var plannedText = texts[0];
+    seq.forEach(function (entry, index) {
+      var nodes = entry.keep != null ? atomNodes[entry.keep] : [entry.node];
+      (nodes || []).forEach(function (node) { plannedNodes.push(node); });
+      (gapNodes[index + 1] || []).forEach(function (node) { plannedNodes.push(node); });
+      plannedText += entry.keep != null ? (nodes || []).map(function (node) { return node.nodeValue || ''; }).join('') : '\n';
+      plannedText += texts[index + 1];
+    });
+    if (plannedNodes.length !== unit.targetNodes.length || plannedNodes.some(function (node, index) { return node !== unit.targetNodes[index]; }) || rendered !== plannedText) {
+      return failInject(unit, 'unsupported-inline-order', 'atom-slot-order');
+    }
     var item = { el: unit.el, nodes: saved, collapsed: [], src: unit.text, lines: DT.splitLines(unit.text), aligned: true };
     DT.replaced.push(item);
     setAttr(unit.el, 'data-dt-replaced', '1', ops);
@@ -3680,6 +3835,10 @@
     var keep = unit.keep;
     var marks = recoverXrefMarks(unit, rawMarks);
     marks.at = marks.at.slice();
+    noteModelAtomCluster(unit, marks);
+    var order = atomOrder(unit, marks);
+    var ranks = [];
+    order.forEach(function (index, rank) { ranks[index] = rank; });
     // 结构性原子（引用 / 图表链接 / 混合段落里的普通链接）在双语译文里放可点击的副本；
     // 其中有标记丢了就一个副本都不放（原段落里的都完好），notranslate / 提及照旧放原文文字
     var citesOk = keep.every(function (k, i) {
@@ -3691,7 +3850,7 @@
       items.push({ at: marks.at[i], k: k, i: i });
     });
     items.sort(function (a, b) {
-      return a.at - b.at || a.i - b.i;
+      return a.at - b.at || (ranks[a.i] == null ? a.i : ranks[a.i]) - (ranks[b.i] == null ? b.i : ranks[b.i]);
     });
     node.textContent = '';
     var pos = 0;
@@ -3773,7 +3932,7 @@
   // 旧译文不能再写进新内容，调用方放弃这次注入，下一轮按新内容重翻
   DT.sourceChanged = function (unit) {
     if (!unit || !unit.el) return true;
-    if (unit.inlineProtocol === 'v1' && inlineMetadataChanged(unit)) return true;
+    if (unit.inlineProtocol === 'v1' && (inlineMetadataChanged(unit) || pendingInlineChanged(unit))) return true;
     if (unit.snapshot) return sourceChangedSnapshot(unit);
     var now = unit.own ? ownText(unit.el) : DT.unitText(unit.el);
     return now !== unit.text;
@@ -3957,6 +4116,7 @@
   // 注入结果分类（unit.injectResult / DT.lastInject）。DT.inject 仍返回 true / false（兼容旧调用），
   // main.js 的 tryInject 按 code 决定怎么记：
   //   success          已写进页面
+  //   safe-degraded    已写进页面，文献引用使用明确标注的同句兼容落点
   //   already-rendered 这一段已经有译文 / 已标记翻译过（不用再注入）
   //   not-applicable   单元本身就是引用 / 提及链接，没有可改写的正文
   //   empty            去掉标记后没有译文
@@ -3964,6 +4124,7 @@
   //   stale-source     源节点已经不在页面上（页面更新了，需要重新收集）
   //   unsafe-structure 当前 DOM 结构没法安全写回（注音 / pre-wrap 分行 / 祖先链接里的混排 / 渲染器拒绝）
   //   invalid-placement 引用 / 链接在译文里的位置定不下来（行数对不上 / 没有句子）
+  //   unsupported-inline-order 原地原子顺序或安全插槽不能保持模型语义（完整保留原文）
   function injectOutcome(unit, ok, code, reason) {
     var res = { code: code, reason: reason || '' };
     if (unit) unit.injectResult = res;
@@ -3987,7 +4148,7 @@
       align = ownOrAlign;
     }
     var unit = isUnit ? unitOrEl : legacyUnit(unitOrEl, ownOrAlign && ownOrAlign.parts ? false : ownOrAlign);
-    if (unit) unit.injectResult = null;
+    if (unit) { unit.injectResult = null; unit.renderWarning = null; unit.citeMode = ''; }
     if (unit && unit.inlineIssue) return injectOutcome(unit, false, 'invalid-placement', 'inline-' + unit.inlineIssue);
     if (!unit || !unit.el || !unit.el.isConnected) return injectOutcome(unit, false, 'stale-source', 'disconnected');
     // 根节点本身就是文献引用 / 用户名提及（独立链接或 citation span）：没有可安全改写的正文，原样保留。
@@ -3999,7 +4160,7 @@
     if (unit.inlineProtocol === 'v1') {
       inline = inspectInline(unit, text);
       if (!inline.ok) return injectOutcome(unit, false, 'invalid-placement', 'inline-' + inline.reason);
-      if (inlineMetadataChanged(unit)) return injectOutcome(unit, false, 'stale-source', 'inline-metadata-changed');
+      if (inlineMetadataChanged(unit) || pendingInlineChanged(unit)) return injectOutcome(unit, false, 'stale-source', 'inline-metadata-changed');
       unit.inlineResult = inline;
       unit.formatMode = inline.formatMissing ? 'plain-fallback' : 'mapped';
     }
@@ -4010,7 +4171,7 @@
       if (!(unit.ruby && unit.ruby.length && !(unit.keep && unit.keep.length))) cited = { stripped: inline.stripped, at: (unit.keep || []).map(function (k, i) {
         var a = inline.atoms.filter(function (atom) { return atom.id === i + 1; })[0];
         return a ? a.at : -1;
-      }) };
+      }), order: inline.atoms.map(function (atom) { return atom.id - 1; }) };
     } else if (text && unit.keep && unit.keep.length) {
       if (hasStructAtom(unit)) cited = DT.units.keepMarks(text, unit.keep, unit.text);
       var kept = DT.units.keepParse(text, unit.keep, unit.text);
@@ -4063,6 +4224,7 @@
     }
     var ok;
     var checkpoint = tx.length;
+    var previousRenderMode = unit.renderMode;
     var renderedCheckpoint = rendered.length;
     var replacedCheckpoint = DT.replaced.length;
     var renderError = null;
@@ -4085,6 +4247,7 @@
         unit.targetNodes = null;
         unit.targetValues = null;
         unit.citedInserted = null;
+        unit.renderMode = previousRenderMode;
       }
       renderFrames -= 1;
       if (compactPending) compactTx();
@@ -4093,7 +4256,7 @@
       DT.log('inject rollback', renderError);
       return injectOutcome(unit, false, 'unsafe-structure', 'inline-render-exception');
     }
-    if (ok) return injectOutcome(unit, true, 'success', unit.citeMode || unit.renderMode || '');
+    if (ok) return injectOutcome(unit, true, unit.citeMode === 'sentence' ? 'safe-degraded' : 'success', unit.citeMode || unit.renderMode || '');
     var why = unit.injectResult;
     return injectOutcome(unit, false, why ? why.code : 'unsafe-structure', why ? why.reason : 'renderer-refused');
   };
@@ -4413,6 +4576,9 @@
     DT.state.skipped = 0;
     DT.state.renderFailed = 0;
     DT.state.lastRenderError = '';
+    DT.state.inlineOrderFailed = 0;
+    DT.state.inlinePlacementWarnings = 0;
+    DT.state.safeDegraded = 0;
     DT.state.total = 0;
   };
 })();
