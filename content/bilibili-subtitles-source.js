@@ -74,6 +74,11 @@
     var lastSeq = -1;
     var lastEmitted = '';
     var lastError = '';
+    // 取字幕失败（网络 / 签名过期 / 空文件）后按退避重试；播放器新回包（新签名地址）立即可以再试。
+    var RETRY_MS = [3000, 10000, 30000];
+    var failedKey = '';
+    var failedAt = 0;
+    var failures = 0;
 
     function log() {
       if (env.log) env.log.apply(null, arguments);
@@ -168,6 +173,7 @@
       if (!track) return null;
       var key = [meta.bvid, meta.cid, String(track.id_str || track.id || track.lan), String(track.lan), lan].join('|');
       if (key === lastEmitted) return null;
+      if (key === failedKey && (failures > RETRY_MS.length || now() - failedAt < RETRY_MS[failures - 1])) return null;
       lastEmitted = key;
       return { type: 'bilibili', meta: meta, track: track, lan: lan, key: key };
     }
@@ -180,7 +186,16 @@
       lastSeq = meta.seq;
       lastMeta = meta;
       pending = { meta: meta, replay: data.replay === true };
+      // 新回包带新的签名地址：之前失败的轨道马上可以再取一次
+      if (!data.replay) { failures = 0; failedKey = ''; }
       return true;
+    }
+
+    // 播放器当前选中的语言：active 项优先；没有 active 类时只认元数据明确给过的语言或唯一轨道（与 take 一致）
+    function chosenLan(meta) {
+      var lan = activeLanIn(doc);
+      if (lan || !meta) return lan;
+      return meta.selectedLan || (meta.tracks.length === 1 ? String(meta.tracks[0].lan || '') : '');
     }
 
     function take() {
@@ -234,6 +249,18 @@
           lastError = (err && err.message) || 'fetch_failed';
           log('bilibili subtitles: fetch failed', lastError);
           return null;
+        })
+        .then(function (track) {
+          // 失败不能占住去重键：否则同一条轨道（重放、播放器新回包）再也不会被取。
+          if (track) {
+            if (failedKey === event.key) { failedKey = ''; failures = 0; }
+          } else {
+            if (lastEmitted === event.key) lastEmitted = '';
+            failures = failedKey === event.key ? failures + 1 : 1;
+            failedKey = event.key;
+            failedAt = now();
+          }
+          return track;
         });
     }
 
@@ -261,12 +288,20 @@
       if (p.hasP && track.page && Number(track.page) !== p.page) return false;
       var cid = currentCid();
       if (track.cid && cid && String(track.cid) !== cid) return false;
+      // 用户在播放器里换了语言（新轨道还没取到 / 取不到 / 元数据里没有）：旧轨道立即让位，不能继续盖住原生字幕
+      if (track.rawLang && lastMeta && lastMeta.bvid === track.bvid && String(lastMeta.cid) === String(track.cid)) {
+        var lan = chosenLan(lastMeta);
+        var want = lan ? trackFor(lastMeta, lan) : null;
+        if (lan && (!want || String(want.lan || '') !== track.rawLang)) return false;
+      }
       return !!(p.videoPage);
     }
 
     return {
       platform: 'bilibili',
-      hideNativeCss: '.rimefox-subs-on .bpx-player-subtitle-wrap{display:none !important;}.rimefox-subs-on .bili-subtitle-x-subtitle-panel{display:none !important;}',
+      // 用透明而不是 display:none 收起原生字幕：没有 active 类时要靠原生字幕层是否在显示来判断 CC 开着，
+      // display:none 会让接管本身看起来像「CC 关了」，每个 tick 来回接管 / 交还（闪烁且照常计费）。
+      hideNativeCss: '.rimefox-subs-on .bpx-player-subtitle-wrap,.rimefox-subs-on .bili-subtitle-x-subtitle-panel{opacity:0 !important;pointer-events:none !important;}',
       take: take,
       accept: accept,
       resolve: resolve,
@@ -280,8 +315,8 @@
       player: playerView,
       captionsOn: function () {
         if (activeLanIn(doc)) return true;
-        // 只有播放器元数据明确记录过当前语言时，才用原生字幕层兜底；避免 CC 关闭后旧轨道继续显示。
-        return !!(lastMeta && lastMeta.selectedLan) && nativeSubtitleVisible(doc);
+        // 没有 active 类：播放器元数据明确记录过当前语言、或只有一条轨道（与 take 的选轨一致）时，用原生字幕层兜底。
+        return !!(lastMeta && (lastMeta.selectedLan || lastMeta.tracks.length === 1)) && nativeSubtitleVisible(doc);
       },
       matches: matches,
       blocked: function () { return false; },

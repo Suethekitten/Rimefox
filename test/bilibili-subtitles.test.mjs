@@ -412,6 +412,85 @@ await t('active class 缺失但原生字幕可见时，用播放器元数据选�
   assert.equal(source.captionsOn(), true);
 });
 
+await t('换到另一种语言（元数据里没有 / 尚未取到）时旧轨道立即失效，不再盖住原生字幕', async function () {
+  const state = { lan: 'en-US' };
+  const doc = makeDoc(state);
+  const source = createBiliSource({
+    doc: doc,
+    location: { hostname: 'www.bilibili.com', pathname: '/video/BV1xx411c7mD', search: '' },
+    send: async function () { return { ok: true, text: bodyOf([[1, 2, 'Hello.']]) }; }
+  });
+  source.accept(messageFor({ tracks: [trackOf('en-US', SAFE_HUMAN_URL), trackOf('ai-zh', SAFE_URL)], selectedLan: 'en-US' }, 1));
+  const track = await source.resolve(source.take());
+  assert.ok(track);
+  assert.equal(source.matches(track), true, '选中的就是这条轨道');
+  state.lan = 'ja';
+  assert.equal(source.matches(track), false, '元数据里没有 ja：交还原生字幕');
+  state.lan = 'ai-zh';
+  assert.equal(source.matches(track), false, '换成另一条轨道（新轨道还没取到）：旧轨道不能继续显示');
+  state.lan = 'en-US';
+  assert.equal(source.matches(track), true);
+});
+
+await t('取字幕失败一次后按退避重试；播放器新回包（新签名地址）立即重试', async function () {
+  const state = { lan: 'en-US' };
+  const doc = makeDoc(state);
+  let clock = 10000;
+  let failNext = 2;
+  let fetches = 0;
+  const source = createBiliSource({
+    doc: doc,
+    location: { hostname: 'www.bilibili.com', pathname: '/video/BV1xx411c7mD', search: '' },
+    now: function () { return clock; },
+    send: async function () {
+      fetches += 1;
+      if (failNext > 0) { failNext -= 1; return { ok: false, error: 'http' }; }
+      return { ok: true, text: bodyOf([[1, 2, 'Hello.']]) };
+    }
+  });
+  source.accept(messageFor({ tracks: [trackOf('en-US', SAFE_HUMAN_URL)], selectedLan: 'en-US' }, 1));
+  assert.equal(await source.resolve(source.take()), null, '第一次失败');
+  assert.equal(source.take(), null, '退避期内不重试');
+  clock += 3500;
+  const retry = source.take();
+  assert.ok(retry, '退避到期后重试同一条轨道');
+  assert.equal(await source.resolve(retry), null, '第二次也失败');
+  clock += 1000;
+  assert.equal(source.take(), null, '第二次退避更长');
+  source.accept(messageFor({ tracks: [trackOf('en-US', SAFE_HUMAN_URL)], selectedLan: 'en-US' }, 2));
+  const fresh = source.take();
+  assert.ok(fresh, '播放器新回包立即可以再取');
+  assert.ok(await source.resolve(fresh), '这次成功');
+  assert.equal(source.take(), null, '成功后不再重复产出');
+  assert.equal(fetches, 3);
+});
+
+await t('收起原生字幕用透明而不是 display:none，接管本身不会让兜底判定成「CC 关了」', function () {
+  const state = { lan: '', wrap: { getClientRects: function () { return [1]; } } };
+  const source = createBiliSource({
+    doc: makeDoc(state),
+    location: { hostname: 'www.bilibili.com', pathname: '/video/BV1xx411c7mD', search: '' },
+    send: async function () { return { ok: true, text: bodyOf([[1, 2, 'x']]) }; }
+  });
+  assert.equal(/display\s*:\s*none/.test(source.hideNativeCss), false);
+  assert.match(source.hideNativeCss, /\.rimefox-subs-on \.bpx-player-subtitle-wrap[^{]*\{[^}]*opacity:0 !important/);
+});
+
+await t('没有 active 类、元数据也没给语言、只有一条轨道：take 与 captionsOn 一致，能接管', async function () {
+  const state = { lan: '', wrap: { getClientRects: function () { return [1]; } } };
+  const source = createBiliSource({
+    doc: makeDoc(state),
+    location: { hostname: 'www.bilibili.com', pathname: '/video/BV1xx411c7mD', search: '' },
+    send: async function () { return { ok: true, text: bodyOf([[1, 2, 'x']]) }; }
+  });
+  source.accept(messageFor({ tracks: [trackOf('en-US', SAFE_HUMAN_URL)], selectedLan: '' }, 1));
+  const ev = source.take();
+  assert.ok(ev, '唯一轨道兜底');
+  assert.equal(source.captionsOn(), true, 'captionsOn 也要认唯一轨道，否则取了字幕却永远不显示');
+  const track = await source.resolve(ev);
+  assert.equal(source.matches(track), true);
+});
+
 console.log('\n[Bilibili 运行时：隔离 / 懒翻译 / 渲染]');
 
 function setupRuntime() {
