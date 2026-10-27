@@ -2625,7 +2625,8 @@ async function inlineReplayChecks() {
   await until(async () => { const st = await state(); return st && !st.busy; }, 25000);
   const mixed = await state();
   const mixedDom = await dom('#replay-long');
-  check('行内重放：切片拼接后缺标记 → renderFailed，不能 skipped + settled', mixed && mixed.renderFailed > 0 && mixed.skipped === 0 && mixedDom.replaced === false, JSON.stringify({ status: mixed && { renderFailed: mixed.renderFailed, outputFailed: mixed.outputFailed, skipped: mixed.skipped }, dom: mixedDom }));
+  // 0.12.5：每片都已单独校验，只因一片按协议省略全部 <f> 才拼不上时，整段按普通译文降级显示（不判失败、不留标记）。
+  check('行内重放：切片一片省略全部 <f> → 整段普通译文降级，不 renderFailed、不 skipped', mixed && mixed.renderFailed === 0 && mixed.skipped === 0 && mixedDom.replaced === true && mixedDom.text.indexOf('第一片中文') >= 0 && !/<\/?[fk]\d+>/.test(mixedDom.text), JSON.stringify({ status: mixed && { renderFailed: mixed.renderFailed, outputFailed: mixed.outputFailed, skipped: mixed.skipped }, dom: mixedDom }));
   await tabMsg(tab.tabId, { type: 'dt:toggle' });
   stats.outputMode = '';
   await send('Target.closeTarget', { targetId: tab.targetId }, tab.s);
