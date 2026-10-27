@@ -4,7 +4,7 @@ Last updated: 2026-10-27. Rimefox is a bring-your-own-key browser translation ex
 
 ## Information sent for translation
 
-Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, text you translate in a webpage text box with the shortcut or context menu, and YouTube caption text when subtitle translation is enabled. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page. Content scripts also run in subframes, so text in embedded frames is transmitted under the same rules when translated.
+Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, text you translate in a webpage text box with the shortcut or context menu, and YouTube or Bilibili caption text when subtitle translation is enabled. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page. Content scripts also run in subframes, so text in embedded frames is transmitted under the same rules when translated.
 
 When the optional local masking feature is enabled, reliably detectable values (email addresses, phone numbers, ID card numbers and bank card numbers, optionally Chinese names in explicit contexts) are replaced with `__PII_<TYPE>_<n>__` placeholders before the request is sent; only the placeholder text is transmitted. See “Optional local masking” below.
 
@@ -34,9 +34,9 @@ Off by default. When enabled in Settings → Privacy, the extension masks sensit
 
 Rimefox's use of user data complies with the user data policy of the Microsoft Edge Add-ons website, including the Limited Use requirements. Data is used only to provide the translation features described in this policy and to maintain, secure and measure those features. It is not sold, not used for personalized advertising or creditworthiness decisions, and is not read by humans except as required for security or legal compliance. The same limited-use commitments apply wherever the extension is distributed.
 
-## YouTube captions
+## Video captions (YouTube / Bilibili)
 
-Subtitle translation is off by default. A packaged MAIN-world script nevertheless loads locally on www.youtube.com, m.youtube.com and www.youtube-nocookie.com to observe caption responses already loaded by the player and pass text to the extension. When necessary, the extension may request a same-origin YouTube caption URL to retrieve an original-language track. Enabling subtitle translation sends relevant caption text near the playback position to your configured translation API. It does not upload video or audio to that API. This is an unofficial feature, unaffiliated with YouTube or Google, and depends on interfaces that may change.
+Subtitle translation is off by default. A packaged MAIN-world script nevertheless loads locally on the listed YouTube / youtube-nocookie pages and on Bilibili video pages to observe subtitle metadata already loaded by the player. Enabling subtitle translation sends caption text near the playback position to your configured translation API; only about the next 90 seconds are sent. When necessary, the extension may request a same-origin YouTube caption URL for an original-language track, or request a Bilibili subtitle file from an allow-listed official HTTPS subtitle CDN. The Bilibili request is made by the extension service worker without cookies, and redirects outside the allow-list are rejected. This is an unofficial compatibility feature, unaffiliated with YouTube, Google or Bilibili, and depends on site interfaces that may change.
 
 ## Local storage and retention
 
@@ -58,7 +58,7 @@ Diagnostic output is copied locally only when requested and can contain the curr
 
 ## Access and excluded uses
 
-Rimefox does not access browser history or browse unopened sites in the background. Page translation skips input and editable controls; text you deliberately submit in the popup, select for translation, or translate in a webpage text box with the shortcut or context menu is processed as described above. It does not read browser cookie or password databases. Same-origin YouTube caption requests may include browser credentials. The broad host permission supports translation on user-opened pages and requests to user-selected endpoints; the general content script excludes Google Accounts and Chrome Web Store pages. This exclusion is not a network firewall or a guarantee about an endpoint you manually configure.
+Rimefox does not access browser history or browse unopened sites in the background. Page translation skips input and editable controls; text you deliberately submit in the popup, select for translation, or translate in a webpage text box with the shortcut or context menu is processed as described above. It does not read browser cookie or password databases. Same-origin YouTube caption requests may include browser credentials; Bilibili subtitle-CDN requests are sent without cookies. Bilibili subtitle support adds no browser permissions: it reuses the existing broad host permission and scripting permission. The broad host permission supports translation on user-opened pages and requests to user-selected endpoints; the general content script excludes Google Accounts and Chrome Web Store pages. This exclusion is not a network firewall or a guarantee about an endpoint you manually configure.
 
 ## Contact
 

@@ -144,3 +144,36 @@ test('a new endpoint cannot join the old endpoint request while it is in flight'
   assert.equal(observed, 2);
   assert.deepEqual(results.map(x => x.results[0]), ['甲openai接口译文', '乙openai接口译文']);
 });
+
+
+test('subtitle:fetch only accepts allow-listed CDN URLs from Bilibili video pages', async () => {
+  const originalFetch = globalThis.fetch;
+  let seen = null;
+  globalThis.fetch = async (url, init) => {
+    seen = { url, init };
+    return new Response(JSON.stringify({ body: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+  const sendFrom = (pageUrl, msg) => new Promise(resolve => listener(msg, { url: pageUrl }, resolve));
+  try {
+    const allowed = await sendFrom('https://www.bilibili.com/zh-Hans/video/BV1xx411c7mD', {
+      type: 'subtitle:fetch', url: 'https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/demo?auth_key=fake'
+    });
+    assert.equal(allowed.ok, true);
+    assert.equal(allowed.text, '{"body":[]}');
+    assert.equal(seen.init.credentials, 'omit');
+    assert.equal(seen.init.redirect, 'manual');
+    const rejectedUrl = await sendFrom('https://www.bilibili.com/video/BV1xx411c7mD', {
+      type: 'subtitle:fetch', url: 'https://evil.example/subtitle.json'
+    });
+    assert.equal(rejectedUrl.ok, false);
+    const rejectedOrigin = await sendFrom('https://example.com/article', {
+      type: 'subtitle:fetch', url: 'https://i0.hdslb.com/bfs/subtitle/demo.json'
+    });
+    assert.equal(rejectedOrigin.ok, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

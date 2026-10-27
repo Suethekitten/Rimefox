@@ -62,6 +62,7 @@ const CHOSUN_LIVE = flag('--chosun-live')
       return arg && !arg.startsWith('--') ? arg : 'https://www.chosun.com/economy/industry-company/2026/10/23/ZWDCNVYTJ5AJ3OEPV2PTABG5WA/';
     })()
   : '';
+const BILIBILI_SUBTITLES = option('--bilibili-subtitles');
 const BILIBILI_LIVE = flag('--bilibili-live')
   ? (() => {
       const arg = option('--bilibili-live');
@@ -630,6 +631,7 @@ const pending = new Map();
 const exceptions = [];
 const contexts = []; // 各标签页里的执行环境：内容脚本跑在扩展的隔离环境里
 const timedtext = new Map(); // YouTube 字幕请求：requestId → { v, mime }，跟踪它的响应
+const biliMock = { body: null, player: null, fulfilled: 0, apiFulfilled: 0 }; // Bilibili 播放器元数据 / 字幕 CDN 拦截：只用于 E2E
 const captionResponses = []; // 加载完的字幕回包：{ v, mime, bytes }
 ws.onmessage = (e) => {
   const m = JSON.parse(e.data);
@@ -666,6 +668,31 @@ ws.onmessage = (e) => {
     }
     if (m.method === 'Network.loadingFailed') verbose('  字幕加载失败 ' + m.params.errorText + (m.params.canceled ? '（被取消）' : ''));
   }
+  if (m.method === 'Fetch.requestPaused') {
+    const u = m.params.request.url;
+    if (/^https:\/\/aisubtitle\.hdslb\.com\//.test(u)) {
+      const body = Buffer.from(JSON.stringify(biliMock.body || { body: [] }), 'utf8').toString('base64');
+      biliMock.fulfilled += 1;
+      send('Fetch.fulfillRequest', {
+        requestId: m.params.requestId,
+        responseCode: 200,
+        responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'access-control-allow-origin', value: '*' }],
+        body: body
+      }, m.sessionId).catch(() => {});
+      return;
+    }
+    if (/^https:\/\/api\.bilibili\.com\/x\/player\/(?:wbi\/)?v2/.test(u)) {
+      const body = Buffer.from(JSON.stringify(biliMock.player || { code: 0, data: {} }), 'utf8').toString('base64');
+      biliMock.apiFulfilled += 1;
+      send('Fetch.fulfillRequest', {
+        requestId: m.params.requestId,
+        responseCode: 200,
+        responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'access-control-allow-origin', value: '*' }],
+        body: body
+      }, m.sessionId).catch(() => {});
+      return;
+    }
+  }
   // 只记扩展自己的异常：YouTube 这类网页自己的报错不算
   if (m.method === 'Runtime.exceptionThrown') {
     const d = m.params.exceptionDetails;
@@ -698,6 +725,8 @@ const swTarget = await until(async () => {
 });
 if (!swTarget) throw new Error('找不到扩展的 service worker');
 const sw = await attach(swTarget.targetId);
+// E2E 只拦截 B 站字幕 CDN：用合成 body 验证扩展的取字幕 / 叠层 / 费用行为，不读取真实字幕内容。
+await send('Fetch.enable', { patterns: [{ urlPattern: 'https://aisubtitle.hdslb.com/*' }] }, sw);
 const swEval = (code) => evaluate(sw, '(async () => {' + code + '})()');
 const readConfig = () => swEval("return (await chrome.storage.local.get('config')).config;");
 const patchConfig = (patch) => {
@@ -1844,6 +1873,150 @@ async function glossaryNotesChecks(o) {
   await patchConfig({ uiLang: 'zh' });
 }
 
+// ---------------- Bilibili 真实页面（合成轨道，不访问真实字幕内容） ----------------
+// 真实 B 站播放器 DOM + 合成字幕元数据 + CDP 拦截字幕 CDN。直接驱动隔离环境里的
+// DT.subtitleSource.resolve() / DT.subtitleRuntime，验证取字幕、叠层、原生恢复、分 P 和费用。
+async function bilibiliSubtitleChecks(url) {
+  console.log('\n[Bilibili 字幕 E2E]');
+  await patchConfig({ subtitleTranslate: true, targetLang: 'zh-CN', debug: VERBOSE });
+  const bili = await openTab(url);
+  const ready = await until(() => pageEval(bili, "return !!document.querySelector('#bilibili-player video')"), 30000);
+  check('打开 Bilibili 视频页：播放器加载出来', ready, url);
+  if (!ready) return;
+  const tabList = await swEval("return await chrome.tabs.query({}).then((tabs) => tabs.map((t) => ({ id: t.id, url: t.url }))).catch((e) => String(e))");
+  verbose('Bili tabs=' + JSON.stringify(tabList));
+  const tabId = Array.isArray(tabList) ? (tabList.filter((t) => t.url && t.url.indexOf('/video/') >= 0).pop() || {}).id : null;
+  verbose('Bili tabId=' + tabId);;
+  const runtimeReady = await until(async () => swEval(`return await chrome.scripting.executeScript({ target: { tabId: ${JSON.stringify(tabId)} }, world: 'ISOLATED', func: () => !!(window.__DT && window.__DT.subtitleRuntime && window.__DT.subtitleRuntime.instance) }).then((x) => !!(x && x[0] && x[0].result)).catch(() => false)`), 15000, 200);
+  check('Bilibili 字幕运行时加载', runtimeReady);
+  if (!runtimeReady) return;
+  const pageBv = (/\/video\/(BV[0-9A-Za-z]+)/.exec(new URL(url).pathname) || [])[1] || 'BV1xx411c7mD';
+  const fakeUrl = 'https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/e2e?auth_key=fake';
+
+  async function injectBiliTrack(opts) {
+    if (opts.text) biliMock.body = { body: [{ from: 1, to: 3, content: opts.text }] };
+    const cfg = { bvid: opts.bvid || pageBv, cid: String(opts.cid || 1001), lan: opts.lan || 'en-US', empty: !!opts.empty, url: fakeUrl };
+    const code = `return await chrome.scripting.executeScript({
+      target: { tabId: ${JSON.stringify(tabId)} },
+      world: 'ISOLATED',
+      func: async (cfg) => {
+        const DT = window.__DT;
+        if (!DT) return 'no-dt';
+        if (!DT.subtitleRuntime || !DT.subtitleRuntime.instance) return 'no-runtime';
+        if (!DT.subtitleSource) return 'no-source';
+        const player = document.querySelector('#bilibili-player') || document.querySelector('.bpx-player-container');
+        if (!player) return 'no-player';
+        document.querySelectorAll('.bpx-player-ctrl-subtitle-language-item.bpx-state-active').forEach((el) => el.classList.remove('bpx-state-active'));
+        let item = document.querySelector('.bpx-player-ctrl-subtitle-language-item[data-lan="' + cfg.lan + '"]');
+        if (!item) {
+          item = document.createElement('div');
+          item.className = 'bpx-player-ctrl-subtitle-language-item';
+          item.setAttribute('data-lan', cfg.lan);
+          player.appendChild(item);
+        }
+        if (!cfg.empty) item.classList.add('bpx-state-active');
+        const v = player.querySelector('video') || document.querySelector('video');
+        if (v) { v.muted = true; try { v.pause(); } catch (err) {} try { v.currentTime = 1.5; } catch (err) {} }
+        if (cfg.empty) { DT.subtitleRuntime.instance.tick(); return 'empty'; }
+        const meta = { bvid: cfg.bvid, cid: cfg.cid, aid: 1, seq: 1, tracks: [] };
+        const raw = { id: 'e2e-sub', id_str: 'e2e-sub', lan: cfg.lan, lan_doc: '中文', subtitle_url: cfg.url, type: 1 };
+        const real = await DT.subtitleSource.resolve({ type: 'bilibili', meta: meta, track: raw });
+        if (!real) return 'no-track';
+        const original = DT.subtitleSource.resolve;
+        DT.subtitleSource.resolve = async (x) => x;
+        try { await DT.subtitleRuntime.instance.process(real); } finally { DT.subtitleSource.resolve = original; }
+        DT.subtitleRuntime.instance.tick();
+        return 'ok';
+      },
+      args: [${JSON.stringify(cfg)}]
+    }).then((x) => x && x[0] ? x[0].result : 'no-result').catch((e) => 'err:' + e.message);`;
+    return swEval(code);
+  }
+
+  const first = await injectBiliTrack({ cid: 1001, text: 'Hello from Bilibili.' });
+  verbose('Bili first=' + JSON.stringify(first) + ' cdn=' + biliMock.fulfilled);
+  const shown = await until(async () => {
+    const st = await pageEval(bili, `return (() => {
+      const o = document.querySelector('.rimefox-subs');
+      const p = document.querySelector('#bilibili-player');
+      const wrap = document.querySelector('.bpx-player-subtitle-wrap');
+      const on = !!o && o.style.display !== 'none';
+      return { on: on, orig: on && o.children[0] ? o.children[0].textContent : '', trans: on && o.children[1] ? o.children[1].textContent : '', playerOn: !!p && p.classList.contains('rimefox-subs-on'), count: document.querySelectorAll('.rimefox-subs').length, nativeHidden: wrap ? getComputedStyle(wrap).display === 'none' : null };
+    })();`);
+    return st && st.trans && st.trans.indexOf('译:') === 0 ? st : null;
+  }, 30000, 250);
+  check('合成 Bilibili 字幕轨：双语叠层出现（原文 + 译文）',
+    shown && shown.orig === 'Hello from Bilibili.' && shown.trans.indexOf('译:Hello from Bilibili.') === 0,
+    shown ? shown.orig + ' / ' + shown.trans : '没有出现叠层');
+  check('Bilibili 原生字幕层被收起，且只有一个 Rimefox 叠层',
+    shown && shown.playerOn === true && shown.count === 1 && shown.nativeHidden !== false,
+    shown ? JSON.stringify({ playerOn: shown.playerOn, count: shown.count, nativeHidden: shown.nativeHidden }) : '无数据');
+  check('Bilibili 字幕 CDN 请求走了后台白名单取文本', biliMock.fulfilled > 0, '拦截 ' + biliMock.fulfilled + ' 次');
+  check('Bilibili 字幕送翻（当前窗口的小批）', stats.texts > 0, '送翻 ' + stats.texts + ' 条');
+  if (!shown) return;
+
+  await patchConfig({ subtitleTranslate: false });
+  const restored = await until(async () => {
+    const st = await pageEval(bili, `return (() => {
+      const o = document.querySelector('.rimefox-subs'); const p = document.querySelector('#bilibili-player'); const wrap = document.querySelector('.bpx-player-subtitle-wrap');
+      return { hidden: !o || o.style.display === 'none', playerOn: !!p && p.classList.contains('rimefox-subs-on'), nativeVisible: !wrap || getComputedStyle(wrap).display !== 'none' };
+    })();`);
+    return st && st.hidden && !st.playerOn && st.nativeVisible ? st : null;
+  }, 10000, 200);
+  check('关闭字幕翻译：叠层隐藏、隐藏类移除、原生字幕恢复', !!restored, restored ? JSON.stringify(restored) : '未恢复');
+  const sentAfterOff = stats.texts;
+  await sleep(1200);
+  check('关闭期间不再产生字幕翻译请求', stats.texts === sentAfterOff, '新增 ' + (stats.texts - sentAfterOff) + ' 条');
+
+  const beforeReopen = stats.texts;
+  await patchConfig({ subtitleTranslate: true });
+  const reopened = await until(async () => pageEval(bili, "const o=document.querySelector('.rimefox-subs'); return !!o && o.style.display !== 'none' && o.children[1] && o.children[1].textContent.indexOf('译:') === 0;"), 10000, 200);
+  check('重新打开字幕翻译：复用已有译文，不重复送翻', !!reopened && stats.texts === beforeReopen,
+    JSON.stringify({ reopened: !!reopened, added: stats.texts - beforeReopen }));
+
+  const p2 = await injectBiliTrack({ cid: 2002, text: 'Second part subtitle.' });
+  const p2Shown = await until(async () => {
+    const overlay = await pageEval(bili, "const o=document.querySelector('.rimefox-subs'); return { on: !!o && o.style.display !== 'none', trans: o && o.children[1] ? o.children[1].textContent : '' };");
+    return overlay && overlay.on && overlay.trans.indexOf('Second part') >= 0 ? overlay : null;
+  }, 20000, 250);
+  check('分 P：cid 变化后切到新轨道，旧文本不残留',
+    p2 && p2Shown && p2Shown.trans.indexOf('译:Second part subtitle.') === 0,
+    p2Shown ? p2Shown.trans : '没有切到 P2');
+
+  const bv2 = 'BV2yy411c7mE';
+  await pageEval(bili, "history.pushState({}, '', '/video/" + bv2 + "/'); return true;");
+  const another = await injectBiliTrack({ bvid: bv2, cid: 3003, text: 'Another video.' });
+  const bv2Shown = await until(async () => {
+    const overlay = await pageEval(bili, "const o=document.querySelector('.rimefox-subs'); return { on: !!o && o.style.display !== 'none', trans: o && o.children[1] ? o.children[1].textContent : '' };");
+    return overlay && overlay.on && overlay.trans.indexOf('Another video') >= 0 ? overlay : null;
+  }, 20000, 250);
+  check('站内切换 BV：新视频字幕接管，旧视频不污染',
+    another && bv2Shown && bv2Shown.trans.indexOf('译:Another video.') === 0,
+    bv2Shown ? bv2Shown.trans : '没有切换');
+
+  const beforeEmpty = stats.texts;
+  const empty = await injectBiliTrack({ bvid: bv2, cid: 3003, empty: true });
+  await sleep(1000);
+  const emptyState = await pageEval(bili, "const o=document.querySelector('.rimefox-subs'); const p=document.querySelector('#bilibili-player'); return { hidden: !o || o.style.display==='none', playerOn: !!p && p.classList.contains('rimefox-subs-on') };");
+  check('空字幕轨道：0 请求、0 叠层，原生播放器不受影响',
+    empty && emptyState.hidden && !emptyState.playerOn && stats.texts === beforeEmpty,
+    JSON.stringify({ hidden: emptyState.hidden, added: stats.texts - beforeEmpty }));
+
+  await pageEval(bili, "history.pushState({}, '', '/video/" + pageBv + "/'); return true;");
+  await patchConfig({ targetLang: 'en' });
+  await tabMsg(tabId, { type: 'dt:setTarget', target: 'en' });
+  const targetNow = await until(async () => swEval(`return await chrome.scripting.executeScript({ target: { tabId: ${JSON.stringify(tabId)} }, world: 'ISOLATED', func: () => window.__DT && window.__DT.state && window.__DT.state.target }).then((x) => x && x[0] && x[0].result === 'en-US').catch(() => false)`), 5000, 100);
+  verbose('targetNow=' + targetNow);
+  const same = await injectBiliTrack({ bvid: pageBv, cid: 1001, lan: 'en-US', text: 'Native English.' });
+  await sleep(1500);
+  const sameLang = await pageEval(bili, "const o=document.querySelector('.rimefox-subs'); const p=document.querySelector('#bilibili-player'); return { hidden: !o || o.style.display==='none', playerOn: !!p && p.classList.contains('rimefox-subs-on') };");
+  check('目标语言 = 字幕语言：交还原生字幕、不发翻译',
+    same && sameLang.hidden && !sameLang.playerOn && stats.texts === beforeEmpty,
+    JSON.stringify({ hidden: sameLang.hidden, playerOn: sameLang.playerOn, added: stats.texts - beforeEmpty }));
+
+  await patchConfig({ subtitleTranslate: false, targetLang: 'zh-CN' });
+}
+
 // ---------------- YouTube 真实页面 ----------------
 // 静音播放、打开 CC，并切到英文字幕轨：YouTube 会按网络所在地区 / 界面语言自动选字幕（比如中文），
 // 字幕本来就是目标语言（简体中文）时扩展按设计不接管，所以固定拿英文字幕翻成中文（最常见的用法）
@@ -1952,7 +2125,8 @@ async function youtubeChecks(url) {
   // （不用刷新页面验证：刷新后常有跳不过的贴片广告，一等就是几分钟）
   await sleep(3200); // 等缓存落盘
   const before = stats.texts;
-  const again = await contentEval(yt, 'window.__DT.send(' + JSON.stringify({ type: 'translate', texts: [overlay.orig], target: 'zh-CN', style: 'plain' }) + ')');
+  const cacheScope = await contentEval(yt, "window.__DT.subtitleRuntime.instance.inspect().track.cacheScope");
+  const again = await contentEval(yt, 'window.__DT.send(' + JSON.stringify({ type: 'translate', texts: [overlay.orig], target: 'zh-CN', style: 'plain', cacheScope }) + ')');
   check(
     '字幕译文进了缓存：同一句再送翻直接命中、不发请求',
     again && again.ok && again.cached === 1 && again.results[0] === overlay.trans && stats.texts === before,
@@ -3238,6 +3412,7 @@ try {
     await shadowChecks();
   }
   if (YOUTUBE) await youtubeChecks(YOUTUBE);
+  if (BILIBILI_SUBTITLES) await bilibiliSubtitleChecks(BILIBILI_SUBTITLES);
 } catch (err) {
   crashed = err;
   check('检查脚本本身跑完', false, err && err.stack ? err.stack.split('\n').slice(0, 3).join(' | ') : String(err));

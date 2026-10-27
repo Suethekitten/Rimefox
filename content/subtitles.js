@@ -1,5 +1,5 @@
-// YouTube 字幕运行时：消费字幕来源适配层、拼句、按进度懒翻译、叠层显示。
-// 只在 YouTube 加载；纯函数在 content/subtitles-core.js，来源适配在 content/subtitles-source.js（都必须先加载）。
+// 通用视频字幕运行时：消费来源适配层、按播放进度懒翻译、双语叠层显示。
+// 平台差异只存在于 DT.subtitleSource（YouTube / Bilibili）；这里不解析任何站点的原始回包。
 (function () {
   'use strict';
 
@@ -7,7 +7,7 @@
   if (!DT || !DT.subs) return; // 依赖 subtitles-core.js
   var subs = DT.subs;
   var source = DT.subtitleSource;
-  if (!source) return; // 依赖 subtitles-source.js
+  if (!source) return;
 
   var LOOK_AHEAD_MS = 90000; // 只翻播放位置往后这么长
   var LOOK_BEHIND_MS = 3000;
@@ -16,18 +16,20 @@
   var RETRY_MS = 15000;
   var LINGER_MS = 1500; // 句末后再停留这么久，等下一句或等译文
   var STYLE_ID = 'rimefox-subs-style';
+  var OVERLAY_CLASS = 'rimefox-subs';
+  var ACTIVE_CLASS = 'rimefox-subs-on';
 
   // 运行时工厂：把 DOM、配置、发送、计时都从参数注入，Node 测试可以用假实现控制 Promise 顺序。
   // 返回的对象只暴露 tick / process / reset / inspect；真实页面在文件末尾自动创建并每 200ms 调用 tick。
   function createRuntime(env) {
     var doc = env.doc;
     var src = env.source || source;
-    var track = null; // { key, v, lang, kind, target, style, units, trans, failedAt, pending, gen, inflight, warned }
+    var track = null; // { identity, platform, videoKey, trackKey, lang, kind, units, ... }
     var overlay = null;
     var shown = '';
     var shownOverlay = null;
     var last = null; // 上一句已显示的内容，句间空档时用来兜底
-    var processSeq = 0; // 异步拿原文轨道的代际：晚开始的 process 覆盖早开始的
+    var processSeq = 0; // 异步解析 / 取原文轨道的代际：晚开始的 process 覆盖早开始的
     var replayAskedFor = ''; // 已经为哪个视频向来源层要过一次 replay（每个视频最多一次）
 
     function now() {
@@ -38,17 +40,62 @@
       if (env.log) env.log.apply(null, arguments);
     }
 
-    // 正在播广告：广告也是同一个播放器里的一段视频（播放器带 ad-showing），字幕请求带的是广告自己的视频 ID
-    function adOn(player) {
+    function platform() {
+      return src.platform || 'youtube';
+    }
+
+    function playerView() {
+      if (src.player) return src.player();
+      return env.player ? env.player() : null;
+    }
+
+    function captionsOn(player) {
+      if (src.captionsOn) return src.captionsOn(player);
+      var btn = player && player.querySelector ? player.querySelector('.ytp-subtitles-button') : null;
+      return !btn || btn.getAttribute('aria-pressed') === 'true';
+    }
+
+    function blocked(player) {
+      if (src.blocked) return !!src.blocked(player);
       return !!(player && player.classList && player.classList.contains('ad-showing'));
     }
-    function adShowing() {
-      var view = env.player();
-      return adOn(view && view.player);
+
+    function currentVideoKey() {
+      if (src.videoKey) return src.videoKey();
+      return env.videoId ? env.videoId() : '';
+    }
+
+    function matchesTrack(candidate) {
+      if (src.matches) return src.matches(candidate);
+      var vid = env.videoId ? env.videoId() : '';
+      return !candidate || !candidate.v || !vid || candidate.v === vid;
+    }
+
+    function hideNativeCss() {
+      return src.hideNativeCss || '.rimefox-subs-on .ytp-caption-window-container{display:none !important;}';
+    }
+
+    function identityOf(t) {
+      return [
+        t.platform || platform(),
+        t.videoKey || t.v || '',
+        t.trackKey || '',
+        t.lang || '',
+        t.kind || ''
+      ].join('|');
+    }
+
+    function cacheScopeOf(t) {
+      return [
+        t.platform || platform(),
+        t.videoKey || t.v || '',
+        t.trackKey || '',
+        t.lang || ''
+      ].join('|').slice(0, 200);
     }
 
     function reset() {
-      processSeq += 1; // 让还在 fetchText 的旧 process 作废
+      processSeq += 1; // 让还在 resolve 的旧 process 作废
       track = null;
       shown = '';
       shownOverlay = null;
@@ -60,9 +107,7 @@
     //   原始轨道（track.units，时间轴）只跟「视频 + 字幕轨道」走，视频没换、轨道没换就一直留着；
     //   译文（trans / pending / inflight）跟「目标语言 + 风格 + 请求代际 gen」走，任何一项变了都作废。
     // 目标语言等于字幕语言、或关掉字幕翻译时只是不接管（交还原生字幕），轨道不扔：
-    // 以前这里直接 reset()，用户再切回中文时 YouTube 不会重新请求字幕，就再也翻不了了。
-
-    // 语言 / 风格变化：保留原始字幕和句子时间轴，只让旧译文与旧请求失效
+    // 用户再切回中文时不必等页面重新加载字幕。
     function invalidate(next) {
       if (!track) return;
       track.gen += 1;
@@ -75,63 +120,50 @@
       if (next && next.targetCode !== undefined) track.targetCode = next.targetCode;
       if (next && next.style !== undefined) track.style = next.style;
       if (next && next.intensity !== undefined) track.intensity = next.intensity;
-      if (next && next.key !== undefined) track.key = next.key;
       shown = '';
       shownOverlay = null;
       last = null;
     }
 
     async function process(raw) {
-      if (!raw || !raw.url) return;
-      var p = subs.paramsOf(raw.url);
-      var url = raw.url;
-      var body = raw.body;
-      var lang = p.lang;
+      if (!raw) return;
       var seq = ++processSeq;
-      var startVideo = p.v || env.videoId();
-      // 重放的是主环境钩子留着的「最后一份」，可能是上一个视频的：和当前视频对不上就不收
-      if (raw.replay && p.v && env.videoId() && p.v !== env.videoId()) return;
-      // 播广告时收到别的视频的字幕（广告自己的）：不收。插播广告会把正片的轨道换掉，
-      // 广告播完播放器不会再请求一次正片字幕，后面的双语字幕就没了。
-      // 不播广告时照常收：换视频时新字幕可能比地址栏先到
-      if (p.v && env.videoId() && p.v !== env.videoId() && adShowing()) return;
-
-      // YouTube 机翻轨道：拿原文轨道来做双语（同源请求，带着播放器的令牌）
-      if (p.tlang) {
-        url = subs.withoutTlang(raw.url);
-        try {
-          body = await src.fetchText(url);
-        } catch (err) {
-          body = '';
-        }
-        if (seq !== processSeq) return; // 已经有更新的 process 开始
-        if (!body) return; // 拿不到原文就不接管，原生机翻字幕照常显示
-      }
-
-      // 字幕本来就是目标语言：照样解析、留着轨道，只是不接管（tick 里交还原生字幕）；
-      // 用户之后改了目标语言就能直接接着翻，不用等 YouTube 再请求一次
-      var key = [p.v, lang, p.kind, env.target(), env.targetCode ? env.targetCode() : env.target()].join('|');
-      if (track && track.key === key) return; // 播放器重复拉同一条轨道（拖动进度时会）
-
-      var json;
+      var normalized;
       try {
-        json = JSON.parse(body);
+        normalized = src.resolve ? await src.resolve(raw) : raw;
       } catch (err) {
-        return; // 不是 json3（老格式 / 出错页），不接管
+        return;
       }
-      var units = subs.unitsOf(json, url);
+      if (seq !== processSeq) return; // 已经有更新的 process 开始
+      if (!normalized || !normalized.units || !normalized.units.length) return;
+
+      var units = normalized.units.filter(function (u) {
+        return u && isFinite(u.start) && isFinite(u.end) && u.end > u.start && typeof u.text === 'string' && u.text;
+      });
       if (!units.length) return;
 
+      var identity = identityOf(normalized);
+      if (track && track.identity === identity) return; // 播放器重复拉同一条轨道（拖动进度时会）
+
       track = {
-        key: key,
-        v: p.v || startVideo,
-        lang: lang,
-        kind: p.kind,
-        target: env.target(),
-        targetCode: env.targetCode ? env.targetCode() : env.target(),
-        style: env.styleId(),
-        intensity: env.intensity ? env.intensity() : 'standard',
+        identity: identity,
+        platform: normalized.platform || platform(),
+        videoKey: normalized.videoKey || normalized.v || '',
+        v: normalized.videoKey || normalized.v || '', // 兼容旧测试 / 诊断字段
+        trackKey: normalized.trackKey || '',
+        lang: normalized.lang || '',
+        rawLang: normalized.rawLang || normalized.lang || '',
+        kind: normalized.kind || '',
+        label: normalized.label || '',
+        bvid: normalized.bvid || '',
+        cid: normalized.cid || '',
+        page: normalized.page || 0,
+        cacheScope: cacheScopeOf(normalized),
         units: units,
+        target: env.target ? env.target() : '',
+        targetCode: env.targetCode ? env.targetCode() : (env.target ? env.target() : ''),
+        style: env.styleId ? env.styleId() : 'plain',
+        intensity: env.intensity ? env.intensity() : 'standard',
         trans: new Array(units.length),
         failedAt: [],
         pending: {},
@@ -142,13 +174,13 @@
       shown = '';
       shownOverlay = null;
       last = null;
-      log('subtitles:', units.length, 'units', p.kind === 'asr' ? '(asr)' : '', p.tlang ? '(from tlang)' : '');
+      log('subtitles:', units.length, 'units', platform(), normalized.kind || '', normalized.lang || '');
     }
 
     // ---------------- 翻译调度 ----------------
     function pump(nowMs) {
       if (!track) return;
-      if (!env.enabled()) return;
+      if (!env.enabled || !env.enabled()) return;
       if (track.target !== env.target() || track.targetCode !== (env.targetCode ? env.targetCode() : env.target()) || track.style !== env.styleId() || track.intensity !== (env.intensity ? env.intensity() : 'standard')) return; // 由 tick 先失效
       if (subs.sameLanguage(track.lang, env.targetCode ? env.targetCode() : env.target())) return; // 字幕本来就是目标语言：不翻
       if (track.inflight > 0) return; // 只限制同一代任务；旧视频/旧语言的请求不算
@@ -203,6 +235,9 @@
           style: batchStyle
         };
         if (batchStyle !== 'plain') requestMessage.intensity = batchIntensity;
+        // 字幕缓存身份隔离到平台 / 视频 / cid / 轨道 / 源语言；目标语言、风格、模型配置由后台基础键负责。
+        // 显示模式不是身份的一部分，切换双语 / 仅译文不会重复付费。
+        if (mine.cacheScope) requestMessage.cacheScope = mine.cacheScope;
         request = env.send(requestMessage);
       } catch (err) {
         request = Promise.reject(err);
@@ -244,18 +279,18 @@
 
     // ---------------- 显示 ----------------
     function ensureStyle() {
-      if (doc.getElementById(STYLE_ID)) return;
+      var existing = doc.getElementById(STYLE_ID);
+      var css = hideNativeCss();
+      if (existing) {
+        if (existing.textContent !== css) existing.textContent = css;
+        return;
+      }
       var style = doc.createElement('style');
       style.id = STYLE_ID;
       style.setAttribute('data-dt-ui', '1');
-      // 接管期间隐藏原生字幕，免得两套字幕叠在一起
-      style.textContent = '.rimefox-subs-on .ytp-caption-window-container{display:none !important;}';
+      // 接管期间只隐藏当前播放器里的原生字幕层；不碰弹幕和页面其它区域。
+      style.textContent = css;
       (doc.head || doc.documentElement).appendChild(style);
-    }
-
-    function captionsOn(player) {
-      var btn = player.querySelector ? player.querySelector('.ytp-subtitles-button') : null;
-      return !btn || btn.getAttribute('aria-pressed') === 'true';
     }
 
     function ensureOverlay(player) {
@@ -263,22 +298,36 @@
       if (overlay) {
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
         else if (overlay.remove) overlay.remove();
+        overlay = null;
       }
+      // 同一个播放器只允许一个 Rimefox 字幕层。
+      var old = [];
+      try {
+        old = doc.querySelectorAll('.' + OVERLAY_CLASS);
+      } catch (err) {
+        old = [];
+      }
+      Array.prototype.forEach.call(old, function (node) {
+        if (node.parentNode) node.parentNode.removeChild(node);
+      });
       overlay = doc.createElement('div');
       overlay.setAttribute('data-dt-ui', '1');
-      overlay.className = 'rimefox-subs';
+      overlay.className = OVERLAY_CLASS;
+      var font = platform() === 'youtube'
+        ? '"YouTube Noto",Roboto,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif'
+        : '"PingFang SC","Microsoft YaHei","Noto Sans SC",Roboto,sans-serif';
       overlay.style.cssText = [
         'position:absolute',
         'left:50%',
         'transform:translateX(-50%)',
-        // 高于底部渐变（24），低于控制条（59）和设置菜单：不能盖住播放器控件
+        // 高于底部渐变，低于控制条和设置菜单：不能盖住播放器控件
         'z-index:30',
         'max-width:86%',
         'width:max-content',
         'text-align:center',
         'pointer-events:none',
         'display:none',
-        'font-family:"YouTube Noto",Roboto,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif'
+        'font-family:' + font
       ].join(';');
       var orig = doc.createElement('div');
       var trans = doc.createElement('div');
@@ -300,26 +349,35 @@
 
     function render(state) {
       var player = state && state.player;
-      doc.querySelectorAll('.rimefox-subs-on').forEach(function (el) {
-        if (el !== player) el.classList.remove('rimefox-subs-on');
+      var nodes = [];
+      try {
+        nodes = doc.querySelectorAll('.' + ACTIVE_CLASS);
+      } catch (err) {
+        nodes = [];
+      }
+      Array.prototype.forEach.call(nodes, function (el) {
+        if (el !== player) el.classList.remove(ACTIVE_CLASS);
       });
       // 没有可显示的内容就交还给原生字幕：以前先加隐藏类再判空，句间空档会两边都没有
       if (!state || !state.orig || !player) {
-        if (player) player.classList.remove('rimefox-subs-on');
+        if (player) player.classList.remove(ACTIVE_CLASS);
         if (overlay) overlay.style.display = 'none';
         shown = '';
         shownOverlay = null;
         return;
       }
       ensureStyle();
-      player.classList.add('rimefox-subs-on');
+      player.classList.add(ACTIVE_CLASS);
       var surface = ensureOverlay(player);
 
-      // 字号跟播放器高度走（全屏时变大）；控制条显示时往上让一让
+      // 字号跟播放器高度走（全屏时变大）；控制条显示时往上让一让。
       var h = player.clientHeight || 360;
       var size = Math.max(13, Math.min(32, Math.round(h * 0.036)));
-      var autohide = player.classList.contains('ytp-autohide');
-      overlay.style.bottom = Math.round(autohide ? h * 0.04 : Math.max(56, h * 0.1)) + 'px';
+      var autohide = src.controlsHidden ? !!src.controlsHidden(player) : (platform() === 'youtube' && player.classList.contains('ytp-autohide'));
+      var bottom = src.overlayBottom
+        ? src.overlayBottom(h, autohide)
+        : Math.round(autohide ? h * 0.04 : Math.max(56, h * 0.1));
+      overlay.style.bottom = bottom + 'px';
       overlay._trans.style.fontSize = size + 'px';
       overlay._orig.style.fontSize = Math.round(size * 0.82) + 'px';
 
@@ -334,8 +392,8 @@
       overlay.style.display = 'block';
     }
 
-    // 当前视频没有可用轨道（还没收到、或手上的是上一个视频的）：请来源层把最后一份字幕回包重放一次。
-    // 每个视频最多要一次；重放回来的在 process() 里核对视频，旧视频的不收。不碰 CC 开关
+    // 当前视频没有可用轨道（还没收到、或手上的是上一个视频的）：请来源层把最后一份回包重放一次。
+    // 每个视频最多要一次；重放回来的在 process() 里核对视频，旧视频的不收。不碰 CC 开关。
     function recover(vid, player) {
       if (!vid || replayAskedFor === vid || !player || !captionsOn(player)) return;
       replayAskedFor = vid;
@@ -359,17 +417,18 @@
         return;
       }
 
-      // 换了视频：先收起，等新视频的字幕回包把 track 换掉。
-      // 不能在这里清掉 track —— 新字幕可能比地址栏先到，会把刚收到的新轨道一起清掉
-      var vid = env.videoId();
-      var view = env.player();
+      var view = playerView();
       var player = view && view.player;
       // 播广告时交还原生显示、不调度翻译：时间轴是广告的，正片的句子对不上
-      if (adOn(player)) {
+      if (blocked(player)) {
         render(null);
         return;
       }
-      if (!track || (track.v && vid && track.v !== vid)) {
+
+      // 换了视频 / 分 P：先收起，等新视频的字幕回包把 track 换掉。
+      // 不能在这里清掉 track —— 新字幕可能比地址栏先到，会把刚收到的新轨道一起清掉。
+      var vid = currentVideoKey();
+      if (!track || !matchesTrack(track)) {
         recover(vid, player);
         render(null);
         return;
@@ -378,10 +437,7 @@
       // 目标语言 / 趣味风格变化：旧译文与旧请求立即失效（包括切到和字幕同语言的时候），轨道保留
       var tgt = env.target();
       if (track.target !== tgt) {
-        invalidate({
-          target: tgt,
-          key: [track.v, track.lang, track.kind, tgt].join('|')
-        });
+        invalidate({ target: tgt });
       }
       var code = env.targetCode ? env.targetCode() : env.target();
       if (track.targetCode !== code) invalidate({ targetCode: code });
@@ -405,7 +461,7 @@
       var i = subs.unitAt(track.units, ms);
       if (i < 0) {
         // 句间空档：上一句刚结束不久就继续留着（最多 1.5s），否则交还原生字幕
-        if (last && last.v === track.v && subs.shouldLinger(last, ms, LINGER_MS)) {
+        if (last && last.identity === track.identity && subs.shouldLinger(last, ms, LINGER_MS)) {
           var late = track.trans[last.i];
           render({
             player: player,
@@ -421,12 +477,12 @@
       var trans = track.trans[i];
       // 译文和原文一样（或模型判定无需翻译）就只显示一行
       if (!trans || subs.clean(trans) === subs.clean(unit.text)) trans = '';
-      last = { v: track.v, i: i, start: unit.start, end: unit.end, orig: unit.text };
+      last = { identity: track.identity, i: i, start: unit.start, end: unit.end, orig: unit.text };
       render({ player: player, orig: unit.text, trans: trans });
     }
 
     function start() {
-      replayAskedFor = env.videoId() || ''; // 启动时已经要过一次，recover() 不再重复要
+      replayAskedFor = currentVideoKey() || ''; // 启动时已经要过一次，recover() 不再重复要
       try {
         src.replay();
       } catch (err) {
@@ -451,7 +507,7 @@
   // 测试入口：Node 自检脚本会用假的 doc / source / send 调用 create()
   DT.subtitleRuntime = { create: createRuntime };
 
-  if (typeof location === 'undefined' || !/(^|\.)youtube(-nocookie)?\.com$/.test(location.hostname)) return;
+  if (typeof location === 'undefined') return;
 
   function cfg() {
     return DT.state.config || {};
@@ -482,11 +538,6 @@
     return DT.normalizeIntensity ? DT.normalizeIntensity(DT.state && DT.state.intensity) : 'standard';
   }
 
-  function currentVideoId() {
-    var m = /[?&]v=([^&]+)/.exec(location.search) || /\/(?:embed|shorts|live)\/([^/?#]+)/.exec(location.pathname);
-    return m ? m[1] : '';
-  }
-
   var runtime = createRuntime({
     doc: document,
     source: source,
@@ -495,16 +546,11 @@
     targetCode: targetCode,
     styleId: styleId,
     intensity: intensity,
-    videoId: currentVideoId,
     now: function () {
       return Date.now();
     },
-    player: function () {
-      var video = document.querySelector('video.html5-main-video') || document.querySelector('video');
-      var player = video && (video.closest('.html5-video-player') || document.getElementById('movie_player'));
-      if (!video || !player) return null;
-      return { player: player, video: video, ms: video.currentTime * 1000 };
-    },
+    player: source.player,
+    videoId: source.videoKey,
     send: function (msg) {
       return DT.send(msg, 190000);
     },
@@ -516,5 +562,6 @@
     }
   });
 
+  DT.subtitleRuntime.instance = runtime;
   runtime.start();
 })();

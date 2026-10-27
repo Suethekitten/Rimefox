@@ -146,7 +146,38 @@ function setup() {
       return d.promise;
     },
     replays: 0,
-    replay: function () { source.replays += 1; }
+    replay: function () { source.replays += 1; },
+    // 测试替身：生产环境的 YouTube 适配层在 content/subtitles-source.js，这里只保留
+    // 运行时竞态测试需要的协议行为（v 校验 / 广告过滤 / tlang 取原文 / json3 解析）。
+    resolve: async function (raw) {
+      if (!raw || !raw.url) return null;
+      const p = subs.paramsOf(raw.url);
+      const current = state.video;
+      if (raw.replay && p.v && current && p.v !== current) return null;
+      const ad = !!(state.player && state.player.classList.contains('ad-showing'));
+      if (p.v && current && p.v !== current && ad) return null;
+      let url = raw.url;
+      let body = raw.body;
+      if (p.tlang) {
+        url = subs.withoutTlang(raw.url);
+        body = await source.fetchText(url);
+        if (!body) return null;
+      }
+      let json;
+      try { json = JSON.parse(body); } catch (err) { return null; }
+      const units = subs.unitsOf(json, url);
+      if (!units.length) return null;
+      const videoKey = p.v || current;
+      return {
+        platform: 'youtube',
+        videoKey: videoKey,
+        v: videoKey,
+        trackKey: [p.lang, p.kind || 'manual'].join(':'),
+        lang: p.lang,
+        kind: p.kind === 'asr' ? 'asr' : 'manual',
+        units: units
+      };
+    }
   };
 
   const state = {

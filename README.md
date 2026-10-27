@@ -24,7 +24,7 @@
 - **省 token、防限流** —— 懒翻译（只翻屏幕附近）、批量合并、并发控制、三层缓存、429/5xx 自动重试
 - **动态页面** —— MutationObserver 补翻新内容，SPA 路由切换后自动重翻
 - **阅读辅助** —— 悬停对照、划词翻译、输入框翻译（`Alt+I`）、置顶翻译小窗、网页悬浮入口（默认关闭）
-- **YouTube 字幕双语** —— 打开 CC 时显示「原文 + 译文」（非官方功能，默认关闭）
+- **视频字幕双语（YouTube / 哔哩哔哩）** —— 打开字幕时显示「原文 + 译文」（非官方兼容功能，默认关闭）
 - **可选隐私保护** —— 发请求前在本地把邮箱、电话、身份证号、银行卡号换成占位符，译文回来后还原（默认关闭）
 - **术语表与提示词** —— 设置首选译法，可加说明区分适用语境与例外；无说明的旧词条保持固定译法，详见[术语表帮助](docs/GLOSSARY.md)。也支持追加措辞要求和趣味风格
 - **自定义目标语言** —— 内置语言之外可添加名称、标准代码和说明；无代码的虚构语言安全降级，阿拉伯语等 RTL 排版正常
@@ -69,7 +69,7 @@
 | [docs/PROFESSIONAL-TRANSLATION.md](docs/PROFESSIONAL-TRANSLATION.md) | 医学专业模式：开关、词库来源、提示词、缓存隔离、测试与限制 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 优先级、已完成 / 待办、明确不做的清单 |
 | [docs/UPGRADING.md](docs/UPGRADING.md) | 从旧版 DualTrans 升级与配置迁移 |
-| [docs/YOUTUBE.md](docs/YOUTUBE.md) | YouTube 字幕双语的限制、风险与隐私说明 |
+| [docs/VIDEO-SUBTITLES.md](docs/VIDEO-SUBTITLES.md) | YouTube / 哔哩哔哩字幕双语的限制、风险与隐私说明 |
 | [docs/archive/](docs/archive/README.md) | 归档：审计报告、评估、历史验证记录（不是现状） |
 | [PRIVACY.md](PRIVACY.md) · [English](docs/privacy.en.md) | 隐私说明：会发送什么、保存在哪里 |
 | [SECURITY.md](SECURITY.md) | 安全问题如何私下报告 |
@@ -79,7 +79,7 @@
 ## 支持范围
 
 - Chrome 114+ / Edge 114+，Manifest V3
-- 视频字幕只支持 YouTube 的 CC 字幕轨道；画面硬字幕、PDF / EPUB、图片 OCR 不做
+- 视频字幕支持 YouTube 的 CC 字幕轨道，以及哔哩哔哩公开视频已提供的官方字幕轨道（人工 / AI）；需要站点提供可合法访问的字幕轨，画面硬字幕、PDF / EPUB、图片 OCR 不做
 - 行内格式做有限保真：局部加粗、斜体、代码、删除线、高亮、下划线、引号、按键、小字、上下标、局部颜色和普通链接可随译文保留；复杂链接或无法可靠对应的结构会保留原文，必要时在设置页写站点规则
 - 开放 Shadow DOM：已适配 B 站新版评论区正文；closed Shadow Root、shadow root 直接文本、iframe 内评论区暂不支持
 - B 站未登录时只展示首屏评论和“登录后查看”提示，滚动加载 / 楼中楼展开需要在登录态下验证
@@ -88,7 +88,7 @@
 
 ## 声明
 
-本项目为**独立实现**，与任何商业产品无关联；除 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 中注明的 MIT 许可复用内容外，不含其他第三方产品的代码、图标或文案。YouTube 字幕是**非官方**功能，与 YouTube、Google 无关联；YouTube 是 Google LLC 的商标。
+本项目为**独立实现**，与任何商业产品无关联；除 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 中注明的 MIT 许可复用内容外，不含其他第三方产品的代码、图标或文案。YouTube 与哔哩哔哩字幕都是**非官方兼容**功能，与 YouTube、Google、哔哩哔哩无关联；YouTube 是 Google LLC 的商标，哔哩哔哩是其权利人的商标。
 
 所有翻译请求只发往**你自己配置的接口**，不经过本项目作者的服务器；API Key 只保存在本机浏览器的 `chrome.storage.local` 中。
 

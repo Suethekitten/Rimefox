@@ -22,6 +22,7 @@ import { maskTexts, restoreText, optionsFromConfig } from './lib/privacy.js';
 import { openWelcomePage, shouldOpenWelcome } from './lib/welcome.js';
 import { createUsageStats } from './lib/usage.js';
 import { INLINE_VERSION, inspectInline } from './lib/inline.js';
+import { isTrustedBilibiliSubtitleUrl, isBilibiliVideoPage, SUBTITLE_FETCH_MAX_BYTES } from './lib/subtitle-source.js';
 
 // 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
 const usageStats = createUsageStats();
@@ -310,6 +311,11 @@ async function handleTranslate(msg, sender) {
     // 旧条目没有接口身份，不能推断它来自哪个地址；不复用，也不清空其他缓存。
     endpoint: JSON.stringify([active.engine, active.baseUrl.trim().replace(/\/+$/, '')]),
     host: hostOf(sender),
+    // 视频字幕单独隔离：平台 / 视频 / cid / 轨道 / 源语言；目标语言、风格、模型、接口、术语和提示词
+    // 仍由同一套基础键负责。显示模式不是身份的一部分，切换双语 / 仅译文不会重复付费。
+    subtitle: typeof msg.cacheScope === 'string' && /^[A-Za-z0-9_:|.\-]{1,200}$/.test(msg.cacheScope)
+      ? 'subtitle-v1:' + msg.cacheScope
+      : '',
     // 行内协议是独立的 opt-in 身份；普通请求不追加，旧缓存键逐字不变。
     prompt: promptFingerprint(cfg.customPrompt) + (inlineProtocol ? ':inline-' + INLINE_VERSION : ''),
     // 内置语言 / 普通风格不追加这两段：旧普通缓存键逐字不变。
@@ -831,9 +837,44 @@ function providerLabel(cfg) {
   return model ? name + ' · ' + model : name;
 }
 
+// 字幕 CDN 取文本：只允许内容脚本在 B 站视频页发起，且 URL 必须在官方白名单内。
+// 不带 Cookie、不跟随到白名单外的主机、限制体积；这是取字幕原文，不是翻译请求。
+async function handleSubtitleFetch(msg, sender) {
+  const url = String((msg && msg.url) || '');
+  const pageUrl = String((sender && (sender.url || (sender.tab && sender.tab.url))) || '');
+  if (url.length > 2048 || !isTrustedBilibiliSubtitleUrl(url)) return { ok: false, error: 'bad_url' };
+  if (!isBilibiliVideoPage(pageUrl)) return { ok: false, error: 'bad_origin' };
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 15000) : null;
+  try {
+    const res = await fetch(url, {
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'manual',
+      signal: controller ? controller.signal : undefined
+    });
+    if (!res || !res.ok) return { ok: false, error: 'http' };
+    if (!isTrustedBilibiliSubtitleUrl(res.url || url)) return { ok: false, error: 'bad_redirect' };
+    const len = Number((res.headers && res.headers.get && res.headers.get('content-length')) || 0);
+    if (len > SUBTITLE_FETCH_MAX_BYTES) return { ok: false, error: 'too_large' };
+    const type = String((res.headers && res.headers.get && res.headers.get('content-type')) || '');
+    if (type && !/json|text\/|octet-stream/i.test(type)) return { ok: false, error: 'bad_type' };
+    const buf = await res.arrayBuffer();
+    if (!buf || buf.byteLength > SUBTITLE_FETCH_MAX_BYTES) return { ok: false, error: 'too_large' };
+    const text = new TextDecoder().decode(buf);
+    if (!text) return { ok: false, error: 'empty' };
+    return { ok: true, text };
+  } catch (err) {
+    return { ok: false, error: 'fetch_failed' };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // ---------------- 消息路由 ----------------
 const ROUTES = {
   translate: handleTranslate,
+  'subtitle:fetch': handleSubtitleFetch,
   test: handleTest,
   ensure: async (msg) => {
     const ok = await ensureInjected(msg.tabId);

@@ -44,7 +44,7 @@ Edge 目前对 **名称 / 描述引用其他浏览器** 比 Chrome 严：政策 
 
 ### 0. 先在 Edge 里手工装一遍（10 分钟）
 
-不要拿「e2e 过了」代替真实安装：`node tools/package-store.mjs` 产出的 zip 解压后，`edge://extensions` → 开发人员模式 → 加载解压缩的扩展 → 选含 `manifest.json` 的那层目录。确认悬浮入口、设置页、划词、YouTube 字幕在 Edge 里都能用。这一步也是审核会做的事。
+不要拿「e2e 过了」代替真实安装：`node tools/package-store.mjs` 产出的 zip 解压后，`edge://extensions` → 开发人员模式 → 加载解压缩的扩展 → 选含 `manifest.json` 的那层目录。确认悬浮入口、设置页、划词、YouTube / 哔哩哔哩字幕在 Edge 里都能用。这一步也是审核会做的事。
 
 ### 1. 注册开发者账号
 
@@ -139,7 +139,7 @@ manifest 里 `name` → `__MSG_extensionName__`、`description` → `__MSG_exten
 ### Single Purpose
 
 ```
-Translate web pages, selected text, text in a webpage text box, popup text and YouTube captions using a translation API endpoint and API key configured by the user. Glossary, custom prompts, display options and optional local privacy masking exist only to support this single purpose.
+Translate web pages, selected text, text in a webpage text box, popup text and YouTube / Bilibili video captions using a translation API endpoint and API key configured by the user. Glossary, custom prompts, display options and optional local privacy masking exist only to support this single purpose.
 ```
 
 ### Permission justification
@@ -176,7 +176,7 @@ Translate web pages, selected text, text in a webpage text box, popup text and Y
 ### Store listing：中文 Description（≥250 字符）
 
 ```
-凛狐 Rimefox 让你用自己的 API 做整页双语对照翻译：原文和译文逐段交错显示，鼠标停在译文上可以看到对应的原句（长段落以可展开的节选显示），也可以切换成仅译文模式。支持动态内容补翻、划词翻译、弹窗随手翻译、输入框翻译（快捷键或右键菜单，翻完可 Ctrl+Z 还原），以及可选的 YouTube 双语字幕（默认关闭，仅支持可用的 CC 字幕，不支持画面硬字幕）。
+凛狐 Rimefox 让你用自己的 API 做整页双语对照翻译：原文和译文逐段交错显示，鼠标停在译文上可以看到对应的原句（长段落以可展开的节选显示），也可以切换成仅译文模式。支持动态内容补翻、划词翻译、弹窗随手翻译、输入框翻译（快捷键或右键菜单，翻完可 Ctrl+Z 还原），以及可选的 YouTube / 哔哩哔哩双语字幕（默认关闭，仅支持站点提供的官方字幕轨，不支持画面硬字幕）。
 
 用术语表固定常用词的译法，用自定义提示词调整表达；界面支持中文和英文，主题支持浅色和深色，悬浮入口可以拖动并吸附到页面边缘。可选的「AI 隐私保护翻译」会在发请求前于本地把邮箱、电话、身份证号、银行卡号等可识别信息换成占位符，译文回来后再还原；该功能默认关闭，不保证识别全部敏感信息。
 
@@ -188,7 +188,7 @@ Translate web pages, selected text, text in a webpage text box, popup text and Y
 ### Store listing：English Description
 
 ```
-Rimefox translates web pages with your own API key. Original and translated paragraphs are shown together, so you can read the source and the translation side by side. Hover a translated sentence to see the matching source (long paragraphs show an expandable excerpt), or switch to translation-only view. It also handles dynamic pages that load more content, selected text, text you type in the popup, text in a webpage text box (shortcut or context menu, with Ctrl+Z to undo), and optional bilingual YouTube captions (off by default, available CC tracks only, captions burned into the video are not supported).
+Rimefox translates web pages with your own API key. Original and translated paragraphs are shown together, so you can read the source and the translation side by side. Hover a translated sentence to see the matching source (long paragraphs show an expandable excerpt), or switch to translation-only view. It also handles dynamic pages that load more content, selected text, text you type in the popup, text in a webpage text box (shortcut or context menu, with Ctrl+Z to undo), and optional bilingual YouTube / Bilibili video captions (off by default, official subtitle tracks only, captions burned into the video are not supported).
 
 Use a glossary to pin down terminology and custom prompts to shape the wording. The interface is available in Chinese and English, with light and dark themes; the on-page dock can be dragged and snaps to the page edge. The optional "AI privacy masking" feature replaces reliably detectable email addresses, phone numbers, ID card numbers and bank card numbers with placeholders before a request and restores them afterwards; it is off by default and does not guarantee that all sensitive data is detected.
 
@@ -200,7 +200,7 @@ PDF, EPUB and image OCR are not supported. Source, support and privacy policy: h
 ### Search terms（≤7 个词/短语，每个 ≤30 字符）
 
 ```
-translation, translate, bilingual, DeepSeek, OpenAI, YouTube captions, glossary
+translation, translate, bilingual, DeepSeek, OpenAI, YouTube captions, Bilibili captions, glossary
 ```
 
 ### Notes for certification（英文，直接贴进控制台）
@@ -221,7 +221,7 @@ Test steps:
 5. Click the toolbar icon -> Translate (or press Alt+A). Paragraphs are translated and shown alternately with the original.
 6. Hover a translated sentence: the matching source sentence is highlighted. Use the on-page dock to switch between bilingual and translation-only view, then restore the original page.
 7. Select a phrase and use the context menu "Translate selection".
-8. Settings -> Subtitles: enable subtitle translation, then open a YouTube video that offers a CC track. The feature is off by default and this is an optional, unofficial feature.
+8. Settings -> Subtitles: enable subtitle translation, then open a YouTube video that offers a CC track or a Bilibili video with an official subtitle track. The feature is off by default and this is an optional, unofficial feature.
 9. Settings -> Privacy: "AI privacy masking" is off by default; when enabled, it masks emails/phones/IDs/card numbers locally before sending.
 
 Notes:
@@ -267,7 +267,7 @@ Notes:
 |---|---|
 | **BYOK 不可测**（最可能被驳回） | Notes 里给限额、可撤销的临时 Key + 分步操作；同时写明不给 Key 时的降级说明 |
 | `<all_urls>` 被质疑过宽 | 用上表的权限理由；强调页面和接口都由用户选择 |
-| YouTube `world: "MAIN"` 被当成侵入页面 | 说明只在 manifest 列出的 3 个 YouTube 域读取播放器已加载的字幕，默认关闭，非官方 |
+| YouTube / Bilibili `world: "MAIN"` 被当成侵入页面 | 说明只在 manifest 列出的 YouTube 域和哔哩哔哩视频页读取播放器已加载的字幕，默认关闭，非官方 |
 | 隐私政策与实际行为不一致 | 本次补了输入框翻译；以后改数据流必须同步 `PRIVACY.md` / `privacy.en.md` / 本文 |
 | API Key 明文存 `chrome.storage.local`（政策 1.5.5「认证信息要安全」） | 已是 `TRUSTED_CONTEXTS`、网页脚本读不到；更彻底的做法是会话级存储（ROADMAP P2-1）。真被问到，按现状如实说明 |
 | 只声明一种语言却宣传中英双语界面（政策 1.7） | 0.9.6 起 `_locales` 带 `zh_CN` + `en`，两种语言各一份 listing，已解决 |

@@ -64,8 +64,8 @@ node test/package-store.test.mjs
 |---|---|
 | 中文名称（≤45 字符） | 凛狐 · 双语对照翻译（来自 `_locales/zh_CN`） |
 | English name（≤45 characters） | Rimefox - Bilingual Translation |
-| 中文简介（≤132 字符） | 使用自己的 API Key 翻译网页、选中文字和 YouTube 字幕，支持术语表、自定义提示词、中英文界面与可选本地隐私脱敏。 |
-| English summary（≤132 characters） | Translate pages, selections and YouTube captions with your own API key; glossary, prompts, bilingual UI, optional local masking. |
+| 中文简介（≤132 字符） | 使用自己的 API Key 翻译网页、选中文字和 YouTube / 哔哩哔哩字幕，支持术语表、自定义提示词、中英文界面与可选本地隐私脱敏。 |
+| English summary（≤132 characters） | Translate pages, selections and YouTube / Bilibili video captions with your own API key; glossary, prompts, bilingual UI, optional local masking. |
 | 分类建议 | Productivity；按控制台当前可选项选择最接近的生产力 / 工具分类 |
 | 界面与 listing 语言 | 简体中文、English；0.9.6 起 manifest 用 `_locales`（`zh_CN` / `en`）本地化名称和简介，商店会出现中文（简体）+ English (United States) 两行 |
 | 支持入口 | <https://github.com/Suethekitten/Rimefox/issues> |
@@ -77,21 +77,21 @@ node test/package-store.test.mjs
 
 中文详细说明：
 
-凛狐 Rimefox 让你在网页上对照阅读原文和译文，悬停译文可查看对应原句（长段落以可展开的节选显示），也支持仅译文显示、动态内容补翻、划词翻译、弹窗文字翻译与可选的 YouTube 双语字幕。通过术语表指定常用词的译法，用自定义提示词调整表达，按需要切换中文或英文界面、浅色或深色主题。可选的「AI 隐私保护翻译」会在发请求前于本地把邮箱、电话、身份证号、银行卡号等可识别信息换成占位符，译文回来后再还原；该功能默认关闭，不保证识别全部敏感信息。
+凛狐 Rimefox 让你在网页上对照阅读原文和译文，悬停译文可查看对应原句（长段落以可展开的节选显示），也支持仅译文显示、动态内容补翻、划词翻译、弹窗文字翻译与可选的 YouTube / 哔哩哔哩双语字幕。通过术语表指定常用词的译法，用自定义提示词调整表达，按需要切换中文或英文界面、浅色或深色主题。可选的「AI 隐私保护翻译」会在发请求前于本地把邮箱、电话、身份证号、银行卡号等可识别信息换成占位符，译文回来后再还原；该功能默认关闭，不保证识别全部敏感信息。
 
 本扩展采用 BYOK：你需要自行配置 API 地址、API Key 和模型，服务商可能收取费用。支持 DeepSeek 等 OpenAI 兼容接口以及 Anthropic、Gemini 协议，没有内置免费翻译额度。作者不运营翻译服务器，不使用分析或遥测。待翻文本、自定义提示词及命中术语直接发给你配置的接口；Key 用于该接口认证。本机保存设置与缓存，第三方处理以其隐私政策为准。
 
-YouTube 字幕翻译默认关闭，仅支持可用的 CC 字幕，不支持画面硬字幕。此功能非官方，与 Google 或 YouTube 无关联，平台更新可能导致失效。暂不支持 PDF、EPUB 或图片 OCR。
+视频字幕翻译默认关闭，仅支持站点可用的官方字幕轨（YouTube CC / B 站人工或 AI 字幕），不支持画面硬字幕。此功能非官方，与 Google、YouTube 或哔哩哔哩无关联，平台更新可能导致失效。暂不支持 PDF、EPUB 或图片 OCR。
 
 源码与支持：<https://github.com/Suethekitten/Rimefox> 。隐私政策：<https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> 。
 
 English detailed description:
 
-Read webpages with original text and translation together, hover a translated sentence to see the matching source with an expandable excerpt for long paragraphs, or switch to translation-only view. Rimefox also offers selected-text translation, a popup text translator, dynamic-page translation, and optional bilingual YouTube captions. Use a glossary for preferred terminology and custom prompts for wording. The interface supports Chinese and English, with light and dark themes. The optional “AI privacy masking” feature replaces reliably detectable email addresses, phone numbers, ID card numbers and bank card numbers with placeholders before a request and restores them afterwards; it is off by default and does not guarantee that all sensitive data is detected.
+Read webpages with original text and translation together, hover a translated sentence to see the matching source with an expandable excerpt for long paragraphs, or switch to translation-only view. Rimefox also offers selected-text translation, a popup text translator, dynamic-page translation, and optional bilingual YouTube / Bilibili video captions. Use a glossary for preferred terminology and custom prompts for wording. The interface supports Chinese and English, with light and dark themes. The optional “AI privacy masking” feature replaces reliably detectable email addresses, phone numbers, ID card numbers and bank card numbers with placeholders before a request and restores them afterwards; it is off by default and does not guarantee that all sensitive data is detected.
 
 Bring your own API key: configure an endpoint, key and model from your chosen provider. Provider charges may apply; no free translation quota is bundled. Rimefox supports OpenAI-compatible endpoints such as DeepSeek, plus Anthropic and Gemini protocols. The author operates no translation server and uses no analytics or telemetry. Text to translate, custom prompts and matching glossary terms go directly to your configured endpoint, with your key used for authentication. Settings and caches are stored locally; providers process requests under their own policies.
 
-YouTube caption translation is disabled by default and requires an available CC track. It cannot translate captions burned into video. This unofficial feature is not affiliated with Google or YouTube and may stop working after platform changes. PDF, EPUB and image OCR are not supported.
+Video caption translation is disabled by default and requires an official subtitle track exposed by the site (YouTube CC, or Bilibili manual/AI subtitles). It cannot translate captions burned into video. This unofficial feature is not affiliated with Google, YouTube or Bilibili and may stop working after platform changes. PDF, EPUB and image OCR are not supported.
 
 Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: <https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> .
 
@@ -101,7 +101,7 @@ Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: 
 
 单一用途（建议原文）：
 
-> Translate web pages, selected text, popup text and YouTube captions using a translation API endpoint and API key configured by the user. Glossary, prompts, display options and optional local privacy masking support this single purpose.
+> Translate web pages, selected text, popup text and YouTube / Bilibili video captions using a translation API endpoint and API key configured by the user. Glossary, prompts, display options and optional local privacy masking support this single purpose.
 
 不要以「作者没有服务器」为由勾选「完全不收集 / 传输数据」。按当前问卷对 collection / transmission 的定义，以代码真实行为申报：
 
@@ -139,7 +139,7 @@ Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: 
 | `contextMenus` | 划词翻译右键菜单 | Adds a context-menu item for translating the user's selected text. |
 | `host_permissions: <all_urls>` | 在用户打开的任意网页运行内容脚本读取待翻正文；向用户填写的任意 API 地址发请求 | Reads page text only when the user translates, and sends it only to the endpoint the user configures. No background browsing, no history collection, no ad or analytics use. Broad host access is required because the user can choose any page and any API endpoint. |
 | `all_frames: true` | iframe 内的正文、选区和嵌入播放器 | The content script runs in subframes so embedded text and selections can be translated. Translation is initiated by the user, or by the optional auto-translate setting the user enables. |
-| YouTube `world: MAIN` | 只在 manifest 列出的 YouTube / youtube-nocookie 域读取播放器已加载的字幕；无扩展 API Key | Reads caption data already loaded by the player on the listed YouTube domains only. No key or extension API is exposed to the page. |
+| YouTube / Bilibili 页面脚本（`world: MAIN`） | 只在 manifest 列出的 YouTube / youtube-nocookie 域和哔哩哔哩视频页读取播放器已加载的字幕；无扩展 API Key | Reads subtitle data already loaded by the player on the listed YouTube and Bilibili video pages. No key or extension API is exposed to the page. |
 | `exclude_matches` | 排除 Chrome Web Store 新旧域名与 Google Accounts | Declarative exclusion; programmatic fallback injection checks the target URL first. |
 | `web_accessible_resources` | 置顶翻译窗里显示扩展图标 | Exposes one 32px icon so the pinned translation window can display it. |
 
@@ -157,7 +157,7 @@ Select a short phrase and use the translation button or context menu. Repeat in 
 
 Optional privacy masking: open Settings → Privacy, enable `AI privacy masking`, keep email/phone/ID/bank toggles on, and translate a test page containing `test@example.com`, `18744325579`, `11010519491231002X` and `4242 4242 4242 4242`. With a real endpoint, verify the displayed translation restores the original values. Network inspection should show placeholders such as `__PII_EMAIL_ADDRESS_1__` in the request rather than the originals. Turn the feature off and confirm the request contains the original text again. If a model drops a placeholder, that segment should fail rather than display corrupted text.
 
-YouTube captions are off by default. First confirm no translation API request for captions with that setting off (the local caption hook can still run). Enable subtitle translation, open a YouTube video with an available CC track, enable CC, and verify bilingual captions. Seek and change video, then disable the feature. No CC track or hardcoded subtitles are unsupported, not test failures. Also check mobile YouTube and youtube-nocookie embeds where accessible.
+Video captions are off by default. First confirm no translation API request for captions with that setting off (the local caption hook can still run). Enable subtitle translation, open a YouTube video with an available CC track or a Bilibili video with an official subtitle track, enable captions, and verify bilingual captions. Seek, change video or part, then disable the feature. No track and hardcoded subtitles are unsupported, not test failures. Also check mobile YouTube, youtube-nocookie embeds and Bilibili locale-prefixed URLs where accessible.
 
 Open accounts.google.com and both Chrome Web Store URL patterns; confirm automatic general content scripts are absent. Browser-internal pages and the store are not translation targets. Report errors without sharing private page content or keys.
 

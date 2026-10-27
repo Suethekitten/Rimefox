@@ -41,11 +41,14 @@
     return u.toString();
   };
 
-  // 语言是否相同：zh-Hans ≈ zh-CN，zh-Hant ≈ zh-TW，其它比主语言
+  // 语言是否相同：zh-Hans ≈ zh-CN，zh-Hant ≈ zh-TW，ai-zh ≈ zh-CN，其它比主语言。
+  // Bilibili 的 AI 轨道用 ai-zh / ai-en 这种前缀，不能把它当成独立语言。
   function langKey(code) {
-    var c = String(code || '').toLowerCase();
-    if (/^zh(-hans|-cn|-sg)?$/.test(c)) return 'zh-cn';
+    var c = String(code || '').toLowerCase().replace(/_/g, '-');
+    if (/^ai-/.test(c)) c = c.slice(3);
+    if (/^zh(-hans|-cn|-sg|-zh)?$/.test(c)) return 'zh-cn';
     if (/^zh-(hant|tw|hk|mo)$/.test(c)) return 'zh-tw';
+    if (c === 'zh') return 'zh-cn';
     return c.split('-')[0];
   }
   subs.sameLanguage = function (a, b) {
@@ -175,6 +178,104 @@
       if (i === words.length - 1) flush(null);
     });
     return out;
+  };
+
+  // ---------------- Bilibili 字幕 JSON ----------------
+  // Bilibili 的 body 是 [{ from: 秒, to: 秒, content: 文本 }]。不执行 HTML、不读 innerHTML；
+  // 只做纯文本规范化、时间边界与重复 / 空段过滤，避免坏数据进入翻译调度。
+  var BILI_MAX_UNIT_CHARS = 2000;
+  var BILI_MAX_SECONDS = 24 * 60 * 60;
+
+  function finiteSeconds(value) {
+    var n = Number(value);
+    return isFinite(n) && n >= 0 && n <= BILI_MAX_SECONDS ? n : NaN;
+  }
+
+  // 严格 URL 白名单：只接受 B 站官方字幕 CDN 的 HTTPS 地址。
+  // 与 lib/subtitle-source.js 的实现必须一致（差分测试见 test/bilibili-subtitles.test.mjs）。
+  subs.isTrustedBilibiliSubtitleUrl = function (value) {
+    var u;
+    try {
+      u = new URL(String(value || ''), 'https://www.bilibili.com');
+    } catch (err) {
+      return false;
+    }
+    if (u.protocol !== 'https:') return false;
+    var host = String(u.hostname || '').toLowerCase();
+    var path = String(u.pathname || '');
+    if (host === 'aisubtitle.hdslb.com' && /^\/bfs\/(ai_)?subtitle\//.test(path)) return true;
+    if (/^i[0-9]\.hdslb\.com$/.test(host) && /^\/bfs\/subtitle\//.test(path)) return true;
+    return false;
+  };
+
+  subs.bilibiliCues = function (json) {
+    var body = json && json.body;
+    if (!Array.isArray(body) || !body.length) return [];
+    var out = [];
+    var seen = {};
+    body.forEach(function (item) {
+      if (!item || typeof item !== 'object') return;
+      var from = finiteSeconds(item.from);
+      var to = finiteSeconds(item.to);
+      if (!isFinite(from) || !isFinite(to) || to <= from) return;
+      var text = clean(typeof item.content === 'string' ? item.content : '');
+      if (!text) return;
+      if (text.length > BILI_MAX_UNIT_CHARS) return; // 超长正文交给模型会挤爆批次，宁可不接管
+      var start = Math.round(from * 1000);
+      var end = Math.round(to * 1000);
+      if (end <= start) return;
+      var id = start + '|' + end + '|' + text;
+      if (seen[id]) return;
+      seen[id] = true;
+      out.push({ start: start, end: end, text: text });
+    });
+    out.sort(function (a, b) {
+      return a.start - b.start || a.end - b.end;
+    });
+    // 完全包含在前一条里的重复段（站点偶发重复推送）只保留先出现的那条。
+    var merged = [];
+    out.forEach(function (cue) {
+      var prev = merged[merged.length - 1];
+      if (prev && cue.start >= prev.start && cue.end <= prev.end && cue.text === prev.text) return;
+      merged.push(cue);
+    });
+    return merged;
+  };
+
+  // Bilibili 的字幕段通常已经是完整句子；仍用同一套句末标点 / 间隔规则合并被拆开的段，
+  // 但窗口更保守，避免把两个说话人的短句硬拼成一段。
+  subs.bilibiliUnits = function (json) {
+    return subs.sentencesOf(subs.bilibiliCues(json), { maxChars: 160, gapMs: 1200 });
+  };
+
+  // 把轨道元数据 + 已解析 body 变成统一时间轴。id 只用于区分轨道，不进入翻译文本。
+  subs.bilibiliTrack = function (json, meta) {
+    var m = meta || {};
+    var track = m.track || {};
+    var units = subs.bilibiliUnits(json);
+    if (!units.length) return null;
+    var rawLang = String(track.lan || '');
+    var lk = langKey(rawLang);
+    var displayLang = lk === 'zh-cn' ? 'zh-CN' : (lk === 'zh-tw' ? 'zh-TW' : (/^ai-/.test(rawLang) ? lk : rawLang));
+    var key = [
+      String(m.bvid || ''),
+      String(m.cid || ''),
+      String(track.id_str || track.id || rawLang || 'track'),
+      rawLang
+    ].join(':');
+    return {
+      platform: 'bilibili',
+      videoKey: String(m.bvid || '') + ':' + String(m.cid || ''),
+      bvid: String(m.bvid || ''),
+      cid: String(m.cid || ''),
+      page: Number(m.page) || 0,
+      trackKey: key,
+      lang: displayLang,
+      rawLang: rawLang,
+      kind: /^ai-/.test(rawLang) || /\/ai_subtitle\//.test(String(track.subtitle_url || '')) ? 'asr' : 'manual',
+      label: String(track.lan_doc || ''),
+      units: units
+    };
   };
 
   // json3 + 地址 → 显示单位（句子）

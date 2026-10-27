@@ -973,6 +973,35 @@
     return bad.length ? '语言比较错：' + JSON.stringify(bad) : true;
   });
 
+  check('字幕：Bilibili body 秒转毫秒、空段 / 非法时间 / 重复 / 超长过滤', function () {
+    var json = { body: [
+      { from: 1.2, to: 4.5, content: '  Hello   everyone.  ' },
+      { from: 4.6, to: 7.8, content: 'Welcome back.' },
+      { from: -1, to: 2, content: 'bad' },
+      { from: 4.6, to: 7.8, content: 'Welcome back.' },
+      { from: 8, to: 9, content: '   ' },
+      { from: 9, to: 10, content: new Array(2002).join('x') }
+    ] };
+    var units = DT.subs.bilibiliUnits(json);
+    var texts = units.map(function (u) { return u.text; });
+    if (texts.join('|') !== 'Hello everyone.|Welcome back.') return '解析结果不对：' + texts.join('|');
+    if (units[0].start !== 1200 || units[0].end !== 4500) return '时间转换不对';
+    return true;
+  });
+
+  check('字幕：Bilibili ai-zh 识别为中文；CDN 白名单拒绝任意 URL', function () {
+    var track = DT.subs.bilibiliTrack(
+      { body: [{ from: 31.9, to: 32.72, content: '晚上好。' }] },
+      { bvid: 'BV1xx411c7mD', cid: '1001', track: { id_str: '1', lan: 'ai-zh', subtitle_url: 'https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/x' } }
+    );
+    if (!track || track.lang !== 'zh-CN' || track.kind !== 'asr') return '轨道识别不对';
+    if (!DT.subs.sameLanguage('ai-zh', 'zh-CN') || !DT.subs.sameLanguage('ai-en', 'en-US')) return 'ai- 语言比较不对';
+    if (!DT.subs.isTrustedBilibiliSubtitleUrl('https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/x')) return '官方地址应通过';
+    if (DT.subs.isTrustedBilibiliSubtitleUrl('http://aisubtitle.hdslb.com/bfs/ai_subtitle/x')) return 'HTTP 不应通过';
+    if (DT.subs.isTrustedBilibiliSubtitleUrl('https://evil.example/x.json')) return '任意域名不应通过';
+    return true;
+  });
+
   // ---------------- 调度纯函数（从 main.js 抽到 core.js） ----------------
   check('distanceOf: 屏幕内为 0', function () {
     var d = DT.distanceOf({ top: 100, bottom: 120, width: 300, height: 20 }, 800);
