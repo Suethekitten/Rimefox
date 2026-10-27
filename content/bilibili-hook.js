@@ -10,15 +10,33 @@
   if (window.__rimefoxBiliHook) return;
   window.__rimefoxBiliHook = true;
 
-  var API = /^https:\/\/api\.bilibili\.com\/x\/player\/(?:wbi\/)?v2(?:\?|$)/;
-  var REL = /^\/x\/player\/(?:wbi\/)?v2(?:\?|$)/;
+  var PATH = /^\/x\/player\/(?:wbi\/)?v2$/;
   var HISTORY_MAX = 4;
   var history = [];
   var seq = 0;
+  var xhrUrls = new WeakMap();
+
+  // 播放器实际写法是协议相对地址（"//api.bilibili.com/x/player/wbi/v2"），也可能传 URL / Request 对象。
+  // 一律按当前页面解析成绝对地址再比较主机和路径；读取页面对象的属性出错就当没看见，不能让 fetch 抛出。
+  function absoluteUrl(input) {
+    try {
+      var raw = input;
+      if (raw && typeof raw === 'object') raw = raw.url || raw.href;
+      if (raw == null || raw === '') return '';
+      return new URL(String(raw), location.href).href;
+    } catch (err) {
+      return '';
+    }
+  }
 
   function interesting(url) {
-    if (typeof url !== 'string') return false;
-    return API.test(url) || REL.test(url);
+    if (!url) return false;
+    try {
+      var u = new URL(url);
+      return u.protocol === 'https:' && (u.hostname === 'api.bilibili.com' || u.hostname === 'www.bilibili.com') && PATH.test(u.pathname);
+    } catch (err) {
+      return false;
+    }
   }
 
   function post(data) {
@@ -69,11 +87,11 @@
   var open = XMLHttpRequest.prototype.open;
   var send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (method, url) {
-    this.__rimefoxBiliUrl = url;
+    xhrUrls.set(this, absoluteUrl(url));
     return open.apply(this, arguments);
   };
   XMLHttpRequest.prototype.send = function () {
-    var url = this.__rimefoxBiliUrl;
+    var url = xhrUrls.get(this) || '';
     if (interesting(url)) {
       var requestSeq = ++seq;
       this.addEventListener('load', function () {
@@ -92,7 +110,7 @@
   var nativeFetch = window.fetch;
   if (nativeFetch) {
     window.fetch = function (input) {
-      var url = typeof input === 'string' ? input : (input && input.url);
+      var url = absoluteUrl(input);
       var requestSeq = ++seq;
       var result = nativeFetch.apply(this, arguments);
       if (interesting(url)) {
