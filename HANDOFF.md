@@ -446,12 +446,12 @@ Bilibili: /x/player/(wbi/)v2 轨道元数据      ├─ 每 200ms 按 video.cur
 
 - **统一格式**：`{ platform, videoKey, trackKey, lang, kind, units: [{start,end,text}] }`。运行时不再解析 json3，也不认识 B 站 body；所有平台差异在 `DT.subtitleSource`。
 - **YouTube**：`subtitles-source.js` 把 hook 的 json3 解析成统一轨道；地址带 `tlang` 时去掉后同源再取原文；CC 开关看 `.ytp-subtitles-button[aria-pressed]`；播广告时 `blocked()` 交还原生。
-- **Bilibili**：`bilibili-hook.js` 只观察播放器自己的 `/x/player/(wbi/)v2` 回包，带 bvid / cid / 官方字幕轨（含时限签名 `subtitle_url`），留最近几份供扩展晚启动时 replay。`bilibili-subtitles-source.js` 只接受 bvid 与当前页面对得上的回包，按播放器 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选轨；`subtitle_url` 必须命中 `lib/subtitle-source.js` 的 HTTPS 官方 CDN 白名单，由后台 `subtitle:fetch` 取文本（无 Cookie、限制 2 MB、拒绝白名单外跳转）。
+- **Bilibili**：`bilibili-hook.js` 只观察播放器自己的 `/x/player/(wbi/)v2` 回包，带 bvid / cid / 官方字幕轨（含时限签名 `subtitle_url`），留最近几份供扩展晚启动时 replay。请求地址先按页面解析成绝对地址再比对主机和路径：真实播放器写的是协议相对地址 `//api.bilibili.com/x/player/wbi/v2`，`fetch` 也可能收到 URL / Request 对象。`bilibili-subtitles-source.js` 只接受 bvid 与当前页面对得上的回包，按播放器 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选轨；没有 active 类时只认元数据 `selectedLan` 或唯一轨道，并要求原生字幕层在显示（所以原生字幕用 `opacity:0` 收起，不用 `display:none`）。当前选中语言对应的不是这条轨道（换了语言、新轨道还没取到或取不到）时 `matches()` 立即让位；取字幕失败按 3 s / 10 s / 30 s 退避重试，播放器新回包（新签名地址）立即重试；字幕每段保留为独立显示单位，不跨段合并。`subtitle_url` 必须命中 `lib/subtitle-source.js` 的 HTTPS 官方 CDN 白名单，由后台 `subtitle:fetch` 取文本（无 Cookie、限制 2 MB、拒绝白名单外跳转）。
 - **视频身份**：YouTube 用 `v`；Bilibili 用 `bvid + cid + 轨道 ID + 语言`。分 P 只改 cid 也会换 track；换 BV 时 URL 未更新前旧回包不能接管；旧请求晚归由 `processSeq` / `gen` / `source.matches()` 丢弃。`?p=` 不是身份的一部分，cid 才是。
 - **会话状态**：track 带 `identity / target / targetCode / style / intensity` 与 `gen / inflight / pending`。目标语言或风格变化只 `invalidate()` 译文与在途请求，原始轨道保留；目标语言 = 字幕语言、关 CC 或关闭字幕翻译只 `render(null)`，交还原生字幕。
 - **缓存身份**：字幕请求额外带 `cacheScope = platform|videoKey|trackKey|lang`，后台 `makeKey` 追加 `subtitle-v1:` 段；目标语言、风格、模型、接口、术语和提示词仍由原有基础键负责，显示模式不参与，所以切双语 / 仅译文不重复付费。带 `subtitle-v1:` 的条目只进内存层和 session 层（`lib/cache.js` 的 `memoryOnly`），不写 `chrome.storage.local`，磁盘里不留观看记录；读到旧版本写进磁盘的字幕条目会删掉。
 - **播放器重建**：显示缓存绑定具体叠层（`shownOverlay`）；播放器 DOM 替换后即使文本相同也会重新写。切视频/分 P 只创建一个叠层，清理旧叠层。
-- **测试**：`test/subtitles-session.test.mjs` 覆盖 YouTube A–Q 竞态；`test/bilibili-subtitles.test.mjs` 覆盖 Bilibili body 解析、轨道选择、bvid/cid 切换、旧响应晚归、缓存身份、关闭恢复和不全量预翻；`tools/e2e-extension.mjs --bilibili-subtitles <url>` 在真实 B 站播放器 DOM 上跑合成轨道（CDP 拦截字幕 CDN），不读取真实字幕内容。
+- **测试**：`test/subtitles-session.test.mjs` 覆盖 YouTube A–Q 竞态；`test/bilibili-subtitles.test.mjs` 覆盖 Bilibili body 解析、轨道选择、bvid/cid 切换、旧响应晚归、缓存身份、关闭恢复和不全量预翻；`test/bilibili-hook.test.mjs` 直接运行页面钩子（协议相对 / URL / Request 写法）。`tools/e2e-extension.mjs` 默认整套里有离线 Bilibili（也可 `--bilibili-only` 单跑）：CDP 拦截出假视频页、播放器元数据和字幕 CDN，元数据由页面像真实播放器一样发协议相对地址的 XHR，经真实钩子 → 来源层 → 后台取字幕 → 运行时；`--bilibili-subtitles <url>` 在真实 B 站页面上走同样步骤（只拦截带 `rimefox_e2e=1` 的那条元数据请求），不读取真实字幕内容。
 - **限制**：依赖 YouTube / Bilibili 的未公开接口和 DOM 类名，改版可能失效；B 站没有可用官方字幕轨时不接管，不做弹幕、直播、OCR、音频识别或绕过登录/会员。
 
 
@@ -572,7 +572,8 @@ node test/package-store.test.mjs # 打包白名单：商店包与 Release 包只
 ```
 node tools/e2e-extension.mjs                                                  # 文章页 / 划词 / 加入术语表 / 输入框翻译 / 仅译文 / 还原 / 文献引用（Nature 上标，真实点击）/ 混合行内（Science 引用 + 图表链接）/ Shadow DOM 夹具 / 配置广播 / 简繁 / 缓存落盘 / 设置页 / 自检页
 node tools/e2e-extension.mjs --youtube "https://www.youtube.com/watch?v=iG9CE55wbtY"   # 再加 YouTube 真实页面的双语字幕
-node tools/e2e-extension.mjs --bilibili-subtitles "https://www.bilibili.com/video/BV1is421u7Xc/"  # 真实 B 站播放器 DOM + 合成字幕轨（CDP 拦截字幕 CDN）
+node tools/e2e-extension.mjs --bilibili-only  # 离线假 B 站页面 + 合成字幕轨，经真实页面钩子（默认整套也会跑）
+node tools/e2e-extension.mjs --bilibili-subtitles "https://www.bilibili.com/video/BV1is421u7Xc/"  # 真实 B 站页面 + 合成字幕轨，同样经真实钩子
 node tools/e2e-extension.mjs --chosun-live  # 真实朝鲜日报正文的韩文→中文目标字体 A/B（本地假翻译，不发真实付费请求）
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
 node tools/e2e-extension.mjs --bilibili-live  # 真实 B 站视频页评论区验收（需要能上 bilibili.com；未登录只显示首屏，滚动 / 楼中楼会显示未验证）
@@ -841,13 +842,13 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 0.12.6 把已有 YouTube 字幕翻译扩展为「YouTube / Bilibili 共用一套运行时」，不是独立视频翻译引擎。用户设置仍是同一个 `subtitleTranslate`，没有新增 B 站开关。
 
-- **运行时抽象**：`subtitles.js` 只消费 `DT.subtitleSource` 返回的统一轨道 `{ platform, videoKey, trackKey, lang, kind, units }`；不再解析 json3。YouTube 的 `subtitles-source.js` 和新增的 `bilibili-subtitles-source.js` 各自负责来源、轨道选择与解析。`subtitles-core.js` 保留 YouTube json3，并新增 Bilibili body（from/to 秒转毫秒、空段 / 非法时间 / 重复 / 超长过滤、句末合并）。
-- **Bilibili 捕获**：新增 `bilibili-hook.js`（MAIN world，document_start），只观察 `/x/player/(wbi/)v2` 回包，保留最近几份供扩展晚启动时 replay；不改请求、不读 Cookie。来源层按 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选当前轨道；active class 缺失但原生字幕层可见时，用播放器元数据 `selectedLan` 或唯一轨道兜底；拒绝 bvid 与页面不一致的回包。
+- **运行时抽象**：`subtitles.js` 只消费 `DT.subtitleSource` 返回的统一轨道 `{ platform, videoKey, trackKey, lang, kind, units }`；不再解析 json3。YouTube 的 `subtitles-source.js` 和新增的 `bilibili-subtitles-source.js` 各自负责来源、轨道选择与解析。`subtitles-core.js` 保留 YouTube json3，并新增 Bilibili body（from/to 秒转毫秒、空段 / 非法时间 / 重复 / 超长过滤；每段保留为独立显示单位，不按句末标点跨段合并）。
+- **Bilibili 捕获**：新增 `bilibili-hook.js`（MAIN world，document_start），只观察 `/x/player/(wbi/)v2` 回包（地址按页面解析，真实播放器的协议相对写法也能识别），保留最近几份供扩展晚启动时 replay；不改请求、不读 Cookie。来源层按 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选当前轨道；active class 缺失但原生字幕层可见时，用播放器元数据 `selectedLan` 或唯一轨道兜底；拒绝 bvid 与页面不一致的回包。
 - **取字幕安全**：新增 `lib/subtitle-source.js` 白名单，只允许 `aisubtitle.hdslb.com` 的 `/bfs/(ai_)subtitle/` 与 `i[0-9].hdslb.com` 的 `/bfs/subtitle/` HTTPS 地址。后台新增 `subtitle:fetch`：校验发送方是 `www.bilibili.com` 视频页、无 Cookie、`redirect: 'manual'`、Content-Length / 2 MB 限制、允许 JSON / text / octet-stream；不作为翻译 API。
 - **身份与费用**：Bilibili 轨道身份为 bvid + cid + 轨道 ID + 语言，并带 player `page_no`；URL 明确带 `?p=` 且与轨道 page 不一致时 `source.matches()` 立即失效，旧 P 不会在新 P 上继续显示。翻译请求新增 `cacheScope`，后台缓存键追加 `subtitle-v1:platform|videoKey|trackKey|lang`，目标语言 / 风格 / 模型 / 接口 / 术语 / 提示词仍走原有基础键；显示模式不参与，切换双语 / 仅译文不重复付费。
 - **渲染**：叠层继续插在播放器容器里，`rimefox-subs-on` 只隐藏当前播放器原生字幕；Bilibili 限定选择器为 `.bpx-player-subtitle-wrap` 和 `.bili-subtitle-x-subtitle-panel`，不碰弹幕。关闭翻译 / CC / 同语言 / 广告时移除隐藏类并隐藏叠层；播放器重建后重新绑定叠层。
 - **URL 兼容**：`www.bilibili.com/zh-Hans/video/BV...` 等语言前缀也纳入 manifest、页面判断和后台发送方校验；`?p=` 用于 page 失效判断，cid + page 共同描述分 P。
-- **测试**：新增 `test/bilibili-subtitles.test.mjs`（解析、轨道选择、bvid/cid 切换、旧响应、缓存身份、关闭恢复、不全量预翻、URL 白名单差分）；`test/subtitles-session.test.mjs` 的 YouTube A–Q 全部保留，测试替身补 `resolve()`。E2E 新增 `--bilibili-subtitles <url>`：真实 B 站播放器 DOM + 合成轨道 + CDP 拦截字幕 CDN，覆盖叠层、原生恢复、分 P、站内换 BV、同语言 0 请求和关闭后 0 请求。
+- **测试**：新增 `test/bilibili-subtitles.test.mjs`（解析、轨道选择、bvid/cid 切换、旧响应、缓存身份、关闭恢复、不全量预翻、URL 白名单差分）；`test/subtitles-session.test.mjs` 的 YouTube A–Q 全部保留，测试替身补 `resolve()`。E2E：默认整套里的离线 Bilibili（`--bilibili-only`）与 `--bilibili-subtitles <url>` 都经真实页面钩子，覆盖叠层、原生恢复、分 P、站内换 BV、同语言 0 请求、关闭后 0 请求、换语言让位、取字幕失败重试、无标点字幕不合并、无 active 类兜底不闪烁和磁盘缓存不含视频标识；新增 `test/bilibili-hook.test.mjs`。
 - **限制**：真实人工 / AI 字幕轨的浏览器验收受登录态与视频可用性限制；没有合法登录会话时只能验证合成轨道。B 站番剧、直播、弹幕、硬字幕 OCR、音频识别、DRM / 会员内容不在本轮范围；站点接口或 DOM 改版可能失效。
 
 
