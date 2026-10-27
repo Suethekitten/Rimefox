@@ -79,6 +79,12 @@ function inlineStripped(text) {
   return checked.ok ? checked.stripped : '';
 }
 
+// 译文一侧的同一口径：按原文校验后去掉原子与标记。结构不合法时返回空串，交给随后的行内校验报错。
+function inlineOutputStripped(source, output) {
+  const checked = inspectInline(source, output);
+  return checked.ok ? checked.stripped : '';
+}
+
 // 明显是一段正文（而不是按钮 / 标签 / 缩写）才把空回包、超长回包算模型失败。
 // 长度和句末标点都要有：短文本可能本来就不需要翻译，不能因此报错。
 function isSubstantialSource(text) {
@@ -371,7 +377,7 @@ async function handleTranslate(msg, sender) {
         alignCache.delete(keyOf(text));
         hit = undefined;
         hitAlign = null;
-      } else if ((!fixed.trim() && isSubstantialSource(cacheSource)) || (isSubstantialSource(cacheSource) && isRunaway(cacheSource, fixed))) {
+      } else if ((!fixed.trim() && isSubstantialSource(cacheSource)) || (isSubstantialSource(cacheSource) && isRunaway(cacheSource, cacheOutput))) {
         // 旧版本 / 旧在途请求可能把空回包或失控长文写进缓存；读取时同样失效，
         // 否则用户点「重新翻译」仍会拿到同一条坏译文。
         cache.remove(keyOf(text));
@@ -582,7 +588,9 @@ async function handleTranslate(msg, sender) {
             settle(text, null, new ApiError('模型返回空译文，已保留原文', 0, 'empty-output'), null, null, null, 'empty-output');
             continue;
           }
-          if (typeof value === 'string' && sourceSubstantial && isRunaway(sourceVisible, value)) {
+          // 长度守卫两边都按可见正文比：sourceVisible 不含 <kN> 原子，译文也要去掉原子和标记再比，
+          // 否则链接 / 引用密集的参考文献条目会被误判成失控长文（或在非实质原文时变成空译文）。
+          if (typeof value === 'string' && sourceSubstantial && isRunaway(sourceVisible, inlineProtocol ? inlineOutputStripped(text, value) : value)) {
             settle(text, null, new ApiError('模型返回内容异常偏长，已保留原文', 0, 'runaway-output'), null, null, null, 'runaway-output');
             continue;
           }
@@ -606,7 +614,7 @@ async function handleTranslate(msg, sender) {
           }
           let result = '';
           let validation = null;
-          if (typeof value === 'string' && value.trim() && !isRunaway(sourceVisible, value)) {
+          if (typeof value === 'string' && value.trim() && !isRunaway(sourceVisible, outputVisible)) {
             validation = professional.validate(text, value);
             const reviewed = await reviewHighRisk({
               engine: professional, source: text, translation: value, report: validation, budget: reviewBudget,

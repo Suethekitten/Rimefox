@@ -100,6 +100,23 @@ test('model invented HTML is rejected while source literal HTML remains inert te
   assert.equal(inspectInline('<f1>x</f1>', '<f0001>字</f0001>').reason, 'malformed-marker');
 });
 
+test('comparison operators and bracketed prose in the text are not invented markup', () => {
+  // 0.12.3 把「< + 字母」一直取到字符串末尾作为 key，译文尾部一变就判 markup-leak。
+  for (const [source, target] of [
+    ['If the value is small and a < b then the result is <f1>always</f1> positive.', '如果值很小且 a < b，则结果<f1>总是</f1>为正。'],
+    ['Returns true when a < b holds, otherwise <f1>false</f1> is returned.', '当 a < b 成立时返回 true，否则返回<f1>false</f1>。'],
+    ['When i<n, call <f1>next()</f1> again.', '当 i<n 时，再次调用<f1>next()</f1>。'],
+    ['＜お知らせ＞ 本日は<f1>休業</f1>です。', '<Notice> We are <f1>closed</f1> today.'],
+    ['Use <kbd>Ctrl</kbd> as shown in <f1>docs</f1>.', '按<f1>文档</f1>所示使用 <kbd>Ctrl</kbd>。']
+  ]) {
+    const result = inspectInline(source, target);
+    assert.equal(result.ok, true, target + ' → ' + result.reason);
+  }
+  // 原文有比较号，模型另外编造了真实 HTML 标签时仍然拒绝。
+  assert.equal(inspectInline('If a < b then <f1>stop</f1>.', '如果 a < b 则<b>停止</b><f1>停</f1>。').reason, 'markup-leak');
+  assert.equal(inspectInline('If a < b then <f1>stop</f1>.', '如果 a < b 则 <span class="x">停</span><f1>停</f1>。').reason, 'markup-leak');
+});
+
 test('inline prompt is opt in, keeps one target language and describes the sole mutable atom exception', () => {
   const old = systemPrompt('en', 'plain', [], '', false, false, true);
   assert.equal(systemPrompt('en', 'plain', [], '', false, false, true, null, false), old);

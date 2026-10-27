@@ -315,3 +315,35 @@ test('strict review retains cross-format user terminology and notes without expo
   }
   await saveConfig({ professionalProfile: 'general', glossary: [] });
 });
+
+test('link- and citation-dense rows are length-checked by visible text, not marker bytes', async () => {
+  calls = [];
+  // 0.12.3：原文去掉了 <kN> 原子再比长度，译文却带着全部标记；参考文献条目、链接列表句因此
+  // 返回空串（内容侧误报 missing-marker）或被当成模型失控长文。
+  const countries = ['Belgium', 'Luxembourg', 'Germany', 'Switzerland', 'Monaco', 'Italy', 'Andorra', 'Spain'];
+  const zh = ['比利时', '卢森堡', '德国', '瑞士', '摩纳哥', '意大利', '安道尔', '西班牙'];
+  const mark = (label, i) => `<k${i + 1}><f${i + 1}>${label}</f${i + 1}></k${i + 1}>`;
+  const listSource = 'France borders ' + countries.map(mark).join(', ') + '.';
+  const listOutput = '法国与' + zh.map(mark).join('、') + '接壤。';
+  const refSource = '<k1><f1>↑</f1></k1> <k2><f2>"America\'s choice"</f2></k2>. <f3>Nature</f3>. <f4>455</f4> (7217): 1149. 29 October 2008. <k3><f5>Bibcode</f5></k3>:<k4><f6>2008Natur.455Q1149.</f6></k4>. <k5><f7>doi</f7></k5>:<k6><f8>10.1038/4551149a</f8></k6>.';
+  const refOutput = '<k1><f1>↑</f1></k1> <k2><f2>“美国的选择”</f2></k2>。<f3>自然</f3>。<f4>455</f4> (7217): 1149。2008年10月29日。<k3><f5>文献代码</f5></k3>:<k4><f6>2008Natur.455Q1149.</f6></k4>。<k5><f7>数字对象标识符</f7></k5>:<k6><f8>10.1038/4551149a</f8></k6>。';
+  respond = () => [listOutput, refOutput];
+  const first = await send([listSource, refSource]);
+  assert.deepEqual(first.results, [listOutput, refOutput]);
+  assert.deepEqual(first.inlineErrors, [null, null]);
+  assert.deepEqual(first.outputErrors, [null, null]);
+  assert.equal(calls.length, 1);
+  const again = await send([listSource, refSource]);
+  assert.equal(again.cached, 2, 'valid dense rows are cached and survive the cache-hit length check');
+  assert.equal(calls.length, 1);
+});
+
+test('a genuinely runaway marked translation is still rejected by visible length', async () => {
+  calls = [];
+  const source = 'The committee approved the <f1>revised</f1> budget after a short discussion today.';
+  respond = () => ['委员会今天经过简短讨论批准了<f1>修订后的</f1>预算。' + '然后'.repeat(200)];
+  const result = await send([source]);
+  assert.deepEqual(result.results, [null]);
+  assert.equal(result.outputErrors[0], 'runaway-output');
+  assert.equal(cache.get(key(source)), undefined);
+});
