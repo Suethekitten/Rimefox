@@ -558,6 +558,8 @@
         if (at < max / 2) at = max;
         var span = spanAt(spans, base + at);
         if (span) at = span[0] > base ? span[0] - base : span[1] - base;
+        // 硬切不能落在代理对中间（emoji、扩展区汉字），否则两片各剩半个字符。
+        if (at > 0 && at < rest.length && /[\uD800-\uDBFF]/.test(rest.charAt(at - 1)) && /[\uDC00-\uDFFF]/.test(rest.charAt(at))) at -= 1;
         if (at <= 0 || at >= rest.length) break;
         units.push(rest.slice(0, at));
         rest = rest.slice(at);

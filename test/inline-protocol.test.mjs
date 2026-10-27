@@ -117,6 +117,22 @@ test('comparison operators and bracketed prose in the text are not invented mark
   assert.equal(inspectInline('If a < b then <f1>stop</f1>.', '如果 a < b 则 <span class="x">停</span><f1>停</f1>。').reason, 'markup-leak');
 });
 
+test('marker look-alikes and empty link labels are rejected instead of being shown', () => {
+  // 0.12.5：全角 / 零宽 / 单角括号拼出的「标记」在格式全部缺失时会原样显示在页面上。
+  const source = 'A <f1>bold</f1> claim.';
+  for (const target of ['一个<ｆ1>大胆</ｆ1>的声明。', '一个＜ｆ１＞大胆＜/ｆ１＞的声明。', '一个<\u200bf1>大胆</\u200bf1>的声明。', '一个\u2039f1\u203a大胆的声明。']) {
+    assert.equal(inspectInline(source, target).ok, false, target);
+  }
+  assert.equal(inspectInline(source, '一个<f1>大胆</f1>的声明。').ok, true);
+  assert.equal(inspectInline(source, '一个大胆的声明。').reason, 'format-missing');
+  assert.equal(inspectInline('Watch the <f1>F1</f1> race.', '观看《F1》<f1>赛车</f1>比赛。').ok, true, '书名号里的 F1 不是标记');
+  // 0.12.5：格式全部缺失时链接标签不能是空的，否则原链接在页面上消失。
+  const linked = 'See <k1><f1>the documentation</f1></k1> for <f2>more</f2> details.';
+  assert.equal(inspectInline(linked, '详情请见<k1></k1>。').reason, 'empty-format');
+  assert.equal(inspectInline(linked, '详情请见<k1>   </k1>。').reason, 'empty-format');
+  assert.equal(inspectInline(linked, '详情请见<k1>文档</k1>。').ok, true);
+});
+
 test('inline prompt is opt in, keeps one target language and describes the sole mutable atom exception', () => {
   const old = systemPrompt('en', 'plain', [], '', false, false, true);
   assert.equal(systemPrompt('en', 'plain', [], '', false, false, true, null, false), old);

@@ -1524,5 +1524,14 @@ await t('长段落一片按协议省略全部 <fN>、另一片保留：整段按
   assert.equal(env.DT.state.renderFailed || 0, 0);
 });
 
+await t('超长单句硬切不会落在代理对中间（emoji / 扩展区汉字）', async () => {
+  const env = await boot();
+  const text = '汉'.repeat(319) + '😀' + '汉'.repeat(400) + '𠀀'.repeat(150);
+  const parts = env.DT.splitLong(text, 200);
+  assert.ok(parts.length > 1);
+  assert.ok(parts.every((part) => !/[\uD800-\uDBFF]$/.test(part) && !/^[\uDC00-\uDFFF]/.test(part)), JSON.stringify(parts.map((x) => x.length)));
+  assert.equal(parts.join(''), text);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);
