@@ -841,13 +841,15 @@
           var seg = pending[0];
           if (batch.length && (batch.length >= limitItems || seg.style !== batch[0].style)) break;
           var pick = 0;
-          // Fill a compatible batch from the same visibility priority. Alternating
-          // plain/formatted siblings must not each create a one-item API request.
+          // Fill a compatible batch from the same visibility tier (same DT.batchLimits band).
+          // Alternating plain/formatted siblings must not each create a one-item API request;
+          // prio is a pixel distance, so off-screen units almost never share an exact value.
           if (batch.length && seg.inlineProtocol !== batch[0].inlineProtocol) {
             pick = -1;
             for (var bi = 1; bi < pending.length; bi += 1) {
               var candidate = pending[bi];
-              if (queue[candidate.ui].prio !== prio || candidate.style !== batch[0].style) break;
+              var band = DT.batchLimits(queue[candidate.ui].prio, viewHeight(), maxItems, maxChars);
+              if (band.items !== limitItems || band.chars !== limitChars || candidate.style !== batch[0].style) break;
               if (candidate.inlineProtocol === batch[0].inlineProtocol && chars + candidate.text.length <= limitChars) {
                 pick = bi;
                 break;
@@ -929,10 +931,20 @@
         }
         var raw = DT.joinSlots(unit.slots, DT.translationSeps(unit.seps, target, DT.targetInfo()));
         // 每个切片单独合法，不代表拼回整段后仍然合法：一个切片省略全部 <fN>（协议允许）
-        // 另一个切片保留 <fN>，拼起来就会缺标记。这里必须显式失败，不能让它经 keepText
-        // 变成空串后走「跳过 + settled」——那会让长复杂段落永久不再重试。
+        // 另一个切片保留 <fN>，拼起来就会缺标记——这种情况下面按普通译文降级。降级后仍不合法时
+        // 必须显式失败，不能让它经 keepText 变成空串后走「跳过 + settled」——那会让长复杂段落永久不再重试。
         if (unit.inlineProtocol && DT.inlineInspect) {
           var joinedInline = DT.inlineInspect(unit, raw);
+          // 后台已逐片校验（含 <kN> 骨架）。只有「部分切片按协议省略了全部 <fN>」会让拼合失败：
+          // 这时整段按协议的安全降级处理——去掉全部 <fN>，显示普通译文（原子仍须校验通过）。
+          if (joinedInline && !joinedInline.ok && unit.slots.length > 1) {
+            var plainRaw = raw.replace(/<\/?f\d{1,3}>/g, '');
+            var plainInline = DT.inlineInspect(unit, plainRaw);
+            if (plainInline && plainInline.ok) {
+              raw = plainRaw;
+              joinedInline = plainInline;
+            }
+          }
           if (joinedInline && !joinedInline.ok) {
             noteRenderFailure(unit, 'invalid-inline', joinedInline.reason);
             return;

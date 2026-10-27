@@ -546,12 +546,13 @@ await t('模型回包语言错误：不算成功 / 跳过，记 outputFailed；�
   assert.equal(DT.state.outputFailed, 1, '同一段只算一次输出失败');
 });
 
-await t('切片的行内格式拼接后损坏：记 invalid-inline / renderFailed，不能当空译文跳过并 settled', async () => {
+await t('切片拼接后结构仍损坏（去掉全部 <fN> 也不合法）：记 invalid-inline / renderFailed，不能当空译文跳过并 settled', async () => {
   const hooks = { timers: [], listeners: {} };
   const env = await boot({ config: { lazy: true, skipSameLang: false, maxUnitChars: 1200 }, hooks });
   const DT = env.DT;
   DT.generation = 1;
-  // 真实环境由 content/dom.js 提供 inlineInspect；这个测试只验证内容脚本在“拼接后校验失败”时的分类。
+  // 真实环境由 content/dom.js 提供 inlineInspect；这里的桩把任何缺 f1/f2 的拼合（包括去掉全部 <fN> 的普通降级）
+  // 都判为结构损坏，只验证内容脚本在「拼接后仍校验失败」时的分类。合法降级见下面 0.12.5 的用例。
   DT.inlineInspect = (unit, raw) => ({ ok: /<f1>/.test(raw) && /<f2>/.test(raw), reason: 'missing-marker', formatMissing: false });
   const filler = 'This is a long sentence with enough words to force multiple translation slices. '.repeat(24);
   const wire = 'Start <f1>alpha</f1> ' + filler + ' End <f2>beta</f2>.';
@@ -1468,6 +1469,59 @@ await t('模型链接聚簇与安全引用降级：成功但明确质量警告�
     assert.equal(status.safeDegraded, code === 'safe-degraded' ? 1 : 0);
     assert.ok(messages.some((message) => message.includes('需要核对')));
   }
+});
+
+console.log('\n[0.12.5 请求成本与切片降级]');
+
+await t('屏外交错的格式段 / 普通段按可见度档位凑批，不退化成每段一个请求', async () => {
+  const env = await boot({ config: { lazy: false, skipSameLang: false, concurrency: 1, batchSize: 8, maxCharsPerBatch: 2000 } });
+  const units = Array.from({ length: 12 }, (_, index) => {
+    const text = 'Paragraph number ' + index + ' has some words.';
+    const el = contextElement('p', text);
+    // 都在屏幕下方、彼此相隔 60px：prio 各不相同，但属于同一档位
+    const top = 2000 + index * 60;
+    el.getBoundingClientRect = () => ({ width: 300, height: 40, top, bottom: top + 40 });
+    return { el, text, index, wire: index % 2 ? text : '<f1>Paragraph</f1> number ' + index + ' has some words.',
+      inlineProtocol: index % 2 ? '' : 'v1', style: 'plain', sentences: [] };
+  });
+  const asked = [];
+  env.DT.collectAll = () => units;
+  env.DT.sourceChanged = () => false;
+  env.DT.inject = () => true;
+  env.DT.send = async (msg) => {
+    if (msg.type !== 'translate') return { ok: true };
+    asked.push(msg);
+    return { ok: true, results: msg.texts.map((text) => '译：' + text) };
+  };
+  await env.message({ type: 'dt:toggle' });
+  assert.equal(asked.length, 2, JSON.stringify(asked.map((m) => m.texts.length)));
+  assert.ok(asked.every((m) => m.texts.every((x) => /<f1>/.test(x) === !!m.inlineProtocol)), '协议仍不混批');
+});
+
+await t('长段落一片按协议省略全部 <fN>、另一片保留：整段按普通译文降级显示，不判失败', async () => {
+  const env = await boot({ config: { lazy: false, skipSameLang: false, concurrency: 1, maxUnitChars: 200 } });
+  const { inspectInline } = await import('../lib/inline.js');
+  env.DT.inlineInspect = (u, raw) => (u.inlineProtocol === 'v1' ? inspectInline(u.wire, raw) : { ok: true });
+  const s1 = 'The <f1>first</f1> part of this long paragraph explains the background in plenty of words for the reader to follow along.';
+  const s2 = 'The <f2>second</f2> part of this long paragraph continues with additional explanation that keeps going on for a while.';
+  const wire = s1 + ' ' + s2;
+  const text = wire.replace(/<\/?f\d>/g, '');
+  const unit = { el: contextElement('p', text), text, wire, inlineProtocol: 'v1', index: 0, sentences: [], style: 'plain' };
+  const asked = [];
+  const injected = [];
+  env.DT.collectAll = (accept) => [unit].filter(accept);
+  env.DT.sourceChanged = () => false;
+  env.DT.inject = (u, raw) => { injected.push(raw); return true; };
+  env.DT.send = async (msg) => {
+    if (msg.type !== 'translate') return { ok: true };
+    asked.push(...msg.texts);
+    return { ok: true, results: msg.texts.map((x) => (x.includes('<f1>') ? '这段长段落的第一部分用大量文字解释了背景。' : '这段长段落的<f2>第二</f2>部分继续补充说明。')), inlineErrors: msg.texts.map(() => null) };
+  };
+  await env.message({ type: 'dt:toggle' });
+  assert.ok(asked.length >= 2, '需要至少两个切片');
+  assert.equal(injected.length, 1);
+  assert.ok(!/<\/?f\d>/.test(injected[0]), '降级后不带任何 <fN>：' + injected[0]);
+  assert.equal(env.DT.state.renderFailed || 0, 0);
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
