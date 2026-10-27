@@ -213,6 +213,7 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
   模型合并 / 拆分行时依次填写，多出的并进最后一行，多余的行清空并折叠它自己的换行；`aligned` 记录是否逐行对应。
 - **只改本段落的行**：段落之间的空行是别人的锚点，绝不折叠。
 - 混合行内内容（文献引用、图表链接、普通链接、提及、notranslate、Ruby 夹在正文里）：原子原地不动，原子外的文字清空后，译文作为新文本节点插在原子之间、永远不进链接（`injectMixed`：正文原子须保持模型顺序，仅文献引用允许受限同句兼容定位，`<br>` 与 pre-wrap 的 `\n` 分行逐行对齐）；Ruby 整体当原子，中文不写进 rt/rp；结构不支持或行数对不上时保持原文并写明注入结果，仅译文不降级双语。见 [HANDOFF §5.2.1](../HANDOFF.md) 的「文献引用」与「注入结果分类」。
+- 包装壳里的原子（`<i><a>`、`<strong><a>`、`<em>…<sup>[1]</sup></em>`、`<code><a>`、`<small><a>`）：`styleSafeSlot(unit, slot, side)` 按槽位在原子前 / 后逐层判断能否逃到壳外。强边界（字重 / 斜体 / 本地格式壳 / 行内代码与等宽字体）：槽位到壳边缘之间只剩会被清空的源文字就逃到壳的这一侧，正文写在壳前 / 壳后，不染上强调或等宽，链接也不会被甩到句末。弱边界（其它字号、字体、上下标、装饰线、底色）：只有这一侧壳里除了原子没有别的文字才逃出，`<small>ordinary small text <a/> …</small>` 这类自带小字正文的壳保持原样。逃不出的一层（壳里原子两侧都还有原子，如 `<em><a/> and <a/></em>`）停在原处，这段正文本来就在壳里。包含原子的包装壳本身不进 `<fN>`；被强边界清空的壳内源文字随正文写到壳外。
 - 普通行内链接：内容区域里只要普通文字和链接混排，链接就作为原子，中文正文写在链接外；整段链接 / 导航 / 按钮保持原行为。可可靠读取和写入可见文字的链接通过 v1 翻译标签（含可验证的span/sup包装），不可验证时保守失败，图表 / 补充材料可靠标签仍本地化。`@username` 提及链接作为保留区，用户名链接保持原样。
 - **稳定正文 / 无双语回退**：仅译文下 `hasUnsafeInlineLink` 不再设置 `linkFallback='dual'`；无法安全重建时保持原文并报 `unsafe-structure`。`[8]` / `［9］` 等本地数字引用链接、上标数字链接和参考文献目标数字链接进入 `keep`，普通 “section 1” 数字锚点不误判。
 - **上下文防抖**：医学文档快照从 `DT.replacedOf(el).src` 读原文，只有网站自身的标题 / 章节 mutation 才 `contextChanged`；own 译文、方向壳和移动的原文本不触发补扫 / startOver。`DT.debugStats` 记录 startOver / restore / contextChanged / incremental / injectDual / linkFallback 计数，便于本地复现，不输出正文。
@@ -243,6 +244,9 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 - `lib/inline-protocol.js` 是唯一实现，classic 内容脚本与 `lib/inline.js` ESM wrapper 共用；`inspect(source,target)` 校验唯一性、配对、父子关系、原子字节和虚构 HTML，返回 `stripped/ranges/atoms`。兄弟格式允许随目标语序重排，不能跨嵌套或凭长度猜对应。
 - 所有 f 均缺失而 k 仍可信时只显示普通译文，不强贴强调，也不缓存；部分缺失、错误嵌套、虚构标记或原子内容改变则拒绝。源文本含保留标记字面量时关闭新格式映射；若同时有 protect，固定本地失败且零请求。
 - `translate` 消息仅 opt-in 单元带 `inlineProtocol:'v1'`，不与普通单元混批；同可见优先级内补齐兼容小批，避免交错格式把每段变成一次请求。`splitLong(text,max,inlineProtocol)` 只在 opt-in 时识别 f，k 与嵌套格式/原子内换行都不可拆。后台提示词身份增加 `:inline-v1`，保留既有端点、模型、目标语言、术语和专业 scope；不清空用户全部缓存。
+- 编造标记检查（`markupCounts`）只统计名字是真实 HTML 元素、或像协议碎片（k / f 后接空、数字或大写）的 `<名字` / `＜名字` / `&lt;名字`，key 只到名字为止：正文里的 `a < b`、`i<n`、`＜お知らせ＞ → <Notice>` 不再被判 markup-leak。
+- 空回包 / 失控长文守卫（后台新回包、复核前、缓存命中三处）两侧都用可见正文：原文 `inlineStripped`，译文 `inspect(原文, 译文).stripped`；不能拿去掉原子的原文去比带全部 `<kN><fM>` 的译文。
+- 隐私脱敏对 inline-v1 文本按去掉 `<kN>/<fN>` 的可见文字识别（`maskText(..., { inlineMarkers: true })`），命中区间按标记边界切段、各自换占位符，标记一个字节不动。
 - 用户术语、术语说明、医学词和缓存指纹按共享解析器去标记的可见文字匹配；跨 f 边界不能漏词，空保护原子不从本地原文恢复。专业上下文的缩写采用同样的可见文字。
 - 后台验证缓存、新响应及严格复核候选；坏缓存定向移除，新坏结果不缓存、不追加结构重试。`inlineErrors[i]` 回到调度后计 renderFailed，清掉同段尚未发出的切片，未变更段落不再请求。已经发出的并发切片仍受既有代际取消边界限制。
 - DOM 再次预检后才写入；`injectMixed` 在既有 gap 中构建语义壳，原链接仅事务改标签 Text，原子不移动。失败回滚新增事务、注册和渲染记录；活跃注入期间暂停压缩以维持 checkpoint。纯 Ruby 继续独立译文容器，不把译文写进 rt/rp。
@@ -255,7 +259,7 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
 协议有效性与 DOM 可实现性分层：inline-v1 允许目标语言重排，不因当前渲染器的能力限制修改协议、清缓存或拒绝服务商响应。仅译文及控件强制替换统一进入 `injectMixed`，不能走旧 `keepPlacement` 的正文句末吸附或暗中改双语。
 
 - `keepMarks.order` 与 `inlineResult.atoms` 保留实际 token 顺序；仅比较去原子后的偏移不够，交换两个相邻链接时它们偏移可完全相同。双语 `fillCited` 同偏移也按目标 token 序排序。
-- 0.12.3 起，同一父元素下连续的一段普通正文链接可按模型目标 token 顺序，用 RenderTransaction 的 move 操作移动原 A 节点；不克隆、不重建 href/title/id/事件，不移动引用 / xref / mention / protect / control / ruby。链接嵌套在 span/strong、与引用交错、跨行、contenteditable 或已知框架根时继续安全失败。
+- 0.12.3 起，同一父元素下连续的一段普通正文链接可按模型目标 token 顺序，用 RenderTransaction 的 move 操作移动原 A 节点；不克隆、不重建 href/title/id/事件，不移动引用 / xref / mention / protect / control / ruby。链接嵌套在 span/strong、与引用交错、跨行、contenteditable 或已知框架根时，**需要重排**的段落继续安全失败；不需要重排的包装链接按 §3.3 原地渲染。链接区后面没有非链接原子时，以源里最后一个链接原来的下一个兄弟为插入锚点，不追加到父级末尾（共享 `<br><br>` 容器的末尾在后续段落之后）。
 - 除上述可重排普通链接外，xref / mention / protect / control / ruby 的逆序、无法确定落点或跨硬行均返回 `unsupported-inline-order`，原段落保留；不将它们当引用编号。正常同序相邻原子和正常引用共址可注入。
 - 只有文献引用的同句兼容定位可安全降级，不跨句/硬行把引用归给另一条陈述；返回 `safe-degraded`、保留 true 返回值并附 placement warning。普通成功仍是 `success`。
 - 源中分散的多个正文链接被模型连续放在句末时，不猜测模型语言意图、不改变输出，只附 `suspicious-inline-placement` 质量提示。正常相邻链接与引用共址不因位置相同被拒绝。
