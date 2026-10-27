@@ -84,6 +84,7 @@
         if (options.hrefOrder) check(name + ':href-order-at-equal-offset', Array.prototype.map.call(view.querySelectorAll('a'), function (a) { return a.getAttribute('href'); }).join('|') === options.hrefOrder.join('|'), view.outerHTML);
         if (options.warning) check(name + ':explicit-placement-warning', !!warning && warning.code === options.warning, JSON.stringify(warning));
         if (options.noWarning) check(name + ':normal-adjacency-no-warning', !warning, JSON.stringify(warning));
+        if (options.inspect) check(name + ':structure', options.inspect(p, links), p.outerHTML);
       }
       check(name + ':original-link-identity', links.every(function (a) { return a.isConnected && p.contains(a); }));
       check(name + ':original-link-attributes', links.every(function (a, i) { return a.outerHTML.replace(/>[\s\S]*<\/a>$/, '>') === attrs[i]; }));
@@ -148,6 +149,60 @@
       var rtlDirect = 'الدراسة تشرح <a href="/first">النتيجة الأولى</a> و<a href="/second">النتيجة الثانية</a> مع معلومات كافية.';
       record('rtl:direct-swap', rtlDirect, function (u) { return '这项研究说明' + atom(u, 1, '第二结果') + '与' + atom(u, 0, '第一结果') + '并给出充分信息。'; }, { dir: 'rtl', reorder: true });
       record('rtl-ltr:mixed-direction', 'The LTR explanation contains <span dir="rtl"><a href="/arabic">الدليل</a></span> and <a href="/english">English evidence</a> before its final conclusion.', function (u) { return '从左到右的说明包含' + atom(u, 0, '阿文指南') + '与' + atom(u, 1, '英文证据') + '然后得出最终结论。'; }, { noWarning: true });
+      // 0.12.4：链接 / 引用被 <i>/<strong>/<em> 包住时，仅译文必须原地渲染，不能整段失败，
+      // 也不能把正文全部写到包装壳前面、把链接甩到句末（0.12.0–0.12.2 的静默错位）。
+      var iconSrc = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+      function wrapperOf(p, tag) { return p.querySelector(tag + ':not([data-dt-format])'); }
+      record('wrapped:italic-link', 'The results were published in <i><a href="/nature">Nature</a></i> last year by the research team.', function (u) {
+        return '研究团队去年在' + atom(u, 0, '自然') + '上发表了这些结果。';
+      }, { noWarning: true, inspect: function (p, links) { var i = wrapperOf(p, 'i'); return !!i && i.contains(links[0]) && i.textContent === '自然'; } });
+      record('wrapped:strong-link', 'Please <strong><a href="/doc">read the documentation</a></strong> before you continue with the remaining instructions.', function (u) {
+        return '继续执行其余步骤之前，请' + atom(u, 0, '阅读文档') + '。';
+      }, { noWarning: true, inspect: function (p, links) { var b = wrapperOf(p, 'strong'); return !!b && b.contains(links[0]) && b.textContent === '阅读文档'; } });
+      record('wrapped:wiki-italic-title', 'The novel <i><a href="/wiki/War_and_Peace">War and Peace</a></i> was written by <a href="/wiki/Leo_Tolstoy">Leo Tolstoy</a> and published in 1869.', function (u) {
+        return '小说' + atom(u, 0, '战争与和平') + '由' + atom(u, 1, '列夫·托尔斯泰') + '创作，于1869年出版。';
+      }, { noWarning: true, inspect: function (p, links) { var i = wrapperOf(p, 'i'); return !!i && i.contains(links[0]) && i.textContent === '战争与和平' && !i.contains(links[1]); } });
+      record('wrapped:two-links-in-em', 'See <em><a href="/a">the first article</a> and <a href="/b">the second article</a></em> for more details about this topic.', function (u) {
+        return '详情请参见' + atom(u, 0, '第一篇') + '和' + atom(u, 1, '第二篇') + '。';
+      }, { noWarning: true, inspect: function (p) { var em = wrapperOf(p, 'em'); return !!em && em.textContent === '第一篇和第二篇'; } });
+      record('wrapped:em-citation', 'The <em>strong effect<sup class="reference"><a href="#cite_note-1">[1]</a></sup></em> was confirmed in several independent trials last year.', function (u) {
+        return '这种强烈效应' + atom(u, 0) + '去年已在多项独立试验中得到证实。';
+      }, { noWarning: true, inspect: function (p) { var em = wrapperOf(p, 'em'); return !!em && em.textContent === '[1]'; } });
+      // 排版不同的包装（等宽 / 小字）里只有原子时，周围正文写在包装外，不能整段变等宽或小字。
+      record('wrapped:code-link', 'Call the <code><a href="/api/fetch">fetch</a></code> function before starting the translation request on this page.', function (u) {
+        return '在本页开始翻译请求之前，调用' + atom(u, 0, 'fetch') + '函数。';
+      }, { noWarning: true, inspect: function (p) { var code = wrapperOf(p, 'code'); return !!code && code.textContent === 'fetch'; } });
+      record('wrapped:small-link', 'The full dataset is listed in <small><a href="/data">the appendix</a></small> together with all the remaining tables.', function (u) {
+        return '完整数据集与其余所有表格一起列在' + atom(u, 0, '附录') + '中。';
+      }, { noWarning: true, inspect: function (p) { var small = wrapperOf(p, 'small'); return !!small && small.textContent === '附录'; } });
+      // 0.12.4：没有后缀原子的链接重排以最后一个链接原来的下一个兄弟为锚点，段尾的 <br> / 图标不动。
+      record('reorder:trailing-br', ordinary + '<br>', function (u) { return '文章比较' + atom(u, 1, '乙') + '与' + atom(u, 0, '甲') + '之后得出结论。'; }, {
+        reorder: true, inspect: function (p, links) { var br = p.querySelector('br'); return p.lastChild === br && links.every(function (a) { return a.compareDocumentPosition(br) & 4; }); }
+      });
+      record('reorder:trailing-icon', ordinary + ' <img alt="" width="8" height="8" src="' + iconSrc + '">', function (u) { return '文章比较' + atom(u, 1, '乙') + '与' + atom(u, 0, '甲') + '之后得出结论。'; }, {
+        reorder: true, inspect: function (p, links) { var img = p.querySelector('img'); return links.every(function (a) { return a.compareDocumentPosition(img) & 4; }); }
+      });
+      // 共享 <br><br> 容器：父级末尾在后面段落之后，重排不能把本段搬过去，下一段也不能因此变成 stale。
+      var shared = document.createElement('div');
+      shared.innerHTML = 'The first paragraph explains the background of this study in detail.<br><br>' + ordinary +
+        '<br><br>The third paragraph discusses something else entirely and then continues.';
+      box.appendChild(shared); DT.state.mode = 'translation'; DT.state.target = 'zh-CN';
+      var sharedBefore = shared.outerHTML, sharedNodes = nodes(shared), sharedUnits = DT.collect(shared);
+      var middle = sharedUnits.filter(function (u) { return /alpha/.test(u.text); })[0];
+      var third = sharedUnits.filter(function (u) { return /third paragraph/.test(u.text); })[0];
+      check('reorder-shared:three-units', sharedUnits.length === 3 && !!middle && !!third, sharedUnits.map(function (u) { return u.text; }).join(' | '));
+      if (middle && third) {
+        var middleOk = DT.inject(middle, '文章比较' + atom(middle, 1, '乙') + '与' + atom(middle, 0, '甲') + '之后得出结论。', 'zh-CN');
+        check('reorder-shared:middle-reordered', middleOk && !!middle.inlineReordered, JSON.stringify(middle.injectResult));
+        var sharedParts = shared.innerHTML.split('<br><br>');
+        check('reorder-shared:stays-between-its-separators', sharedParts.length === 3 && sharedParts[0].indexOf('first paragraph') >= 0 &&
+          sharedParts[1].indexOf('文章比较') >= 0 && sharedParts[1].indexOf('/beta') >= 0 && sharedParts[1].indexOf('/beta') < sharedParts[1].indexOf('/alpha') &&
+          sharedParts[2].indexOf('third paragraph') >= 0 && sharedParts[2].indexOf('文章') < 0, shared.innerHTML);
+        check('reorder-shared:next-paragraph-still-renders', DT.inject(third, '第三段讨论了完全不同的内容，然后继续展开。', 'zh-CN'), JSON.stringify(third.injectResult));
+      }
+      DT.restore();
+      check('reorder-shared:exact-restore', shared.outerHTML === sharedBefore && sameNodes(sharedNodes, shared), shared.outerHTML);
+      shared.remove();
       // A site can fill an existing empty element while the model request is pending.
       // Checking only snapshots of old Text nodes misses the newly added fact.
       var changed = document.createElement('p');

@@ -3102,18 +3102,90 @@
 
   // 仅译文：把译文放到正文排版上下文，而不是复用局部 <strong> / 粗体 span 里的第一个文本节点。
   // 返回 { parent, before }；不需要逃出时返回原 slot。
-  function styleSafeSlot(unit, slot) {
+  // 不带 side 的调用保持旧行为：一律放到最外层强调壳之前，之后由 atom-slot-order 的身份核对兜底。
+  // side（'before' / 'after'）是原子前 / 后的正文槽位，按包装层逐层判断能否逃到壳外：
+  // - 强边界（字重 / 斜体 / 格式壳 / 行内代码与等宽）：槽位到壳边缘之间只剩会被清空的源文字就逃到壳的这一侧，
+  //   <i><a>Nature</a></i> 前后的正文写在壳前、壳后，不会把链接甩到句末，也不会让正文染上强调或等宽；
+  // - 弱边界（其它字号 / 字体 / 上下标 / 装饰线 / 底色）：只有这一侧壳里除了原子没有别的文字才逃出，
+  //   <small>ordinary small text <a/> …</small> 这类本身带小字正文的壳保持原样；
+  // - 逃不出的那一层（壳里原子两侧都还有原子，或弱边界壳里有自己的文字）停在原处，正文本来就在壳里。
+  function styleSafeSlot(unit, slot, side) {
     if (!slot || !slot.parent) return slot;
+    side = side || slot.side;
+    // put() 会对已规划的槽位再调用一次；带上 side，留在包装壳里的槽位不会被第二次调用挪走。
+    if (side && slot.side !== side) slot = { parent: slot.parent, before: slot.before, side: side };
     if (slot.parent === unit.el) return slot;
     var base = inlineStyleSignature(unit.el);
-    var boundary = null;
     var cur = slot.parent;
+    if (side !== 'before' && side !== 'after') {
+      var boundary = null;
+      while (cur && cur !== unit.el && cur.nodeType === 1) {
+        if (strongBoundary(unit, cur, base, false)) boundary = cur;
+        cur = cur.parentNode;
+      }
+      if (!boundary || styleBoundaryIsWhole(unit, boundary) || !boundary.parentNode) return slot;
+      return { parent: boundary.parentNode, before: boundary };
+    }
+    var edge = side === 'after' ? 'end' : 'start';
+    var escaped = null;
     while (cur && cur !== unit.el && cur.nodeType === 1) {
-      if (styleDiffers(cur, base) || (unit.formats || []).some(function (f) { return f.kind !== 'link' && f.el === cur; })) boundary = cur;
+      var strong = strongBoundary(unit, cur, base, true);
+      var weak = !strong && typographyDiffers(cur, unit.el);
+      if (strong || weak) {
+        if (styleBoundaryIsWhole(unit, cur) || !slotAtEdge(unit, slot, cur, edge, weak)) break;
+        escaped = cur;
+      }
       cur = cur.parentNode;
     }
-    if (!boundary || styleBoundaryIsWhole(unit, boundary) || !boundary.parentNode) return slot;
-    return { parent: boundary.parentNode, before: boundary };
+    if (!escaped || !escaped.parentNode) return slot;
+    return { parent: escaped.parentNode, before: side === 'after' ? escaped.nextSibling : escaped, side: side };
+  }
+
+  // 强调边界：字重 / 斜体 / 粗体字体族、本地格式壳；原子槽位另外把行内代码和等宽字体当强边界，
+  // 否则 <code><a>fetch</a>()</code> 后面的整句正文都会落进 code 变成等宽。
+  function strongBoundary(unit, el, base, atomSlot) {
+    if (styleDiffers(el, base) || (unit.formats || []).some(function (f) { return f.kind !== 'link' && f.el === el; })) return true;
+    if (!atomSlot) return false;
+    if (INLINE_CODE_TAGS[tagOf(el)]) return true;
+    var cs = styleOf(el);
+    var bs = styleOf(unit.el);
+    return !!cs && !!bs && cs.fontFamily !== bs.fontFamily && /mono|courier|consolas|menlo/i.test(cs.fontFamily);
+  }
+
+  // 弱边界：字号、字体族、上下标、装饰线、底色与段落不同的包装（<small>、上下标、下划线、高亮等）。
+  function typographyDiffers(el, baseEl) {
+    var a = styleOf(el);
+    var b = styleOf(baseEl);
+    if (!a || !b) return false;
+    return a.fontSize !== b.fontSize || a.fontFamily !== b.fontFamily || a.verticalAlign !== 'baseline' ||
+      a.textDecorationLine !== b.textDecorationLine || (a.backgroundColor !== b.backgroundColor && a.backgroundColor !== 'rgba(0, 0, 0, 0)');
+  }
+
+  // 节点在仅译文写入时只剩会被清空的源文字（文本 / 注释 / 只含文字的元素），不是原子、图片、换行或控件。
+  // blankOnly：连源文字也不能有，只允许空白（弱边界壳只在「这一侧只有原子」时才逃出）。
+  function clearableNode(unit, node, blankOnly) {
+    if (node.nodeType === 8) return true;
+    if (node.nodeType === 3) return !blankOnly || !/\S/.test(node.nodeValue);
+    if (node.nodeType !== 1) return false;
+    if (keepIndexOf(unit, node) >= 0 || (unit.keep || []).some(function (k) { return node.contains(k.el); })) return false;
+    if (NON_TEXT_TAGS[tagOf(node)] || /^(BR|WBR|IMG|PICTURE|INPUT|BUTTON|HR)$/.test(tagOf(node))) return false;
+    for (var c = node.firstChild; c; c = c.nextSibling) if (!clearableNode(unit, c, blankOnly)) return false;
+    return true;
+  }
+
+  // 槽位到 boundary 的开头（start）/ 结尾（end）之间是否只有会被清空的源文字（blankOnly 时只允许空白）。
+  function slotAtEdge(unit, slot, boundary, edge, blankOnly) {
+    var parent = slot.parent;
+    var node = edge === 'end' ? slot.before : (slot.before ? slot.before.previousSibling : parent.lastChild);
+    while (parent) {
+      for (var n = node; n; n = edge === 'end' ? n.nextSibling : n.previousSibling) {
+        if (!clearableNode(unit, n, blankOnly)) return false;
+      }
+      if (parent === boundary) return true;
+      node = edge === 'end' ? parent.nextSibling : parent.previousSibling;
+      parent = parent.parentNode;
+    }
+    return false;
   }
 
   // 可选诊断：记录译文写入前的局部样式、祖先链和 DOM 结构；不参与渲染。
@@ -3335,7 +3407,8 @@
       if (el.isContentEditable) return null;
       if (el.querySelector && el.querySelector('a,button,input,textarea,select,[contenteditable]')) return null;
     }
-    // 链接块后面第一个非链接原子是稳定边界；没有后缀时追加到父级末尾。
+    // 链接块后面第一个非链接原子是稳定边界。没有后缀原子时，以源里最后一个链接原来的下一个兄弟为边界，
+    // 不能追加到父级末尾：共享 <br><br> 容器的末尾在后面段落之后，整段 <p> 末尾的 <br> / 图标也会被挪到链接前面。
     var boundary = null;
     for (i = 0; i < nonlinks.length; i += 1) {
       if (nonlinks[i] > linkLast) {
@@ -3344,6 +3417,7 @@
         break;
       }
     }
+    if (!boundary) boundary = keep[linkLast].el.nextSibling;
     if (boundary && boundary.parentNode !== unit.el) return null;
     var same = true;
     for (i = 0; i < links.length; i += 1) if (links[i] !== targetLinks[i]) { same = false; break; }
@@ -3654,8 +3728,8 @@
     }
     seq.forEach(function (item) {
       if (!item.nl) {
-        item.beforeSlot = styleSafeSlot(unit, safeSlot(unit, item.node, false, item.cite, slotMemo));
-        item.afterSlot = styleSafeSlot(unit, safeSlot(unit, item.node, true, item.cite, slotMemo));
+        item.beforeSlot = styleSafeSlot(unit, safeSlot(unit, item.node, false, item.cite, slotMemo), 'before');
+        item.afterSlot = styleSafeSlot(unit, safeSlot(unit, item.node, true, item.cite, slotMemo), 'after');
         previousConnected = item;
         return;
       }
