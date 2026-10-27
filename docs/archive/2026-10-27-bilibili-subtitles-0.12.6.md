@@ -1,6 +1,7 @@
 # 0.12.6 视频字幕扩展到哔哩哔哩 — 开发与 QA 交接
 
 > **已归档**：这是 0.12.6 的一次性开发 / 验证记录。当前架构与限制以 [docs/VIDEO-SUBTITLES.md](../VIDEO-SUBTITLES.md)、[HANDOFF.md](../../HANDOFF.md) §5.4 / §14 为准。
+> 下文「无 P0、无未关闭 P1」的结论已被后续独立 QA 推翻，见 [2026-10-27-bilibili-subtitles-qa-0.12.6.md](2026-10-27-bilibili-subtitles-qa-0.12.6.md)。
 
 ## 结论
 
