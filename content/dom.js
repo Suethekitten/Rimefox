@@ -564,7 +564,9 @@
       }
       return !!(looksLikeReferenceTarget(target) || /(ref|bib|cite|fn|note|reference)/i.test(href));
     }
-    if (el.closest && el.closest('sup,sub')) return false;
+    // 上标 / 下标里的符号、单字母脚注（†、a）不当正文链接；带词语的链接（维基 [citation needed]）是普通链接原子。
+    // 否则它既不是原子也不受保护：仅译文把标签写进新建的非链接上标壳，原链接被清空、点不到。
+    if (el.closest && el.closest('sup,sub') && !/\p{L}{2,}/u.test(text)) return false;
     // 链接里嵌 notranslate 时由 notranslate 保护，不能再把整条链接当普通原子。
     if (el.querySelector && el.querySelector(KEEP_SELECTOR)) return false;
     return true;
@@ -827,7 +829,12 @@
   }
 
   // 只复制有限的语义差异。原网页属性、类名、字体族和 HTML 不进入模型或新格式壳。
-  var FORMAT_TAGS = { STRONG: 1, B: 1, EM: 1, I: 1, SPAN: 1, SMALL: 1, SUP: 1, SUB: 1, CODE: 1 };
+  var FORMAT_TAGS = { STRONG: 1, B: 1, EM: 1, I: 1, SPAN: 1, SMALL: 1, SUP: 1, SUB: 1, CODE: 1,
+    U: 1, S: 1, STRIKE: 1, DEL: 1, INS: 1, MARK: 1, Q: 1, KBD: 1, SAMP: 1, VAR: 1, ABBR: 1, CITE: 1, DFN: 1 };
+  // 语义标签本身就是格式（删除线、高亮、引号、按键……），即使计算样式和父级一样也要保留；
+  // 格式壳用同名标签重建，浏览器默认样式和站点按标签写的 CSS（kbd 边框、mark 底色、q 的引号）照常生效。
+  var SEMANTIC_FORMAT_TAGS = { U: 1, S: 1, STRIKE: 1, DEL: 1, INS: 1, MARK: 1, Q: 1, KBD: 1, SAMP: 1, VAR: 1, ABBR: 1, CITE: 1, DFN: 1 };
+  var SHELL_TAGS = /^(strong|b|em|i|small|sup|sub|code|u|s|del|ins|mark|q|kbd|samp|var|abbr|cite|dfn)$/;
   function formatStyle(el) {
     var tag = tagOf(el);
     if (!FORMAT_TAGS[tag]) return null;
@@ -853,6 +860,11 @@
     if (tag === 'CODE') out.code = true;
     // 某些局部加粗仅由专有字体名表达；传递语义，不传递不兼容字体。
     if (!out.weight && cs.fontFamily !== base.fontFamily && /bold|black|heavy|semibold|demi/i.test(cs.fontFamily)) out.weight = '700';
+    // 颜色、底色、装饰线（警示红字、高亮 span、下划线 / 删除线 span）：只记录与父级不同的计算值。
+    if (cs.color !== base.color) out.color = cs.color;
+    if (cs.backgroundColor !== base.backgroundColor && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor)) out.background = cs.backgroundColor;
+    if (cs.textDecorationLine && cs.textDecorationLine !== 'none' && cs.textDecorationLine !== base.textDecorationLine) out.decoration = cs.textDecorationLine;
+    if (SEMANTIC_FORMAT_TAGS[tag]) out.semantic = tag.toLowerCase();
     return Object.keys(out).length ? out : null;
   }
 
@@ -2973,7 +2985,10 @@
       if (!el || el.nodeType !== 1 || !el.isConnected) return;
       if (format.kind === 'link') return;
       if (keepIndexOf(unit, el) >= 0) return;
-      if (el.children && el.children.length) return;
+      // 只剩已清空的子格式（<strong>very <em>truly</em> important</strong>）也要藏：外层的底色 / 内边距会留下空药丸。
+      // 里面还有图片、控件、链接或保留原子时不藏。
+      if (el.querySelector && el.querySelector(KEEP_SOLID + ',br,wbr')) return;
+      if ((unit.keep || []).some(function (k) { return el.contains(k.el); })) return;
       if (String(el.textContent || '').replace(/\s+/g, '')) return;
       setStyle(el, 'display', 'none', ops);
     });
@@ -3957,7 +3972,7 @@
       var target = parent;
       active.forEach(function (r) {
         var f = formats[r.id - 1];
-        var tag = /^(strong|b|em|i|small|sup|sub|code)$/.test(f.tag) ? f.tag : 'span';
+        var tag = SHELL_TAGS.test(f.tag) ? f.tag : 'span';
         var span = document.createElement(tag);
         span.setAttribute('data-dt-format', unit.id);
         var st = f.style || {};
@@ -3967,6 +3982,10 @@
         if (st.size) span.style.setProperty('font-size', st.size, 'important');
         if (st.vertical) span.style.setProperty('vertical-align', st.vertical, 'important');
         if (st.code) span.style.setProperty('font-family', 'monospace', 'important');
+        if (st.decoration) span.style.setProperty('text-decoration-line', st.decoration, 'important');
+        if (st.background) span.style.setProperty('background-color', st.background, 'important');
+        // 颜色不加 important：夜间模式 / 站点主题仍可覆盖。
+        if (st.color) span.style.setProperty('color', st.color);
         target.appendChild(span);
         nodeUnit.set(span, unit);
         target = span;

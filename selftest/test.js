@@ -2841,8 +2841,13 @@
         if (!u) return sel + ':没收到';
         return (u.keep || []).length + (/<k\d+>/.test(u.wire || '') ? ':wire' : '');
       });
-      var r = eq(neg, ['0', '0', '0', '1:wire', '0']);
+      // #neg-link / #neg-word 是普通链接原子（不是引用）。0.12.5 起上标里带词语的链接（[citation needed]）
+      // 也当普通链接原子，否则它既不受保护也不是原子，仅译文会清空原链接。
+      var r = eq(neg, ['0', '0', '0', '1:wire', '1:wire']);
       if (r !== true) return '误判：' + r;
+      var word = DT.collect(box.querySelector('#neg-word'))[0];
+      r = eq((word.keep || []).map(function (k) { return k.kind; }), ['link']);
+      if (r !== true) return '[citation needed] 应是普通链接而不是引用：' + r;
       var pos = ['#pos-wiki', '#pos-md'].map(function (sel) {
         var u = DT.collect(box.querySelector(sel))[0];
         return u ? (u.keep || []).map(function (k) { return k.text + (k.cite ? '*' : ''); }).join(',') : sel + ':没收到';

@@ -175,6 +175,36 @@
       record('wrapped:small-link', 'The full dataset is listed in <small><a href="/data">the appendix</a></small> together with all the remaining tables.', function (u) {
         return '完整数据集与其余所有表格一起列在' + atom(u, 0, '附录') + '中。';
       }, { noWarning: true, inspect: function (p) { var small = wrapperOf(p, 'small'); return !!small && small.textContent === '附录'; } });
+      // 0.12.5：删除线 / 高亮 / 引号 / 按键 / 下划线 / 颜色是格式，用同名标签的格式壳随译文保留；
+      // 原元素清空后隐藏，不留孤立引号、空按键框或空药丸。
+      function fx(u, n, label) { var id = (u.wire.match(/<f(\d+)>/g) || [])[n].slice(2, -1); return '<f' + id + '>' + label + '</f' + id + '>'; }
+      function shell(p, tag) { return p.querySelector(tag + '[data-dt-format]'); }
+      function hiddenOriginal(p, tag) { return Array.prototype.every.call(p.querySelectorAll(tag + ':not([data-dt-format])'), function (el) { return getComputedStyle(el).display === 'none'; }); }
+      record('semantic:del-mark-q', 'The price fell from <del>fifty dollars</del> to thirty, <mark>the deadline is Friday</mark>, and he said <q>science is thinking</q> in class today.', function (u) {
+        return '价格从' + fx(u, 0, '五十美元') + '降到三十，' + fx(u, 1, '截止日期是周五') + '，他在课上说' + fx(u, 2, '科学就是思考') + '。';
+      }, { noWarning: true, inspect: function (p) {
+        var del = shell(p, 'del'), mark = shell(p, 'mark'), q = shell(p, 'q');
+        return !!del && del.textContent === '五十美元' && getComputedStyle(del).textDecorationLine.indexOf('line-through') >= 0 &&
+          !!mark && mark.textContent === '截止日期是周五' && !!q && q.textContent === '科学就是思考' &&
+          hiddenOriginal(p, 'del') && hiddenOriginal(p, 'mark') && hiddenOriginal(p, 'q');
+      } });
+      record('semantic:kbd-u-color', 'Press <kbd>Ctrl</kbd> and <kbd>S</kbd> to save, ask <u>John Smith</u> first, and <span style="color:rgb(200, 0, 0)">never delete the folder</span> today.', function (u) {
+        return '按' + fx(u, 0, 'Ctrl') + '和' + fx(u, 1, 'S') + '保存，先问' + fx(u, 2, '约翰·史密斯') + '，今天' + fx(u, 3, '绝不要删除文件夹') + '。';
+      }, { noWarning: true, inspect: function (p) {
+        var keys = p.querySelectorAll('kbd[data-dt-format]'), u = shell(p, 'u'), red = shell(p, 'span');
+        return keys.length === 2 && keys[0].textContent === 'Ctrl' && keys[1].textContent === 'S' && hiddenOriginal(p, 'kbd') &&
+          !!u && u.textContent === '约翰·史密斯' && !!red && getComputedStyle(red).color === 'rgb(200, 0, 0)' && red.textContent === '绝不要删除文件夹';
+      } });
+      record('semantic:styled-outer-pill', 'A <strong style="background:#fc0;padding:0 6px">very <em>truly</em> important</strong> point about all of this here.', function (u) {
+        return '关于这一切的一个' + fx(u, 0, '非常' + fx(u, 1, '真正') + '重要') + '的观点。';
+      }, { noWarning: true, inspect: function (p) { return hiddenOriginal(p, 'strong') && hiddenOriginal(p, 'em'); } });
+      // 0.12.5：上标里带词语的链接（维基 [citation needed]）是普通链接原子：标签随译文翻译，原链接留在上标里、可点击。
+      record('sup-link:citation-needed', 'Some claim is made here.<sup class="reference"><a href="#cite_note-1">[1]</a></sup> Another claim<sup class="noprint"><i><a href="/wiki/Wikipedia:Citation_needed">citation needed</a></i></sup> follows here.', function (u) {
+        return '这里提出了某项说法。' + atom(u, 0) + '另一项说法' + atom(u, 1, '需要引用') + '随后给出。';
+      }, { noWarning: true, inspect: function (p, links) {
+        var a = links[1];
+        return a.textContent === '需要引用' && !!a.closest('sup') && a.getClientRects().length > 0;
+      } });
       // 0.12.4：没有后缀原子的链接重排以最后一个链接原来的下一个兄弟为锚点，段尾的 <br> / 图标不动。
       record('reorder:trailing-br', ordinary + '<br>', function (u) { return '文章比较' + atom(u, 1, '乙') + '与' + atom(u, 0, '甲') + '之后得出结论。'; }, {
         reorder: true, inspect: function (p, links) { var br = p.querySelector('br'); return p.lastChild === br && links.every(function (a) { return a.compareDocumentPosition(br) & 4; }); }
