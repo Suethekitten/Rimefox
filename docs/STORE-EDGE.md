@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Microsoft Edge 加载项商店上架材料
 
-最后更新：2026-10-25，对应 `main`（Rimefox 0.12.3）；商店线上 0.9.6，本次未更新；下一次商店更新用 0.12.3。
+最后更新：2026-10-27，对应 `main`（Rimefox 0.12.5）；商店线上 0.9.7；下一次商店更新用最新已发布版本（Edge 需 > 0.9.7）。
 
 > **分工**：提交状态、差哪几项、待办清单在 [STORE.md](STORE.md)（唯一主人）。
 > 本文只写 **Edge 与 Chrome 的差异**、Partner Center 的提交流程，以及只给 Edge 控制台用的粘贴文案（≥250 字符描述、search terms、notes for certification）。
@@ -9,7 +9,7 @@
 ## 结论
 
 - **代码不需要为 Edge 改**：MV3、无 `update_url`、无远程代码、无混淆，`lib/config.js` 已经区分 `edge://` 与 `chrome://`，`world: "MAIN"` 和 `minimum_chrome_version` 都是 Edge 支持的字段。
-- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线；0.9.7 随后提交，审核结果以 Partner Center 为准，本次未更新线上版本。
+- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线；0.9.7 已上线（2026-10-27 核实）。
 - Edge 注册**免费**（Chrome 收一次性 $5）；后续更新用 **Packages → 上传新包**，版本号必须比线上大。
 
 ## 商店标识
@@ -240,7 +240,7 @@ Notes:
 | 截图（中文行） | 同上 | `docs/screenshots/store-0*.png` 5 张：中文界面 + 英文→中文，`node tools/screenshot-store.mjs --lang zh` 生成（0.9.6 界面） |
 | 小宣传图 | 440×280，可选 | 未做 |
 | 大宣传图 | 1400×560，可选 | 未做 |
-| 扩展包 | zip，manifest 在根 | 0.9.6 的包已上传并过审；下次更新重新 `node tools/package-store.mjs` 出包 |
+| 扩展包 | zip，manifest 在根 | 0.9.7 的包已上传并过审；下次更新重新 `node tools/package-store.mjs` 出包 |
 
 截图内容为真实扩展界面 + 本地测试接口返回的人工示例译文，未使用真实 Key；上传前自己再确认一遍没有泄露 Key、账号、私人页面。
 
@@ -278,7 +278,7 @@ Notes:
 提交状态见 [STORE.md](STORE.md)「当前状态」；Edge 这边只剩：
 
 1. 确认 0.9.7 的认证结果（以 Partner Center 为准）；被驳回就按报告改完重提，可能要求先升版本号。
-2. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大（当前线上 0.9.6，目标 0.12.3）。
+2. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大（当前线上 0.9.7，目标用最新已发布版本）。
 3. 可选：补 440×280 小宣传图、1400×560 大宣传图。
 
 ## 八、官方依据（2026-10-20 查询）

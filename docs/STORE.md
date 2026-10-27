@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-10-25，对应 `main`（Rimefox 0.12.3）；Chrome 商店线上 0.10.2，Edge 线上 0.9.6（本次未更新）。
+最后更新：2026-10-27，对应 `main`（Rimefox 0.12.5）；Chrome 商店线上 0.12.5，Edge 线上 0.9.7。
 
 > 本文只写**通用材料 + Chrome**；Edge 的差异与专属填写内容见 [STORE-EDGE.md](STORE-EDGE.md)。
 > 历史审计（0.8.5 的「差哪 5 项」）已归档到 [archive/STORE-READINESS.md](archive/STORE-READINESS.md)，不再是现状。
@@ -11,15 +11,15 @@
 |---|---|
 | 仓库 | 已公开：<https://github.com/Suethekitten/Rimefox>（最新 Release 见 Releases 页） |
 | 商店包 | `node tools/package-store.mjs` 产出 `dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录 |
-| 提交状态（Edge） | **0.9.6 已上线**（2026-10-20 提交）；本次未更新，0.9.7 的审核结果以 Partner Center 为准。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh> |
-| 提交状态（Chrome） | **0.10.2 已上线**（2026-10-25 核实；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
+| 提交状态（Edge） | **0.9.7 已上线**（2026-10-27 核实）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh> |
+| 提交状态（Chrome） | **0.12.5 已上线**（2026-10-27 核实；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
 | Chrome 更新负责人 | 协助者（商店提供方 APXS 的账号）；出包与商店文案交给他上传 |
 
-两个商店都已走通上架；**当前的问题是版本落后**：
+两个商店都已走通上架；**Chrome 已跟上最新 Release，Edge 仍落后**：
 
-- Chrome 线上是 **0.10.2**，落后于 `main` / GitHub Release 的 **0.12.3**；
-- Edge 线上是 **0.9.6**，本次未更新，同样落后；
-- 下一次更新：两边都用 **0.12.3** 商店包，版本号必须大于各自线上版本；Chrome 由协助者上传，Edge 按 Partner Center 流程提交。
+- Chrome 线上是 **0.12.5**，与 `main` / GitHub Release 一致；
+- Edge 线上是 **0.9.7**，落后于 0.12.5；
+- 下一次更新：两边都用最新已发布版本出的商店包，版本号必须大于各自线上版本（Chrome 需 > 0.12.5，Edge 需 > 0.9.7）；Chrome 由协助者上传，Edge 按 Partner Center 流程提交。
 
 ## Chrome 商店标识
 
@@ -28,7 +28,7 @@
 | 商店页 | <https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
 | 扩展 ID | `gbaoafaogljdolpkppocfaeldejampeo` |
 | 提供方 | APXS |
-| 线上版本 | 0.10.2（2026-10-25 核实） |
+| 线上版本 | 0.12.5（2026-10-27 核实） |
 
 > GitHub Release 的 zip 从 0.8.6 起与商店包用同一份白名单，但多一层 `Rimefox/` 文件夹、manifest.json 不在根目录，**不能**当商店包上传。
 
@@ -177,13 +177,13 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 事项 | 说明 |
 |---|---|
 | 开发者账号 | 已完成（Chrome）；后续保持 2FA |
-| 商店包上传 | Chrome 已更新至 0.10.2；下一次更新重新出 0.12.3 商店包，不要上传 GitHub Release 整仓包 |
-| 截图 / 宣传图 | 5 张已生成；下次更新时按 0.12.3 界面确认或重拍 |
+| 商店包上传 | Chrome 已更新至 0.12.5；下一次更新重新出最新已发布版本的商店包，不要上传 GitHub Release 整仓包 |
+| 截图 / 宣传图 | 5 张已生成；下次更新时按当时界面确认或重拍 |
 | 审核专用 API Key | 首次审核已通过；后续更新沿用同一个限额、可撤销的 Key |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
 | 支持入口 | 已可用：GitHub Issues 公开 |
 | 单一用途 / 权限说明 | 已填写；权限或数据流有改动时同步更新 |
-| 提交审核 | 已完成（Chrome 0.10.2）；后续更新走同样的上传 + 提交流程 |
+| 提交审核 | 已完成（Chrome 0.12.5）；后续更新走同样的上传 + 提交流程 |
 
 ## 风险与说明
 
@@ -193,7 +193,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | BYOK 无法直接测试 | 最高优先级：准备审核专用、限额、可撤销 Key，通过控制台私密说明交付 |
 | YouTube 非官方接口 | 明示非官方、默认关闭、仅 CC；验证当前可用性，避免品牌背书与「保证全部字幕可用」的承诺 |
 | 隐私政策与实际行为不一致 | 本次已按 0.8.5 代码核对；悬停对照开关、字幕稳定性、仅调试可见的用量统计都没有新增请求接收方或权限，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
-| 版本与仓库差异 | Chrome 线上 0.10.2、Edge 线上 0.9.6；GitHub Release 已到 0.12.3。以商店后台实际版本为准，下一次更新统一用 0.12.3 商店包 |
+| 版本与仓库差异 | Chrome 线上 0.12.5、Edge 线上 0.9.7；GitHub Release 已到 0.12.5。以商店后台实际版本为准，下一次更新统一用最新已发布版本的商店包 |
 
 ## 官方依据（2026-10-18 查询）
 

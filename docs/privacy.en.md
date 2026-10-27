@@ -1,12 +1,14 @@
 # Rimefox Privacy Policy
 
-Last updated: 2026-10-20. Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
+Last updated: 2026-10-27. Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
 
 ## Information sent for translation
 
 Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, text you translate in a webpage text box with the shortcut or context menu, and YouTube caption text when subtitle translation is enabled. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page. Content scripts also run in subframes, so text in embedded frames is transmitted under the same rules when translated.
 
 When the optional local masking feature is enabled, reliably detectable values (email addresses, phone numbers, ID card numbers and bank card numbers, optionally Chinese names in explicit contexts) are replaced with `__PII_<TYPE>_<n>__` placeholders before the request is sent; only the placeholder text is transmitted. See “Optional local masking” below.
+
+Paragraphs whose inline formatting must be preserved carry a few plain-text markers in the text sent (for example `<f1>`, `</f1>`, `<k1></k1>`). `<fN>` marks formatting positions; `<kN>` only marks where non-translated content sits, and that content itself is not sent.
 
 Requests also include the target language, translation instructions including your custom prompt, and matching glossary source terms and specified translations. When you use a custom target language, its name, optional language code and translation note are sent as language preferences. Your API key is sent to the configured endpoint in authentication headers. Connection tests send fixed sample sentences; model-list requests also authenticate to that endpoint. The provider receives normal network metadata such as your IP address. Do not translate sensitive content or put secrets into prompts unless you trust the configured endpoint.
 
@@ -22,6 +24,7 @@ Off by default. When enabled in Settings → Privacy, the extension masks sensit
 
 - The placeholder-to-value mapping exists only in memory for the duration of one translation request. It is never written to chrome.storage or the configuration, never exported, never logged, and never sent with any request.
 - No permission is added and no WASM, ONNX runtime or remote model is downloaded.
+- Paragraphs with inline formatting (bold, links and similar) are masked locally in the same way before sending.
 - If the model drops, rewrites or invents a placeholder, the affected segment is treated as a failed translation: the page keeps the source text and retries with the existing backoff, rather than displaying corrupted content or using source text as a translation.
 - Scope is limited to fixed-format data. Addresses, organizations, passwords, seed phrases and private keys are not masked. Chinese names are detected only in explicit contexts such as “Name:” or “I am …”, are off by default, and may still be missed or misidentified.
 - Translation caching is unchanged: short source/translation pairs may still be stored in the local disk cache under the existing rules; the mapping itself is never cached.

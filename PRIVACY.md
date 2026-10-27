@@ -1,6 +1,6 @@
 # 隐私说明
 
-最后更新：2026-10-20。
+最后更新：2026-10-27。
 
 > **English summary**: Rimefox has no author-operated server or telemetry. See the [full English privacy policy](docs/privacy.en.md). Page text you choose to translate is sent only to the API endpoint **you** configure (DeepSeek, OpenAI-compatible, Anthropic, Gemini…), under that provider's privacy policy. An optional, off-by-default local masking feature replaces reliably detectable sensitive values with placeholders before sending and restores them locally; the mapping never leaves the request. Your API key, settings and translation cache are stored locally; the key is also sent to your configured provider for authentication. No analytics, no telemetry, no third-party SDKs.
 
@@ -20,6 +20,8 @@
 | AI 精翻（默认关闭） | 在整页翻译请求中额外带上：当前文章标题、章节标题、本文明确给出的缩写定义、同一文章容器内相邻的有限正文片段（有长度和数量上限）。不发送整页全文、导航、评论、广告、隐藏内容或编辑器草稿 |
 | 测试连接 | 两句固定的英文测试句 |
 
+需要保留原文格式的段落会按行内格式协议发送：文本里夹少量纯文本标记（如 `<f1>`、`</f1>`、`<k1></k1>`）。`<fN>` 标记格式位置，`<kN>` 只标记「不翻译的内容」所在的位置，其中原文不随请求发送。
+
 请求还会带上目标语言、翻译提示词（包括你填写的自定义提示词）和本批文本命中的术语表原词与指定译法。使用自定义目标语言时，你填写的名称、可选语言代码和翻译说明也会作为语言偏好发送。请求还带 API Key（认证请求头，发给配置的接口）。获取模型列表和测试连接也会向配置的接口认证。
 
 YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默认关闭，但页面挂钩仍会加载。启用翻译后才向配置 API 发送待翻字幕。适用站点包括 www.youtube.com、m.youtube.com 和 www.youtube-nocookie.com；需要原文轨道时还可能请求同源 YouTube 字幕地址。
@@ -35,6 +37,8 @@ YouTube 页面脚本会在本地观察播放器加载的字幕；字幕翻译默
 1. 把能可靠识别的敏感信息（邮箱、电话号码、身份证号、银行卡号；可选中文姓名）替换成 `__PII_<类型>_<序号>__` 形式的占位符；
 2. 只把**带占位符的文本**发给上面说的接口；
 3. 译文返回后，在本机把占位符换回原文，再显示在页面上。
+
+带局部格式（加粗、链接等）的段落同样在本地先遮罩再发送。
 
 关于这份「占位符 → 原文」的映射：
 

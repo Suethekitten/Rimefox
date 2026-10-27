@@ -34,7 +34,7 @@
 1. 打开 `chrome://extensions/`（Edge：`edge://extensions/`）
 2. 开启开发者模式（Chrome：右上角「开发者模式」；Edge：左下角「开发人员模式」）
 3. 点「加载已解压的扩展程序」（Edge：「加载解压缩的扩展」），选中 `edge-bilingual/` 文件夹
-4. 首次安装会自动打开设置页
+4. 首次安装会自动打开欢迎页（新手引导），点「打开设置」继续；之后可从设置页侧栏或弹窗底部「指南」重新打开
 5. 填 API 地址（默认 `https://api.deepseek.com/v1`）、Key、模型名（默认 `deepseek-chat`）
 6. 点「保存」→「测试连接」
 7. 打开任意英文网页 → `Alt+A`（Mac：`Option+A`；或点工具栏图标 →「翻译此页」）
@@ -67,6 +67,9 @@ edge-bilingual/
 │   ├── inline-protocol.js  classic / ESM 共用的有限格式校验，inline.js 为 ESM 导出入口
 │   ├── prompt.js          翻译提示词（普通 / 趣味风格 / 结构化对齐共用目标语言约束），纯函数
 │   ├── lang-guard.js      目标语言保守校验：拉丁目标回中日韩、CJK 目标回整段英文（缓存定向失效用），纯函数
+│   ├── glossary.js        术语表纯函数：CSV 解析、清洗、命中、提示词片段、缓存指纹
+│   ├── glossary-sample.js 设置页「导入示例」用的术语数据（与 docs/glossary/starter.csv 同步）
+│   ├── i18n.js            设置页 / 弹窗的静态界面文案（中文 → English），不碰网页正文
 │   ├── cache.js           三层翻译缓存：内存 + storage.session+ storage.local（短文本，512 KB）
 │   ├── privacy.js         可选的本地脱敏 / 恢复（纯 JS，无依赖）：识别、占位符、fail-closed 恢复
 │   ├── usage.js           仅调试用的用量计数：HTTP、usage token、缓存、重试、拆批、失败、finish_reason
@@ -82,11 +85,14 @@ edge-bilingual/
 │   ├── units.js           翻译单元结构层（纯函数）：文本映射 / 段落 / 句子 / 对齐校验 / 签名
 │   ├── direction.js       目标 / 原始文字方向（BCP 47、dir、computed style、文字特征）；双语 / 仅译文方向元数据
 │   ├── dom.js             ★ 切分 + 注入 + 还原 + 诊断（核心，改动风险最高）；站点规则的只翻 / 跳过区域
+│   ├── shadow.js          开放 Shadow DOM：只收 open shadow root，交给 walk 收集，自建观察器与译文样式（0.10.2）
+│   ├── adapters/          站点适配器：目前只有 bilibili-comments.js（找评论正文、声明要收集的 root 与监听边界）
 │   ├── appearance.js      网页里的外观：强调色、译文排版、自定义 CSS、页面明暗、夜间模式写到 <html> 上
 │   ├── main.js            调度：开关、批处理、观察器、快捷键、看门狗；DT.control 给悬浮入口用
 │   ├── selection.js       划词：右键菜单 / 选区按钮 / 气泡（翻完可「置顶」、可「加入术语表」）
 │   ├── input.js           输入框翻译（0.9.0）：可编辑区域里按快捷键 / 右键菜单，翻完原地写回（可撤销）
 │   ├── subtitles-core.js  YouTube 字幕纯函数（解析 json3、拼句）；自检页与 YouTube 运行时共用
+│   ├── subtitles-source.js YouTube 字幕来源适配层：收 hook 消息、取原文轨道、replay，暴露 DT.subtitleSource
 │   ├── subtitles.js       YouTube 字幕运行时：懒翻译、叠层显示（只在 YouTube 加载）
 │   ├── youtube-hook.js    页面主环境（world: MAIN）：捕获播放器的字幕请求，转给 subtitles.js
 │   ├── hover.js           悬停对照：高亮同一处的原文和译文，替换型单元弹原文气泡
@@ -516,16 +522,31 @@ node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / �
 node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（含术语表）/ 删除自定义服务商 / 输入框目标语言
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数
 node test/parse.test.mjs       # 回包解析 parseArray / parseAlignedArray（结构化句子对齐）/ 换行规范化 / 写入前校验 / 思考过程兜底 / 输出长度护栏 / 单条拆句拼回
+node test/inline-protocol.test.mjs # 行内格式协议：INLINE_VERSION、标记解析 / 校验、形似标记与空标签拒绝
+node test/inline-pipeline.test.mjs # 行内协议 + 真实 router/provider（可控本地模型）：标记原样、切片、降级、缓存身份
+node test/output-acceptance.test.mjs # 模型回包验收：语言错误 / 空正文 / 行内标记损坏 / 正确译文与缓存
 node test/cache.test.mjs       # 三层缓存：落地恢复、字节预算、删除、清空、分段落盘与旧格式迁移
+node test/background-state.test.mjs # 真实 router / config / cache + 内存存储与假接口：后台状态与并发行为，不发付费请求
 node test/translate-pipeline.test.mjs  # 真实 background.js + 假 fetch：多转义换行、旧缓存修复、JSON 包装拦截、可修补格式不拆批、在途请求去重、术语改动、glossary:add、命中术语才注入提示词、输入框 noCache、align 对齐 / 旧缓存降级、目标语言（align / 普通 / 坏缓存定向失效 / 不写坏缓存）、文献引用不命中旧的压平缓存且旧条目不被清空
 node test/prompt.test.mjs      # 提示词：普通 vs 趣味风格、align 结构化输出、温度、保留分行规则、简繁转写、两种模式共用的唯一目标语言、保留标记（含文献引用编号）只在带标记的批次出现
 node test/lang-guard.test.mjs  # 目标语言保守校验：拉丁目标回中文 / CJK 目标回整段英文 / 正常混排 / 专名清单 / 短文本
+node test/language-context.test.mjs # 自定义目标语言 / 趣味强度 / AI 精翻上下文：纯函数与缓存身份回归
+node test/professional-engine.test.mjs # 专业 Registry 与引擎：通用 / 医学档案注册与策略选择
+node test/professional-validation.test.mjs # 本地校验规则：数字 / 单位 / 否定与因果，严格复核的触发条件
+node test/professional-config-storage.test.mjs # 专业字段的旧配置迁移、导入导出与旁路缓存保留
+node test/professional-pipeline.test.mjs # 真实后台 + 假付费服务：专业模式管线、缓存隔离与费用边界
+node test/medical.test.mjs     # 医学数据完整性 / 术语匹配 / 用户优先级 / 提示词 / 缓存键
+node test/medical-evaluation.test.mjs # 离线评测方法与构造输出（tools/evaluate-medical.mjs），不生成真实模型结论
 node test/provider.test.mjs    # 思考模式吃空 content：关思考重试、错误信息、记住服务端不认的思考参数
 node test/glossary.test.mjs    # 术语表：清洗 / CSV 往返 / 命中 / 提示词与指纹 / 按命中算的缓存指纹 / 一键收录 upsert
+node test/glossary-notes.test.mjs # 术语说明与例外：纯数据 / 提示词 / 缓存测试，不调用模型
+node test/glossary-notes-pipeline.test.mjs # 真实后台 + 存储 + provider（假模型）：说明与例外进提示词和缓存身份
 node test/i18n.test.mjs        # 界面中英文：静态文案 / 动态状态 / t() / 校验提示全覆盖
 node test/appearance.test.mjs  # 强调色、译文排版变量、自定义 CSS 清洗
 node test/site-rules.test.mjs  # 站点规则匹配 / 校验 / 合并、夜间名单、配置导入
 node test/welcome.test.mjs     # 首次安装判断 / 语言默认值 / 欢迎页资源、英文覆盖、权限与后台接线
+node test/privacy.test.mjs     # 本地脱敏 / 恢复纯函数：识别、占位符、fail-closed 恢复
+node test/privacy-pipeline.test.mjs # translate 路由集成：发出去的是占位符、回来已还原、映射不落盘、失败不出半截译文
 node test/subtitles-session.test.mjs # 字幕运行时 A–Q：语言/视频切换、异步轨道、播放器重建、CC/开关、广告
 node test/usage.test.mjs       # 三协议 usage 提取 + 统计聚合
 node test/usage-pipeline.test.mjs # 假 chrome/fetch：请求数、缓存、拆批、部分成功、usage 汇总
@@ -533,8 +554,11 @@ node test/hover-config.test.mjs # hover:set 严格布尔、重复写、无网络
 node test/content-main.test.mjs # 内容脚本调度：注入失败（模型已给译文、DOM 写不进去）不算跳过、页面没变不重发；自动翻译只在顶层页面、配置广播改模式 / 语言时整页重建、保留区送翻、注入被拒不再重发、长段落切片不切开保留区
 node test/sentence-align.test.mjs # 悬停对照的断句（缩写 / 脚注号 / 小写续接）与本地句子对齐：38 段人工语料每个句界都对
 node test/glass-dock.test.mjs # 液态玻璃：槽位几何 / 竖向槽位 / 橡皮筋 / 最近槽位 / 三通道滤镜
+node test/dock.test.mjs        # 悬浮入口位置纯函数 DT.dockPlace / DT.dockDefault：吸附 / 悬浮 / 夹回 / 窄屏 / 坏值
 node test/content-injection.test.mjs # 补注入清单与 manifest 完全一致（units / input / shadow / B 站适配器不漏、顺序不乱）
 node test/switch-geometry.test.mjs # 开关：设置页 / 弹窗共用一套几何变量，透镜尺寸 = 玻璃滤镜贴图尺寸，页面里没有第二份实现
+node test/ui-theme.test.mjs    # 扩展页面主题：options / popup 各自一份合并到 lib/ui-appearance.js 后行为一致
+node test/package-store.test.mjs # 打包白名单：商店包与 Release 包只收运行时文件，自检页与测试不进包
 ```
 > 每个文件的条数以 `node --test` 的输出为准，本文不维护数字。
 
@@ -633,6 +657,8 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `currentProvider` | `deepseek` | 当前服务商（内置模板 id，或 `__custom__` / `custom:N`） |
 | `providerConfig` | `{}` | 按服务商存的 `{engine, baseUrl, apiKey, model}`，**Key 不进内容脚本** |
 | `customProviders` | `[]` | 用户保存并命名的自定义服务商 `[{id, name}]` |
+| `temperature` | 0.2 | 采样温度，随请求发送；选了文言文 / 猫娘时由风格自带的温度覆盖（`prompt.js` 的 `temperatureFor`） |
+| `timeoutMs` | 60000 | 单次请求的「多久没收到数据」超时；另有 180s 总上限（见 §6 坑 18） |
 | `thinkingMode` | `off` | `auto` / `off` / `custom`，见接口层一节（0.5.1 前默认 `auto`） |
 | `thinkingExtra` | `''` | `custom` 时合并进请求体的 JSON 字符串 |
 | `targetLang` | `zh-CN` | 内置语言代码或 `customLanguages` 里的自定义语言 id |
@@ -670,6 +696,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `accentColor` | `violet` | 强调色：预设 id（`violet` / `blue` / `teal` / `green` / `amber` / `rose` / `slate`）或 `#rrggbb`；`violet` = 不改网页译文颜色 |
 | `reduceTransparency` | false | 设置页 / 弹窗：玻璃效果改实色 |
 | `disableShadow` | false | 设置页 / 弹窗：去掉投影 |
+| `liquidGlass` | true | 设置页左侧导航与弹窗底部工具坞的液态玻璃；关闭后回到普通样式 |
 | `typoFontScale` | 100 | 译文字号百分比（70–160，100 = 跟随原文） |
 | `typoLineHeight` | 0 | 译文行高（0 = 跟随原文，最大 3） |
 | `typoGap` | 3 | 段落译文与原文的间距（0.1em 为单位，0–20） |
@@ -682,6 +709,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `dockEnabled` | false | 网页悬浮入口 |
 | `dockSide` | `right` | 悬浮入口位置：`right` / `left` |
 | `dockAutoHide` | true | 悬浮入口收起时半藏；贴边吸附时只露出半个小球 |
+| `dockPos` | `null` | 拖拽后的位置 `{x, y}`；`null` = 按 `dockSide` 贴边 |
 | `customPrompt` | `''` | 追加到系统提示词末尾，进缓存指纹（改了旧译文失效） |
 | `professionalProfile` | `general` | 通用 / 医学专业策略；架构、质量与缓存规则见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
 | `professionalOptions` | 见配置默认值 | 质量等级、子领域与有限严格复核预算，见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
@@ -697,7 +725,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 > 这里只记**技术上的硬限制与坑**。用户能感觉到的「不支持什么」在 [docs/ROADMAP.md](docs/ROADMAP.md) §7 与 README「支持范围」。
 
 1. **仅译文模式下短中文会留下空白** —— 站点给容器写了固定高度，中文比英文短 40%，填不满。无通用解，只能按站点写规则或改用双语。
-2. **行内格式只做有限保真** —— `strong` / `em` / `code` / `small` / `sup` / `sub` 的局部语义可随译文对应；复杂链接、分行失配或无法可靠映射时保留原文。站点背景 / 边框不复制，已清空的原格式壳在事务内隐藏。段落里的 `button` / `label` / `summary` 文字是控件原子，仅译文下不能清空，否则会留下无标签按钮。
+2. **行内格式只做有限保真** —— `strong` / `em` / `code` / `small` / `sup` / `sub`，以及 0.12.5 起的 `u` / `s` / `del` / `ins` / `mark` / `q` / `kbd` / `samp` / `var` / `abbr` / `cite` / `dfn` 与局部颜色、底色、装饰线可随译文对应；复杂链接、分行失配或无法可靠映射时保留原文。站点背景 / 边框不复制，已清空的原格式壳在事务内隐藏。段落里的 `button` / `label` / `summary` 文字是控件原子，仅译文下不能清空，否则会留下无标签按钮。
 3. **`<br>` 分隔的长帖**：0.8.4 起译文保留分行（双语、仅译文都是），但双语仍是整段译文追加在段末，没做「一行原文一行译文」的逐行穿插对照。
 4. ~~没有图标~~（0.4.7 已加：`icons/`，源文件是 `icon.svg` / `icon-small.svg`，PNG 用无头 Chrome 渲染）
 5. **站点规则库还很小**：内置规则只有 GitHub 文件列表和 Wikipedia 语言列表两条，其余靠通用启发式和用户自己写的规则；重前端站点（SPA 框架、虚拟滚动）可能漏翻。
@@ -708,12 +736,12 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 10. **置顶小窗依赖浏览器能力**：Document Picture-in-Picture 需要 Chrome 116+；退回的 `window.open` 小窗不会置顶，网页设置了 COOP 等隔离或拦截弹窗时打不开（会提示）。
 11. ~~振假名会混进原文 / 仅译文残留假名~~（0.9.2 已在真实青空文库《罗生门》验证：29 段、双语逐段、仅译文 0 个可见 `rt`、关闭后逐字恢复；Pixiv 真实注音页仍只有 fixture）
 12. **Ruby 段落仅译文**：普通 Ruby 段落仍用独立译文容器（`injectRuby`）；Ruby 与引用 / 链接混排时把 `<ruby>` 整体当原子保留、周围正文重建，Ruby 基字本身不翻译，局部排版可能略有差异；竖排（縦書き）/ `writing-mode: vertical-*` 未验证
-13. **真实网站覆盖**：0.9.2 只对青空文库《罗生门》做了真实页面验收；Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，不能当成已验证
-13. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
-14. **目标语言校验是保守的定向失效**：覆盖「拉丁目标却整段回中日韩」和「中日韩目标却整段回拉丁」两种高置信度情况；短文本、专名 / 术语清单、合法中英混排不做自动失效；无标准代码的自定义语言没有可靠语言标签，仍可能漏判。坏结果仍显示一次但不写缓存，下次重新请求；旧缓存里的这类条目可能保留，重新翻译即可覆盖
-15. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式保留原文引用节点并重建文本节点；普通链接混合段落、注音 + 引用 / 链接、pre-wrap 文本里的硬换行都走混合行内渲染，原地翻成译文。仍不支持原地重建的：模型把分行合并 / 拆开后行数对不上、或结构确实无法安全重建（保持原文，注入结果写明原因，不退回双语）。混合段落里的普通链接默认保留原文字，只有图表 / 补充材料等可靠标签做本地化（任意链接文字翻译仍需链接级标记，见 ROADMAP P1-2）。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
-16. **0.12.0 独立 QA 的剩余低优先项**：模型自然语言前言、普通文本里的形似 `<fN>` / `<kN>`、截断输出提示、无链接纯数字上标、仅由 `font-family` 表达的局部差异尚未自动处理；当前分别按保留原文 / 保守失败处理，不引入高误杀启发式，也不因此追加付费请求。Chrome 156 的 E2E 仍可能需要 `--no-sandbox` 包装脚本，见 §7.1c。
-17. **阿拉伯语维基百科仍有部分段落无法翻译**（0.12.3）：0.12.4 修复的包装链接问题（§14）是已证实的一个原因：「ذكاء اصطناعي」条目离线回放中 2 段 `atom-slot-order` 失败在 0.12.4 归零。尚未在真实页面与真实模型下复核；若仍有段落不翻，请用 `dt:diagnose` 记录失败原因与段落结构。
+13. **真实网站覆盖**：青空文库《罗生门》和朝鲜日报正文（韩文→中文字体 A/B）有真实页面验收，证据在 `docs/verification/`；Science Advances 有 headed 真机检查（只验引用识别 / 注入 / 还原，不调真实模型）。Pixiv / GitHub / Aeon / OWID / YouTube 仍只过了本地 fixture 或旧版检查，B 站评论区未登录只覆盖首屏，都不能当成已验证；0.12 起的行内格式改动只用假模型与离线回放覆盖，真实模型与在线页面未复核（见 §14「限制」）
+14. **结构化句子对齐依赖模型遵守输出格式**：不遵守时自动降级为行 / 段落级（页面照常显示）；真实模型下的遵守率与译文质量尚未用 API Key 验证
+15. **目标语言校验是保守的定向失效**：覆盖「拉丁目标却整段回中日韩」和「中日韩目标却整段回拉丁」两种高置信度情况；短文本、专名 / 术语清单、合法中英混排不做自动失效；无标准代码的自定义语言没有可靠语言标签，仍可能漏判。坏结果仍显示一次但不写缓存，下次重新请求；旧缓存里的这类条目可能保留，重新翻译即可覆盖
+16. **文献引用已改为通用行内识别**：不再只认 `<sup>`；Science 的 `<a role="doc-biblioref"><i>1</i></a>`、citation span、无链接但带强提示的上标、`<a><sup>2</sup></a>` 均可识别；数学 / 图表 / 章节 / 站外数字链接有反例保护。仅译文模式保留原文引用节点并重建文本节点；普通链接混合段落、注音 + 引用 / 链接、pre-wrap 文本里的硬换行都走混合行内渲染，原地翻成译文。仍不支持原地重建的：模型把分行合并 / 拆开后行数对不上、或结构确实无法安全重建（保持原文，注入结果写明原因，不退回双语）。混合段落里的普通链接默认保留原文字，只有图表 / 补充材料等可靠标签做本地化（任意链接文字翻译仍需链接级标记，见 ROADMAP P1-2）。真实模型能否原样照抄 `<kN>` 标记、所有未知出版社结构仍只用假模型 / 夹具覆盖。
+17. **0.12.0 独立 QA 的剩余低优先项**：模型自然语言前言、普通文本里的形似 `<fN>` / `<kN>`、截断输出提示、无链接纯数字上标、仅由 `font-family` 表达的局部差异尚未自动处理；当前分别按保留原文 / 保守失败处理，不引入高误杀启发式，也不因此追加付费请求。Chrome 156 的 E2E 仍可能需要 `--no-sandbox` 包装脚本，见 §7.1c。
+18. **阿拉伯语维基百科仍有部分段落无法翻译**（0.12.3）：0.12.4 修复的包装链接问题（§14）是已证实的一个原因：「ذكاء اصطناعي」条目离线回放中 2 段 `atom-slot-order` 失败在 0.12.4 归零。尚未在真实页面与真实模型下复核；若仍有段落不翻，请用 `dt:diagnose` 记录失败原因与段落结构。
 
 ---
 
