@@ -447,7 +447,8 @@ async function handleTranslate(msg, sender) {
   let privacyRows = null;
   let privacyValues = null;
   if (cfg.privacyEnabled === true && todo.length) {
-    const masked = maskTexts(todo, optionsFromConfig(cfg));
+    // 行内协议文本按可见文字识别，标记原样保留（见 lib/privacy.js 的 inlineSpans）。
+    const masked = maskTexts(todo, { ...optionsFromConfig(cfg), inlineMarkers: inlineProtocol });
     privacyRows = new Map();
     privacyValues = masked.values;
     const usable = [];

@@ -254,5 +254,39 @@ t('脱敏文本发给“模型”，回包后按原文还原（含术语/自定�
   });
 });
 
+console.log('\n[行内格式标记]');
+
+// 0.12.4：行内协议文本按去掉 <kN>/<fN> 的可见文字识别，命中区间按标记边界切段替换，标记原样保留。
+t('标签后接加粗值：去掉标记后识别，标记不动', () => {
+  const plain = maskText('Your Account Number: 12345678901 is active.', ALL);
+  const marked = maskText('Your Account Number: <f1>12345678901</f1> is active.', { ...ALL, inlineMarkers: true });
+  assert.equal(plain.masked.indexOf('12345678901'), -1);
+  assert.equal(marked.masked.indexOf('12345678901'), -1);
+  assert.match(marked.masked, /^Your Account Number: <f1>__PII_[A-Z_]+_\d+__<\/f1> is active\.$/);
+});
+
+t('跨标记的邮箱 / 电话按标记切段，每段各自占位，还原后结构与原文一致', () => {
+  const ctx = createSession();
+  const source = 'Mail <f1>john.doe</f1>@example.com or call <f2>+1</f2> (415) 555-2671 now.';
+  const row = maskText(source, { ...ALL, inlineMarkers: true }, ctx);
+  ['john.doe', '@example.com', '(415) 555-2671'].forEach((secret) => assert.equal(row.masked.indexOf(secret), -1, secret));
+  assert.equal((row.masked.match(/<\/?f\d>/g) || []).join(''), '<f1></f1><f2></f2>');
+  const back = restoreText(row.masked, row.tokens, ctx.values);
+  assert.equal(back.ok, true);
+  assert.equal(back.text, source);
+});
+
+t('原子里的值也被遮罩，但不跨出 <kN> 边界', () => {
+  const ctx = createSession();
+  const source = 'Write to <k1><f1>support@example.com</f1></k1> today.';
+  const row = maskText(source, { ...ALL, inlineMarkers: true }, ctx);
+  assert.match(row.masked, /^Write to <k1><f1>__PII_EMAIL_[A-Z_]*\d+__<\/f1><\/k1> today\.$/);
+  assert.equal(restoreText(row.masked, row.tokens, ctx.values).text, source);
+});
+
+t('不开 inlineMarkers 时行为与之前一致', () => {
+  assert.deepEqual(maskText('Mail a@b.com now.', ALL), maskText('Mail a@b.com now.', { ...ALL, inlineMarkers: false }));
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

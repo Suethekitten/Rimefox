@@ -234,6 +234,29 @@ t('第二次命中本地缓存，不再请求接口', () => {
   assert.equal(String(res.results[0]).indexOf('__PII_'), -1);
 });
 
+console.log('\n[行内格式标记]');
+
+// 0.12.4：带 <fN> 的段落走 inline-v1，脱敏必须看可见文字；标签后接加粗值以前会原样发给 API。
+await setConfig({ privacyEnabled: true });
+calls.length = 0;
+replyFor = (texts) => texts.map((one) => one
+  .replace('Your Account Number: ', '您的账号：').replace(' is active.', '已激活。')
+  .replace('Mail ', '请发邮件到 ').replace(' for help.', ' 获取帮助。'));
+res = await translate([
+  'Your Account Number: <f1>12345678901</f1> is active.',
+  'Mail <f1>john.doe</f1>@example.com for help.'
+], { inlineProtocol: 'v1', target: 'zh-CN' });
+t('inline-v1 请求体里没有加粗的账号和跨标记的邮箱，标记仍在', () => {
+  const all = calls.map((one) => one.body.messages[1].content).join('\n');
+  ['12345678901', 'john.doe', '@example.com'].forEach((secret) => assert.equal(all.indexOf(secret), -1, 'leaked: ' + secret));
+  assert.equal(all.indexOf('<f1>') >= 0, true);
+});
+t('inline-v1 回包按原标记还原，行内校验通过', () => {
+  assert.deepEqual(res.results, ['您的账号：<f1>12345678901</f1>已激活。', '请发邮件到 <f1>john.doe</f1>@example.com 获取帮助。']);
+  assert.deepEqual(res.inlineErrors, [null, null]);
+});
+replyFor = null;
+
 console.log('\n[映射不落盘]');
 
 await new Promise((r) => setTimeout(r, 3000)); // 等缓存 flush 写存储
