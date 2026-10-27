@@ -577,7 +577,7 @@
   function keepElOf(node, root, withLinks, withRuby) {
     var found = null;
     for (var cur = node.parentNode; cur && cur !== root && cur.nodeType === 1; cur = cur.parentNode) {
-      if (isProtectedEl(cur) || isCitationEl(cur) || isMentionEl(cur) || isXrefEl(cur) || (withLinks && isPlainLinkEl(cur)) || (withRuby && tagOf(cur) === 'RUBY')) {
+      if (isProtectedEl(cur) || isLinkAroundProtect(cur) || isCitationEl(cur) || isMentionEl(cur) || isXrefEl(cur) || (withLinks && isPlainLinkEl(cur)) || (withRuby && tagOf(cur) === 'RUBY')) {
         found = cur;
       } else if (isControlTextEl(cur) && !found) {
         // 控件标签本身也是原子；但 label/summary 里已有引用 / notranslate 时，
@@ -586,6 +586,16 @@
       }
     }
     return found;
+  }
+
+  // 链接里夹着 notranslate / translate=no 时，整条链接按保护原子处理：链接保持原样（标签不翻、仍可点击），
+  // 整条都不发给 API。否则只有里面的保护词是原子，译文把链接其余文字写到链接外，链接缩成那个保护词。
+  function isLinkAroundProtect(el) {
+    if (!el || el.nodeType !== 1 || tagOf(el) !== 'A' || !el.hasAttribute('href')) return false;
+    var inner = el.querySelector && el.querySelector(KEEP_SELECTOR);
+    if (!inner && siteExclude && el.querySelector) inner = el.querySelector(siteExclude);
+    if (!inner) return false;
+    return String(el.textContent || '').replace(/\s+/g, '') !== String(inner.textContent || '').replace(/\s+/g, '');
   }
 
   // 控件文字单独成原子：按钮 / label / summary 的可见标签不能被段落译文清空。
@@ -597,7 +607,7 @@
 
   // 保留区的种类：protect（notranslate）/ cite / mention / xref（图表链接）/ link（混合段落里的普通链接）/ control（控件标签）
   function keepKind(el) {
-    if (isProtectedEl(el)) return 'protect';
+    if (isProtectedEl(el) || isLinkAroundProtect(el)) return 'protect';
     if (isCitationEl(el)) return 'cite';
     if (isMentionEl(el)) return 'mention';
     if (isXrefEl(el)) return 'xref';
@@ -1045,26 +1055,59 @@
     var texts = [];
     var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     for (var t = walker.nextNode(); t; t = walker.nextNode()) {
-      if (/\S/.test(t.nodeValue)) texts.push(t);
+      if (/\S/.test(t.nodeValue) && !hiddenWithin(t, el)) texts.push(t);
     }
     if (!texts.length) return false;
-    var first = texts[0];
+    // 整条标签写进与链接本身排版一致的最长文字节点：徽章 / 图标 span、局部加粗词不吞下整条标签。
+    // 都不一致时才退回最长的节点；隐藏的无障碍文字保持原样，不参与。
+    var base = inlineStyleSignature(el);
+    var plain = texts.filter(function (node) {
+      for (var p = node.parentElement; p && p !== el; p = p.parentElement) {
+        if (styleDiffers(p, base) || typographyDiffers(p, el)) return false;
+      }
+      return true;
+    });
+    var first = (plain.length ? plain : texts).reduce(function (best, node) {
+      return node.nodeValue.trim().length > best.nodeValue.trim().length ? node : best;
+    });
     var before = first.nodeValue;
     var wrote = /^\s*/.exec(before)[0] + label + /\s*$/.exec(before)[0];
+    var emptied = [];
     if (ops) {
       setText(first, wrote, ops);
       saved.push({ node: first, value: before, wrote: wrote });
-      for (var i = 1; i < texts.length; i += 1) {
-        var extra = texts[i];
-        var old = extra.nodeValue;
+    } else first.nodeValue = wrote;
+    texts.forEach(function (extra) {
+      if (extra === first) return;
+      var old = extra.nodeValue;
+      if (ops) {
         setText(extra, '', ops);
         saved.push({ node: extra, value: old, wrote: '' });
+      } else extra.nodeValue = '';
+      emptied.push(extra);
+    });
+    // 清空后只剩空壳的子元素（带底色 / 内边距的徽章、加粗词）藏起来，不在链接里留空框。
+    emptied.forEach(function (node) {
+      var top = null;
+      for (var p = node.parentElement; p && p !== el; p = p.parentElement) {
+        if (/\S/.test(p.textContent) || p.contains(first) || (p.querySelector && p.querySelector('img,svg,picture,video,canvas'))) break;
+        top = p;
       }
-    } else {
-      first.nodeValue = wrote;
-      for (var j = 1; j < texts.length; j += 1) texts[j].nodeValue = '';
-    }
+      if (!top) return;
+      if (ops) setStyle(top, 'display', 'none', ops);
+      else top.style.setProperty('display', 'none', 'important');
+    });
     return true;
+  }
+
+  // 文本节点在 root 里是否被 display:none / hidden 的祖先藏起来（无障碍前缀、折叠说明）。
+  function hiddenWithin(node, root) {
+    for (var p = node.parentElement; p && p !== root; p = p.parentElement) {
+      if (p.hidden) return true;
+      var cs = styleOf(p);
+      if (cs && cs.display === 'none') return true;
+    }
+    return false;
   }
 
   // 内容脚本把多个切片的译文拼回整段后，必须在写 DOM 前再校验一次完整 wire。
@@ -2413,7 +2456,10 @@
 
   function setText(node, value, ops) {
     if (!node || node.nodeValue === value) return false;
-    txPush({ op: 'text', node: node, before: node.nodeValue, after: value }, ops);
+    // 清空时记下原位置：站点 normalize() / 清理空文本节点会把空节点移出文档，还原时按这里放回。
+    txPush(value === ''
+      ? { op: 'text', node: node, before: node.nodeValue, after: value, parent: node.parentNode, prev: node.previousSibling, next: node.nextSibling }
+      : { op: 'text', node: node, before: node.nodeValue, after: value }, ops);
     ownWrites.set(node, value);
     node.nodeValue = value;
     return true;
@@ -2469,12 +2515,24 @@
           if (op.node && op.node.parentNode) op.node.parentNode.removeChild(op.node);
         } else if (op.op === 'move') {
           if (op.node && op.node.parentNode === op.toParent && op.fromParent) {
+            // 移动节点会让里面的焦点落回 body；放回原位后把焦点还给它（还原 / 回滚都走这里）。
+            var focused = document.activeElement;
+            var hadFocus = !!focused && focused !== document.body && op.node.contains(focused);
             if (op.fromBefore && op.fromBefore.parentNode === op.fromParent) op.fromParent.insertBefore(op.node, op.fromBefore);
             else op.fromParent.appendChild(op.node);
+            if (hadFocus && document.activeElement !== focused) {
+              try { focused.focus({ preventScroll: true }); } catch (err) { /* 老浏览器忽略 */ }
+            }
           }
         } else if (op.op === 'text') {
           // 只撤销仍是我们写入的值：站点后来改过的节点保持站点的新内容
           if (op.node && op.node.nodeValue === op.after) {
+            if (!op.node.parentNode && op.parent && op.parent.isConnected) {
+              // 被站点移出文档的空源文本节点：放回清空前的位置，再恢复原文（否则原文永久丢失）。
+              if (op.next && op.next.parentNode === op.parent) op.parent.insertBefore(op.node, op.next);
+              else if (op.prev && op.prev.parentNode === op.parent) op.parent.insertBefore(op.node, op.prev.nextSibling);
+              else op.parent.appendChild(op.node);
+            }
             op.node.nodeValue = op.before;
             ownWrites.delete(op.node);
           }
@@ -4080,10 +4138,13 @@
     var prev = -1;
     items.forEach(function (item) {
       var seg = marks.stripped.slice(pos, item.at);
-      if (prev >= 0 && !/\S/.test(seg)) seg += citeSeparator(unit, prev, item.i);
-      if (seg) {
-        if (unit.inlineResult) appendInlineRange(node, unit, marks.stripped, pos, item.at);
-        else node.appendChild(document.createTextNode(seg));
+      var sep = prev >= 0 && !/\S/.test(seg) ? citeSeparator(unit, prev, item.i) : '';
+      if (seg || sep) {
+        if (unit.inlineResult) {
+          // 行内格式路径按译文区间重建文字，引用之间补的分隔符（Nature 的 1,2）在区间之外，单独补上。
+          if (seg) appendInlineRange(node, unit, marks.stripped, pos, item.at);
+          if (sep) node.appendChild(document.createTextNode(sep));
+        } else node.appendChild(document.createTextNode(seg + sep));
       }
       node.appendChild(isStructKeep(item.k) ? atomClone(item.k, unit, item.i) : document.createTextNode(item.k.text));
       pos = item.at;

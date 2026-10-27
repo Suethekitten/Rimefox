@@ -4614,10 +4614,12 @@
   // 0.9.7 容器保护：有直接文本、夹着块级子元素的容器只收自己的文字流（flowTokens，局部段落）。
   // 文字流里的 notranslate 行内 code、链接里嵌的 notranslate 同样是保留区
   check('保留区·局部段落（flowTokens）：仅译文原地分段写回、双语去标记，还原逐字一致', function () {
+    // 0.12.5：链接里夹着 notranslate 时整条链接是保护原子（空 <kN></kN>、原样保留、不外发），
+    // 以前只有里面的保护词是原子，链接其余文字被当正文，仅译文只能安全失败。
     var html =
       '<div id="n6-box">Use <code class="notranslate">--force</code> with <a href="#f">the <span class="notranslate">Rimefox</span> CLI</a> carefully.' +
       '<div>Block child text here.</div></div>';
-    var reply = '小心地将 <k1></k1> 与 <k2></k2> 命令行一起使用。';
+    var reply = '小心地将 <k1></k1> 与 <k2></k2> 一起使用。';
     var modes = ['translation', 'dual'];
     for (var i = 0; i < modes.length; i += 1) {
       var box = keepFixture(html);
@@ -4628,25 +4630,21 @@
           var units = DT.collect(box);
           var flow = units[0];
           if (units.length !== 2 || !flow || flow.whole) return '收集：' + JSON.stringify(units.map(function (u) { return [u.text, u.whole]; }));
-          if (wireWithoutFormats(flow) !== 'Use <k1></k1> with the <k2></k2> CLI carefully.') return '送翻文本：' + wireWithoutFormats(flow);
-          if (modes[i] === 'translation') {
-            // 这是一个带普通链接 / 块级兄弟的局部段落：不能为了链接退回双语。
-            // 统一安全渲染器无法安全重建时保留原文并写明失败，不插入译文。
-            if (DT.inject(flow, reply, 'zh-CN')) return '仅译文 + 不安全局部链接应安全失败';
-            if (!flow.injectResult || flow.injectResult.code !== 'unsafe-structure' || flow.injectResult.reason !== 'unsafe-inline-link') return '失败分类不对：' + JSON.stringify(flow.injectResult);
-            if (outer.querySelector('[data-dt-target]')) return '仅译文不该插入双语';
-            if (outer.querySelector('code').textContent !== '--force' || outer.querySelector('.notranslate:not(code)').textContent !== 'Rimefox') return '保留元素被改';
-            var a = outer.querySelector('a');
-            if (!a || a.textContent.indexOf('Rimefox') < 0 || a.getAttribute('href') !== '#f') return '原链接被吞';
-            DT.restore();
-            return outer.innerHTML === before ? true : '失败时原文被改';
-          }
-          if (!DT.inject(flow, reply, 'zh-CN')) return '双语 inject 返回 false';
+          if (wireWithoutFormats(flow) !== 'Use <k1></k1> with <k2></k2> carefully.') return '送翻文本：' + wireWithoutFormats(flow);
+          if (/Rimefox|CLI|force/.test(flow.wire || '')) return '保护内容进了请求：' + flow.wire;
+          if (!DT.inject(flow, reply, 'zh-CN')) return modes[i] + ' inject 返回 false：' + JSON.stringify(flow.injectResult);
           if (outer.querySelector('code').textContent !== '--force' || outer.querySelector('.notranslate:not(code)').textContent !== 'Rimefox') return '保留元素被改：' + outer.innerHTML;
-          var target = outer.querySelector('[data-dt-target]');
-          if (!target || target.textContent !== '小心地将 --force 与 Rimefox 命令行一起使用。') return '译文节点：' + (target && target.textContent);
-          if (target.nextSibling !== outer.querySelector('div')) return '译文没插在块级子元素前';
-          if (target.closest('a')) return '译文块落进了链接';
+          var a = outer.querySelector('a');
+          if (!a || a.textContent !== 'the Rimefox CLI' || a.getAttribute('href') !== '#f') return '原链接被改：' + (a && a.outerHTML);
+          if (modes[i] === 'translation') {
+            if (outer.querySelector('[data-dt-target]')) return '仅译文不该插入双语';
+            if (outer.textContent.indexOf('小心地将') < 0 || outer.textContent.indexOf('carefully') >= 0) return '仅译文没有原地写回：' + outer.textContent;
+          } else {
+            var target = outer.querySelector('[data-dt-target]');
+            if (!target || target.textContent !== '小心地将 --force 与 the Rimefox CLI 一起使用。') return '译文节点：' + (target && target.textContent);
+            if (target.nextSibling !== outer.querySelector('div')) return '译文没插在块级子元素前';
+            if (target.closest('a')) return '译文块落进了链接';
+          }
           DT.restore();
           return outer.innerHTML === before ? true : '还原不一致：' + outer.innerHTML;
         });

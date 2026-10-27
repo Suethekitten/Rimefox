@@ -205,6 +205,56 @@
         var a = links[1];
         return a.textContent === '需要引用' && !!a.closest('sup') && a.getClientRects().length > 0;
       } });
+      // 0.12.5：链接标签写进与链接排版一致的最长文字节点，被清空的徽章 / 加粗词藏起来，不留空框。
+      record('labels:badge-not-swallowing', 'See the <a href="/n"><span class="badge" style="background:red;color:white;padding:0 4px">New</span> release notes page</a> for full details today.', function (u) {
+        return '今天查看' + atom(u, 0, '新版发布说明页面') + '了解完整详情。';
+      }, { noWarning: true, inspect: function (p, links) {
+        var badge = links[0].querySelector('.badge');
+        return links[0].innerText.trim() === '新版发布说明页面' && getComputedStyle(badge).display === 'none' && links[0].getClientRects().length > 0;
+      } });
+      record('labels:nested-bold', 'Please read <a href="/x"><span>the</span> <b>manual</b></a> before you continue here.', function (u) {
+        return '继续之前请阅读' + atom(u, 0, '手册') + '。';
+      }, { noWarning: true, inspect: function (p, links) { return links[0].innerText.trim() === '手册' && getComputedStyle(links[0].querySelector('b')).display === 'none'; } });
+      // 0.12.5：链接里夹着 notranslate 时整条链接是保护原子：原样保留、可点击、不发给 API。
+      record('labels:link-around-notranslate', 'Use <a href="/x">the <span class="notranslate">Rimefox</span> extension</a> today, and see <a href="/y">docs</a> for more.', function (u) {
+        return '今天使用' + atom(u, 0) + '，并查看' + atom(u, 1, '文档') + '了解更多。';
+      }, { noWarning: true, inspect: function (p, links) { return links[0].textContent === 'the Rimefox extension' && links[1].textContent === '文档'; } });
+      var protectLinkP = document.createElement('p');
+      protectLinkP.innerHTML = 'Use <a href="/x">the <span class="notranslate">Rimefox</span> extension</a> today, and see <a href="/y">docs</a> for more.';
+      box.appendChild(protectLinkP); DT.state.mode = 'translation';
+      var protectLinkUnit = DT.collect(protectLinkP)[0];
+      check('labels:link-around-notranslate-not-sent', !!protectLinkUnit && !/Rimefox|extension/.test(protectLinkUnit.wire) && /<k1><\/k1>/.test(protectLinkUnit.wire), protectLinkUnit && protectLinkUnit.wire);
+      protectLinkP.remove();
+      // 0.12.5：站点在译文显示期间 normalize()（清掉被清空的源文本节点），还原后原文仍逐字回来。
+      var normP = document.createElement('p');
+      normP.innerHTML = 'Hello <strong>beautiful</strong> world. Please continue carefully here.';
+      box.appendChild(normP); DT.state.mode = 'translation';
+      var normBefore = normP.outerHTML, normUnit = DT.collect(normP)[0];
+      var normOk = DT.inject(normUnit, '你好，' + fx(normUnit, 0, '美丽的') + '世界。请仔细继续。', 'zh-CN');
+      normP.normalize();
+      DT.restore();
+      check('restore:site-normalize-keeps-original-text', normOk && normP.outerHTML === normBefore, normP.outerHTML);
+      normP.remove();
+      // 0.12.5：重排移动过的链接在还原后仍保有焦点。
+      var focusP = document.createElement('p');
+      focusP.innerHTML = ordinary;
+      box.appendChild(focusP); DT.state.mode = 'translation';
+      var focusLink = focusP.querySelector('a'), focusUnit = DT.collect(focusP)[0];
+      focusLink.focus();
+      var focusOk = DT.inject(focusUnit, '文章比较' + atom(focusUnit, 1, '乙') + '与' + atom(focusUnit, 0, '甲') + '之后得出结论。', 'zh-CN');
+      DT.restore();
+      check('restore:reordered-link-keeps-focus', focusOk && !!focusUnit.inlineReordered && document.activeElement === focusLink, document.activeElement && document.activeElement.tagName);
+      focusP.remove();
+      // 0.12.5：双语带格式（inline-v1）时，Nature 式相邻引用之间仍补分隔符（1,2，而不是 12）。
+      var natureP = document.createElement('p');
+      natureP.innerHTML = 'Diseases<sup><a href="#ref-CR1" data-test="citation-ref">1</a></sup> and <em>other</em> conditions<sup><a href="#ref-CR2" data-test="citation-ref">2</a></sup> appear in this cohort study.';
+      box.appendChild(natureP); DT.state.mode = 'dual';
+      var natureUnit = DT.collect(natureP)[0];
+      var natureOk = natureUnit && DT.inject(natureUnit, '疾病和' + fx(natureUnit, 0, '其他') + '病症' + atom(natureUnit, 0) + atom(natureUnit, 1) + '出现在本队列研究中。', 'zh-CN');
+      var natureTarget = natureP.querySelector('[data-dt-target]');
+      check('dual:inline-citation-separator', natureOk && !!natureTarget && natureTarget.textContent === '疾病和其他病症1,2出现在本队列研究中。', natureTarget && natureTarget.textContent);
+      DT.restore(); DT.state.mode = 'translation';
+      natureP.remove();
       // 0.12.4：没有后缀原子的链接重排以最后一个链接原来的下一个兄弟为锚点，段尾的 <br> / 图标不动。
       record('reorder:trailing-br', ordinary + '<br>', function (u) { return '文章比较' + atom(u, 1, '乙') + '与' + atom(u, 0, '甲') + '之后得出结论。'; }, {
         reorder: true, inspect: function (p, links) { var br = p.querySelector('br'); return p.lastChild === br && links.every(function (a) { return a.compareDocumentPosition(br) & 4; }); }
