@@ -242,10 +242,15 @@
     return merged;
   };
 
-  // Bilibili 的字幕段通常已经是完整句子；仍用同一套句末标点 / 间隔规则合并被拆开的段，
-  // 但窗口更保守，避免把两个说话人的短句硬拼成一段。
+  // Bilibili 的每一段本来就是播放器显示的单位，有自己的起止时间。中文字幕和 AI 字幕通常不带句末标点，
+  // 按句末标点合并会把十几段拼成一段、显示三十秒，字幕和画面脱节，还会在中文之间插空格：不跨段合并。
+  // 同一批请求里相邻几段会一起送翻，模型仍能看到上下文。
   subs.bilibiliUnits = function (json) {
-    return subs.sentencesOf(subs.bilibiliCues(json), { maxChars: 160, gapMs: 1200 });
+    return subs.bilibiliCues(json).map(function (cue) {
+      var unit = { start: cue.start, end: cue.end, text: cue.text };
+      if (SOUND_TAG.test(cue.text)) unit.tag = true;
+      return unit;
+    });
   };
 
   // 把轨道元数据 + 已解析 body 变成统一时间轴。id 只用于区分轨道，不进入翻译文本。

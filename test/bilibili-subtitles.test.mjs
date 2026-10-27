@@ -209,6 +209,18 @@ await t('人工字幕：from/to 秒转毫秒、空白清理、顺序保持、句
   eq(units[1].start, 4600);
 });
 
+await t('没有句末标点的连续字幕（中文 / AI 字幕常见）逐段保留时间轴，不拼成长块、不插空格', function () {
+  const zh = ['大家好欢迎来到我的频道', '今天我们来聊一聊人工智能', '它正在改变我们的生活', '从手机里的语音助手', '到自动驾驶汽车',
+    '再到医院里的影像诊断', '很多事情都已经不一样了', '但是它也带来了一些问题', '比如隐私和就业', '我们应该怎么看待', '这就是今天的主题',
+    '希望大家喜欢', '记得一键三连', '我们下期再见'];
+  const units = subs.bilibiliUnits(JSON.parse(bodyOf(zh.map(function (text, i) { return [i * 2.4, i * 2.4 + 2.35, text]; }))));
+  eq(units.length, zh.length);
+  eq(units.map(function (u) { return u.text; }), zh);
+  assert.ok(units.every(function (u) { return u.end - u.start <= 2400; }), '每段仍是原来的约 2.4 秒');
+  const en = ['so today we are going to talk', 'about how this model works', 'and why it matters for', 'everyone who uses it'];
+  eq(subs.bilibiliUnits(JSON.parse(bodyOf(en.map(function (text, i) { return [i * 1.6, i * 1.6 + 1.55, text]; })))).length, en.length);
+});
+
 await t('AI 中文字幕：ai-zh 识别为中文，轨道 kind=asr，时间轴正确', function () {
   const json = JSON.parse(bodyOf([[31.9, 32.72, '晚上好。'], [32.8, 35.0, '欢迎回来。']]));
   const track = subs.bilibiliTrack(json, {
