@@ -272,5 +272,45 @@ await t('清空时还在路上的旧数据不会被加载回来', async () => {
   assert.equal(c.get('old'), undefined);
 });
 
+console.log('\n[视频字幕条目不进磁盘层]');
+
+// 字幕条目的键带视频 / 分 P / 轨道：写进磁盘层就成了重启后仍在的观看记录。
+const subKey = (scope, text) => makeKey({ target: 'zh-CN', model: 'm', host: 'www.bilibili.com', subtitle: 'subtitle-v1:' + scope }, text);
+
+await t('字幕条目只在内存层和 session 层，磁盘层（chrome.storage.local）里没有视频标识', async () => {
+  const session = fakeArea();
+  const local = fakeArea();
+  const a = createCache({ session, local });
+  await a.ready;
+  a.set(subKey('bilibili|BV1xx411c7mD:1001|track|en', 'Hello there.'), '你好。');
+  a.set(subKey('youtube|dQw4w9WgXcQ|en:manual|en', 'Never gonna give you up.'), '永不放弃你。');
+  a.set(makeKey({ target: 'zh-CN', model: 'm', host: 'example.com' }, 'Save'), '保存');
+  await a.flush();
+  const disk = JSON.stringify(local.data);
+  assert.equal(/BV1xx411c7mD|dQw4w9WgXcQ|subtitle-v1/.test(disk), false, disk.slice(0, 200));
+  assert.ok(disk.indexOf('保存') >= 0, '普通短文本仍进磁盘层');
+  // 同一次浏览器会话里（service worker 回收后）仍能命中，不重复计费
+  const b = createCache({ session, local });
+  await b.ready;
+  assert.equal(b.get(subKey('bilibili|BV1xx411c7mD:1001|track|en', 'Hello there.')), '你好。');
+  // 重启浏览器（session 清空）后不再命中，也就没有留下记录
+  const c = createCache({ session: fakeArea(), local });
+  await c.ready;
+  assert.equal(c.get(subKey('bilibili|BV1xx411c7mD:1001|track|en', 'Hello there.')), undefined);
+});
+
+await t('磁盘层里已有的字幕条目（0.12.6 开发版写入）读到就删，并落盘清掉', async () => {
+  const local = fakeArea();
+  // 模拟旧版本：直接写一个磁盘段（[键, 译文] 列表 + 段号清单）
+  const legacyKey = subKey('youtube|dQw4w9WgXcQ|en:manual|en', 'Hi.');
+  await local.set({ 'dt.cache.v1.l.0': [[legacyKey, '嗨。'], [makeKey({ target: 'zh-CN', model: 'm', host: 'example.com' }, 'Open'), '打开']], 'dt.cache.v1.l.index': [0] });
+  const fresh = createCache({ session: fakeArea(), local });
+  await fresh.ready;
+  assert.equal(fresh.get(legacyKey), undefined);
+  assert.equal(fresh.get(makeKey({ target: 'zh-CN', model: 'm', host: 'example.com' }, 'Open')), '打开');
+  await fresh.flush();
+  assert.equal(/dQw4w9WgXcQ/.test(JSON.stringify(local.data)), false);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

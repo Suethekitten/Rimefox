@@ -449,7 +449,7 @@ Bilibili: /x/player/(wbi/)v2 轨道元数据      ├─ 每 200ms 按 video.cur
 - **Bilibili**：`bilibili-hook.js` 只观察播放器自己的 `/x/player/(wbi/)v2` 回包，带 bvid / cid / 官方字幕轨（含时限签名 `subtitle_url`），留最近几份供扩展晚启动时 replay。`bilibili-subtitles-source.js` 只接受 bvid 与当前页面对得上的回包，按播放器 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选轨；`subtitle_url` 必须命中 `lib/subtitle-source.js` 的 HTTPS 官方 CDN 白名单，由后台 `subtitle:fetch` 取文本（无 Cookie、限制 2 MB、拒绝白名单外跳转）。
 - **视频身份**：YouTube 用 `v`；Bilibili 用 `bvid + cid + 轨道 ID + 语言`。分 P 只改 cid 也会换 track；换 BV 时 URL 未更新前旧回包不能接管；旧请求晚归由 `processSeq` / `gen` / `source.matches()` 丢弃。`?p=` 不是身份的一部分，cid 才是。
 - **会话状态**：track 带 `identity / target / targetCode / style / intensity` 与 `gen / inflight / pending`。目标语言或风格变化只 `invalidate()` 译文与在途请求，原始轨道保留；目标语言 = 字幕语言、关 CC 或关闭字幕翻译只 `render(null)`，交还原生字幕。
-- **缓存身份**：字幕请求额外带 `cacheScope = platform|videoKey|trackKey|lang`，后台 `makeKey` 追加 `subtitle-v1:` 段；目标语言、风格、模型、接口、术语和提示词仍由原有基础键负责，显示模式不参与，所以切双语 / 仅译文不重复付费。
+- **缓存身份**：字幕请求额外带 `cacheScope = platform|videoKey|trackKey|lang`，后台 `makeKey` 追加 `subtitle-v1:` 段；目标语言、风格、模型、接口、术语和提示词仍由原有基础键负责，显示模式不参与，所以切双语 / 仅译文不重复付费。带 `subtitle-v1:` 的条目只进内存层和 session 层（`lib/cache.js` 的 `memoryOnly`），不写 `chrome.storage.local`，磁盘里不留观看记录；读到旧版本写进磁盘的字幕条目会删掉。
 - **播放器重建**：显示缓存绑定具体叠层（`shownOverlay`）；播放器 DOM 替换后即使文本相同也会重新写。切视频/分 P 只创建一个叠层，清理旧叠层。
 - **测试**：`test/subtitles-session.test.mjs` 覆盖 YouTube A–Q 竞态；`test/bilibili-subtitles.test.mjs` 覆盖 Bilibili body 解析、轨道选择、bvid/cid 切换、旧响应晚归、缓存身份、关闭恢复和不全量预翻；`tools/e2e-extension.mjs --bilibili-subtitles <url>` 在真实 B 站播放器 DOM 上跑合成轨道（CDP 拦截字幕 CDN），不读取真实字幕内容。
 - **限制**：依赖 YouTube / Bilibili 的未公开接口和 DOM 类名，改版可能失效；B 站没有可用官方字幕轨时不接管，不做弹幕、直播、OCR、音频识别或绕过登录/会员。
