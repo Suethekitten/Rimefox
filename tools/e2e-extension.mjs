@@ -3,6 +3,7 @@
 //   node tools/e2e-extension.mjs                                  普通文章页 / 划词 / 仅译文 / 还原 / 配置广播 / 简繁 / 缓存落盘 / 设置页
 //   node tools/e2e-extension.mjs --youtube <视频地址>              再加 YouTube 真实页面的双语字幕（需要能上 YouTube，视频要有人工字幕）
 //   --browser <可执行文件>（或环境变量 RIMEFOX_BROWSER）换浏览器，比如 Edge；--headed 显示窗口；--keep 保留临时用户目录；
+//   --bilibili-only 只跑离线 Bilibili 字幕（CDP 拦截出假视频页 / 播放器元数据 / 字幕 CDN，经真实钩子；默认整套也会跑）
 //   --verbose 打印扩展的调试日志、YouTube 的字幕请求和广告开始 / 结束（排查用）；--youtube-only 跳过文章页和设置页
 // 品牌版 Chrome 137+ 不认 --load-extension：带 --enable-unsafe-extension-debugging 启动，再用 CDP 的 Extensions.loadUnpacked 加载。
 // 全部通过时退出码 0；结果另存在临时目录的 result.json。Node 22+（用内置 WebSocket），不依赖 npm 包。
@@ -63,6 +64,8 @@ const CHOSUN_LIVE = flag('--chosun-live')
     })()
   : '';
 const BILIBILI_SUBTITLES = option('--bilibili-subtitles');
+// 只跑离线 Bilibili 字幕（CDP 拦截出一个假视频页 / 播放器元数据 / 字幕 CDN，不访问真实网站）
+const BILIBILI_ONLY = flag('--bilibili-only');
 const BILIBILI_LIVE = flag('--bilibili-live')
   ? (() => {
       const arg = option('--bilibili-live');
@@ -631,7 +634,29 @@ const pending = new Map();
 const exceptions = [];
 const contexts = []; // 各标签页里的执行环境：内容脚本跑在扩展的隔离环境里
 const timedtext = new Map(); // YouTube 字幕请求：requestId → { v, mime }，跟踪它的响应
-const biliMock = { body: null, player: null, fulfilled: 0, apiFulfilled: 0 }; // Bilibili 播放器元数据 / 字幕 CDN 拦截：只用于 E2E
+// Bilibili 播放器元数据 / 字幕 CDN 拦截：只用于 E2E。offline=true 时连视频页也由这里给（不访问真实网站）；
+// 真实页面模式只拦截带 rimefox_e2e=1 的元数据请求，播放器自己的请求照常放行。
+const biliMock = { body: null, player: null, fulfilled: 0, apiFulfilled: 0, failNext: 0, offline: false, page: '', wav: null };
+function silentWav(seconds) {
+  const rate = 4000;
+  const n = rate * seconds;
+  const buf = Buffer.alloc(44 + n);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n, 4); buf.write('WAVE', 8); buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate, 28); buf.writeUInt16LE(1, 32); buf.writeUInt16LE(8, 34); buf.write('data', 36); buf.writeUInt32LE(n, 40);
+  buf.fill(128, 44);
+  return buf;
+}
+const BILI_FAKE_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Bilibili 离线 E2E</title>
+<style>#bilibili-player{position:relative;width:640px;height:360px;background:#000}video{width:640px;height:360px}
+.bpx-player-subtitle-wrap{position:absolute;bottom:24px;left:0;right:0;color:#fff;text-align:center}</style></head><body>
+<div id="bilibili-player"><div class="bpx-player-container"><div class="bpx-player-video-wrap"><video muted preload="auto" src="/e2e-silence.wav"></video></div>
+<div class="bpx-player-subtitle-wrap"><span class="bpx-player-subtitle-panel-text">原生字幕</span></div></div></div></body></html>`;
+function fulfill(m, code, type, data, extraHeaders) {
+  const headers = [{ name: 'content-type', value: type }].concat(extraHeaders || []);
+  send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: code, responseHeaders: headers,
+    body: Buffer.isBuffer(data) ? data.toString('base64') : Buffer.from(String(data), 'utf8').toString('base64') }, m.sessionId).catch(() => {});
+}
 const captionResponses = []; // 加载完的字幕回包：{ v, mime, bytes }
 ws.onmessage = (e) => {
   const m = JSON.parse(e.data);
@@ -670,6 +695,34 @@ ws.onmessage = (e) => {
   }
   if (m.method === 'Fetch.requestPaused') {
     const u = m.params.request.url;
+    const origin = (m.params.request.headers && (m.params.request.headers.Origin || m.params.request.headers.origin)) || '*';
+    if (biliMock.offline && /^https:\/\/www\.bilibili\.com\//.test(u)) {
+      if (/^https:\/\/www\.bilibili\.com\/video\//.test(u)) fulfill(m, 200, 'text/html; charset=utf-8', BILI_FAKE_PAGE);
+      else if (/\/e2e-silence\.wav$/.test(u)) {
+        // 支持 Range，媒体才可拖动（currentTime 设得上去）
+        const wav = biliMock.wav || (biliMock.wav = silentWav(60));
+        const h = m.params.request.headers || {};
+        const range = /bytes=(\d+)-(\d*)/.exec(h.Range || h.range || '');
+        if (range) {
+          const from = Number(range[1]);
+          const to = range[2] ? Math.min(Number(range[2]), wav.length - 1) : wav.length - 1;
+          fulfill(m, 206, 'audio/wav', wav.subarray(from, to + 1), [{ name: 'content-range', value: 'bytes ' + from + '-' + to + '/' + wav.length }, { name: 'accept-ranges', value: 'bytes' }]);
+        } else fulfill(m, 200, 'audio/wav', wav, [{ name: 'accept-ranges', value: 'bytes' }]);
+      }
+      else fulfill(m, 404, 'text/plain', '');
+      return;
+    }
+    if (/^https:\/\/api\.bilibili\.com\//.test(u) && !/^https:\/\/api\.bilibili\.com\/x\/player\/(?:wbi\/)?v2\?(?:.*&)?rimefox_e2e=1/.test(u)) {
+      if (biliMock.offline) fulfill(m, 404, 'application/json', '{"code":-404}');
+      else send('Fetch.continueRequest', { requestId: m.params.requestId }, m.sessionId).catch(() => {});
+      return;
+    }
+    if (/^https:\/\/aisubtitle\.hdslb\.com\//.test(u) && biliMock.failNext > 0) {
+      biliMock.failNext -= 1;
+      biliMock.failed = (biliMock.failed || 0) + 1;
+      fulfill(m, 500, 'text/plain', 'e2e failure');
+      return;
+    }
     if (/^https:\/\/aisubtitle\.hdslb\.com\//.test(u)) {
       const body = Buffer.from(JSON.stringify(biliMock.body || { body: [] }), 'utf8').toString('base64');
       biliMock.fulfilled += 1;
@@ -682,14 +735,10 @@ ws.onmessage = (e) => {
       return;
     }
     if (/^https:\/\/api\.bilibili\.com\/x\/player\/(?:wbi\/)?v2/.test(u)) {
-      const body = Buffer.from(JSON.stringify(biliMock.player || { code: 0, data: {} }), 'utf8').toString('base64');
       biliMock.apiFulfilled += 1;
-      send('Fetch.fulfillRequest', {
-        requestId: m.params.requestId,
-        responseCode: 200,
-        responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'access-control-allow-origin', value: '*' }],
-        body: body
-      }, m.sessionId).catch(() => {});
+      // 带 Cookie 的跨域 XHR：必须回显 Origin 并允许凭据，和真实接口一样
+      fulfill(m, 200, 'application/json', JSON.stringify(biliMock.player || { code: 0, data: {} }),
+        [{ name: 'access-control-allow-origin', value: origin }, { name: 'access-control-allow-credentials', value: 'true' }]);
       return;
     }
   }
@@ -1876,10 +1925,19 @@ async function glossaryNotesChecks(o) {
 // ---------------- Bilibili 真实页面（合成轨道，不访问真实字幕内容） ----------------
 // 真实 B 站播放器 DOM + 合成字幕元数据 + CDP 拦截字幕 CDN。直接驱动隔离环境里的
 // DT.subtitleSource.resolve() / DT.subtitleRuntime，验证取字幕、叠层、原生恢复、分 P 和费用。
-async function bilibiliSubtitleChecks(url) {
-  console.log('\n[Bilibili 字幕 E2E]');
+// offline=true：视频页、播放器元数据、字幕 CDN 全部由 CDP 拦截给出，不访问真实网站。
+// 两种模式都不绕过来源层：元数据由页面主环境发出协议相对地址的 XHR（和真实播放器写法一样），
+// 经 content/bilibili-hook.js → postMessage → accept / take → 后台 subtitle:fetch → 运行时。
+async function bilibiliSubtitleChecks(url, offline) {
+  console.log('\n[Bilibili 字幕 E2E' + (offline ? '（离线假页面）' : '') + ']');
   await patchConfig({ subtitleTranslate: true, targetLang: 'zh-CN', debug: VERBOSE });
-  const bili = await openTab(url);
+  biliMock.offline = !!offline;
+  const bili = await openTab(url, async (s) => {
+    const patterns = offline
+      ? [{ urlPattern: 'https://www.bilibili.com/*' }, { urlPattern: 'https://api.bilibili.com/*' }]
+      : [{ urlPattern: 'https://api.bilibili.com/x/player/*' }];
+    await send('Fetch.enable', { patterns }, s);
+  });
   const ready = await until(() => pageEval(bili, "return !!document.querySelector('#bilibili-player video')"), 30000);
   check('打开 Bilibili 视频页：播放器加载出来', ready, url);
   if (!ready) return;
@@ -1891,60 +1949,64 @@ async function bilibiliSubtitleChecks(url) {
   check('Bilibili 字幕运行时加载', runtimeReady);
   if (!runtimeReady) return;
   const pageBv = (/\/video\/(BV[0-9A-Za-z]+)/.exec(new URL(url).pathname) || [])[1] || 'BV1xx411c7mD';
-  const fakeUrl = 'https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/e2e?auth_key=fake';
+  let injected = 0;
 
+  // 和真实播放器一样请求元数据：协议相对地址 + 凭据的 XHR，由页面主环境的钩子转给扩展。
+  // CDP 只回答带 rimefox_e2e=1 的这一条（合成轨道，字幕正文来自 biliMock.body）。
   async function injectBiliTrack(opts) {
     if (opts.text) biliMock.body = { body: [{ from: 1, to: 3, content: opts.text }] };
-    const cfg = { bvid: opts.bvid || pageBv, cid: String(opts.cid || 1001), lan: opts.lan || 'en-US', empty: !!opts.empty, url: fakeUrl };
-    const code = `return await chrome.scripting.executeScript({
-      target: { tabId: ${JSON.stringify(tabId)} },
-      world: 'ISOLATED',
-      func: async (cfg) => {
-        const DT = window.__DT;
-        if (!DT) return 'no-dt';
-        if (!DT.subtitleRuntime || !DT.subtitleRuntime.instance) return 'no-runtime';
-        if (!DT.subtitleSource) return 'no-source';
-        const player = document.querySelector('#bilibili-player') || document.querySelector('.bpx-player-container');
-        if (!player) return 'no-player';
-        document.querySelectorAll('.bpx-player-ctrl-subtitle-language-item.bpx-state-active').forEach((el) => el.classList.remove('bpx-state-active'));
-        let item = document.querySelector('.bpx-player-ctrl-subtitle-language-item[data-lan="' + cfg.lan + '"]');
-        if (!item) {
-          item = document.createElement('div');
-          item.className = 'bpx-player-ctrl-subtitle-language-item';
-          item.setAttribute('data-lan', cfg.lan);
-          player.appendChild(item);
-        }
-        if (!cfg.empty) item.classList.add('bpx-state-active');
-        const v = player.querySelector('video') || document.querySelector('video');
-        if (v) { v.muted = true; try { v.pause(); } catch (err) {} try { v.currentTime = 1.5; } catch (err) {} }
-        if (cfg.empty) { DT.subtitleRuntime.instance.tick(); return 'empty'; }
-        const meta = { bvid: cfg.bvid, cid: cfg.cid, aid: 1, seq: 1, tracks: [] };
-        const raw = { id: 'e2e-sub', id_str: 'e2e-sub', lan: cfg.lan, lan_doc: '中文', subtitle_url: cfg.url, type: 1 };
-        const real = await DT.subtitleSource.resolve({ type: 'bilibili', meta: meta, track: raw });
-        if (!real) return 'no-track';
-        const original = DT.subtitleSource.resolve;
-        DT.subtitleSource.resolve = async (x) => x;
-        try { await DT.subtitleRuntime.instance.process(real); } finally { DT.subtitleSource.resolve = original; }
-        DT.subtitleRuntime.instance.tick();
-        return 'ok';
-      },
-      args: [${JSON.stringify(cfg)}]
-    }).then((x) => x && x[0] ? x[0].result : 'no-result').catch((e) => 'err:' + e.message);`;
-    return swEval(code);
+    if (opts.cues) biliMock.body = { body: opts.cues };
+    const bvid = opts.bvid || pageBv;
+    const cid = String(opts.cid || 1001);
+    const lan = opts.lan || 'en-US';
+    injected += 1;
+    biliMock.player = { code: 0, message: 'OK', data: { aid: 1, bvid: bvid, cid: Number(cid), page_no: opts.page || 1,
+      subtitle: { lan: opts.empty ? '' : (opts.selectedLan != null ? opts.selectedLan : lan),
+        subtitles: opts.empty ? [] : [{ id: 1, id_str: 'e2e-' + bvid + '-' + cid + '-' + lan, lan: lan, lan_doc: lan, type: 1,
+          subtitle_url: '//aisubtitle.hdslb.com/bfs/ai_subtitle/prod/e2e-' + bvid + '-' + cid + '-' + injected + '.json?auth_key=fake' }] } } };
+    const cfg = { bvid: bvid, cid: cid, lan: lan, empty: !!opts.empty, noActive: !!opts.noActive, at: opts.at || 1.5 };
+    const before = biliMock.apiFulfilled;
+    const sent = await pageEval(bili, `
+      const cfg = ${JSON.stringify(cfg)};
+      const player = document.querySelector('#bilibili-player') || document.querySelector('.bpx-player-container');
+      if (!player) return 'no-player';
+      document.querySelectorAll('.bpx-player-ctrl-subtitle-language-item.bpx-state-active').forEach((el) => el.classList.remove('bpx-state-active'));
+      let item = document.querySelector('.bpx-player-ctrl-subtitle-language-item[data-lan="' + cfg.lan + '"]');
+      if (!item) {
+        item = document.createElement('div');
+        item.className = 'bpx-player-ctrl-subtitle-language-item';
+        item.setAttribute('data-lan', cfg.lan);
+        player.appendChild(item);
+      }
+      if (!cfg.empty && !cfg.noActive) item.classList.add('bpx-state-active');
+      const v = player.querySelector('video') || document.querySelector('video');
+      if (v) { v.muted = true; try { v.pause(); } catch (err) {} try { v.currentTime = cfg.at; } catch (err) {} }
+      const x = new XMLHttpRequest();
+      x.open('GET', '//api.bilibili.com/x/player/wbi/v2?bvid=' + cfg.bvid + '&cid=' + cfg.cid + '&rimefox_e2e=1');
+      x.withCredentials = true;
+      x.send();
+      return 'sent';`);
+    if (sent !== 'sent') return sent;
+    return (await until(() => biliMock.apiFulfilled > before, 10000, 50)) ? 'ok' : 'no-metadata-request';
   }
+  const biliOverlay = () => pageEval(bili, `
+    const o = document.querySelector('.rimefox-subs');
+    const p = document.querySelector('#bilibili-player');
+    const wrap = document.querySelector('.bpx-player-subtitle-wrap');
+    const on = !!o && o.style.display !== 'none';
+    const cs = wrap ? getComputedStyle(wrap) : null;
+    return { on: on, orig: on && o.children[0] ? o.children[0].textContent : '', trans: on && o.children[1] ? o.children[1].textContent : '',
+      playerOn: !!p && p.classList.contains('rimefox-subs-on'), count: document.querySelectorAll('.rimefox-subs').length,
+      nativeHidden: cs ? (cs.display === 'none' || cs.opacity === '0') : null };`);
 
   const first = await injectBiliTrack({ cid: 1001, text: 'Hello from Bilibili.' });
   verbose('Bili first=' + JSON.stringify(first) + ' cdn=' + biliMock.fulfilled);
   const shown = await until(async () => {
-    const st = await pageEval(bili, `return (() => {
-      const o = document.querySelector('.rimefox-subs');
-      const p = document.querySelector('#bilibili-player');
-      const wrap = document.querySelector('.bpx-player-subtitle-wrap');
-      const on = !!o && o.style.display !== 'none';
-      return { on: on, orig: on && o.children[0] ? o.children[0].textContent : '', trans: on && o.children[1] ? o.children[1].textContent : '', playerOn: !!p && p.classList.contains('rimefox-subs-on'), count: document.querySelectorAll('.rimefox-subs').length, nativeHidden: wrap ? getComputedStyle(wrap).display === 'none' : null };
-    })();`);
+    const st = await biliOverlay();
     return st && st.trans && st.trans.indexOf('译:') === 0 ? st : null;
   }, 30000, 250);
+  if (!shown) verbose('Bili video=' + JSON.stringify(await pageEval(bili, "const v=document.querySelector('video'); return v ? { t: v.currentTime, rs: v.readyState, err: v.error && v.error.code, src: v.currentSrc, dur: v.duration } : null;")) + ' overlay=' + JSON.stringify(await biliOverlay()));
+  check('Bilibili 元数据经页面主环境钩子（协议相对地址的播放器请求）送到来源层', first === 'ok' && !!shown, first);
   check('合成 Bilibili 字幕轨：双语叠层出现（原文 + 译文）',
     shown && shown.orig === 'Hello from Bilibili.' && shown.trans.indexOf('译:Hello from Bilibili.') === 0,
     shown ? shown.orig + ' / ' + shown.trans : '没有出现叠层');
@@ -1959,7 +2021,7 @@ async function bilibiliSubtitleChecks(url) {
   const restored = await until(async () => {
     const st = await pageEval(bili, `return (() => {
       const o = document.querySelector('.rimefox-subs'); const p = document.querySelector('#bilibili-player'); const wrap = document.querySelector('.bpx-player-subtitle-wrap');
-      return { hidden: !o || o.style.display === 'none', playerOn: !!p && p.classList.contains('rimefox-subs-on'), nativeVisible: !wrap || getComputedStyle(wrap).display !== 'none' };
+      return { hidden: !o || o.style.display === 'none', playerOn: !!p && p.classList.contains('rimefox-subs-on'), nativeVisible: !wrap || (getComputedStyle(wrap).display !== 'none' && getComputedStyle(wrap).opacity !== '0') };
     })();`);
     return st && st.hidden && !st.playerOn && st.nativeVisible ? st : null;
   }, 10000, 200);
@@ -2014,7 +2076,47 @@ async function bilibiliSubtitleChecks(url) {
     same && sameLang.hidden && !sameLang.playerOn && stats.texts === beforeEmpty,
     JSON.stringify({ hidden: sameLang.hidden, playerOn: sameLang.playerOn, added: stats.texts - beforeEmpty }));
 
+  // ---- 0.12.6 QA 回归（V2–V6），全部经真实钩子 ----
+  await patchConfig({ targetLang: 'zh-CN' });
+  await tabMsg(tabId, { type: 'dt:setTarget', target: 'zh-CN' });
+  await until(async () => swEval(`return await chrome.scripting.executeScript({ target: { tabId: ${JSON.stringify(tabId)} }, world: 'ISOLATED', func: () => window.__DT && window.__DT.state && window.__DT.state.target }).then((x) => x && x[0] && x[0].result === 'zh-CN').catch(() => false)`), 5000, 100);
+  const shownWith = (text, ms) => until(async () => { const st = await biliOverlay(); return st && st.on && st.orig === text && st.trans.indexOf('译:') === 0 ? st : null; }, ms || 20000, 200);
+
+  await injectBiliTrack({ cid: 5005, text: 'Language switch line.' });
+  const beforeSwitch = await shownWith('Language switch line.');
+  await pageEval(bili, `document.querySelectorAll('.bpx-player-ctrl-subtitle-language-item').forEach((el) => el.classList.remove('bpx-state-active'));
+    let ja = document.querySelector('.bpx-player-ctrl-subtitle-language-item[data-lan="ja"]');
+    if (!ja) { ja = document.createElement('div'); ja.className = 'bpx-player-ctrl-subtitle-language-item'; ja.setAttribute('data-lan', 'ja'); (document.querySelector('#bilibili-player') || document.body).appendChild(ja); }
+    ja.classList.add('bpx-state-active'); return true;`);
+  const handedBack = await until(async () => { const st = await biliOverlay(); return st && !st.on && !st.playerOn && !st.nativeHidden ? st : null; }, 5000, 150);
+  check('换到没有译文的语言（ja）：旧叠层让位，原生字幕恢复', !!beforeSwitch && !!handedBack, JSON.stringify(handedBack || await biliOverlay()));
+
+  biliMock.failNext = 1;
+  const failedBefore = biliMock.failed || 0;
+  await injectBiliTrack({ cid: 6006, text: 'Retry after failure.' });
+  await sleep(1500);
+  const afterFail = await biliOverlay();
+  await injectBiliTrack({ cid: 6006, text: 'Retry after failure.' }); // 播放器再次请求元数据（新签名地址）
+  const retried = await shownWith('Retry after failure.');
+  check('字幕 CDN 失败一次后，播放器新回包会重试并显示', (biliMock.failed || 0) > failedBefore && !afterFail.on && !!retried, JSON.stringify({ failed: biliMock.failed, afterFail: afterFail.on, retried: !!retried }));
+
+  await injectBiliTrack({ cid: 7007, cues: [{ from: 1, to: 2.4, content: 'first part without punctuation' }, { from: 2.4, to: 4.8, content: 'second part continues here' }, { from: 4.8, to: 7.2, content: 'third part ends the line' }] });
+  const unmerged = await shownWith('first part without punctuation');
+  check('没有句末标点的连续字幕逐段显示，不拼成长块', !!unmerged, JSON.stringify(await biliOverlay()));
+
+  await injectBiliTrack({ cid: 8008, text: 'Fallback steady line.', noActive: true, selectedLan: '' });
+  await shownWith('Fallback steady line.');
+  const samples = [];
+  for (let i = 0; i < 12; i += 1) { const st = await biliOverlay(); samples.push(st.on && st.nativeHidden ? 'O' : '-'); await sleep(200); }
+  check('没有 active 类、只有一条轨道：用原生字幕层兜底接管，且不闪烁', samples.every((x) => x === 'O'), samples.join(''));
+
+  await sleep(3200); // 等缓存落盘
+  const disk = await swEval('return JSON.stringify(await chrome.storage.local.get(null));');
+  check('磁盘缓存（chrome.storage.local）里没有视频标识或字幕作用域', disk.indexOf(pageBv) < 0 && disk.indexOf(bv2) < 0 && disk.indexOf('subtitle-v1') < 0,
+    (disk.match(/BV[0-9A-Za-z]{6,}|subtitle-v1[^"]{0,40}/g) || []).slice(0, 3).join(' | '));
+
   await patchConfig({ subtitleTranslate: false, targetLang: 'zh-CN' });
+  biliMock.offline = false;
 }
 
 // ---------------- YouTube 真实页面 ----------------
@@ -3372,6 +3474,8 @@ try {
     await languageChecks();
   } else if (STYLE_PERSIST_ONLY) {
     await stylePersistenceChecks();
+  } else if (BILIBILI_ONLY) {
+    await bilibiliSubtitleChecks('https://www.bilibili.com/video/BV1xx411c7mD/', true);
   } else if (BILIBILI_LIVE) {
     await liveBilibiliChecks(BILIBILI_LIVE);
   } else if (LIVE_AOZORA) {
@@ -3410,6 +3514,7 @@ try {
     await popupLocaleChecks();
     await medicalChecks();
     await shadowChecks();
+    await bilibiliSubtitleChecks('https://www.bilibili.com/video/BV1xx411c7mD/', true);
   }
   if (YOUTUBE) await youtubeChecks(YOUTUBE);
   if (BILIBILI_SUBTITLES) await bilibiliSubtitleChecks(BILIBILI_SUBTITLES);
