@@ -52,7 +52,9 @@
   }
 
   function adShowing() {
-    var view = player();
+    // 这里以前调的是不存在的 player()：p.v 与当前视频不一致时抛 ReferenceError，
+    // 整条回包被当成失败丢掉，换视频 / 广告期间的轨道就再也接不上（独立 QA 的 V9）。
+    var view = playerView();
     return !!(view && adOn(view.player));
   }
 

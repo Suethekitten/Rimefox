@@ -23,6 +23,7 @@ import { openWelcomePage, shouldOpenWelcome } from './lib/welcome.js';
 import { createUsageStats } from './lib/usage.js';
 import { INLINE_VERSION, inspectInline } from './lib/inline.js';
 import { isTrustedBilibiliSubtitleUrl, isBilibiliVideoPage, SUBTITLE_FETCH_MAX_BYTES } from './lib/subtitle-source.js';
+import { SUBTITLE_BUDGET, SUBTITLE_BUDGET_ALL_TABS, createBudgetState, budgetReserve, budgetSettle, budgetRelease, budgetSnapshot } from './lib/subtitle-budget.js';
 
 // 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
 const usageStats = createUsageStats();
@@ -99,7 +100,7 @@ function isSubstantialSource(text) {
 // style：趣味翻译风格（lib/config.js 的 STYLES），普通翻译为 'plain'
 // policy：{ languageInfo, intensity, aiContext }，只影响提示词与缓存身份，不额外发起请求。
 // inlineProtocol：A 的 <fN> 行内语义协议；与 B 的 languageInfo / intensity / aiContext 同时生效。
-async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked, align, professional, inlineProtocol, policy) {
+async function translateBatchWithRetry(texts, target, cfg, style, glossary, privacyMasked, align, professional, inlineProtocol, policy, spend) {
   let attempt = 0;
   let lastErr = null;
   const temperature = temperatureFor(cfg, style);
@@ -122,7 +123,14 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
     attempt += 1;
     if (attempt > 1) usageStats.retry();
     const meta = {};
+    let reserved = null;
     try {
+      // 字幕请求：发之前先占额度（一次 chat 最多 2 次 HTTP），发完按实际次数回填。
+      // 额度不够就抛，本轮不发送；调用方会把它当成整批失败并通知内容脚本停掉自动翻译。
+      if (spend) {
+        reserved = spend.reserve(MAX_HTTP_PER_CHAT, texts.reduce((n, one) => n + String(one || '').length, 0));
+        if (!reserved) throw new ApiError('字幕翻译请求已达本页上限，已暂停自动翻译', 0, 'subtitle-budget');
+      }
       const active = activeConfig(cfg);
       const raw = await chat({
         meta,
@@ -154,6 +162,8 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
       // 每次又要等完整生成。跳出重试，下面对半拆开
       mismatch = texts.length > 1;
     } catch (err) {
+      // 预算用尽不是模型错误：不重试、不拆批，直接把这条原因交回去。
+      if (err && err.detail === 'subtitle-budget') throw err;
       // content 为空、但思考过程里有答案（推理模型偶尔把最终数组写进 reasoning_content）：从里面捞
       if (err && err.code === 'empty_content') {
         const salvaged = parseArrayFromReasoning(err.reasoningText, texts);
@@ -167,6 +177,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
         throw err;
       }
     } finally {
+      if (spend) spend.settle(reserved, meta.http || 0);
       // HTTP 次数包含 thinking 二次请求；usage 包含“成功但内容为空 / 解析失败”的响应
       if (meta.http) usageStats.request(meta.http);
       (meta.usages || []).forEach(function (usage) {
@@ -189,12 +200,12 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
     let leftErr = null;
     let rightErr = null;
     try {
-      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked, align, professional, inlineProtocol, policy);
+      left = await translateBatchWithRetry(texts.slice(0, mid), target, cfg, style, glossary, privacyMasked, align, professional, inlineProtocol, policy, spend);
     } catch (err) {
       leftErr = err;
     }
     try {
-      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked, align, professional, inlineProtocol, policy);
+      right = await translateBatchWithRetry(texts.slice(mid), target, cfg, style, glossary, privacyMasked, align, professional, inlineProtocol, policy, spend);
     } catch (err) {
       rightErr = err;
     }
@@ -230,6 +241,117 @@ function hostOf(sender) {
   }
 }
 
+// ---------------- 字幕付费预算 ----------------
+// 按标签页记账，不按页面自报的身份（bvid / cid / id_str / cacheScope）：这些字段页面脚本都能伪造，
+// 内容脚本又跑在网页进程里，无法证明“这条字幕元数据来自播放器”。费用边界只能放在后台。
+// 计数在**每次实际 HTTP 发送前**预留、发送后回填（provider 一次 chat 最多发 2 次）；批量另按字符数记账。
+// 账本写进 storage.session（窗口也写），service worker 被回收后限额不会从零开始。
+const subtitleBudgets = new Map(); // tabId / 'global' → Promise<state>
+const SUBTITLE_BUDGET_MARK = 'subtitle-budget:';
+const SUBTITLE_BUDGET_GLOBAL = 'global';
+const MAX_HTTP_PER_CHAT = 2; // lib/provider.js：思考参数回退时最多发 2 次
+
+// 字幕请求的发送方场景：只认扩展自己的视频页（YouTube / Bilibili）。
+// 页面脚本发不了 chrome.runtime 消息，但消息里的 cacheScope / 身份字段一律不可信；
+// 这里按标签页 URL 认场景，不按消息内容认。
+function subtitleSceneOf(sender) {
+  const url = String((sender && (sender.url || (sender.tab && sender.tab.url))) || '');
+  if (!url) return '';
+  if (isBilibiliVideoPage(url)) return 'bilibili';
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch (err) {
+    return '';
+  }
+  if (host === 'youtube.com' || host === 'www.youtube.com' || host === 'm.youtube.com' ||
+    host === 'youtube-nocookie.com' || host === 'www.youtube-nocookie.com') {
+    return 'youtube';
+  }
+  return '';
+}
+
+function subtitleBudgetSlot(sender) {
+  return sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
+}
+
+// 返回 Promise 并缓存在 Map 里：并发的翻译消息不会各建一份状态。
+function subtitleBudgetFor(slot) {
+  if (slot === null) return null;
+  const hit = subtitleBudgets.get(slot);
+  if (hit) return hit;
+  const key = SUBTITLE_BUDGET_MARK + slot;
+  const loading = (async () => {
+    let saved = null;
+    try {
+      const got = await chrome.storage.session.get(key);
+      saved = got && got[key];
+    } catch (err) {
+      saved = null; // 读不到就从零开始：宁可更严格
+    }
+    return createBudgetState(Date.now(), saved);
+  })();
+  subtitleBudgets.set(slot, loading);
+  return loading;
+}
+
+const subtitleBudgetSavedAt = new Map();
+const subtitleBudgetWrites = new Map(); // slot → 串行化写队列：两次写并发时旧的快照不能盖掉新的
+function saveSubtitleBudget(slot, state, force) {
+  if (slot === null || !state) return;
+  const now = Date.now();
+  if (!force && now - (subtitleBudgetSavedAt.get(slot) || 0) < 1000) return; // 一个批量里不要每发一次就写一次
+  subtitleBudgetSavedAt.set(slot, now);
+  const key = SUBTITLE_BUDGET_MARK + slot;
+  const snap = budgetSnapshot(state); // 此刻的快照；写队列按顺序落盘，后写的计数只会更大
+  const prev = subtitleBudgetWrites.get(slot) || Promise.resolve();
+  const next = prev.then(() => chrome.storage.session.set({ [key]: snap })).catch(() => {});
+  subtitleBudgetWrites.set(slot, next);
+}
+
+// 一次字幕翻译请求的预支器：先占额度再发，发送后按实际次数回填。
+async function subtitleSpendFor(sender) {
+  const slot = subtitleBudgetSlot(sender);
+  if (slot === null) return null;
+  const tabState = await subtitleBudgetFor(slot);
+  const globalState = await subtitleBudgetFor(SUBTITLE_BUDGET_GLOBAL);
+  if (!tabState || !globalState) return null;
+  let stopped = false;
+  const persist = (force) => {
+    saveSubtitleBudget(slot, tabState, force);
+    saveSubtitleBudget(SUBTITLE_BUDGET_GLOBAL, globalState, force);
+  };
+  return {
+    blocked() { return stopped; },
+    reserve(requests, chars) {
+      if (stopped) return null;
+      const now = Date.now();
+      const cost = { requests: requests || MAX_HTTP_PER_CHAT, chars: chars || 0 };
+      const tab = budgetReserve(tabState, now, cost, SUBTITLE_BUDGET);
+      if (!tab) {
+        stopped = true;
+        persist(true);
+        return null;
+      }
+      const all = budgetReserve(globalState, now, cost, SUBTITLE_BUDGET_ALL_TABS);
+      if (!all) {
+        budgetRelease(tabState, tab); // 跨标签页额度不够：台账退回去
+        stopped = true;
+        persist(true);
+        return null;
+      }
+      return { tab: tab, global: all };
+    },
+    settle(entry, actual) {
+      if (!entry) return;
+      const now = Date.now();
+      budgetSettle(tabState, entry.tab, actual, now);
+      budgetSettle(globalState, entry.global, actual, now);
+      persist(false);
+    }
+  };
+}
+
 async function handleTranslate(msg, sender) {
   await cache.ready;
   const cacheEpoch = cache.epoch ? cache.epoch() : 0;
@@ -259,6 +381,12 @@ async function handleTranslate(msg, sender) {
   const contextOmitted = aiContextEnabled && cfg.privacyEnabled === true ? 'privacy' : '';
   const glossary = normalizeGlossary(cfg.glossary);
   const inlineProtocol = msg.inlineProtocol === INLINE_VERSION;
+  // 字幕请求只看发送方场景（标签页地址），不看消息里自报的身份：
+  // - Bilibili：缓存身份固定为文本，另按标签页计付费预算（V8）；
+  // - YouTube：本次不动它的契约，缓存身份仍是原来的 platform|video|track|lang。
+  const subtitleScene = subtitleSceneOf(sender);
+  const subtitleRequest = subtitleScene !== '' && typeof msg.cacheScope === 'string' && /^[A-Za-z0-9_:|.\-]{1,200}$/.test(msg.cacheScope);
+  const subtitleSpend = subtitleRequest && subtitleScene === 'bilibili' ? await subtitleSpendFor(sender) : null;
   const professionalBase = createProfessionalEngine(cfg, {
     target, style, documentContext: msg.documentContext,
     excludeSources: new Set(glossary.map(one => one.source))
@@ -311,10 +439,13 @@ async function handleTranslate(msg, sender) {
     // 旧条目没有接口身份，不能推断它来自哪个地址；不复用，也不清空其他缓存。
     endpoint: JSON.stringify([active.engine, active.baseUrl.trim().replace(/\/+$/, '')]),
     host: hostOf(sender),
-    // 视频字幕单独隔离：平台 / 视频 / cid / 轨道 / 源语言；目标语言、风格、模型、接口、术语和提示词
-    // 仍由同一套基础键负责。显示模式不是身份的一部分，切换双语 / 仅译文不会重复付费。
-    subtitle: typeof msg.cacheScope === 'string' && /^[A-Za-z0-9_:|.\-]{1,200}$/.test(msg.cacheScope)
-      ? 'subtitle-v1:' + msg.cacheScope
+    // 视频字幕单独隔离：Bilibili 只保留“这是字幕译文”这一层身份（内容键），
+    // 平台 / 视频 / cid / 轨道 / 源语言都不进键——页面可以无限轮换这些字段，它们不能当计费身份。
+    // YouTube 本次不改契约，仍按 platform|video|track|lang 隔离。
+    // 重放同一段字幕（伪造的 cid 轮换、切 P 失败、播放器重拉）不再产生第二次付费请求；
+    // 视频身份只用于显示与 source.matches()，不是费用身份。
+    subtitle: subtitleRequest
+      ? (subtitleScene === 'bilibili' ? 'subtitle-v1:content' : 'subtitle-v1:' + msg.cacheScope)
       : '',
     // 行内协议是独立的 opt-in 身份；普通请求不追加，旧缓存键逐字不变。
     prompt: promptFingerprint(cfg.customPrompt) + (inlineProtocol ? ':inline-' + INLINE_VERSION : ''),
@@ -512,7 +643,7 @@ async function handleTranslate(msg, sender) {
   });
   if (current.length > 0) batches.push(current);
 
-  async function requestReview(source, translation, report) {
+  async function requestReview(source, translation, report, spend) {
     let reviewSource = source;
     let reviewCandidate = translation;
     let masked = null;
@@ -527,7 +658,13 @@ async function handleTranslate(msg, sender) {
     // 行内协议仍要保留，否则复核提示词缺少 <fN> 规则，结构化译文会被判损坏。
     const reviewOptions = { languageInfo, intensity, contextInstructions: '', inlineMarked: !!inlineProtocol };
     const meta = {};
+    let reserved = null;
     try {
+      // 复核也是付费请求：同样先占额度（maxHttpAttempts: 1，所以预留 1 次）。
+      if (spend) {
+        reserved = spend.reserve(1, reviewSource.length + reviewCandidate.length);
+        if (!reserved) throw new ApiError('字幕翻译请求已达本页上限，已暂停自动翻译', 0, 'subtitle-budget');
+      }
       const raw = await chat({
         ...active, temperature: 0, timeoutMs: Number(cfg.timeoutMs) || 60000,
         thinkingMode: cfg.thinkingMode, thinkingExtra: cfg.thinkingExtra, maxHttpAttempts: 1,
@@ -549,19 +686,23 @@ async function handleTranslate(msg, sender) {
       }
       return normalizeTranslationBreaks(source, value);
     } finally {
+      if (spend) spend.settle(reserved, meta.http || 0);
       if (meta.http) usageStats.request(meta.http);
       (meta.usages || []).forEach(usage => usageStats.response(usage));
       (meta.finishReasons || []).forEach(reason => usageStats.finish(reason));
     }
   }
 
+  // 字幕预算在 translateBatchWithRetry 里按每次实际发送预留/回填；这里不再按批预扣一次。
+  // 超限时整批按失败落地（结果 null），并给内容脚本一个可识别的 errorCode，
+  // 让它停掉自动翻译、不再每轮重试。预算不随伪造身份重置，只在时间窗口过去后恢复。
   const runs = batches.map((payload) =>
     (async () => {
       await acquire();
       try {
         // 发出去的是脱敏后的文本；映射只在本地
         const wire = privacyRows ? payload.map((text) => privacyRows.get(text).masked) : payload;
-        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows, wantAlign, professional, inlineProtocol, policy);
+        const out = await translateBatchWithRetry(wire, target, cfg, style, glossary, !!privacyRows, wantAlign, professional, inlineProtocol, policy, subtitleSpend);
         if (!out || !out.texts) throw new ApiError('模型返回无法解析', 0, '');
         for (let k = 0; k < payload.length; k += 1) {
           const text = payload[k];
@@ -625,7 +766,7 @@ async function handleTranslate(msg, sender) {
             validation = professional.validate(text, value);
             const reviewed = await reviewHighRisk({
               engine: professional, source: text, translation: value, report: validation, budget: reviewBudget,
-              review: requestReview,
+              review: (sourceText, candidateText, report) => requestReview(sourceText, candidateText, report, subtitleSpend),
               accept: candidate => {
                 if (inlineProtocol) {
                   const checked = inspectInline(text, candidate);
@@ -674,6 +815,9 @@ async function handleTranslate(msg, sender) {
 
   await Promise.all(runs.concat(waits));
 
+  // 预算是否用完：由预支器自己记（一次请求里可能有多批、也可能在复核时才撞到上限）。
+  const budgetBlocked = !!(subtitleSpend && subtitleSpend.blocked());
+
   const failed = results.filter((r) => r === null).length;
   // 只报告上下文模式 / 字符数 / 条数，绝不回传上下文正文、页面标题或正文。
   const contextReport = contextOmitted
@@ -684,11 +828,12 @@ async function handleTranslate(msg, sender) {
         : { mode: 'ai', omitted: 'no-context', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } })
       : { mode: 'off', omitted: '', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } };
   if (results.length && failed === results.length) {
-    return { ok: false, error: describeError(firstError), results, alignments, validations, inlineErrors, outputErrors, context: contextReport };
+    return { ok: false, error: describeError(firstError), errorCode: budgetBlocked ? 'subtitle_budget' : '', results, alignments, validations, inlineErrors, outputErrors, context: contextReport };
   }
 
   return {
     ok: true,
+    errorCode: budgetBlocked ? 'subtitle_budget' : '',
     results,
     alignments,
     validations,
@@ -1058,8 +1203,9 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 
 // 标签页关闭后清掉记忆
 chrome.tabs.onRemoved.addListener((tabId) => {
+  subtitleBudgets.delete(tabId);
   try {
-    chrome.storage.session.remove('resume:' + tabId).catch(() => {});
+    chrome.storage.session.remove(['resume:' + tabId, SUBTITLE_BUDGET_MARK + tabId]).catch(() => {});
   } catch (err) {
     /* 忽略 */
   }

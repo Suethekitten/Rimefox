@@ -169,7 +169,9 @@
         pending: {},
         gen: 0,
         inflight: 0,
-        warned: false
+        warned: false,
+        // 后台按标签页计的付费预算用完了：本页停止自动翻译，等新视频（新 track）再恢复。
+        blocked: false
       };
       shown = '';
       shownOverlay = null;
@@ -180,6 +182,7 @@
     // ---------------- 翻译调度 ----------------
     function pump(nowMs) {
       if (!track) return;
+      if (track.blocked) return; // 后台预算用完：不再自动发请求，等新视频 / 新轨道
       if (!env.enabled || !env.enabled()) return;
       if (track.target !== env.target() || track.targetCode !== (env.targetCode ? env.targetCode() : env.target()) || track.style !== env.styleId() || track.intensity !== (env.intensity ? env.intensity() : 'standard')) return; // 由 tick 先失效
       if (subs.sameLanguage(track.lang, env.targetCode ? env.targetCode() : env.target())) return; // 字幕本来就是目标语言：不翻
@@ -248,6 +251,15 @@
           function (res) {
             // 代际/轨道/语言/风格任何一项变了，结果都作废；旧视频的请求不能污染新视频
             if (track !== mine || mine.gen !== gen || mine.target !== batchTarget || mine.targetCode !== batchTargetCode || mine.style !== batchStyle || mine.intensity !== batchIntensity) return;
+            // 后台预算用完：停掉本页的自动翻译，不再进重试队列（否则每轮退避都会再发一次）
+            if (res && res.errorCode === 'subtitle_budget') {
+              mine.blocked = true;
+              if (!mine.warned) {
+                mine.warned = true;
+                if (env.toast) env.toast('字幕翻译已达本页上限，本页已暂停自动翻译（换视频或刷新后恢复）', 6000);
+              }
+              return;
+            }
             var results = (res && res.results) || [];
             batch.forEach(function (i, k) {
               var value = results[k];
