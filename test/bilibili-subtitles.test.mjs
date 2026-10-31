@@ -630,7 +630,8 @@ await t('分 P 页面号变化时，运行时通过 source.matches 立即停止�
   c.state.page = 2;
   c.runtime.tick();
   assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
-  assert.equal(c.runtime.inspect().overlay.style.display, 'none');
+  const noOverlay = c.runtime.inspect().overlay;
+  assert.ok(!noOverlay || noOverlay.style.display === 'none', 'CC 关闭时不显示叠层');
 });
 
 await t('BV1 → BV2：旧请求晚返回不能污染新视频；新视频立即可调度', async function () {
@@ -682,7 +683,8 @@ await t('字幕翻译关闭 / CC 关闭：0 请求，原生字幕恢复；重新
   c.state.captionsOn = false;
   c.runtime.tick();
   assert.equal(c.player.classList.contains('rimefox-subs-on'), false);
-  assert.equal(c.runtime.inspect().overlay.style.display, 'none');
+  const noOverlay = c.runtime.inspect().overlay;
+  assert.ok(!noOverlay || noOverlay.style.display === 'none', 'CC 关闭时不显示叠层');
   c.state.captionsOn = true;
   c.state.enabled = false;
   c.runtime.tick();
@@ -767,5 +769,28 @@ await t('readTextCapped：没有 content-length 的超大响应读到上限就�
   assert.equal(ok.text, '{"body":[]}');
 });
 
+await t('CC 关闭时即使有轨道也不调度（与来源层 captionsOn 叠加）；重开 CC 复用译文不重复请求', async function () {
+  const c = setupRuntime();
+  c.state.captionsOn = false;
+  await c.runtime.process(trackFor('BV1xx411c7mD:1001', ['Hello.']));
+  c.runtime.tick();
+  assert.equal(c.state.requests.length, 0, 'CC 关闭时不能发请求');
+  const noOverlay = c.runtime.inspect().overlay;
+  assert.ok(!noOverlay || noOverlay.style.display === 'none', 'CC 关闭时不显示叠层');
+
+  c.state.captionsOn = true;
+  c.runtime.tick();
+  assert.equal(c.state.requests.length, 1, '重开 CC 后才调度');
+  await resolveReq(c.state.requests[0], ['你好。']);
+  c.runtime.tick();
+  assert.equal(c.runtime.inspect().overlay._trans.textContent, '你好。');
+
+  const before = c.state.requests.length;
+  c.state.captionsOn = false;
+  c.runtime.tick();
+  c.state.captionsOn = true;
+  c.runtime.tick();
+  assert.equal(c.state.requests.length, before, '重开 CC 复用已有译文，不重复请求');
+});
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);
