@@ -458,8 +458,8 @@ Bilibili: /x/player/(wbi/)v2 轨道元数据      ├─ 每 200ms 按 video.cur
 
 - **统一格式**：`{ platform, videoKey, trackKey, lang, kind, units: [{start,end,text}] }`。运行时不再解析 json3，也不认识 B 站 body；所有平台差异在 `DT.subtitleSource`。
 - **YouTube**：`subtitles-source.js` 把 hook 的 json3 解析成统一轨道；地址带 `tlang` 时去掉后同源再取原文；CC 开关看 `.ytp-subtitles-button[aria-pressed]`；播广告时 `blocked()` 交还原生（V9：`adShowing()` 以前调用不存在的 `player()`，在 `p.v` 与当前视频不一致时抛 ReferenceError，整条回包被丢掉；现在改调 `playerView()`）；
-- **Bilibili**：`bilibili-hook.js` 只观察播放器自己的 `/x/player/(wbi/)v2` 回包，带 bvid / cid / 官方字幕轨（含时限签名 `subtitle_url`），留最近几份供扩展晚启动时 replay。请求地址先按页面解析成绝对地址再比对主机和路径：真实播放器写的是协议相对地址 `//api.bilibili.com/x/player/wbi/v2`，`fetch` 也可能收到 URL / Request 对象。`bilibili-subtitles-source.js` 只接受 bvid 与当前页面对得上的回包，按播放器 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选轨；没有 active 类时只认元数据 `selectedLan` 或唯一轨道，并要求原生字幕层在显示（所以原生字幕用 `opacity:0` 收起，不用 `display:none`）。当前选中语言对应的不是这条轨道（换了语言、新轨道还没取到或取不到）时 `matches()` 立即让位；取字幕失败按 3 s / 10 s / 30 s 退避重试，播放器新回包（新签名地址）立即重试；字幕每段保留为独立显示单位，不跨段合并。`subtitle_url` 必须命中 `lib/subtitle-source.js` 的 HTTPS 官方 CDN 白名单，由后台 `subtitle:fetch` 取文本（无 Cookie、限制 2 MB、拒绝白名单外跳转）。
-- **视频身份**：YouTube 用 `v`；Bilibili 用 `bvid + cid + 轨道 ID + 语言`。分 P 只改 cid 也会换 track；换 BV 时 URL 未更新前旧回包不能接管；旧请求晚归由 `processSeq` / `gen` / `source.matches()` 丢弃。`?p=` 不是身份的一部分，cid 才是。
+- **Bilibili**：`bilibili-hook.js` 只观察播放器自己的 `/x/player/(wbi/)v2` 回包，带 bvid / cid / 官方字幕轨（含时限签名 `subtitle_url`），留最近几份供扩展晚启动时 replay。请求地址先按页面解析成绝对地址再比对主机和路径：真实播放器写的是协议相对地址 `//api.bilibili.com/x/player/wbi/v2`，`fetch` 也可能收到 URL / Request 对象。`bilibili-subtitles-source.js` 只接受 bvid 与当前页面对得上的回包，按播放器 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选轨；没有 active 类时只认元数据 `selectedLan` 或唯一轨道，并要求原生字幕层在显示（所以原生字幕用 `opacity:0` 收起，不用 `display:none`）。当前选中语言对应的不是这条轨道（换了语言、新轨道还没取到或取不到）时 `matches()` 立即让位；取字幕失败按 3 s / 10 s / 30 s 退避重试，播放器新回包（新签名地址）立即重试；字幕每段保留为独立显示单位，不跨段合并。`subtitle_url` 必须命中 `lib/subtitle-source.js` 的 HTTPS 官方 CDN 白名单，由后台 `subtitle:fetch` 取文本（无 Cookie、跟随跳转但最终地址仍须在白名单、流式读并在 2 MB 停）。
+- **视频身份**：YouTube 用 `v`；Bilibili 用 `bvid + cid + 轨道 ID + 语言`。分 P 只改 cid 也会换 track；换 BV 时 URL 未更新前旧回包不能接管；旧请求晚归由 `processSeq` / `gen` / `source.matches()` 丢弃。`?p=` 不是身份的一部分，cid 才是；但地址栏没有 `?p` 时按第 1 P 算，旧 P 轨道立即失效（V10）。回包 `seq` 必须是递增且不超过上次 200 的跳跃（V11），轨道 `id_str` 只认字符串 / 数字、对象一律退回 `id`（V12），避免页面伪造把来源层锁死或把两条轨道撞成同一个键。
 - **会话状态**：track 带 `identity / target / targetCode / style / intensity` 与 `gen / inflight / pending`。目标语言或风格变化只 `invalidate()` 译文与在途请求，原始轨道保留；目标语言 = 字幕语言、关 CC 或关闭字幕翻译只 `render(null)`，交还原生字幕。
 - **缓存身份**：字幕请求带 `cacheScope`，但它只用来标识「这是字幕请求」；后台按**发送方标签页 URL** 认场景（Bilibili / YouTube），不按消息内容认。**Bilibili** 的缓存身份固定为 `subtitle-v1:content`，平台 / 视频 / cid / 轨道 / 源语言都不进键——同一段字幕文字（伪造的 cid / id_str 轮换、切 P 失败、播放器重拉）命中同一份缓存，不会再付一次钱；视频身份只用于显示与 `source.matches()`。**YouTube 本次不改契约**，仍是 `platform|video|track|lang`。这也不等于「重放永远零费用」：关浏览器（字幕缓存只在内存 / session）、缓存淘汰、目标语言 / 风格 / 模型 / 提示词配置变化、上一次失败后的重试，都会重新产生请求——它只保证「同一配置下的同一段文字，不会因为身份被换而重复付费」。目标语言、风格、模型、接口、术语和提示词仍由原有基础键负责，显示模式不参与。带 `subtitle-v1:` 的条目只进内存层和 session 层（`lib/cache.js` 的 `memoryOnly`），不写 `chrome.storage.local`，磁盘里不留观看记录；读到旧版本写进磁盘的字幕条目会删掉。
 - **费用边界**（V8，只对 Bilibili 生效）：字幕付费预算由后台按**标签页**记，跨标签页另有一份总量（`lib/subtitle-budget.js`）。计数在**每次实际 HTTP 发送前预留**、发送后按实际次数回填（一次 `chat` 最多 2 次，只有思考参数回退时才用到第 2 次），整批原文再按字符数记一笔——请求次数和字符数都不直接等于费用，但两个都卡。默认阈值是**保守估计、不是实测基线**：5 分钟滑窗 90 次 HTTP / 9 万字符，单标签页 2400 次 / 200 万字符，跨标签页每窗口 360 次 / 36 万字符、总量 6000 次 / 500 万字符。账本（含窗口）串行写 `chrome.storage.session`，service worker 被回收后限额不会从零开始；并发消息按 slot 缓存同一份状态的 Promise，不会各建一份。bvid / cid / id_str / cacheScope 都来自网页、页面脚本可以伪造，不能作为费用边界，也不参与预算键。超限时整批按失败落地并返回 `errorCode: 'subtitle_budget'`，`content/subtitles.js` 收到后把该轨道标成 `blocked`、停止自动翻译并给一次提示，换视频 / 刷新后新轨道恢复。**目前没有「手动继续」**；以后要加，确认必须放在扩展自己的弹窗里，页面内消息或 `continue: true` 一律不能解除后台限额——字幕叠层是普通 DOM + `pointer-events:none`，不是安全边界。回归见 `test/subtitle-budget.test.mjs`（纯函数）与 `test/subtitle-budget-pipeline.test.mjs`（真实 background + 假 fetch）。
@@ -852,7 +852,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.13.1）
+## 14. 本版技术记录（0.13.0 / 0.13.1 / 0.13.2）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
@@ -866,6 +866,16 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **测试**：`test/reader-contract.test.mjs` 静态契约；`test/reader-smoke.html` 真实 Chrome 解析 / 清洗冒烟；`tools/e2e-reader.mjs` 真实扩展 + 真实 reader 页 + 真实 IndexedDB + 假 API，覆盖导入、章节、目录、图片、链接、脚本清除、双语注入、行内粗体、缓存命中、模式记忆、原文恢复、章末预取下一章和删除。
 - **B 站 CC 关闭**：0.13.1 修复 `bilibili-subtitles-source.js` 的 `captionsOn`：先看原生字幕层是否真实可见，再看 active 语言项；关闭 CC 后即使语言菜单保留 active 选中项也会让位，不产生请求；重开 CC 复用轨道。
 - **限制 / 未完成**：0.13.0 只支持无 DRM、可重排的 EPUB 2/3；固定版式、漫画、音频 / 视频、PDF、MOBI/AZW3、OCR、跨设备同步、高亮 / 批注和完整屏幕阅读器审计不在本轮范围。真实大型出版社 EPUB、移动端、RTL 和大型书库仍需独立 QA；本地 reader E2E 使用合成 EPUB + 假 API，不等同于真实书库验收。PDF 目前只有接口文档。
+
+### 0.13.2 — 字幕费用与稳定性
+
+- **V8 费用身份**：Bilibili 字幕的计费缓存身份从 `subtitle-v1:platform|videoKey|trackKey|lang` 改为固定内容键 `subtitle-v1:content`（`background.js` 的 `scope.subtitle`，发送方场景按标签页 URL 判定）。cid / id_str / 轨道 / 源语言只留在运行时轨道身份、`source.matches()` 与显示里；同一段文字重放（伪造元数据、切 P 失败、播放器重拉）命中同一份缓存，不再产生第二次付费请求。YouTube 不改契约，仍是原来的身份。`memoryOnly` 判据不变（前缀 `subtitle-v1:`），字幕译文仍只进内存 / session。
+- **V8 费用兜底**：新增 `lib/subtitle-budget.js`，后台按标签页（另加一份跨标签页总量）记字幕预算；在 `translateBatchWithRetry` / 复核的**每次实际发送前**预留（一次 chat 最多 2 次 HTTP），`finally` 里按 `meta.http` 回填，并另按整批字符数记账。账本（含窗口）串行写 `chrome.storage.session`，状态按 slot 缓存 Promise；阈值是保守估计（见 §5.4）。超限时整批失败并返回 `errorCode: 'subtitle_budget'`，`content/subtitles.js` 把轨道标成 `blocked`、停止自动翻译并提示一次，换视频 / 刷新恢复；没有「手动继续」。
+- **V8 边界**：两条 `postMessage` 消息的来源仍然无法证明（页面可以伪造 `{source:'rimefox-bili'}`），本次不假装能验证；防护是「不重复计费 + 预算上限」，不是消息认证。cid 一致性检查只防正常使用中的错轨，不防伪造（页面 DOM / `__INITIAL_STATE__` 都是页面写的）。
+- **V9**：`subtitles-source.js` 的 `adShowing()` 之前调用不存在的 `player()`，`p.v !== current` 时抛 ReferenceError、整条回包被丢掉；改为 `playerView()`。
+- **V10–V14**：分 P 判断改为「地址栏没有 `?p` 按第 1 P 算」，旧 P 轨道立即失效（V10）；来源层只接受递增且不超过上次 200 的 `seq`（V11）；`id_str` 只认字符串 / 数字、对象退回 `id`（V12）；后台取字幕改为流式读、超过 2 MB 立即停（V13），并跟随 CDN 跳转、按最终地址校验白名单（V14，`lib/subtitle-source.js` 的 `readTextCapped`）。V15（钩子可被页面识别）仍是加固项。
+- **测试**：新增 `test/subtitle-budget.test.mjs`（预留 / 回填 / 窗口 / 字符上限 / 持久化 / 损坏数据）与 `test/subtitle-budget-pipeline.test.mjs`（真实 background + 假 fetch：换 cid 只请求一次、换源语言共用、YouTube 契约不变、换目标语言重新计费、预算封顶、标签页隔离、session 持久化）。E2E 的离线 Bilibili 增加「页面脚本伪造元数据轮换 cid / id_str → 0 条新送翻」，并给 service worker 的首次 evaluate 加了启动抖动重试。
+- **限制**：预算阈值没有真实用量基线，是按保守估计定的；跨标签页总额度只有纯函数覆盖，没有端到端用例；会话缓存淘汰 / 浏览器重启后的行为未专项验证；同文本跨语言共用译文只验证了「只请求一次」，没做译文质量夹具。
 
 
 

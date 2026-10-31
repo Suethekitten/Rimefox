@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { isTrustedBilibiliSubtitleUrl as libTrusted } from '../lib/subtitle-source.js';
+import { isTrustedBilibiliSubtitleUrl as libTrusted, readTextCapped } from '../lib/subtitle-source.js';
 
 const root = new URL('..', import.meta.url);
 const sandbox = { console, setTimeout, clearTimeout, setImmediate, Promise, URL, URLSearchParams, TextDecoder };
@@ -705,6 +705,66 @@ await t('无轨道时不发 AI 请求；不对两小时视频做全量预翻', a
   eq(c.state.requests.length, 1);
   assert.ok(c.state.requests[0].msg.texts.length <= 8, '单批不超过 8 句');
   assert.ok(c.state.requests[0].msg.texts.join('').length <= 1000, '单批不超过 1000 字');
+});
+
+await t('分 P：地址栏没有 ?p 时按第 1 P 算，旧 P 轨道失效（V10）', async function () {
+  const state = { lan: 'ai-zh' };
+  const doc = makeDoc(state);
+  const source = createBiliSource({
+    doc: doc,
+    location: { hostname: 'www.bilibili.com', pathname: '/video/BV1xx411c7mD', search: '' },
+    send: async function () { return { ok: true, text: bodyOf([[1, 2, 'x']]) }; }
+  });
+  source.accept(messageFor({ bvid: 'BV1xx411c7mD', cid: 1002, page: 2 }, 1));
+  const p2 = await source.resolve(source.take());
+  assert.ok(p2);
+  assert.equal(source.matches(p2), false, '地址栏没有 ?p 就是第 1 P，旧 P2 轨道不能继续显示');
+});
+
+await t('伪造巨大 seq 不能把来源层锁死（V11）', async function () {
+  const state = { lan: 'ai-zh' };
+  const doc = makeDoc(state);
+  const source = createBiliSource({
+    doc: doc,
+    location: { hostname: 'www.bilibili.com', pathname: '/video/BV1xx411c7mD', search: '' },
+    send: async function () { return { ok: true, text: bodyOf([[1, 2, 'x']]) }; }
+  });
+  source.accept(messageFor({ cid: 1001 }, 1));
+  assert.equal(source.inspect().meta.cid, '1001');
+  source.accept(messageFor({ cid: 1002 }, 1000000));
+  assert.equal(source.inspect().meta.cid, '1001', '巨大的 seq 跳跃应被忽略，旧回包不能被顶掉');
+  source.accept(messageFor({ cid: 1003 }, 2));
+  assert.equal(source.inspect().meta.cid, '1003', '之后的真回包仍能进来');
+});
+
+await t('对象 / 数组 id_str 不会把不同轨道撞成同一个键（V12）', async function () {
+  const state = { lan: 'ai-zh' };
+  const doc = makeDoc(state);
+  const source = createBiliSource({
+    doc: doc,
+    location: { hostname: 'www.bilibili.com', pathname: '/video/BV1xx411c7mD', search: '' },
+    send: async function () { return { ok: true, text: bodyOf([[1, 2, 'x']]) }; }
+  });
+  source.accept(messageFor({ tracks: [trackOf('ai-zh', SAFE_URL, { id: 'a', id_str: { bad: 1 } })] }, 1));
+  const first = source.take();
+  source.accept(messageFor({ tracks: [trackOf('ai-zh', SAFE_HUMAN_URL, { id: 'b', id_str: [] })] }, 2));
+  const second = source.take();
+  assert.ok(first && second);
+  assert.notEqual(first.key, second.key, 'String(对象) 全是 [object Object]，必须退回 id');
+});
+
+await t('readTextCapped：没有 content-length 的超大响应读到上限就停（V13）', async function () {
+  const chunk = new Uint8Array(3000).fill(65);
+  const res = new Response(new ReadableStream({
+    start: function (c) { c.enqueue(chunk); c.enqueue(chunk); c.close(); }
+  }));
+  const out = await readTextCapped(res, 4096);
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'too_large');
+  const small = new Response('{"body":[]}');
+  const ok = await readTextCapped(small, 4096);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.text, '{"body":[]}');
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

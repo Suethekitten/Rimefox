@@ -151,10 +151,15 @@ test('subtitle:fetch only accepts allow-listed CDN URLs from Bilibili video page
   let seen = null;
   globalThis.fetch = async (url, init) => {
     seen = { url, init };
-    return new Response(JSON.stringify({ body: [] }), {
+    const res = new Response(JSON.stringify({ body: [] }), {
       status: 200,
       headers: { 'content-type': 'application/json' }
     });
+    // 模拟签名地址 302 到白名单外：跟随之后仍要按最终 URL 拒绝（V14）
+    if (String(url).indexOf('redirect-evil') >= 0) {
+      Object.defineProperty(res, 'url', { value: 'https://evil.example/x' });
+    }
+    return res;
   };
   const sendFrom = (pageUrl, msg) => new Promise(resolve => listener(msg, { url: pageUrl }, resolve));
   try {
@@ -164,7 +169,12 @@ test('subtitle:fetch only accepts allow-listed CDN URLs from Bilibili video page
     assert.equal(allowed.ok, true);
     assert.equal(allowed.text, '{"body":[]}');
     assert.equal(seen.init.credentials, 'omit');
-    assert.equal(seen.init.redirect, 'manual');
+    assert.equal(seen.init.redirect, 'follow');
+    const redirectedAway = await sendFrom('https://www.bilibili.com/video/BV1xx411c7mD', {
+      type: 'subtitle:fetch', url: 'https://aisubtitle.hdslb.com/bfs/ai_subtitle/redirect-evil?auth_key=fake'
+    });
+    assert.equal(redirectedAway.ok, false);
+    assert.equal(redirectedAway.error, 'bad_redirect');
     const rejectedUrl = await sendFrom('https://www.bilibili.com/video/BV1xx411c7mD', {
       type: 'subtitle:fetch', url: 'https://evil.example/subtitle.json'
     });

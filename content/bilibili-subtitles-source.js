@@ -168,10 +168,19 @@
       return hit;
     }
 
+    function stableTrackId(track) {
+      // id_str 可能被页面换成对象 / 数组：String({}) 全是 "[object Object]"，两条轨道会撞成同一个键，
+      // 之后切轨就再也不生效。只接受字符串 / 数字，其它按 id → lan 兜底。
+      var value = track && track.id_str;
+      if (typeof value !== 'string' && typeof value !== 'number') value = track && track.id;
+      if (typeof value !== 'string' && typeof value !== 'number') value = track && track.lan;
+      return String(value);
+    }
+
     function eventFrom(meta, lan) {
       var track = trackFor(meta, lan);
       if (!track) return null;
-      var key = [meta.bvid, meta.cid, String(track.id_str || track.id || track.lan), String(track.lan), lan].join('|');
+      var key = [meta.bvid, meta.cid, stableTrackId(track), String(track.lan), lan].join('|');
       if (key === lastEmitted) return null;
       if (key === failedKey && (failures > RETRY_MS.length || now() - failedAt < RETRY_MS[failures - 1])) return null;
       lastEmitted = key;
@@ -182,6 +191,9 @@
       var meta = parseMessage(data);
       if (!meta) return false;
       if (meta.seq < lastSeq) return false; // 旧请求晚返回：只接受不早于已见代际的回包
+      // hook 的 seq 每请求 +1。页面伪造一个巨大的 seq 会把之后所有真回包全锁掉（永远 loading）；
+      // 已经收过回包时，只接受不超过 200 的代际跳跃。扩展晚启动时 lastSeq 还是 -1，首条不限。
+      if (lastSeq >= 0 && meta.seq > lastSeq + 200) return false;
       if (meta.seq === lastSeq && lastMeta && meta.bvid === lastMeta.bvid && meta.cid === lastMeta.cid && pending) return false;
       lastSeq = meta.seq;
       lastMeta = meta;
@@ -284,8 +296,9 @@
       var p = page();
       if (p.bvid && track.bvid && track.bvid !== p.bvid) return false;
       if (p.aid && track.aid && String(track.aid) !== p.aid) return false;
-      // 分 P：URL 明确带 ?p= 时，页面变化立即让旧 P 轨道失效；不等播放器 / 地址栏谁先更新。
-      if (p.hasP && track.page && Number(track.page) !== p.page) return false;
+      // 分 P：地址栏没有 ?p 时按第 1 P 算（B 站默认页）。旧 P 轨道不能在新页上继续显示，
+      // 也不等播放器 / 地址栏谁先更新——这是 QA 的 V10。
+      if (track.page && Number(track.page) !== p.page) return false;
       var cid = currentCid();
       if (track.cid && cid && String(track.cid) !== cid) return false;
       // 用户在播放器里换了语言（新轨道还没取到 / 取不到 / 元数据里没有）：旧轨道立即让位，不能继续盖住原生字幕

@@ -22,7 +22,7 @@ import { maskTexts, restoreText, optionsFromConfig } from './lib/privacy.js';
 import { openWelcomePage, shouldOpenWelcome } from './lib/welcome.js';
 import { createUsageStats } from './lib/usage.js';
 import { INLINE_VERSION, inspectInline } from './lib/inline.js';
-import { isTrustedBilibiliSubtitleUrl, isBilibiliVideoPage, SUBTITLE_FETCH_MAX_BYTES } from './lib/subtitle-source.js';
+import { isTrustedBilibiliSubtitleUrl, isBilibiliVideoPage, SUBTITLE_FETCH_MAX_BYTES, readTextCapped } from './lib/subtitle-source.js';
 import { SUBTITLE_BUDGET, SUBTITLE_BUDGET_ALL_TABS, createBudgetState, budgetReserve, budgetSettle, budgetRelease, budgetSnapshot } from './lib/subtitle-budget.js';
 
 // 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
@@ -983,7 +983,7 @@ function providerLabel(cfg) {
 }
 
 // 字幕 CDN 取文本：只允许内容脚本在 B 站视频页发起，且 URL 必须在官方白名单内。
-// 不带 Cookie、不跟随到白名单外的主机、限制体积；这是取字幕原文，不是翻译请求。
+// 不带 Cookie、限制体积、最终地址仍要过白名单；这是取字幕原文，不是翻译请求。
 async function handleSubtitleFetch(msg, sender) {
   const url = String((msg && msg.url) || '');
   const pageUrl = String((sender && (sender.url || (sender.tab && sender.tab.url))) || '');
@@ -995,7 +995,8 @@ async function handleSubtitleFetch(msg, sender) {
     const res = await fetch(url, {
       credentials: 'omit',
       cache: 'no-store',
-      redirect: 'manual',
+      // 签名地址可能 302 到边缘节点（V14）：跟随后仍按最终 URL 校验白名单，跨出白名单就拒绝
+      redirect: 'follow',
       signal: controller ? controller.signal : undefined
     });
     if (!res || !res.ok) return { ok: false, error: 'http' };
@@ -1004,11 +1005,11 @@ async function handleSubtitleFetch(msg, sender) {
     if (len > SUBTITLE_FETCH_MAX_BYTES) return { ok: false, error: 'too_large' };
     const type = String((res.headers && res.headers.get && res.headers.get('content-type')) || '');
     if (type && !/json|text\/|octet-stream/i.test(type)) return { ok: false, error: 'bad_type' };
-    const buf = await res.arrayBuffer();
-    if (!buf || buf.byteLength > SUBTITLE_FETCH_MAX_BYTES) return { ok: false, error: 'too_large' };
-    const text = new TextDecoder().decode(buf);
-    if (!text) return { ok: false, error: 'empty' };
-    return { ok: true, text };
+    // 没有 content-length 时边读边数，超限立刻停（V13）
+    const capped = await readTextCapped(res, SUBTITLE_FETCH_MAX_BYTES);
+    if (!capped.ok) return capped;
+    if (!capped.text) return { ok: false, error: 'empty' };
+    return { ok: true, text: capped.text };
   } catch (err) {
     return { ok: false, error: 'fetch_failed' };
   } finally {
