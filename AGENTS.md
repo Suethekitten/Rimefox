@@ -46,6 +46,7 @@
 | 版本号规则、发版说明、提交与推送 | 本文件 |
 | 接下来做什么、优先级、版本安排、用户向已有限制 | [docs/ROADMAP.md](docs/ROADMAP.md) |
 | 架构、消息协议、踩坑、调试、配置项、技术向已知问题、发版技术命令 | [HANDOFF.md](HANDOFF.md) |
+| EPUB 阅读器接口、BookDocument、reader 缓存与 PDF 预留边界 | [docs/READER-ARCHITECTURE.md](docs/READER-ARCHITECTURE.md) |
 | 翻译引擎实现（单元模型 / 渲染 / 句子对齐） | [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md) |
 | 上架材料 | [docs/STORE.md](docs/STORE.md)（通用 + Chrome）、[docs/STORE-EDGE.md](docs/STORE-EDGE.md)（Edge 差异） |
 | 隐私 | [PRIVACY.md](PRIVACY.md)、[docs/privacy.en.md](docs/privacy.en.md) |

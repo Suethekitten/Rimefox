@@ -25,6 +25,7 @@
 - **动态页面** —— MutationObserver 补翻新内容，SPA 路由切换后自动重翻
 - **阅读辅助** —— 悬停对照、划词翻译、输入框翻译（`Alt+I`）、置顶翻译小窗、网页悬浮入口（默认关闭）
 - **视频字幕双语（YouTube / 哔哩哔哩）** —— 打开字幕时显示「原文 + 译文」（非官方兼容功能，默认关闭）
+- **EPUB 阅读与翻译** —— 导入本地无 DRM 的 EPUB 2/3，可上传本机字体，支持字号/行高/字距/段距/页宽、主题、全屏，支持目录、脚注、图片和阅读进度；双语 / 仅译文按需翻（原书不上传）
 - **可选隐私保护** —— 发请求前在本地把邮箱、电话、身份证号、银行卡号换成占位符，译文回来后还原（默认关闭）
 - **术语表与提示词** —— 设置首选译法，可加说明区分适用语境与例外；无说明的旧词条保持固定译法，详见[术语表帮助](docs/GLOSSARY.md)。也支持追加措辞要求和趣味风格
 - **自定义目标语言** —— 内置语言之外可添加名称、标准代码和说明；无代码的虚构语言安全降级，阿拉伯语等 RTL 排版正常
@@ -70,6 +71,7 @@
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 优先级、已完成 / 待办、明确不做的清单 |
 | [docs/UPGRADING.md](docs/UPGRADING.md) | 从旧版 DualTrans 升级与配置迁移 |
 | [docs/VIDEO-SUBTITLES.md](docs/VIDEO-SUBTITLES.md) | YouTube / 哔哩哔哩字幕双语的限制、风险与隐私说明 |
+| [docs/READER-ARCHITECTURE.md](docs/READER-ARCHITECTURE.md) | EPUB 阅读器、BookDocument 接口、翻译缓存、PDF 预留边界与安全限制 |
 | [docs/archive/](docs/archive/README.md) | 归档：审计报告、评估、历史验证记录（不是现状） |
 | [PRIVACY.md](PRIVACY.md) · [English](docs/privacy.en.md) | 隐私说明：会发送什么、保存在哪里 |
 | [SECURITY.md](SECURITY.md) | 安全问题如何私下报告 |
@@ -79,7 +81,8 @@
 ## 支持范围
 
 - Chrome 114+ / Edge 114+，Manifest V3
-- 视频字幕支持 YouTube 的 CC 字幕轨道，以及哔哩哔哩公开视频已提供的官方字幕轨道（人工 / AI）；需要站点提供可合法访问的字幕轨，画面硬字幕、PDF / EPUB、图片 OCR 不做
+- 视频字幕支持 YouTube 的 CC 字幕轨道，以及哔哩哔哩公开视频已提供的官方字幕轨道（人工 / AI）；需要站点提供可合法访问的字幕轨，画面硬字幕、图片 OCR 不做
+- EPUB 阅读器支持用户本地导入的无 DRM、可重排 EPUB 2/3；固定版式、漫画、PDF、MOBI/AZW3、DRM 和扫描件 OCR 不在 0.13.0 范围
 - 行内格式做有限保真：局部加粗、斜体、代码、删除线、高亮、下划线、引号、按键、小字、上下标、局部颜色和普通链接可随译文保留；复杂链接或无法可靠对应的结构会保留原文，必要时在设置页写站点规则
 - 开放 Shadow DOM：已适配 B 站新版评论区正文；closed Shadow Root、shadow root 直接文本、iframe 内评论区暂不支持
 - B 站未登录时只展示首屏评论和“登录后查看”提示，滚动加载 / 楼中楼展开需要在登录态下验证

@@ -33,7 +33,7 @@ async function collect(name) {
   else throw Error(`Unsupported file: ${name}`);
 }
 for (const name of [
-  'manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'welcome', 'icons',
+  'manifest.json', 'background.js', 'lib', 'content', 'options', 'popup', 'reader', 'welcome', 'icons',
   'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses'
 ]) await collect(name);
 // _locales 是按浏览器界面语言分开的 manifest 文案；没有就不收（0.9.5 及以前没有）。
@@ -82,8 +82,11 @@ for (const ref of refs) if (!entries.some(e => e.name === ref)) throw Error(`Mis
 for (const name of ['welcome/index.html', 'welcome/welcome.css', 'welcome/welcome.js']) {
   if (!entries.some((e) => e.name === name)) throw Error(`Missing welcome asset: ${name}`);
 }
+for (const name of ['reader/index.html', 'reader/reader.css', 'reader/reader.js', 'lib/reader/epub.js', 'lib/reader/sanitize.js', 'lib/reader/store.js', 'lib/reader/translate.js', 'lib/vendor/fflate.browser.mjs']) {
+  if (!entries.some((e) => e.name === name)) throw Error(`Missing reader asset: ${name}`);
+}
 // MIT 等许可证要求版权与许可声明随副本分发：商店 ZIP 也是一次分发，缺一个就拒绝出包。
-for (const name of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt']) {
+for (const name of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt', 'licenses/fflate-MIT.txt']) {
   if (!entries.some((e) => e.name === name)) throw Error(`Missing legal file: ${name}`);
 }
 function crc32(data) {

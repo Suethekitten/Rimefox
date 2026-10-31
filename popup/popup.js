@@ -38,6 +38,7 @@ const el = {
   statusBox: document.getElementById('statusBox'),
   progress: document.getElementById('progress'),
   progressBar: document.getElementById('progressBar'),
+  openReader: document.getElementById('openReader'),
   retranslate: document.getElementById('retranslate'),
   clearCache: document.getElementById('clearCache'),
   diagnose: document.getElementById('diagnose'),
@@ -764,6 +765,11 @@ el.quickClear.addEventListener('click', () => {
   el.quickOut.textContent = '';
   el.quickOut.hidden = true;
   el.quickInput.focus();
+});
+
+el.openReader.addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('reader/index.html') });
+  window.close();
 });
 
 el.openOptions.addEventListener('click', () => {

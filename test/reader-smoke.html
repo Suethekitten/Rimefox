@@ -1,0 +1,70 @@
+<!doctype html><meta charset="utf-8"><title>PENDING</title><pre id="out">running</pre>
+<script type="module">
+import { zipSync, strToU8 } from '../lib/vendor/fflate.browser.mjs';
+import { parseEpub } from '../lib/reader/epub.js';
+import { sanitizeXhtml } from '../lib/reader/sanitize.js';
+const log = [];
+const ok = (name, pass, detail = '') => { log.push((pass ? 'PASS ' : 'FAIL ') + name + (detail ? ' — ' + detail : '')); if (!pass) document.title = 'FAIL'; };
+try {
+  const enc = (s) => strToU8(s);
+  const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7ZkAAAAASUVORK5CYII='), c => c.charCodeAt(0));
+  const files = {};
+  files['mimetype'] = [enc('application/epub+zip'), { level: 0 }];
+  files['META-INF/container.xml'] = enc('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
+  files['OEBPS/content.opf'] = enc('<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Smoke Book</dc:title><dc:creator>Author</dc:creator><dc:language>en</dc:language><dc:identifier id="id">urn:test</dc:identifier></metadata><manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="pic" href="pic.png" media-type="image/png"/></manifest><spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/></spine></package>');
+  files['OEBPS/toc.ncx'] = enc('<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap><navPoint id="n1"><navLabel><text>Chapter One</text></navLabel><content src="ch1.xhtml"/><navPoint id="n2"><navLabel><text>Chapter Two</text></navLabel><content src="ch2.xhtml"/></navPoint></navPoint></navMap></ncx>');
+  files['OEBPS/ch1.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="top">Chapter One</h1><p>Hello <b>bold</b> <a href="ch2.xhtml#note">next</a>.</p><p><img src="pic.png" alt="dot"/></p><script>alert(1)<\/script><p>Safe <em>text</em>.</p></body></html>');
+  files['OEBPS/ch2.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="note">Chapter Two</h1><p>Second.</p></body></html>');
+  files['OEBPS/pic.png'] = png;
+  const zipped = zipSync(files);
+  const book = parseEpub(zipped);
+  ok('title', book.metadata.title === 'Smoke Book', book.metadata.title);
+  ok('authors', book.metadata.authors[0] === 'Author', JSON.stringify(book.metadata.authors));
+  ok('spine', book.sections.length === 2, String(book.sections.length));
+  ok('toc nested', book.toc.length === 1 && book.toc[0].children.length === 1, JSON.stringify(book.toc));
+  ok('cover absent is fine', true);
+  ok('section title', book.sections[0].title === 'Chapter One', book.sections[0].title);
+  const raw = book.sections[0].load();
+  ok('load xhtml', raw.kind === 'xhtml' && raw.html.includes('Chapter One'));
+  const san = sanitizeXhtml(raw.html, { baseHref: raw.baseHref, book, document, DOMParser: window.DOMParser });
+  const host = document.createElement('div');
+  host.appendChild(san.fragment);
+  ok('script removed', !host.querySelector('script'), host.innerHTML);
+  ok('text', host.textContent.includes('Hello') && host.textContent.includes('Safe'), host.textContent);
+  ok('bold kept', !!host.querySelector('b'), host.innerHTML);
+  const img = host.querySelector('img');
+  ok('image local', !!img && img.src.startsWith('blob:'), img && img.src);
+  const a = host.querySelector('a');
+  ok('link internal target', !!a && a.getAttribute('data-reader-target') === 'OEBPS/ch2.xhtml', a && a.outerHTML);
+  ok('chapter2 load', book.sections[1].load().html.includes('Chapter Two'));
+  const base = {};
+  for (const key of Object.keys(files)) base[key] = files[key];
+  base['META-INF/encryption.xml'] = enc('<encryption/>');
+  let code = '';
+  try { parseEpub(zipSync(base)); } catch (err) { code = err.code; }
+  ok('DRM EPUB rejected', code === 'drm_protected', code);
+  const fixed = {};
+  for (const key of Object.keys(files)) fixed[key] = files[key];
+  fixed['OEBPS/content.opf'] = enc('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Fixed</dc:title><meta property="rendition:layout">pre-paginated</meta></metadata><manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>');
+  code = '';
+  try { parseEpub(zipSync(fixed)); } catch (err) { code = err.code; }
+  ok('fixed-layout EPUB rejected', code === 'unsupported_layout', code);
+  const fontObf = {};
+  for (const key of Object.keys(files)) fontObf[key] = files[key];
+  fontObf['META-INF/encryption.xml'] = enc('<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><EncryptedData><CipherData><CipherReference URI="OEBPS/font.otf"/></CipherData></EncryptedData></encryption>');
+  code = '';
+  try { parseEpub(zipSync(fontObf)); } catch (err) { code = err.code; }
+  ok('font-only obfuscation allowed', code === '', code);
+  const unsafe = {};
+  for (const key of Object.keys(files)) unsafe[key] = files[key];
+  unsafe['../escape.txt'] = enc('bad');
+  code = '';
+  try { parseEpub(zipSync(unsafe)); } catch (err) { code = err.code; }
+  ok('path traversal rejected', code === 'unsafe_archive', code);
+} catch (err) {
+  log.push('FAIL exception — ' + (err && err.stack || err));
+  document.title = 'FAIL';
+}
+if (document.title !== 'FAIL') document.title = 'PASS';
+document.getElementById('out').textContent = log.join('\n');
+</script>

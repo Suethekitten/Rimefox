@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>凛狐阅读器</title>
+<link rel="stylesheet" href="../content/styles/inject.css">
+<link rel="stylesheet" href="reader.css">
+</head>
+<body>
+<header class="reader-top" data-dt-ui>
+  <button id="backToLibrary" class="reader-button" type="button" title="返回书库">← 书库</button>
+  <div class="reader-heading">
+    <div id="readerTitle" class="reader-title">凛狐阅读器</div>
+    <div id="readerSubtitle" class="reader-subtitle"></div>
+  </div>
+  <div class="reader-actions">
+    <select id="targetSelect" class="reader-control" title="目标语言" aria-label="目标语言" disabled></select>
+    <select id="modeSelect" class="reader-control" title="显示模式" disabled>
+      <option value="original">原文</option>
+      <option value="bilingual">双语</option>
+      <option value="translation">仅译文</option>
+    </select>
+    <button id="translateChapter" class="reader-button" type="button" disabled title="翻译当前章节">翻译本章</button>
+    <button id="tocToggle" class="reader-button" type="button" disabled title="目录">目录</button>
+    <button id="fullscreenToggle" class="reader-button" type="button" title="全屏阅读" aria-label="全屏阅读">⛶</button>
+    <button id="settingsToggle" class="reader-button" type="button" title="阅读设置">Aa</button>
+  </div>
+</header>
+
+<main id="libraryView" class="library-view">
+  <section class="library-hero">
+    <div>
+      <p class="eyebrow">LOCAL READING</p>
+      <h1>把一本 EPUB 放进凛狐</h1>
+      <p class="library-copy">原书只保存在本机。导入后可阅读、翻译、记住进度；不上传原书，不读取账号信息。</p>
+    </div>
+    <div class="library-import">
+      <label class="drop-zone" id="dropZone">
+        <input id="fileInput" type="file" accept=".epub,application/epub+zip" hidden>
+        <span class="drop-title">选择 EPUB 或拖到这里</span>
+        <span class="drop-note">仅支持无 DRM 的可重排 EPUB 2/3，最大 100 MB</span>
+      </label>
+      <p id="libraryStatus" class="reader-status" role="status"></p>
+    </div>
+  </section>
+  <section class="library-section">
+    <div class="section-head"><h2>我的书</h2><span id="libraryUsage" class="muted"></span></div>
+    <div id="bookGrid" class="book-grid"></div>
+  </section>
+</main>
+
+<main id="readerView" class="reader-view" hidden>
+  <aside id="tocPanel" class="toc-panel" data-dt-ui aria-label="目录">
+    <div class="toc-head"><strong>目录</strong><button id="tocClose" class="reader-button" type="button">×</button></div>
+    <div id="tocList" class="toc-list"></div>
+  </aside>
+  <section id="readerScroll" class="reader-scroll">
+    <div id="readerStatus" class="reader-status" role="status"></div>
+    <article id="bookContent" class="reader-content"></article>
+  </section>
+</main>
+
+<aside id="footnotePanel" class="footnote-panel" data-dt-ui hidden>
+  <div class="toc-head"><strong>脚注</strong><button id="footnoteClose" class="reader-button" type="button">×</button></div>
+  <div id="footnoteBody" class="footnote-body"></div>
+</aside>
+
+<dialog id="settingsDialog" class="settings-dialog" data-dt-ui>
+  <form method="dialog" class="settings-form">
+    <div class="toc-head"><strong>阅读设置</strong><button class="reader-button" value="cancel" type="submit">完成</button></div>
+    <label class="setting-row">字体大小 <input id="fontSize" type="range" min="14" max="30" step="1"></label>
+    <label class="setting-row">行高 <input id="lineHeight" type="range" min="1.3" max="2.2" step="0.05"></label>
+    <label class="setting-row">页宽 <input id="measure" type="range" min="480" max="1000" step="20"></label>
+    <label class="setting-row">字间距 <input id="letterSpacing" type="range" min="0" max="0.12" step="0.01"></label>
+    <label class="setting-row">段间距 <input id="paragraphSpacing" type="range" min="0.5" max="2" step="0.05"></label>
+    <label class="setting-row">主题
+      <select id="themeSelect" class="reader-control">
+        <option value="auto">跟随扩展</option>
+        <option value="light">浅色</option>
+        <option value="dark">深色</option>
+        <option value="sepia">纸张</option>
+      </select>
+    </label>
+    <label class="setting-row">正文字体
+      <select id="fontSelect" class="reader-control">
+        <option value="user">我的字体（本机上传）</option>
+        <option value="serif">系统宋体</option>
+        <option value="sans">系统黑体</option>
+      </select>
+    </label>
+    <div class="setting-row">本机字体
+      <span id="userFontName" class="muted">未上传</span>
+      <span class="font-actions">
+        <button id="userFontUploadBtn" class="reader-button" type="button">上传字体</button>
+        <button id="userFontRemove" class="reader-button" type="button">移除</button>
+      </span>
+      <input id="userFontInput" type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" hidden>
+    </div>
+    <p class="setting-note">字体只保存在本机，不会上传；请确保你有该字体的使用授权。</p>
+  </form>
+</dialog>
+
+<div id="readerToast" class="reader-toast" data-dt-ui role="status" aria-live="polite"></div>
+<script src="../lib/inline-protocol.js"></script>
+<script src="../content/core.js"></script>
+<script src="../content/units.js"></script>
+<script src="../content/direction.js"></script>
+<script src="../content/dom.js"></script>
+<script type="module" src="reader.js"></script>
+</body>
+</html>

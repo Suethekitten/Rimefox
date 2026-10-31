@@ -81,7 +81,7 @@ node test/package-store.test.mjs
 
 本扩展采用 BYOK：你需要自行配置 API 地址、API Key 和模型，服务商可能收取费用。支持 DeepSeek 等 OpenAI 兼容接口以及 Anthropic、Gemini 协议，没有内置免费翻译额度。作者不运营翻译服务器，不使用分析或遥测。待翻文本、自定义提示词及命中术语直接发给你配置的接口；Key 用于该接口认证。本机保存设置与缓存，第三方处理以其隐私政策为准。
 
-视频字幕翻译默认关闭，仅支持站点可用的官方字幕轨（YouTube CC / B 站人工或 AI 字幕），不支持画面硬字幕。此功能非官方，与 Google、YouTube 或哔哩哔哩无关联，平台更新可能导致失效。暂不支持 PDF、EPUB 或图片 OCR。
+视频字幕翻译默认关闭，仅支持站点可用的官方字幕轨（YouTube CC / B 站人工或 AI 字幕），不支持画面硬字幕。此功能非官方，与 Google、YouTube 或哔哩哔哩无关联，平台更新可能导致失效。EPUB 阅读器支持用户本地导入的无 DRM、可重排 EPUB 2/3；PDF、固定版式、漫画和图片 OCR 暂不支持。
 
 源码与支持：<https://github.com/Suethekitten/Rimefox> 。隐私政策：<https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> 。
 
@@ -91,7 +91,7 @@ Read webpages with original text and translation together, hover a translated se
 
 Bring your own API key: configure an endpoint, key and model from your chosen provider. Provider charges may apply; no free translation quota is bundled. Rimefox supports OpenAI-compatible endpoints such as DeepSeek, plus Anthropic and Gemini protocols. The author operates no translation server and uses no analytics or telemetry. Text to translate, custom prompts and matching glossary terms go directly to your configured endpoint, with your key used for authentication. Settings and caches are stored locally; providers process requests under their own policies.
 
-Video caption translation is disabled by default and requires an official subtitle track exposed by the site (YouTube CC, or Bilibili manual/AI subtitles). It cannot translate captions burned into video. This unofficial feature is not affiliated with Google, YouTube or Bilibili and may stop working after platform changes. PDF, EPUB and image OCR are not supported.
+Video caption translation is disabled by default and requires an official subtitle track exposed by the site (YouTube CC, or Bilibili manual/AI subtitles). It cannot translate captions burned into video. This unofficial feature is not affiliated with Google, YouTube or Bilibili and may stop working after platform changes. The EPUB reader supports locally imported, DRM-free, reflowable EPUB 2/3; PDF, fixed-layout, comics and image OCR are not supported.
 
 Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: <https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> .
 

@@ -6,6 +6,7 @@
 
 | 文件 | 是什么 | 版本 / 状态 |
 |---|---|---|
+| [2026-10-31-epub-reader-0.13.0.md](2026-10-31-epub-reader-0.13.0.md) | 0.13.0 EPUB 阅读与翻译：冻结范围、实现、真实 Chrome / 假接口验证、限制与 QA 交接 | 0.13.0，本地待发布 |
 | [2026-10-27-bilibili-subtitles-0.12.6.md](2026-10-27-bilibili-subtitles-0.12.6.md) | 0.12.6 Bilibili 字幕扩展：架构、Chrome 合成轨道 E2E、测试证据、真实登录态限制与 QA 复测清单 | 0.12.6，本地待发布 |
 | [2026-10-27-bilibili-subtitles-qa-0.12.6.md](2026-10-27-bilibili-subtitles-qa-0.12.6.md) | 0.12.6 哔哩哔哩字幕独立 QA（V1–V15）与修复记录 | 0.12.6 |
 | [2026-10-25-0.12.3-release-verification.md](2026-10-25-0.12.3-release-verification.md) | 0.12.3 发布前最终验证：P3 计数修复、全量测试、发布包与发布结果 | 0.12.3，已发布 |

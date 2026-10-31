@@ -76,6 +76,8 @@ edge-bilingual/
 │   ├── appearance.js      强调色预设、译文排版变量、译文自定义 CSS 清洗（纯函数，后台按网址算 page 对象用）
 │   ├── site-rules.js      站点规则：内置规则、校验、按网址匹配；夜间模式网站名单
 │   ├── liquid-glass/      液态玻璃（复用 Sak / MIT）：SVG 位移滤镜、材质、弹窗工具坞、设置页导航
+│   ├── reader/            EPUB 阅读器：epub.js 结构解析、sanitize.js 清洗、store.js IndexedDB、translate.js 队列
+│   ├── vendor/            仅 fflate 0.8.2（MIT）浏览器 ESM，EPUB ZIP 解压
 │   ├── ui-appearance.js   设置页/弹窗共用：强调色等写到 <html>、深浅色圆形过渡、跨页面配置同步、空闲执行
 │   ├── ui-theme-boot.js   设置页/弹窗的首帧主题与外观预判（<head> 同步执行，避免闪一帧白底）
 │   ├── ui-tokens.css      弹窗 / 设置页 / 欢迎页共用的设计变量：材质、三级文字、强调色派生、圆角、阴影、字体；深浅色与「减少透明 / 关闭阴影」都在这里切换（各页面 CSS 首行 @import）；设置页和弹窗共用的开关 `.switch`（弹窗加 `.switch-sm`）也在这里
@@ -102,10 +104,11 @@ edge-bilingual/
 │   ├── dock.js            悬浮入口：Shadow DOM（closed）里的小球 + 按钮列；拖拽 / 吸附 / 半隐藏，默认关闭
 │   └── styles/inject.css  译文样式与主题、页面明暗适配、夜间模式反色
 ├── welcome/               首次安装欢迎页 / 新手引导（index.html + welcome.css + welcome.js，无构建）
-├── popup/                 工具栏面板（含随手翻译）
+├── popup/                 工具栏面板（含随手翻译、EPUB 阅读器入口）
+├── reader/                EPUB 阅读器全标签页（index.html + reader.css + reader.js；不是 content script）
 ├── options/               设置页（提供商模板、模型选择器、快捷键录制、外观 / 站点规则交互、设置搜索、液态玻璃导航；拆分见 options/ 下各模块）
 ├── test/                  Node 单测（引擎 / 配置 / 提供商模板 / 回包解析 / 缓存 / 提示词 / 目标语言校验 / 外观 / 站点规则 / 界面语言 / 隐私脱敏 / 欢迎页 / YouTube 字幕运行时竞态 / Bilibili 字幕解析与生命周期 / 用量诊断 / 液态玻璃 / 注入清单一致性）
-├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs，见 7.1c）
+├── tools/                 打包（package-store.mjs）、发版说明检查、真实浏览器端到端检查（e2e-extension.mjs / e2e-reader.mjs，见 7.1c）
 └── selftest/              离线自检（e2e 脚本会顺带跑一遍，见 7.1c）
 ```
 
@@ -257,6 +260,15 @@ lib/
 > GLM-5.3 系列、Kimi k3、Gemini 3 Pro 是**强制思考**，关不掉；参数被拒后会自动降级，不会让翻译失败。
 
 **新增一个协议**：写 `lib/engines/xxx.js` → 在 `provider.js` 的 `ENGINES` 注册 → `config.js` 的 `ENGINE_IDS` 加 id → 补 `test/engines.test.mjs` 用例。
+
+### 4.6 EPUB 阅读器（0.13.0）
+
+`reader/index.html` 是扩展页，不是 content script；它通过文件选择 / 拖拽读取本地 EPUB，用 `lib/reader/epub.js` 解 ZIP + OPF/spine/nav，用 `lib/reader/sanitize.js` 按 allowlist 构造 DOM。翻译不复制引擎：阅读器直接调用 `content/core.js` / `units.js` / `direction.js` / `dom.js` 的 `DT.collect` 与 `DT.inject`，只自己实现按书 / 章节的队列与 IndexedDB 缓存。
+
+- `reader/index.html` 加载 classic `content/*.js`、`lib/inline-protocol.js`，再加载 `reader.js`（module）。UI 元素必须带 `data-dt-ui`，否则 `dom.js` 会把阅读器按钮当正文。阅读器不内置字体；用户可上传本机 TTF/OTF/WOFF/WOFF2，字体只存本机 IndexedDB 并由 FontFace 加载，系统宋体 / 黑体作为回退；另提供字号、行高、字距、段距、页宽、主题和全屏。
+- 自动翻译只处理当前视口 + 后 2 屏；「翻译本章」才遍历当前 section。background `translate` 用 `noCache: true`，译文写 reader IndexedDB，不污染 512 KB 全局缓存。
+- 书库、进度、删除、缓存 key、PDF 预留和错误码见 [docs/READER-ARCHITECTURE.md](docs/READER-ARCHITECTURE.md)；该文档是唯一契约，其他文档只链接。
+- 测试：`test/reader-contract.test.mjs`（静态契约）、`test/reader-smoke.html`（真实 Chrome 的解析/清洗冒烟）、`tools/e2e-reader.mjs`（真实扩展 + 假 API + 合成 EPUB）。
 
 ---
 
@@ -836,21 +848,19 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.12.6）
+## 14. 本版技术记录（0.13.0）
 
 > 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
 
-0.12.6 把已有 YouTube 字幕翻译扩展为「YouTube / Bilibili 共用一套运行时」，不是独立视频翻译引擎。用户设置仍是同一个 `subtitleTranslate`，没有新增 B 站开关。
+0.13.0 新增本地 EPUB 阅读与翻译。它不是一个新翻译引擎：阅读器只负责文档解析、清洗、章节渲染和按书队列；行内格式、双语 / 仅译文注入、方向和字体仍由 `content/dom.js` 的 `DT.collect` / `DT.inject` 完成。
 
-- **运行时抽象**：`subtitles.js` 只消费 `DT.subtitleSource` 返回的统一轨道 `{ platform, videoKey, trackKey, lang, kind, units }`；不再解析 json3。YouTube 的 `subtitles-source.js` 和新增的 `bilibili-subtitles-source.js` 各自负责来源、轨道选择与解析。`subtitles-core.js` 保留 YouTube json3，并新增 Bilibili body（from/to 秒转毫秒、空段 / 非法时间 / 重复 / 超长过滤；每段保留为独立显示单位，不按句末标点跨段合并）。
-- **Bilibili 捕获**：新增 `bilibili-hook.js`（MAIN world，document_start），只观察 `/x/player/(wbi/)v2` 回包（地址按页面解析，真实播放器的协议相对写法也能识别），保留最近几份供扩展晚启动时 replay；不改请求、不读 Cookie。来源层按 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选当前轨道；active class 缺失但原生字幕层可见时，用播放器元数据 `selectedLan` 或唯一轨道兜底（`take()` 与 `captionsOn()` 用同一规则；原生字幕用 `opacity:0` 收起，否则接管本身会让兜底判定成 CC 已关、每 200 ms 闪烁）；拒绝 bvid 与页面不一致的回包。当前选中语言解析到的不是这条轨道时 `matches()` 立即让位；`resolve()` 失败不占用去重键，按 3 s / 10 s / 30 s 退避重试，播放器新回包立即重试。
-- **取字幕安全**：新增 `lib/subtitle-source.js` 白名单，只允许 `aisubtitle.hdslb.com` 的 `/bfs/(ai_)subtitle/` 与 `i[0-9].hdslb.com` 的 `/bfs/subtitle/` HTTPS 地址。后台新增 `subtitle:fetch`：校验发送方是 `www.bilibili.com` 视频页、无 Cookie、`redirect: 'manual'`、Content-Length / 2 MB 限制、允许 JSON / text / octet-stream；不作为翻译 API。
-- **身份与费用**：Bilibili 轨道身份为 bvid + cid + 轨道 ID + 语言，并带 player `page_no`；URL 明确带 `?p=` 且与轨道 page 不一致时 `source.matches()` 立即失效，旧 P 不会在新 P 上继续显示。翻译请求新增 `cacheScope`，后台缓存键追加 `subtitle-v1:platform|videoKey|trackKey|lang`，目标语言 / 风格 / 模型 / 接口 / 术语 / 提示词仍走原有基础键；显示模式不参与，切换双语 / 仅译文不重复付费。带 `subtitle-v1:` 的条目只进内存层和 session 层，不写 `chrome.storage.local`（否则磁盘里是观看记录），读到旧条目即删；隐私文档已同步。
-- **渲染**：叠层继续插在播放器容器里，`rimefox-subs-on` 只隐藏当前播放器原生字幕；Bilibili 限定选择器为 `.bpx-player-subtitle-wrap` 和 `.bili-subtitle-x-subtitle-panel`，不碰弹幕。关闭翻译 / CC / 同语言 / 广告时移除隐藏类并隐藏叠层；播放器重建后重新绑定叠层。
-- **URL 兼容**：`www.bilibili.com/zh-Hans/video/BV...` 等语言前缀也纳入 manifest、页面判断和后台发送方校验；`?p=` 用于 page 失效判断，cid + page 共同描述分 P。
-- **测试**：新增 `test/bilibili-subtitles.test.mjs`（解析、轨道选择、bvid/cid 切换、旧响应、缓存身份、关闭恢复、不全量预翻、URL 白名单差分）；`test/subtitles-session.test.mjs` 的 YouTube A–Q 全部保留，测试替身补 `resolve()`。E2E：默认整套里的离线 Bilibili（`--bilibili-only`）与 `--bilibili-subtitles <url>` 都经真实页面钩子，覆盖叠层、原生恢复、分 P、站内换 BV、同语言 0 请求、关闭后 0 请求、换语言让位、取字幕失败重试、无标点字幕不合并、无 active 类兜底不闪烁和磁盘缓存不含视频标识；新增 `test/bilibili-hook.test.mjs`。
-- **独立 QA**：开发交接自评「无 P0 / P1」后，独立 QA 在真实扩展 + 本地假 B 站上复现了 V1–V7（钩子不识别真实播放器的协议相对地址、磁盘缓存含视频标识、换语言不让位、取字幕失败不重试、无标点字幕合并成长块、兜底闪烁、唯一轨道兜底不显示），均已修复，记录见 [归档](docs/archive/2026-10-27-bilibili-subtitles-qa-0.12.6.md)。V8–V15（恶意页面脚本的费用 / 锁死、YouTube `adShowing` 引用错误、短暂错轨、2 MB 先读后判、CDN 跳转、钩子可被识别）未处理。
-- **限制**：真实人工 / AI 字幕轨的浏览器验收受登录态与视频可用性限制；没有合法登录会话时只能验证合成轨道；全屏 / 网页全屏 / 小窗下的叠层位置和真实播放器关闭 CC 的判定未在真实页面验证。B 站番剧、直播、弹幕、硬字幕 OCR、音频识别、DRM / 会员内容不在本轮范围；站点接口或 DOM 改版可能失效。
+- **阅读器边界**：`reader/index.html` 是扩展页，不是 content script；弹窗新增 EPUB 入口。`lib/reader/epub.js` 只做 ZIP → container.xml → OPF → spine/nav 的结构解析；`lib/reader/sanitize.js` 用 allowlist 构造 DOM，禁用脚本、远程资源和表单。`lib/vendor/fflate.browser.mjs` 为 fflate 0.8.2（MIT），仅用于同步解压。
+- **文档契约**：`BookDocument` / `DocumentAdapter` / `Section` / `ReadingProgress` 与 PDF 预留边界见 [docs/READER-ARCHITECTURE.md](docs/READER-ARCHITECTURE.md)。PDF 不在 0.13.0 实现，不引入 pdf.js；未来 PDF 共享书库、进度、翻译队列与缓存，但不共享 XHTML renderer。
+- **本地数据**：`rimefox-reader` IndexedDB 保存原书 Blob、封面、元数据、目录、进度和该书译文；单本上限约 100 MB、书库约 500 MB，不申请 `unlimitedStorage`。删除书会删除该书译文与失败记录；同一文件按 SHA-256 去重。
+- **翻译费用**：阅读器发送 `noCache: true`，不让整本书进入现有 512 KB 全局缓存；reader 自身按 `epub-v1|bookId|bookHash|sectionId|contentHash|target|style|intensity|provider|model|professional|language|glossary/prompt` 隔离。自动只翻当前视口 + 后 2 屏，接近章末时预取下一章开头；手动「翻译本章」只翻当前 section；切章取消旧代际。
+- **安全**：ZIP 单条 / 总展开 / 压缩比限制，拒绝路径穿越；`rights.xml` 和非字体 `encryption.xml` 拒绝，纯字体混淆（IDPF / Adobe）允许但不加载出版字体；固定版式拒绝。XHTML 只保留标题、段落、列表、引用、图片、图注、简单表格、基础行内标签、链接和脚注；不把不可信字符串写入 `innerHTML`。
+- **测试**：`test/reader-contract.test.mjs` 静态契约；`test/reader-smoke.html` 真实 Chrome 解析 / 清洗冒烟；`tools/e2e-reader.mjs` 真实扩展 + 真实 reader 页 + 真实 IndexedDB + 假 API，覆盖导入、章节、目录、图片、链接、脚本清除、双语注入、行内粗体、缓存命中、模式记忆、原文恢复、章末预取下一章和删除。
+- **限制 / 未完成**：0.13.0 只支持无 DRM、可重排的 EPUB 2/3；固定版式、漫画、音频 / 视频、PDF、MOBI/AZW3、OCR、跨设备同步、高亮 / 批注和完整屏幕阅读器审计不在本轮范围。真实大型出版社 EPUB、移动端、RTL 和大型书库仍需独立 QA；本地 reader E2E 使用合成 EPUB + 假 API，不等同于真实书库验收。PDF 目前只有接口文档。
 
 
 

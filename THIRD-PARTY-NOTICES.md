@@ -33,6 +33,18 @@
 | `ckiplab/bert-tiny-chinese-ner` | **GPL-3.0**（因此明确不引入） |
 | `funstory-ai/neurobert-mini` | 未公开（Hugging Face 私有） |
 
+## fflate
+
+- 项目：fflate — <https://github.com/101arrowz/fflate>
+- 版本：`0.8.2`（浏览器 ESM 构建）
+- 许可证：MIT，Copyright (c) 2023 Arjun Barrett
+- 许可证全文：[licenses/fflate-MIT.txt](licenses/fflate-MIT.txt)
+- 实际复用位置：[lib/vendor/fflate.browser.mjs](lib/vendor/fflate.browser.mjs)
+
+### 实际复用的内容
+
+EPUB 是 ZIP 容器；只使用 fflate 的同步解压（`unzipSync`）读取 `mimetype`、`META-INF/container.xml`、OPF、XHTML 和图片。保留上游代码，未修改；解压前由 `lib/reader/epub.js` 限制单条大小、总展开大小和压缩比，并拒绝路径穿越。未使用 fflate 的压缩、Worker、Node 文件系统或网络功能。
+
 ## Liquid Glass Slider
 
 - 项目：Liquid Glass Slider — <https://github.com/Saknutella/liquid-glass-slider>
