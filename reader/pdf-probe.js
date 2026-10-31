@@ -1,7 +1,7 @@
 // PDF 探针：在扩展页里加载 legacy pdf.js，渲染一页并取文本层，结果写到 window.__probe。
 // 只用于阶段 0 评估，不进正式 reader 流程。
 import * as pdfjsLib from './vendor/pdfjs/pdf.min.mjs';
-import { pageBlocks, itemsToLines, dropMargins, detectColumns, parsePrintedToc } from '../lib/reader/pdf-text.js';
+import { pageBlocks, itemsToLines, dropMargins, detectColumns, parsePrintedToc, findRepeatedBandTexts } from '../lib/reader/pdf-text.js';
 
 const params = new URLSearchParams(location.search);
 const name = params.get('sample') || 'single';
@@ -73,6 +73,17 @@ function show(text) {
   } catch (err) { out.outline = -1; }
   out.heapLoadMB = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0;
 
+  const bandPages = [];
+  for (let i = 1; i <= Math.min(doc.numPages, 16); i += 1) {
+    const bp = await doc.getPage(i);
+    const bvp = bp.getViewport({ scale: 1 });
+    const bc = await bp.getTextContent();
+    bandPages.push({ items: bc.items, height: bvp.height });
+  }
+  const repeated = findRepeatedBandTexts(bandPages);
+  out.repeated = repeated.length;
+  out.repeatedSample = repeated.slice(0, 6);
+
   const page = await doc.getPage(pageNo);
   const viewport = page.getViewport({ scale: 1 });
   const canvas = document.getElementById('page');
@@ -91,7 +102,7 @@ function show(text) {
   out.head = content.items.slice(0, 8).map((item) => item.str).join(' | ');
 
   // 文本块还原（页眉页脚过滤 / 双栏排序 / 段落合并）
-  const blocks = pageBlocks(content, viewport);
+  const blocks = pageBlocks(content, viewport, { dropTexts: repeated });
   out.blocks = blocks.length;
   out.firstBlock = blocks.length ? blocks[0].text.slice(0, 140) : '';
   out.blockSample = blocks.slice(0, 5).map((b) => ({ s: b.text.slice(0, 45), e: b.text.slice(-45) }));

@@ -2,7 +2,7 @@
 // 运行：node test/reader-pdf-text.test.mjs
 import assert from 'node:assert/strict';
 
-import { itemsToLines, dropMargins, orderColumns, groupParagraphs, pageBlocks, parsePrintedToc } from '../lib/reader/pdf-text.js';
+import { itemsToLines, dropMargins, orderColumns, groupParagraphs, pageBlocks, parsePrintedToc, findRepeatedBandTexts } from '../lib/reader/pdf-text.js';
 
 let pass = 0;
 let fail = 0;
@@ -111,6 +111,32 @@ t('印刷版目录：标题与页码水平错位也能配对', function () {
     { title: 'PACIFIC REGION', page: 11 },
     { title: 'Tides / Wave Formation', page: 15 }
   ]);
+});
+
+t('跨页页眉页脚：整行重复被识别并过滤，正文里的单字不受影响', function () {
+  const pages = [1, 2, 3].map((i) => ({
+    height: 842,
+    items: [
+      { str: 'Journal of Testing 2026', transform: [1, 0, 0, 1, 40, 810] },
+      { str: 'Year', transform: [1, 0, 0, 1, 40, 800] },
+      { str: 'Body text line ' + i, transform: [1, 0, 0, 1, 50, 400] }
+    ]
+  }));
+  const repeats = findRepeatedBandTexts(pages);
+  assert.deepEqual(repeats, ['Journal of Testing #']);
+  const blocks = pageBlocks({ items: pages[0].items }, { width: 595, height: 842 }, { dropTexts: repeats });
+  assert.deepEqual(blocks.map((b) => b.text), ['Body text line 1']);
+});
+
+t('栏目横幅与标题同行时只去掉前缀', function () {
+  const blocks = pageBlocks({
+    items: [
+      { str: 'OPEN', transform: [1, 0, 0, 1, 40, 780] },
+      { str: 'Single dose creatine improves', transform: [1, 0, 0, 1, 90, 780] },
+      { str: 'Body line', transform: [1, 0, 0, 1, 50, 400] }
+    ]
+  }, { width: 595, height: 842 });
+  assert.deepEqual(blocks.map((b) => b.text), ['Single dose creatine improves', 'Body line']);
 });
 
 console.log('\n' + pass + ' 通过 / ' + (pass + fail) + ' 总数');
