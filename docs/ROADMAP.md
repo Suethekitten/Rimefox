@@ -120,7 +120,7 @@
 | P2-8 | 更多界面语言 | 目前中英文；有需求再加 |
 | P2-9 | 翻译引擎内部优化（不加请求、不加设置） | 轻量上下文、片段稳定映射、低成本质检、术语一致性：现状、成本、风险和下一步最小任务见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)；不定版本 |
 | P2-10 | 拆 `main.js` | 把纯函数（离屏距离、取批上限、退避时间表）挪到 `core.js`，只动这两个文件 + 自检页；P1-5 的前置（原 HANDOFF §10） |
-| P2-11 | PDF 扫描件 OCR（未来版本，未排期） | 候选 PaddleOCR.js / Tesseract.js / Scribe.js 的体积、许可与适配性见 [归档评估](archive/2026-10-31-ocr-candidates.md)；先跑 Tesseract 基线探针，再决定是否值得为 PaddleOCR 付 40–60 MB 可选增强包 |
+| P2-11 | PDF 扫描件 OCR（未来版本，**准备中**） | 准备工作已开始：候选 PaddleOCR.js / Tesseract.js / Scribe.js 的体积、许可与适配性评估完成（见 [归档评估](archive/2026-10-31-ocr-candidates.md)），探针计划已定；尚未跑探针、未集成代码。下一步：Tesseract 基线探针，再决定是否值得为 PaddleOCR 付 40–60 MB 可选增强包 |
 
 ### P3 — 明确暂不做
 
