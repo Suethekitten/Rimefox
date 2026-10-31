@@ -866,6 +866,8 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **安全**：ZIP 单条 / 总展开 / 压缩比限制，拒绝路径穿越；`rights.xml` 和非字体 `encryption.xml` 拒绝，纯字体混淆（IDPF / Adobe）允许但不加载出版字体；固定版式拒绝。XHTML 只保留标题、段落、列表、引用、图片、图注、简单表格、基础行内标签、链接和脚注；不把不可信字符串写入 `innerHTML`。
 - **测试**：`test/reader-contract.test.mjs` 静态契约；`test/reader-smoke.html` 真实 Chrome 解析 / 清洗冒烟；`tools/e2e-reader.mjs` 真实扩展 + 真实 reader 页 + 真实 IndexedDB + 假 API，覆盖导入、章节、目录、图片、链接、脚本清除、双语注入、行内粗体、缓存命中、模式记忆、原文恢复、章末预取下一章和删除。
 - **B 站 CC 关闭**：0.13.1 修复 `bilibili-subtitles-source.js` 的 `captionsOn`：先看原生字幕层是否真实可见，再看 active 语言项；关闭 CC 后即使语言菜单保留 active 选中项也会让位，不产生请求；重开 CC 复用轨道。
+
+- **真实页面验收（2026-10-31）**：用户在本机真实扩展里导入样例 EPUB（`dist/reader-sample.epub`，自造内容），确认目录、章节、图片、跨章内部链接跳转、双语 / 仅译文均正常；脚注跨章跳转、退出重进后的进度、删除书的清理仍需抽测。
 - **限制 / 未完成**：0.13.0 只支持无 DRM、可重排的 EPUB 2/3；固定版式、漫画、音频 / 视频、PDF、MOBI/AZW3、OCR、跨设备同步、高亮 / 批注和完整屏幕阅读器审计不在本轮范围。真实大型出版社 EPUB、移动端、RTL 和大型书库仍需独立 QA；本地 reader E2E 使用合成 EPUB + 假 API，不等同于真实书库验收。PDF 目前只有接口文档。
 
 ### 0.13.2 — 字幕费用与稳定性
