@@ -503,6 +503,20 @@ await t('没有 active 类、元数据也没给语言、只有一条轨道：tak
   assert.equal(source.matches(track), true);
 });
 
+await t('关闭 CC 但 active 选中项仍在：captionsOn 必须让位，不能继续显示译文叠层', async function () {
+  const state = { lan: 'ai-zh', wrap: { getClientRects: function () { return []; } } };
+  const doc = makeDoc(state);
+  const source = createBiliSource({
+    doc: doc,
+    location: { hostname: 'www.bilibili.com', pathname: '/video/BV1xx411c7mD', search: '' },
+    send: async function () { return { ok: true, text: bodyOf([[1, 2, 'x']]) }; }
+  });
+  source.accept(messageFor({ tracks: [trackOf('ai-zh', SAFE_URL)], selectedLan: 'ai-zh' }, 1));
+  assert.equal(source.captionsOn(), false, '原生字幕层不可见时，active class 不能单独让扩展接管');
+  state.wrap = { getClientRects: function () { return [1]; } };
+  assert.equal(source.captionsOn(), true, '原生字幕层恢复可见后继续接管');
+});
+
 console.log('\n[Bilibili 运行时：隔离 / 懒翻译 / 渲染]');
 
 function setupRuntime() {

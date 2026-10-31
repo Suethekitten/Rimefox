@@ -2036,6 +2036,22 @@ async function bilibiliSubtitleChecks(url, offline) {
   check('重新打开字幕翻译：复用已有译文，不重复送翻', !!reopened && stats.texts === beforeReopen,
     JSON.stringify({ reopened: !!reopened, added: stats.texts - beforeReopen }));
 
+  // 真实用户关 CC 时，B 站常把语言菜单的 active 选中项留在 DOM 里；
+  // 只要原生字幕层不可见，扩展就必须让位（此前只看 active class，叠层会一直留着）。
+  await pageEval(bili, "const w=document.querySelector('.bpx-player-subtitle-wrap'); if(w) w.style.display='none'; return true;");
+  const ccOff = await until(async () => {
+    const st = await biliOverlay();
+    return st && !st.on && !st.playerOn ? st : null;
+  }, 5000, 150);
+  check('关闭 B 站 CC（active 选中项仍在）：译文叠层让位', !!ccOff, ccOff ? JSON.stringify(ccOff) : '未让位');
+  check('关闭 B 站 CC 期间不产生翻译请求', stats.texts === beforeReopen, '新增 ' + (stats.texts - beforeReopen) + ' 条');
+  await pageEval(bili, "const w=document.querySelector('.bpx-player-subtitle-wrap'); if(w) w.style.display=''; return true;");
+  const ccBack = await until(async () => {
+    const st = await biliOverlay();
+    return st && st.on && st.trans && st.trans.indexOf('译:') === 0 ? st : null;
+  }, 5000, 150);
+  check('重新打开 B 站 CC：复用轨道并恢复叠层', !!ccBack, ccBack ? JSON.stringify({ trans: ccBack.trans }) : '未恢复');
+
   const p2 = await injectBiliTrack({ cid: 2002, text: 'Second part subtitle.' });
   const p2Shown = await until(async () => {
     const overlay = await pageEval(bili, "const o=document.querySelector('.rimefox-subs'); return { on: !!o && o.style.display !== 'none', trans: o && o.children[1] ? o.children[1].textContent : '' };");

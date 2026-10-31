@@ -314,9 +314,12 @@
       },
       player: playerView,
       captionsOn: function () {
+        // active class 不代表 CC 仍开着：B 站在关闭字幕时常把 active 选中项留在菜单里。
+        // 先看原生字幕层是否真的可见，再决定是否接管；否则关 CC 后叠层会一直留着。
+        if (!nativeSubtitleVisible(doc)) return false;
         if (activeLanIn(doc)) return true;
         // 没有 active 类：播放器元数据明确记录过当前语言、或只有一条轨道（与 take 的选轨一致）时，用原生字幕层兜底。
-        return !!(lastMeta && (lastMeta.selectedLan || lastMeta.tracks.length === 1)) && nativeSubtitleVisible(doc);
+        return !!(lastMeta && (lastMeta.selectedLan || lastMeta.tracks.length === 1));
       },
       matches: matches,
       blocked: function () { return false; },
