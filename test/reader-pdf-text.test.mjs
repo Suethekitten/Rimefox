@@ -31,9 +31,9 @@ t('同一行的片段按 x 拼接，空隙大时补空格', function () {
   assert.equal(lines[0].text, 'Hello world');
 });
 
-t('不同 y 分成不同行，从上到下', function () {
+t('不同 y 分成不同行，并保持内容流顺序', function () {
   const lines = itemsToLines([item('second', 10, 600), item('first', 10, 700)]);
-  assert.deepEqual(lines.map((line) => line.text), ['first', 'second']);
+  assert.deepEqual(lines.map((line) => line.text), ['second', 'first']);
 });
 
 t('上下边距内的页眉页脚被丢掉', function () {

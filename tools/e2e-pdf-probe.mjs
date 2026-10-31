@@ -110,7 +110,7 @@ if (fs.existsSync(extraCases)) {
 }
 const results = [];
 for (const item of cases) {
-  const url = 'chrome-extension://' + extId + '/reader/pdf-probe.html?sample=' + item.sample + (item.dir ? '&dir=' + item.dir : '') + (item.page ? '&page=' + item.page : '') + (item.loadPages ? '&loadPages=' + item.loadPages : '') + (item.nocmap ? '&nocmap=1' : '');
+  const url = 'chrome-extension://' + extId + '/reader/pdf-probe.html?sample=' + item.sample + (item.dir ? '&dir=' + item.dir : '') + (item.page ? '&page=' + item.page : '') + (item.full ? '&full=1' : '') + (item.loadPages ? '&loadPages=' + item.loadPages : '') + (item.nocmap ? '&nocmap=1' : '');
   const { targetId } = await send('Target.createTarget', { url: url });
   const session = await attach(targetId);
   const probe = await until(async () => {

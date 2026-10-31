@@ -106,6 +106,7 @@ function show(text) {
   out.blocks = blocks.length;
   out.firstBlock = blocks.length ? blocks[0].text.slice(0, 140) : '';
   out.blockSample = blocks.slice(0, 5).map((b) => ({ s: b.text.slice(0, 45), e: b.text.slice(-45) }));
+  if (params.get('full') === '1') out.blocksText = blocks.map((b) => b.text).join('\n');
   const keptLines = dropMargins(itemsToLines(content.items), viewport.height);
   out.tocLines = dropMargins(itemsToLines(content.items, { fragmentGap: 1000 }), viewport.height).slice(0, 12).map((l) => l.text);
   out.tocDebug = content.items.filter((i) => /PACIFIC REGION|^11$|Tides/.test(i.str)).slice(0, 6).map((i) => [i.str, Math.round(i.transform[4]), Math.round(i.transform[5])]);
