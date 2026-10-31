@@ -876,6 +876,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **V9**：`subtitles-source.js` 的 `adShowing()` 之前调用不存在的 `player()`，`p.v !== current` 时抛 ReferenceError、整条回包被丢掉；改为 `playerView()`。
 - **V10–V14**：分 P 判断改为「地址栏没有 `?p` 按第 1 P 算」，旧 P 轨道立即失效（V10）；来源层只接受递增且不超过上次 200 的 `seq`（V11）；`id_str` 只认字符串 / 数字、对象退回 `id`（V12）；后台取字幕改为流式读、超过 2 MB 立即停（V13），并跟随 CDN 跳转、按最终地址校验白名单（V14，`lib/subtitle-source.js` 的 `readTextCapped`）。V15（钩子可被页面识别）仍是加固项。
 - **测试**：新增 `test/subtitle-budget.test.mjs`（预留 / 回填 / 窗口 / 字符上限 / 持久化 / 损坏数据）与 `test/subtitle-budget-pipeline.test.mjs`（真实 background + 假 fetch：换 cid 只请求一次、换源语言共用、YouTube 契约不变、换目标语言重新计费、预算封顶、标签页隔离、session 持久化）。E2E 的离线 Bilibili 增加「页面脚本伪造元数据轮换 cid / id_str → 0 条新送翻」，并给 service worker 的首次 evaluate 加了启动抖动重试。
+- **真实页面验收（2026-10-31）**：B 站真实视频 + AI 字幕轨确认「原文 + 译文」正常；人工字幕轨、全屏 / 网页全屏 / 小窗下的叠层位置仍未验证。
 - **限制**：预算阈值没有真实用量基线，是按保守估计定的；跨标签页总额度只有纯函数覆盖，没有端到端用例；会话缓存淘汰 / 浏览器重启后的行为未专项验证；同文本跨语言共用译文只验证了「只请求一次」，没做译文质量夹具。
 
 
