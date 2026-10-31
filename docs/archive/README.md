@@ -6,7 +6,7 @@
 
 | 文件 | 是什么 | 版本 / 状态 |
 |---|---|---|
-| [2026-10-31-ocr-candidates.md](2026-10-31-ocr-candidates.md) | 本地 OCR 候选（PaddleOCR.js / Tesseract.js / Scribe.js）的体积、许可与适配性评估；未跑探针、未集成 | 参考记录，2026-10-31 |
+| [2026-10-31-ocr-candidates.md](2026-10-31-ocr-candidates.md) | 本地 OCR 候选（PaddleOCR.js / Tesseract.js / Scribe.js）的体积、许可与适配性评估；未跑探针、未集成 | 参考记录，2026-10-31；OCR 已排入未来版本（ROADMAP P2-11） |
 | [2026-10-31-epub-reader-0.13.0.md](2026-10-31-epub-reader-0.13.0.md) | 0.13.0 EPUB 阅读与翻译：冻结范围、实现、真实 Chrome / 假接口验证、限制与 QA 交接 | 0.13.0，本地待发布 |
 | [2026-10-27-bilibili-subtitles-0.12.6.md](2026-10-27-bilibili-subtitles-0.12.6.md) | 0.12.6 Bilibili 字幕扩展：架构、Chrome 合成轨道 E2E、测试证据、真实登录态限制与 QA 复测清单 | 0.12.6，本地待发布 |
 | [2026-10-27-bilibili-subtitles-qa-0.12.6.md](2026-10-27-bilibili-subtitles-qa-0.12.6.md) | 0.12.6 哔哩哔哩字幕独立 QA（V1–V15）与修复记录 | 0.12.6 |

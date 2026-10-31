@@ -881,7 +881,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - 渲染：按屏幕像素比 + 缩放倍率渲染，支持按钮 / Ctrl+滚轮缩放（50%–300%）。
 - 译文：按页分块、复用 reader 缓存、三种显示模式；目标语言走 reader settings，与网页翻译隔离。
 - 设置：单本上限 50–500 MB（默认 100 MB）。
-- 范围外：扫描件 OCR（见 [docs/archive/2026-10-31-ocr-candidates.md](docs/archive/2026-10-31-ocr-candidates.md)）、跨页段落合并。
+- 范围外：扫描件 OCR（2026-11-01 拍板排到未来版本，候选评估见 [docs/archive/2026-10-31-ocr-candidates.md](docs/archive/2026-10-31-ocr-candidates.md)）、跨页段落合并。
 
 ### 0.13.2 — 字幕费用与稳定性
 
