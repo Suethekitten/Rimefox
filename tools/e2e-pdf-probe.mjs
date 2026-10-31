@@ -8,13 +8,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CHROME = process.argv[2] || process.env.RIMEFOX_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const args = process.argv.slice(2).filter((one) => !one.startsWith('--'));
+const LEGACY = process.argv.includes('--legacy-load'); // Chrome <126 没有 Extensions.loadUnpacked
+const CHROME = args[0] || process.env.RIMEFOX_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PORT = 20200 + Math.floor(Math.random() * 300);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-pdf-probe-'));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const browser = spawn(CHROME, [
   '--headless=new', '--no-sandbox', '--enable-unsafe-extension-debugging',
+  ...(LEGACY ? ['--load-extension=' + ROOT, '--disable-extensions-except=' + ROOT] : []),
   '--remote-debugging-port=' + PORT, '--remote-allow-origins=*',
   '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check', 'about:blank'
 ], { stdio: 'ignore' });
@@ -57,7 +60,21 @@ async function until(fn, ms = 30000, step = 200) {
   return null;
 }
 
-const { id: extId } = await send('Extensions.loadUnpacked', { path: ROOT });
+let extId = '';
+if (!LEGACY) {
+  ({ id: extId } = await send('Extensions.loadUnpacked', { path: ROOT }));
+} else {
+  // Chrome <126 没有 Extensions.loadUnpacked：用 --load-extension 启动后，
+  // 从 service worker 的 URL 里取扩展 ID（114 实测可用，启动约 2–4 秒）。
+  const untilExt = Date.now() + 20000;
+  while (Date.now() < untilExt && !extId) {
+    const { targetInfos } = await send('Target.getTargets');
+    const hit = targetInfos.find((one) => one.type === 'service_worker' && one.url.startsWith('chrome-extension://'));
+    if (hit) extId = new URL(hit.url).hostname;
+    else await sleep(200);
+  }
+  if (!extId) throw new Error('extension id not found');
+}
 console.log('extension', extId);
 
 // 扩展刚加载时第一次 createTarget 会撞上启动竞态：先用一页热身，不计入结果。
