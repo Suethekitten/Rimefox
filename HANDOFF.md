@@ -883,6 +883,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - 译文：按页分块、复用 reader 缓存、三种显示模式；目标语言走 reader settings，与网页翻译隔离。
 - 设置：单本上限 50–500 MB（默认 100 MB）。
 - 范围外：扫描件 OCR（2026-11-01 拍板排到未来版本，候选评估见 [docs/archive/2026-10-31-ocr-candidates.md](docs/archive/2026-10-31-ocr-candidates.md)）、跨页段落合并。
+- **内部定位：测试版**（2026-11-01 拍板）。GitHub Release v0.14.0 保持正常标签（不改 pre-release），但不作正式对外推广；后续维护交给协助者。
 
 ### 0.13.2 — 字幕费用与稳定性
 
