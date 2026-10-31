@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PDF 阅读页 E2E：真实扩展 + 真实 reader 页 + 本地 PDF。
-// 默认只验证导入 / 页容器 / 标题；渲染断言需要 RIMEFOX_PDF_RENDER=1
+// 默认验证：导入上限、导入 / 页容器 / 标题；渲染断言需要 RIMEFOX_PDF_RENDER=1
 // （reader 页里的 pdf.js render 目前会卡住，探针页正常，见 HANDOFF §9）。
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -80,6 +80,14 @@ async function evaluate(sessionId, expression) {
   return out.result.value;
 }
 const pageEval = (session, code) => evaluate(session, '(() => {' + code + '})()');
+async function setInputFile(session, file, dispatch) {
+  const doc = await send('DOM.getDocument', { depth: 0, pierce: true }, session);
+  const input = await send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#fileInput' }, session);
+  await send('DOM.setFileInputFiles', { nodeId: input.nodeId, files: [file] }, session);
+  if (dispatch) {
+    await pageEval(session, "document.getElementById('fileInput').dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  }
+}
 
 const { id: extId } = await send('Extensions.loadUnpacked', { path: ROOT });
 const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/reader/index.html' });
@@ -87,11 +95,17 @@ const page = await attach(targetId);
 check('阅读器页面加载', !!(await until(() => pageEval(page, "return !!document.getElementById('bookGrid')"), 15000)));
 check('阅读器启动完成', !!(await until(() => pageEval(page, "return !!document.querySelector('.empty-library, .book-card')"), 20000)));
 
-const doc = await send('DOM.getDocument', { depth: -1, pierce: true }, page);
-const input = await send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#fileInput' }, page);
-await send('DOM.setFileInputFiles', { nodeId: input.nodeId, files: [PDF] }, page);
-await pageEval(page, "document.getElementById('fileInput').dispatchEvent(new Event('change',{bubbles:true})); return true;");
+// 先测导入上限，避免后面 pdf.js render 卡住影响页面
+check('单本上限默认 100 MB 且可见', await pageEval(page, "return document.getElementById('maxBookMb').value") === '100');
+const obpPath = path.join(ROOT, 'reader', 'pdf-real', 'obp.pdf');
+if (fs.existsSync(obpPath)) {
+  await setInputFile(page, obpPath, true);
+  await sleep(1500);
+  const statusText = await pageEval(page, "return (document.getElementById('libraryStatus')||{}).textContent || ''");
+  check('超过单本上限时拒绝并提示', /上限/.test(statusText), statusText);
+}
 
+await setInputFile(page, PDF, true);
 const pages = await until(() => pageEval(page, "return document.querySelectorAll('.pdf-page').length"), 30000);
 check('PDF 导入后进入阅读页（页容器）', !!pages, pages ? pages + ' 页' : '没有页容器');
 check('页标题/页数正确', !!(await pageEval(page, "const s=document.getElementById('readerSubtitle'); return s && s.textContent.indexOf('PDF') >= 0;")));

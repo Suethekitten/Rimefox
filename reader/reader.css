@@ -177,3 +177,6 @@ button { cursor: pointer; }
 .pdf-blocks { margin-top: 10px; border-top: 1px dashed var(--reader-line); padding-top: 8px; }
 .pdf-block { font-size: 15px; line-height: 1.6; margin: 0 0 0.8em; color: var(--reader-ink); }
 .pdf-empty-text { font-size: 13px; color: var(--reader-muted); }
+
+.setting-row input[type="number"] { width: 84px; }
+.setting-row span { color: var(--reader-muted); font-size: 12px; }

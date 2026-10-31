@@ -180,6 +180,7 @@ function applySettings() {
   $('measure').value = String(s.measure || 720);
   $('letterSpacing').value = String(Number(s.letterSpacing) || 0);
   $('paragraphSpacing').value = String(Number(s.paragraphSpacing) || 1.05);
+  $('maxBookMb').value = String(Math.round((Number(s.maxBookBytes) || READER_LIMITS.maxBookBytes) / 1048576));
   $('themeSelect').value = s.theme || 'auto';
   const hasUserFont = !!state.userFontFace;
   const family = s.fontFamily === 'user' && !hasUserFont ? 'serif' : (s.fontFamily || 'serif');
@@ -338,8 +339,9 @@ async function renderLibrary() {
 
 async function importFile(file) {
   if (!file) return;
-  if (file.size > READER_LIMITS.maxBookBytes) {
-    setStatus('libraryStatus', '文件超过 100 MB，0.13.0 不导入。', 'error');
+  const maxBookBytes = (state.settings && Number(state.settings.maxBookBytes)) || READER_LIMITS.maxBookBytes;
+  if (file.size > maxBookBytes) {
+    setStatus('libraryStatus', '文件超过 ' + Math.round(maxBookBytes / 1048576) + ' MB 上限，可在设置里调高。', 'error');
     return;
   }
   setStatus('libraryStatus', '正在解析 EPUB…');
@@ -843,6 +845,11 @@ function bindEvents() {
   $('measure').addEventListener('input', () => saveSettings({ measure: Number($('measure').value) }));
   $('letterSpacing').addEventListener('input', () => saveSettings({ letterSpacing: Number($('letterSpacing').value) }));
   $('paragraphSpacing').addEventListener('input', () => saveSettings({ paragraphSpacing: Number($('paragraphSpacing').value) }));
+  $('maxBookMb').addEventListener('change', () => {
+    const mb = Math.max(50, Math.min(500, Math.round(Number($('maxBookMb').value) || 100)));
+    $('maxBookMb').value = String(mb);
+    saveSettings({ maxBookBytes: mb * 1024 * 1024 });
+  });
   $('themeSelect').addEventListener('change', () => saveSettings({ theme: $('themeSelect').value }));
   $('fontSelect').addEventListener('change', () => saveSettings({ fontFamily: $('fontSelect').value }));
   $('userFontUploadBtn').addEventListener('click', () => $('userFontInput').click());

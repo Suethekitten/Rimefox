@@ -74,6 +74,10 @@
     <label class="setting-row">页宽 <input id="measure" type="range" min="480" max="1000" step="20"></label>
     <label class="setting-row">字间距 <input id="letterSpacing" type="range" min="0" max="0.12" step="0.01"></label>
     <label class="setting-row">段间距 <input id="paragraphSpacing" type="range" min="0.5" max="2" step="0.05"></label>
+    <label class="setting-row">单本上限
+      <input id="maxBookMb" type="number" class="reader-control" min="50" max="500" step="10" value="100">
+      <span>MB（超过不导入）</span>
+    </label>
     <label class="setting-row">主题
       <select id="themeSelect" class="reader-control">
         <option value="auto">跟随扩展</option>
