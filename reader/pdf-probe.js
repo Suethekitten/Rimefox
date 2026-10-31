@@ -5,9 +5,10 @@ import * as pdfjsLib from './vendor/pdfjs/pdf.min.mjs';
 const params = new URLSearchParams(location.search);
 const name = params.get('sample') || 'single';
 const noCmap = params.get('nocmap') === '1';
+const dir = params.get('dir') === 'real' ? 'reader/pdf-real/' : 'reader/pdf-samples/';
 const status = document.getElementById('status');
 const out = {
-  sample: name + (noCmap ? '+nocmap' : ''),
+  sample: name + (noCmap ? '+nocmap' : '') + (dir === 'reader/pdf-real/' ? ' (real)' : ''),
   version: pdfjsLib.version,
   ok: false,
   error: '',
@@ -29,7 +30,7 @@ function show(text) {
 
 (async () => {
   const t0 = performance.now();
-  const url = chrome.runtime.getURL('reader/pdf-samples/' + name + '.pdf');
+  const url = chrome.runtime.getURL(dir + name + '.pdf');
   const res = await fetch(url);
   const buf = await res.arrayBuffer();
   out.bytes = buf.byteLength;

@@ -88,10 +88,24 @@ console.log('extension', extId);
   }, 30000);
   await send('Target.closeTarget', { targetId });
 }
-const cases = [{ sample: 'single' }, { sample: 'columns' }, { sample: 'scan' }, { sample: 'cjk' }, { sample: 'cjk', nocmap: true }];
+const cases = [
+  { sample: 'single' },
+  { sample: 'columns' },
+  { sample: 'scan' },
+  { sample: 'cjk' },
+  { sample: 'cjk', nocmap: true },
+  { sample: 'plos', dir: 'real' },
+  { sample: 'elife', dir: 'real' },
+  { sample: 'user', dir: 'real' }
+];
+// 本地真实 PDF 用例（reader/pdf-real/cases.json，目录已 gitignore）
+const extraCases = path.join(ROOT, 'reader', 'pdf-real', 'cases.json');
+if (fs.existsSync(extraCases)) {
+  for (const one of JSON.parse(fs.readFileSync(extraCases, 'utf8'))) cases.push({ ...one, dir: 'real' });
+}
 const results = [];
 for (const item of cases) {
-  const url = 'chrome-extension://' + extId + '/reader/pdf-probe.html?sample=' + item.sample + (item.nocmap ? '&nocmap=1' : '');
+  const url = 'chrome-extension://' + extId + '/reader/pdf-probe.html?sample=' + item.sample + (item.dir ? '&dir=' + item.dir : '') + (item.nocmap ? '&nocmap=1' : '');
   const { targetId } = await send('Target.createTarget', { url: url });
   const session = await attach(targetId);
   const probe = await until(async () => {
