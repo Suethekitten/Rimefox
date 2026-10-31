@@ -139,5 +139,19 @@ t('栏目横幅与标题同行时只去掉前缀', function () {
   assert.deepEqual(blocks.map((b) => b.text), ['Single dose creatine improves', 'Body line']);
 });
 
+t('项目符号另起一段', function () {
+  const items = [
+    item('Reviewers:', 50, 700),
+    item('• Alice - University A, reviewer', 50, 686),
+    item('• Bob - University B, reviewer', 50, 672)
+  ];
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.deepEqual(blocks.map((b) => b.text), [
+    'Reviewers:',
+    '• Alice - University A, reviewer',
+    '• Bob - University B, reviewer'
+  ]);
+});
+
 console.log('\n' + pass + ' 通过 / ' + (pass + fail) + ' 总数');
 if (fail) process.exit(1);

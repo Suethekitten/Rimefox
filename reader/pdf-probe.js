@@ -65,7 +65,8 @@ function show(text) {
       for (let i = 1; i <= Math.min(doc.numPages, 20); i += 1) {
         const tocPage = await doc.getPage(i);
         const tocContent = await tocPage.getTextContent();
-        tocEntries.push(...parsePrintedToc(tocContent.items, { maxPage: doc.numPages }));
+        const tocViewport = tocPage.getViewport({ scale: 1 });
+        tocEntries.push(...parsePrintedToc(tocContent.items, { maxPage: doc.numPages, pageWidth: tocViewport.width }));
       }
       out.printedToc = tocEntries.length;
       out.printedSample = tocEntries.slice(0, 3).map((e) => e.title + ' p.' + e.page);
