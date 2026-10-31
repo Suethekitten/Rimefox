@@ -480,7 +480,8 @@ async function renderPdfPage(el, index) {
   const doc = state.pdf;
   if (!doc) return;
   const loaded = await doc.page(index);
-  const baseWidth = el.clientWidth || 720;
+  const content = document.getElementById('bookContent');
+  const baseWidth = Math.max(320, (content ? content.clientWidth : 720) - 56);
   const cssWidth = Math.round(baseWidth * state.pdfZoom);
   const dpr = window.devicePixelRatio || 1;
   // 按屏幕像素比和缩放渲染，避免 CSS 拉伸导致的模糊

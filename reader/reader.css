@@ -169,8 +169,8 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 
 /* ---- PDF 阅读 ---- */
-.pdf-pages { display: flex; flex-direction: column; gap: 20px; padding: 8px 0 48px; overflow-x: auto; }
-.pdf-page { position: relative; background: var(--reader-paper); border: 1px solid var(--reader-line); border-radius: 6px; padding: 10px; }
+.pdf-pages { display: flex; flex-direction: column; gap: 20px; padding: 8px 0 48px; }
+.pdf-page { position: relative; background: var(--reader-paper); border: 1px solid var(--reader-line); border-radius: 6px; padding: 10px; width: fit-content; max-width: none; }
 .pdf-page:not([data-rendered="1"]) { aspect-ratio: 1 / var(--pdf-ratio, 1.414); }
 .pdf-page canvas { display: block; max-width: none; height: auto; }
 .reader-zoom { font-size: 12px; color: var(--reader-muted); min-width: 44px; text-align: center; }
