@@ -17,6 +17,7 @@ const state = {
   pdf: null,
   pdfObserver: null,
   pdfPage: 0,
+  readerTarget: '',
   mode: 'original',
   assets: [],
   noteAssets: [],
@@ -97,6 +98,16 @@ async function loadConfig() {
   return state.config;
 }
 
+// 阅读器自己的翻译配置：目标语言来自 reader settings，不跟随网页翻译的全局设置。
+function readerConfig() {
+  const base = state.config || {};
+  const target = state.readerTarget || base.targetLang || '';
+  const chosen = (base.languages || []).find((language) => language.value === target);
+  const cfg = Object.assign({}, base, { targetLang: target });
+  if (chosen) cfg.activeLanguage = { value: chosen.value, label: chosen.label, code: chosen.code, kind: chosen.kind };
+  return cfg;
+}
+
 function renderTargetSelect() {
   const select = $('targetSelect');
   if (!select) return;
@@ -108,7 +119,7 @@ function renderTargetSelect() {
     option.textContent = language.label;
     select.appendChild(option);
   }
-  const wanted = (state.config && (state.config.targetLang || (state.config.activeLanguage && state.config.activeLanguage.value))) || '';
+  const wanted = state.readerTarget || (state.config && (state.config.targetLang || (state.config.activeLanguage && state.config.activeLanguage.value))) || '';
   if (wanted && !Array.from(select.options).some((option) => option.value === wanted)) {
     const option = document.createElement('option');
     option.value = wanted;
@@ -126,12 +137,10 @@ async function changeTarget() {
   if (!target) return;
   select.disabled = true;
   try {
-    await saveConfig({ targetLang: target });
-    const cfg = await loadConfig();
-    if (!cfg) return;
-    const chosen = (cfg.languages || []).find((language) => language.value === target);
-    cfg.targetLang = target;
-    if (chosen) cfg.activeLanguage = { value: chosen.value, label: chosen.label, code: chosen.code, kind: chosen.kind };
+    // 只改阅读器自己的设置，不动网页翻译的全局 targetLang
+    await saveReaderSettings({ targetLang: target });
+    state.readerTarget = target;
+    const cfg = readerConfig();
     if (translator) await translator.configure(cfg);
     if (translator) translator.stop();
     translator = new ReaderTranslator({ onStatus: onTranslateStatus });
@@ -149,7 +158,7 @@ async function changeTarget() {
       const ratio = Math.max(0, Math.min(1, window.scrollY / max));
       await loadSection(state.section.id, '', ratio);
     }
-    setStatus('readerStatus', '目标语言已切换；点「双语」或「翻译本章」按新语言翻译。');
+    setStatus('readerStatus', '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译。');
   } catch (err) {
     setStatus('readerStatus', '切换目标语言失败：' + ((err && err.message) || '未知错误'), 'error');
     renderTargetSelect();
@@ -660,7 +669,7 @@ async function openBook(record) {
     $('tocToggle').disabled = false;
     $('translateChapter').disabled = !(state.config && state.config.hasKey);
     translator = translator || new ReaderTranslator({ onStatus: onTranslateStatus });
-    await translator.configure(state.config);
+    await translator.configure(readerConfig());
     translator.setDocument(doc);
     $('modeSelect').value = state.mode;
     const progress = record.progress || {};
@@ -883,8 +892,13 @@ async function boot() {
   await loadUserFont();
   applySettings();
   await loadConfig();
+  // 阅读器的目标语言独立保存；首次打开时继承网页翻译的当前目标，之后互不影响
+  const settings = state.settings || {};
+  const fallback = (state.config && (state.config.targetLang || (state.config.activeLanguage && state.config.activeLanguage.value))) || '';
+  state.readerTarget = settings.targetLang || fallback;
+  renderTargetSelect();
   translator = new ReaderTranslator({ onStatus: onTranslateStatus });
-  if (state.config) await translator.configure(state.config);
+  if (state.config) await translator.configure(readerConfig());
   bindEvents();
   await renderLibrary();
 }

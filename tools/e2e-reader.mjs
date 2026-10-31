@@ -168,6 +168,8 @@ check('目标语言下拉可用', targetValues.length > 1, targetValues.slice(0,
 await pageEval("const s=document.getElementById('targetSelect'); s.value='zh-TW'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
 await sleep(800);
 check('切换目标语言后原文重置', await pageEval("return document.getElementById('modeSelect').value === 'original' && document.querySelectorAll('#bookContent [data-dt-target]').length === 0;"));
+const globalTarget = await pageEval("return chrome.storage.local.get('config').then((r) => (r.config || {}).targetLang)");
+check('阅读器目标语言不影响网页翻译全局设置', globalTarget === 'zh-CN', String(globalTarget));
 await pageEval("const s=document.getElementById('modeSelect'); s.value='bilingual'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
 const twTranslated = await until(() => pageEval("const t=document.querySelector('#bookContent [data-dt-target]'); return !!t && t.textContent.indexOf('繁:') >= 0;"), 15000);
 check('新目标语言按 zh-TW 重译', !!twTranslated);
