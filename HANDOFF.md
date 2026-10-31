@@ -877,7 +877,8 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 ### 0.14.0 — PDF 阅读与译文（本地待发布）
 
 - 新增 PDF 导入 / 阅读：pdf.js legacy + cmaps，书库、页容器、进度、目录三档兜底（outline → 印刷版目录页 → 页列表）。
-- 文本块还原：页眉页脚、栏目横幅、双栏 / 侧栏、段落合并；复杂并排版面仍可能合并。
+- 文本块还原：按内容流顺序拼行（中文双栏不再串栏）、页眉页脚 / 栏目横幅过滤、段落合并；复杂并排版面仍可能合并。
+- 渲染：按屏幕像素比 + 缩放倍率渲染，支持按钮 / Ctrl+滚轮缩放（50%–300%）。
 - 译文：按页分块、复用 reader 缓存、三种显示模式；目标语言走 reader settings，与网页翻译隔离。
 - 设置：单本上限 50–500 MB（默认 100 MB）。
 - 范围外：扫描件 OCR（见 [docs/archive/2026-10-31-ocr-candidates.md](docs/archive/2026-10-31-ocr-candidates.md)）、跨页段落合并。

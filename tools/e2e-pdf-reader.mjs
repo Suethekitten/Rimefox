@@ -171,6 +171,18 @@ if (process.env.RIMEFOX_PDF_RENDER === '1') {
   console.log('  NOTE 跳过 canvas / 文本块断言：reader 页里 pdf.js render 已知会卡住（探针页正常）');
 }
 
+// 缩放：回到顶部再测，避免第一页在可视区外没被重渲染
+await pageEval(page, "window.scrollTo(0,0); return true;");
+await sleep(1200);
+const canvasBefore = await pageEval(page, "const c=document.querySelector('.pdf-page canvas'); return c ? c.width : 0");
+await pageEval(page, "document.getElementById('pdfZoomIn').click(); return true;");
+const zoomed = await until(() => pageEval(page, "const c=document.querySelector('.pdf-page canvas'); return c && c.width > " + canvasBefore + " ? c.width : 0"), 40000);
+check('PDF 放大后重新渲染更高分辨率', !!zoomed, canvasBefore + ' → ' + (zoomed || 0));
+const zoomLabel = await pageEval(page, "return document.getElementById('pdfZoomLabel').textContent");
+check('缩放比例显示', zoomLabel === '125%', zoomLabel);
+await pageEval(page, "document.getElementById('pdfZoomOut').click(); return true;");
+await sleep(800);
+
 check('无未捕获异常', exceptions.length === 0, exceptions.slice(0, 2).join(' | '));
 
 // PDF 译文：切到双语，验证译文注入与请求

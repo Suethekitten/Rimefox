@@ -20,6 +20,7 @@ const state = {
   pdfPage: 0,
   pdfTrans: null,
   pdfTranslator: null,
+  pdfZoom: 1,
   readerTarget: '',
   mode: 'original',
   assets: [],
@@ -449,15 +450,46 @@ function jumpToPdfPage(n) {
   if (el) el.scrollIntoView({ block: 'start', behavior: 'instant' });
 }
 
+function updatePdfZoomUi() {
+  const pdf = !!state.pdf;
+  const out = $('pdfZoomOut');
+  const label = $('pdfZoomLabel');
+  const zoomIn = $('pdfZoomIn');
+  if (!out || !label || !zoomIn) return;
+  out.hidden = !pdf;
+  zoomIn.hidden = !pdf;
+  label.hidden = !pdf;
+  label.textContent = Math.round(state.pdfZoom * 100) + '%';
+}
+
+function applyPdfZoom(delta) {
+  if (!state.pdf) return;
+  state.pdfZoom = Math.max(0.5, Math.min(3, Math.round((state.pdfZoom + delta) * 20) / 20));
+  updatePdfZoomUi();
+  for (const el of document.querySelectorAll('.pdf-page')) {
+    const canvas = el.querySelector('canvas');
+    if (canvas) canvas.remove();
+    const blocks = el.querySelector('.pdf-blocks');
+    if (blocks) blocks.remove();
+    delete el.dataset.rendered;
+  }
+  renderVisiblePdfPages();
+}
+
 async function renderPdfPage(el, index) {
   const doc = state.pdf;
   if (!doc) return;
   const loaded = await doc.page(index);
-  const width = el.clientWidth || 720;
-  const scale = Math.max(0.5, Math.min(2, width / loaded.viewport.width));
+  const baseWidth = el.clientWidth || 720;
+  const cssWidth = Math.round(baseWidth * state.pdfZoom);
+  const dpr = window.devicePixelRatio || 1;
+  // 按屏幕像素比和缩放渲染，避免 CSS 拉伸导致的模糊
+  const renderScale = Math.min(3, Math.max(1.5, dpr) * state.pdfZoom);
   const canvas = document.createElement('canvas');
+  canvas.style.width = cssWidth + 'px';
+  canvas.style.height = 'auto';
   el.appendChild(canvas);
-  await doc.render(index, canvas, scale);
+  await doc.render(index, canvas, renderScale);
   if (loaded.blocks.length) {
     const panel = document.createElement('div');
     panel.className = 'pdf-blocks';
@@ -545,8 +577,10 @@ async function openPdfBook(record) {
   state.section = null;
   state.mode = record.mode || 'original';
   state.pdfTrans = new Map();
+  state.pdfZoom = 1;
   if (state.pdfTranslator) state.pdfTranslator.stop();
   state.pdfTranslator = null;
+  updatePdfZoomUi();
   $('libraryView').hidden = true;
   $('readerView').hidden = false;
   $('modeSelect').disabled = false;
@@ -652,6 +686,8 @@ function closeReader() {
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   state.pdfPage = 0;
+  state.pdfZoom = 1;
+  updatePdfZoomUi();
   translator && translator.stop();
   for (const url of state.noteAssets) { try { URL.revokeObjectURL(url); } catch (err) { /* ignore */ } }
   state.noteAssets = [];
@@ -761,6 +797,7 @@ async function openBook(record) {
   if (record.format === 'pdf') { await openPdfBook(record); return; }
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
+  updatePdfZoomUi();
   try {
     const buffer = await record.fileBlob.arrayBuffer();
     const doc = parseEpub(buffer);
@@ -963,6 +1000,13 @@ function bindEvents() {
     if (!$('settingsDialog').open) $('settingsDialog').showModal();
   });
   $('fullscreenToggle').addEventListener('click', toggleFullscreen);
+  $('pdfZoomOut').addEventListener('click', () => applyPdfZoom(-0.25));
+  $('pdfZoomIn').addEventListener('click', () => applyPdfZoom(0.25));
+  $('bookContent').addEventListener('wheel', (event) => {
+    if (!state.pdf || !event.ctrlKey) return;
+    event.preventDefault();
+    applyPdfZoom(event.deltaY < 0 ? 0.25 : -0.25);
+  }, { passive: false });
   document.addEventListener('fullscreenchange', () => {
     $('fullscreenToggle').textContent = document.fullscreenElement ? '⤡' : '⛶';
     $('fullscreenToggle').title = document.fullscreenElement ? '退出全屏' : '全屏阅读';
