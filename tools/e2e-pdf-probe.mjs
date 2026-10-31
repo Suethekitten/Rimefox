@@ -90,6 +90,11 @@ console.log('extension', extId);
 }
 const cases = [
   { sample: 'single' },
+  { sample: 'single', preload: 1 },
+  { sample: 'single', preload: 2 },
+  { sample: 'single', preload: 3 },
+  { sample: 'single', preload: 4 },
+  { sample: 'single', preload: 5 },
   { sample: 'columns' },
   { sample: 'scan' },
   { sample: 'cjk' },
