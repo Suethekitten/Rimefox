@@ -94,6 +94,9 @@ const { targetId } = await send('Target.createTarget', { url: 'chrome-extension:
 const page = await attach(targetId);
 check('阅读器页面加载', !!(await until(() => pageEval(page, "return !!document.getElementById('bookGrid')"), 15000)));
 check('阅读器启动完成', !!(await until(() => pageEval(page, "return !!document.querySelector('.empty-library, .book-card')"), 20000)));
+// pdf.js 的 render 在后台标签页会暂停；必须先让页面可见再导入
+await send('Page.bringToFront', {}, page).catch(() => {});
+check('阅读页可见（后台标签页会暂停渲染）', await pageEval(page, "return document.visibilityState" ) === 'visible');
 
 // 先测导入上限，避免后面 pdf.js render 卡住影响页面
 check('单本上限默认 100 MB 且可见', await pageEval(page, "return document.getElementById('maxBookMb').value") === '100');

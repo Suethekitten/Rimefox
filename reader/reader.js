@@ -887,6 +887,10 @@ function bindEvents() {
     if (state.pdf) renderVisiblePdfPages();
   }, { passive: true });
   window.addEventListener('resize', () => { if (state.pdf) renderVisiblePdfPages(); }, { passive: true });
+  // pdf.js 的 render 靠 rAF 推进；标签页切到后台会暂停，回来时必须补渲染
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && state.pdf) renderVisiblePdfPages();
+  });
   document.addEventListener('keydown', (event) => {
     if ($('readerView').hidden) return;
     if (event.target && /INPUT|SELECT|TEXTAREA/.test(event.target.tagName)) return;
