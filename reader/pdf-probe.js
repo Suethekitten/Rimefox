@@ -7,6 +7,8 @@ const params = new URLSearchParams(location.search);
 const name = params.get('sample') || 'single';
 const noCmap = params.get('nocmap') === '1';
 const dir = params.get('dir') === 'real' ? 'reader/pdf-real/' : 'reader/pdf-samples/';
+const pageNo = Math.max(1, Number(params.get('page') || 1));
+const loadPages = Math.max(0, Math.min(60, Number(params.get('loadPages') || 0)));
 const status = document.getElementById('status');
 const out = {
   sample: name + (noCmap ? '+nocmap' : '') + (dir === 'reader/pdf-real/' ? ' (real)' : ''),
@@ -47,15 +49,22 @@ function show(text) {
   }
   const doc = await pdfjsLib.getDocument(options).promise;
   out.pages = doc.numPages;
+  try {
+    const outline = await doc.getOutline();
+    out.outline = outline ? outline.length : 0;
+    out.outlineFirst = outline && outline[0] ? String(outline[0].title || '') : '';
+  } catch (err) {
+    out.outline = -1;
+  }
+  out.heapLoadMB = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0;
 
-  const page = await doc.getPage(1);
+  const page = await doc.getPage(pageNo);
   const viewport = page.getViewport({ scale: 1 });
   const canvas = document.getElementById('page');
   canvas.width = Math.floor(viewport.width);
   canvas.height = Math.floor(viewport.height);
   const ctx = canvas.getContext('2d');
 
-  if (params.get('textfirst') === '1') await page.getTextContent();
   const renderStart = performance.now();
   await page.render({ canvas: canvas, canvasContext: ctx, viewport: viewport }).promise;
   out.renderMs = Math.round(performance.now() - renderStart);
@@ -70,6 +79,7 @@ function show(text) {
   const blocks = pageBlocks(content, viewport);
   out.blocks = blocks.length;
   out.firstBlock = blocks.length ? blocks[0].text.slice(0, 140) : '';
+  out.blockSample = blocks.slice(0, 5).map((b) => ({ s: b.text.slice(0, 45), e: b.text.slice(-45) }));
 
   // 前 3 页文本量：真实 PDF 首页常常是标题页
   out.perPage = [out.chars];
@@ -81,6 +91,16 @@ function show(text) {
   }
   out.chars3 = out.perPage.reduce((n, value) => n + value, 0);
 
+  if (loadPages) {
+    const loadStart = performance.now();
+    for (let i = 1; i <= Math.min(doc.numPages, loadPages); i += 1) {
+      const p = await doc.getPage(i);
+      await p.getTextContent();
+    }
+    out.loadMs = Math.round(performance.now() - loadStart);
+    out.loadedPages = Math.min(doc.numPages, loadPages);
+  }
+  out.heapMB = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0;
   out.totalMs = Math.round(performance.now() - t0);
   out.ok = true;
   show('done: ' + name + ' · ' + out.pages + 'p · ' + out.chars + ' chars · ' + out.totalMs + 'ms');
