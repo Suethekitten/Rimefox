@@ -303,7 +303,7 @@ async function renderLibrary() {
   if (!books.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-library';
-    empty.textContent = '还没有导入 EPUB。选择一本无 DRM 的书开始。';
+    empty.textContent = '还没有导入 EPUB / PDF。选择一本无 DRM 的书开始。';
     grid.appendChild(empty);
   }
   for (const book of books) {
@@ -360,7 +360,7 @@ async function importFile(file) {
     setStatus('libraryStatus', '文件超过 ' + Math.round(maxBookBytes / 1048576) + ' MB 上限，可在设置里调高。', 'error');
     return;
   }
-  setStatus('libraryStatus', '正在解析 EPUB…');
+  setStatus('libraryStatus', '正在解析…');
   try {
     const est = await estimateUsage();
     if (est.usage && est.quota && est.usage + file.size > READER_LIMITS.maxLibraryBytes) {
