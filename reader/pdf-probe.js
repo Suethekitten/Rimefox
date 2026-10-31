@@ -32,7 +32,13 @@ function show(text) {
   out.bytes = buf.byteLength;
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('reader/vendor/pdfjs/pdf.worker.min.mjs');
-  const doc = await pdfjsLib.getDocument({ data: buf, isEvalSupported: false }).promise;
+  const doc = await pdfjsLib.getDocument({
+    data: buf,
+    isEvalSupported: false,
+    // CJK 内置编码（Adobe-GB1 / GBK / CNS …）需要字形 → Unicode 映射；纯数据文件，不影响浏览器版本
+    cMapUrl: chrome.runtime.getURL('reader/vendor/pdfjs/cmaps/'),
+    cMapPacked: true
+  }).promise;
   out.pages = doc.numPages;
 
   const page = await doc.getPage(1);
