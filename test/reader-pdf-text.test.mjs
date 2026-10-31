@@ -2,7 +2,7 @@
 // 运行：node test/reader-pdf-text.test.mjs
 import assert from 'node:assert/strict';
 
-import { itemsToLines, dropMargins, orderColumns, groupParagraphs, pageBlocks } from '../lib/reader/pdf-text.js';
+import { itemsToLines, dropMargins, orderColumns, groupParagraphs, pageBlocks, parsePrintedToc } from '../lib/reader/pdf-text.js';
 
 let pass = 0;
 let fail = 0;
@@ -94,6 +94,22 @@ t('pageBlocks：页眉 + 双栏 + 段落 一次跑通', function () {
   assert.deepEqual(blocks.map((block) => block.text), [
     'Left one is a sentence. Left two continues it.',
     'Right one is another column. Right two continues that.'
+  ]);
+});
+
+t('印刷版目录：标题与页码水平错位也能配对', function () {
+  const items = [
+    { str: 'PACIFIC REGION', transform: [1, 0, 0, 1, 185, 458], width: 100 },
+    { str: '11', transform: [1, 0, 0, 1, 550, 459], width: 12 },
+    { str: 'Tides / Wave Formation', transform: [1, 0, 0, 1, 185, 355], width: 150 },
+    { str: '15', transform: [1, 0, 0, 1, 550, 356], width: 12 },
+    { str: 'Momotombo volcano crater before the', transform: [1, 0, 0, 1, 185, 300], width: 220 },
+    { str: '2015', transform: [1, 0, 0, 1, 550, 301], width: 20 }
+  ];
+  const entries = parsePrintedToc(items, { maxPage: 165 });
+  assert.deepEqual(entries, [
+    { title: 'PACIFIC REGION', page: 11 },
+    { title: 'Tides / Wave Formation', page: 15 }
   ]);
 });
 

@@ -504,15 +504,38 @@ async function openPdfBook(record) {
   }
   $('tocList').textContent = '';
   const tocWrap = document.createElement('div');
-  for (let i = 1; i <= Math.min(doc.numPages, 200); i += 1) {
-    const row = document.createElement('div');
-    row.className = 'toc-item';
-    const a = document.createElement('a');
-    a.href = '#';
-    a.textContent = '第 ' + i + ' 页';
-    a.addEventListener('click', (event) => { event.preventDefault(); jumpToPdfPage(i); });
-    row.appendChild(a);
-    tocWrap.appendChild(row);
+  let toc = { source: 'pages', entries: [] };
+  try { toc = await doc.toc(); } catch (err) { toc = { source: 'pages', entries: [] }; }
+  if (toc.entries.length) {
+    const hint = document.createElement('div');
+    hint.className = 'toc-hint';
+    hint.textContent = toc.source === 'outline' ? '目录来自 PDF 书签' : '目录来自书内目录页（页码为书内页码）';
+    tocWrap.appendChild(hint);
+    for (const entry of toc.entries) {
+      const row = document.createElement('div');
+      row.className = 'toc-item';
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = entry.title + (entry.page ? ' · p.' + entry.page : '');
+      a.addEventListener('click', (event) => {
+        event.preventDefault();
+        const target = Math.max(1, Math.min(doc.numPages, Number(entry.page) || 1));
+        jumpToPdfPage(target);
+      });
+      row.appendChild(a);
+      tocWrap.appendChild(row);
+    }
+  } else {
+    for (let i = 1; i <= Math.min(doc.numPages, 200); i += 1) {
+      const row = document.createElement('div');
+      row.className = 'toc-item';
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = '第 ' + i + ' 页';
+      a.addEventListener('click', (event) => { event.preventDefault(); jumpToPdfPage(i); });
+      row.appendChild(a);
+      tocWrap.appendChild(row);
+    }
   }
   $('tocList').appendChild(tocWrap);
   setReaderHeader({ title: 'PDF · ' + doc.numPages + ' 页' });

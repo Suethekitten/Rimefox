@@ -1,7 +1,7 @@
 // PDF 探针：在扩展页里加载 legacy pdf.js，渲染一页并取文本层，结果写到 window.__probe。
 // 只用于阶段 0 评估，不进正式 reader 流程。
 import * as pdfjsLib from './vendor/pdfjs/pdf.min.mjs';
-import { pageBlocks, itemsToLines, dropMargins, detectColumns } from '../lib/reader/pdf-text.js';
+import { pageBlocks, itemsToLines, dropMargins, detectColumns, parsePrintedToc } from '../lib/reader/pdf-text.js';
 
 const params = new URLSearchParams(location.search);
 const name = params.get('sample') || 'single';
@@ -56,6 +56,21 @@ function show(text) {
   } catch (err) {
     out.outline = -1;
   }
+  try {
+    const outline = await doc.getOutline();
+    out.outline = outline ? outline.length : 0;
+    out.outlineFirst = outline && outline[0] ? String(outline[0].title || '') : '';
+    if (!outline || !outline.length) {
+      const tocEntries = [];
+      for (let i = 1; i <= Math.min(doc.numPages, 20); i += 1) {
+        const tocPage = await doc.getPage(i);
+        const tocContent = await tocPage.getTextContent();
+        tocEntries.push(...parsePrintedToc(tocContent.items, { maxPage: doc.numPages }));
+      }
+      out.printedToc = tocEntries.length;
+      out.printedSample = tocEntries.slice(0, 3).map((e) => e.title + ' p.' + e.page);
+    }
+  } catch (err) { out.outline = -1; }
   out.heapLoadMB = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0;
 
   const page = await doc.getPage(pageNo);
@@ -81,6 +96,8 @@ function show(text) {
   out.firstBlock = blocks.length ? blocks[0].text.slice(0, 140) : '';
   out.blockSample = blocks.slice(0, 5).map((b) => ({ s: b.text.slice(0, 45), e: b.text.slice(-45) }));
   const keptLines = dropMargins(itemsToLines(content.items), viewport.height);
+  out.tocLines = dropMargins(itemsToLines(content.items, { fragmentGap: 1000 }), viewport.height).slice(0, 12).map((l) => l.text);
+  out.tocDebug = content.items.filter((i) => /PACIFIC REGION|^11$|Tides/.test(i.str)).slice(0, 6).map((i) => [i.str, Math.round(i.transform[4]), Math.round(i.transform[5])]);
   out.lineCount = keptLines.length;
   out.bands = detectColumns(keptLines, viewport.width).map((b) => [Math.round(b[0]), Math.round(b[1])]);
   const wide = keptLines.filter((l) => l.x1 - l.x0 > viewport.width * 0.7);
