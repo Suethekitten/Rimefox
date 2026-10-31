@@ -83,7 +83,35 @@ const scan = buildPdf([{
   content: '0.92 g\n50 120 495 680 re f\n0.4 g\n120 400 355 120 re f\n'
 }]);
 
-for (const [name, buf] of [['single.pdf', single], ['columns.pdf', columns], ['scan.pdf', scan]]) {
+// 中文 CID 字体：Type0 + GBK-EUC-H + Adobe-GB1，故意不带 ToUnicode。
+// 没有 cmaps 时 pdf.js 取不到正确 Unicode（这正是 cmaps 要验证的场景）。
+// <C4E3BAC3CAC0BDE7> = GBK 编码的「你好世界」。
+function buildCjkPdf() {
+  const content = 'BT\n/F1 16 Tf\n60 760 Td\n<C4E3BAC3CAC0BDE7> Tj\n0 -30 Td\n<B2E2CAD4D6D0CEC4D7D6CCE5> Tj\nET\n';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    '<< /Length ' + Buffer.byteLength(content, 'latin1') + ' >>\nstream\n' + content + '\nendstream',
+    '<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /GBK-EUC-H /DescendantFonts [6 0 R] >>',
+    '<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 2 >> /FontDescriptor 7 0 R /DW 1000 >>',
+    '<< /Type /FontDescriptor /FontName /STSong-Light /Flags 4 /FontBBox [-25 -254 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 880 /StemV 93 >>'
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  objects.forEach((body, i) => {
+    offsets.push(Buffer.byteLength(out, 'latin1'));
+    out += (i + 1) + ' 0 obj\n' + body + '\nendobj\n';
+  });
+  const xref = Buffer.byteLength(out, 'latin1');
+  out += 'xref\n0 ' + (objects.length + 1) + '\n0000000000 65535 f \n';
+  offsets.forEach((offset) => { out += String(offset).padStart(10, '0') + ' 00000 n \n'; });
+  out += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n';
+  return Buffer.from(out, 'latin1');
+}
+const cjk = buildCjkPdf();
+
+for (const [name, buf] of [['single.pdf', single], ['columns.pdf', columns], ['scan.pdf', scan], ['cjk.pdf', cjk]]) {
   fs.writeFileSync(path.join(outDir, name), buf);
   console.log(name, buf.length, 'bytes');
 }

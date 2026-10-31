@@ -4,9 +4,10 @@ import * as pdfjsLib from './vendor/pdfjs/pdf.min.mjs';
 
 const params = new URLSearchParams(location.search);
 const name = params.get('sample') || 'single';
+const noCmap = params.get('nocmap') === '1';
 const status = document.getElementById('status');
 const out = {
-  sample: name,
+  sample: name + (noCmap ? '+nocmap' : ''),
   version: pdfjsLib.version,
   ok: false,
   error: '',
@@ -16,6 +17,8 @@ const out = {
   textMs: 0,
   totalMs: 0,
   chars: 0,
+  cmapUrl: '',
+  cmapStatus: 0,
   head: ''
 };
 window.__probe = out;
@@ -32,13 +35,15 @@ function show(text) {
   out.bytes = buf.byteLength;
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('reader/vendor/pdfjs/pdf.worker.min.mjs');
-  const doc = await pdfjsLib.getDocument({
-    data: buf,
-    isEvalSupported: false,
+  const options = { data: buf, isEvalSupported: false, useWorkerFetch: false };
+  if (!noCmap) {
     // CJK 内置编码（Adobe-GB1 / GBK / CNS …）需要字形 → Unicode 映射；纯数据文件，不影响浏览器版本
-    cMapUrl: chrome.runtime.getURL('reader/vendor/pdfjs/cmaps/'),
-    cMapPacked: true
-  }).promise;
+    options.cMapUrl = chrome.runtime.getURL('reader/vendor/pdfjs/cmaps/');
+    out.cmapUrl = options.cMapUrl;
+    try { out.cmapStatus = (await fetch(options.cMapUrl + 'GBK-EUC-H.bcmap')).status; } catch (err) { out.cmapStatus = -1; }
+    options.cMapPacked = true;
+  }
+  const doc = await pdfjsLib.getDocument(options).promise;
   out.pages = doc.numPages;
 
   const page = await doc.getPage(1);

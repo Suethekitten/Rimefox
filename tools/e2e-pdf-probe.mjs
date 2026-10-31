@@ -71,17 +71,18 @@ console.log('extension', extId);
   }, 30000);
   await send('Target.closeTarget', { targetId });
 }
-const samples = ['single', 'columns', 'scan'];
+const cases = [{ sample: 'single' }, { sample: 'columns' }, { sample: 'scan' }, { sample: 'cjk' }, { sample: 'cjk', nocmap: true }];
 const results = [];
-for (const sample of samples) {
-  const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/reader/pdf-probe.html?sample=' + sample });
+for (const item of cases) {
+  const url = 'chrome-extension://' + extId + '/reader/pdf-probe.html?sample=' + item.sample + (item.nocmap ? '&nocmap=1' : '');
+  const { targetId } = await send('Target.createTarget', { url: url });
   const session = await attach(targetId);
   const probe = await until(async () => {
     const out = await send('Runtime.evaluate', { expression: 'window.__probe', returnByValue: true }, session);
     const value = out.result && out.result.value;
     return value && (value.ok || value.error) ? value : null;
   }, 30000);
-  results.push(probe || { sample: sample, ok: false, error: 'timeout' });
+  results.push(probe || { sample: item.sample, ok: false, error: 'timeout' });
   await send('Target.closeTarget', { targetId });
 }
 
