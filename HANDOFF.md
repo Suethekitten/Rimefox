@@ -874,6 +874,14 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 - **限制 / 未完成**：0.13.0 只支持无 DRM、可重排的 EPUB 2/3；固定版式、漫画、音频 / 视频、PDF、MOBI/AZW3、OCR、跨设备同步、高亮 / 批注和完整屏幕阅读器审计不在本轮范围。真实大型出版社 EPUB、移动端、RTL 和大型书库仍需独立 QA；本地 reader E2E 使用合成 EPUB + 假 API，不等同于真实书库验收。PDF 目前只有接口文档。
 
+### 0.14.0 — PDF 阅读与译文（本地待发布）
+
+- 新增 PDF 导入 / 阅读：pdf.js legacy + cmaps，书库、页容器、进度、目录三档兜底（outline → 印刷版目录页 → 页列表）。
+- 文本块还原：页眉页脚、栏目横幅、双栏 / 侧栏、段落合并；复杂并排版面仍可能合并。
+- 译文：按页分块、复用 reader 缓存、三种显示模式；目标语言走 reader settings，与网页翻译隔离。
+- 设置：单本上限 50–500 MB（默认 100 MB）。
+- 范围外：扫描件 OCR（见 [docs/archive/2026-10-31-ocr-candidates.md](docs/archive/2026-10-31-ocr-candidates.md)）、跨页段落合并。
+
 ### 0.13.2 — 字幕费用与稳定性
 
 - **V8 费用身份**：Bilibili 字幕的计费缓存身份从 `subtitle-v1:platform|videoKey|trackKey|lang` 改为固定内容键 `subtitle-v1:content`（`background.js` 的 `scope.subtitle`，发送方场景按标签页 URL 判定）。cid / id_str / 轨道 / 源语言只留在运行时轨道身份、`source.matches()` 与显示里；同一段文字重放（伪造元数据、切 P 失败、播放器重拉）命中同一份缓存，不再产生第二次付费请求。YouTube 不改契约，仍是原来的身份。`memoryOnly` 判据不变（前缀 `subtitle-v1:`），字幕译文仍只进内存 / session。
