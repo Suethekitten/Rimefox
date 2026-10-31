@@ -182,3 +182,10 @@ button { cursor: pointer; }
 .setting-row span { color: var(--reader-muted); font-size: 12px; }
 
 .toc-hint { font-size: 12px; color: var(--reader-muted); padding: 4px 2px 8px; }
+
+/* ---- PDF 译文 ---- */
+.pdf-block { margin: 0 0 0.9em; }
+.pdf-src { display: block; }
+.pdf-trans { margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--reader-accent); color: var(--reader-muted); font-size: 14px; line-height: 1.55; }
+#bookContent[data-pdf-mode="original"] .pdf-trans { display: none; }
+#bookContent[data-pdf-mode="translation"] .pdf-src { display: none; }

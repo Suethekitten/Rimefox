@@ -6,6 +6,7 @@ import { sanitizeXhtml } from '../lib/reader/sanitize.js';
 import { listBooks, getBook, saveBook, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, deleteBookTranslations, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
 import { ReaderTranslator } from '../lib/reader/translate.js';
+import { PdfTranslator } from '../lib/reader/pdf-translate.js';
 import { openPdfDocument, looksLikePdf } from '../lib/reader/pdf.js';
 
 const $ = (id) => document.getElementById(id);
@@ -17,6 +18,8 @@ const state = {
   pdf: null,
   pdfObserver: null,
   pdfPage: 0,
+  pdfTrans: null,
+  pdfTranslator: null,
   readerTarget: '',
   mode: 'original',
   assets: [],
@@ -140,6 +143,19 @@ async function changeTarget() {
     // 只改阅读器自己的设置，不动网页翻译的全局 targetLang
     await saveReaderSettings({ targetLang: target });
     state.readerTarget = target;
+    if (state.pdf) {
+      state.pdfTrans = new Map();
+      if (state.pdfTranslator) state.pdfTranslator.stop();
+      state.pdfTranslator = null;
+      document.querySelectorAll('.pdf-trans').forEach((node) => node.remove());
+      state.mode = 'original';
+      $('modeSelect').value = 'original';
+      state.book.mode = 'original';
+      $('bookContent').dataset.pdfMode = 'original';
+      try { await saveBook(state.book); } catch (err) { /* ignore */ }
+      setStatus('readerStatus', '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译 PDF。');
+      return;
+    }
     const cfg = readerConfig();
     if (translator) await translator.configure(cfg);
     if (translator) translator.stop();
@@ -445,19 +461,69 @@ async function renderPdfPage(el, index) {
   if (loaded.blocks.length) {
     const panel = document.createElement('div');
     panel.className = 'pdf-blocks';
-    for (const block of loaded.blocks) {
-      const p = document.createElement('p');
-      p.className = 'pdf-block';
-      p.textContent = block.text;
-      panel.appendChild(p);
+    for (let i = 0; i < loaded.blocks.length; i += 1) {
+      const block = document.createElement('div');
+      block.className = 'pdf-block';
+      block.dataset.block = String(i);
+      const src = document.createElement('span');
+      src.className = 'pdf-src';
+      src.textContent = loaded.blocks[i].text;
+      block.appendChild(src);
+      panel.appendChild(block);
     }
     el.appendChild(panel);
+    applyPdfTranslations(index);
+    if (state.mode !== 'original' && state.config && state.config.hasKey) {
+      translatePdfPage(index).catch((err) => setStatus('readerStatus', 'PDF 翻译失败：' + ((err && err.message) || '未知错误'), 'error'));
+    }
   } else {
     const note = document.createElement('p');
     note.className = 'pdf-empty-text';
     note.textContent = '本页没有可提取的文字（可能是扫描页）。';
     el.appendChild(note);
   }
+}
+
+function applyPdfTranslations(index) {
+  const texts = (state.pdfTrans && state.pdfTrans.get(index)) || [];
+  const el = document.querySelector('.pdf-page[data-page="' + index + '"]');
+  if (!el) return;
+  const blocks = el.querySelectorAll('.pdf-block');
+  for (let i = 0; i < blocks.length; i += 1) {
+    const value = texts[i] || '';
+    let trans = blocks[i].querySelector('.pdf-trans');
+    if (!value) {
+      if (trans) trans.remove();
+      continue;
+    }
+    if (!trans) {
+      trans = document.createElement('div');
+      trans.className = 'pdf-trans';
+      blocks[i].appendChild(trans);
+    }
+    trans.textContent = value;
+  }
+}
+
+async function translatePdfPage(index) {
+  if (!state.pdf || !state.config || !state.config.hasKey) return;
+  if (!state.pdfTranslator) state.pdfTranslator = new PdfTranslator({ onStatus: onPdfTranslateStatus });
+  const page = await state.pdf.page(index);
+  const texts = await state.pdfTranslator.translatePage({
+    bookId: state.book && state.book.id,
+    page: page,
+    target: state.readerTarget,
+    style: 'plain'
+  });
+  if (!state.pdfTrans) state.pdfTrans = new Map();
+  state.pdfTrans.set(index, texts);
+  applyPdfTranslations(index);
+}
+
+function onPdfTranslateStatus(status) {
+  if (!status) return;
+  if (status.error) setStatus('readerStatus', 'PDF 翻译失败：' + status.error, 'error');
+  else if (status.translated) setStatus('readerStatus', 'PDF 已翻译 ' + status.translated + ' 段。');
 }
 
 async function openPdfBook(record) {
@@ -478,14 +544,19 @@ async function openPdfBook(record) {
   state.doc = null;
   state.section = null;
   state.mode = record.mode || 'original';
+  state.pdfTrans = new Map();
+  if (state.pdfTranslator) state.pdfTranslator.stop();
+  state.pdfTranslator = null;
   $('libraryView').hidden = true;
   $('readerView').hidden = false;
-  $('modeSelect').disabled = true; // PDF 译文接入前先固定原文
+  $('modeSelect').disabled = false;
+  $('modeSelect').value = state.mode;
   $('targetSelect').disabled = false;
   $('tocToggle').disabled = false;
-  $('translateChapter').disabled = true;
+  $('translateChapter').disabled = !(state.config && state.config.hasKey);
   const content = $('bookContent');
   content.textContent = '';
+  content.dataset.pdfMode = state.mode;
   const wrap = document.createElement('div');
   wrap.className = 'pdf-pages';
   content.appendChild(wrap);
@@ -551,16 +622,25 @@ async function openPdfBook(record) {
 }
 
 let pdfRenderQueue = Promise.resolve();
+function visiblePdfPageIndexes() {
+  const margin = 800;
+  const out = [];
+  for (const el of document.querySelectorAll('.pdf-page')) {
+    const rect = el.getBoundingClientRect();
+    if (rect.bottom < -margin || rect.top > window.innerHeight + margin) continue;
+    out.push(Number(el.dataset.page));
+  }
+  return out;
+}
+
 function renderVisiblePdfPages() {
   if (!state.pdf) return;
   const margin = 800;
-  const pages = document.querySelectorAll('.pdf-page');
-  for (const el of pages) {
+  for (const el of document.querySelectorAll('.pdf-page')) {
     const rect = el.getBoundingClientRect();
     if (rect.bottom < -margin || rect.top > window.innerHeight + margin) continue;
     if (el.dataset.rendered === '1') continue;
-    // 一次只渲染一页：pdf.js 的 render task 并发跑在同一个 worker 上，
-    // 后台标签页里 17 页同时开始会互相卡住（实测 render 永不 resolve）。
+    // 一页一页排队：pdf.js 的 render task 并发容易互相拖慢
     el.dataset.rendered = '1';
     pdfRenderQueue = pdfRenderQueue
       .then(() => renderPdfPage(el, Number(el.dataset.page)))
@@ -803,11 +883,27 @@ function saveProgressSoon() {
 }
 
 async function changeMode(mode) {
-  if (!state.book || state.pdf) return;
+  if (!state.book) return;
   $('modeSelect').value = mode;
   state.mode = mode;
   state.book.mode = mode;
-  await saveBook(state.book);
+  try { await saveBook(state.book); } catch (err) { /* ignore */ }
+  if (state.pdf) {
+    $('bookContent').dataset.pdfMode = mode;
+    if (mode === 'original') {
+      setStatus('readerStatus', '原文模式。');
+      return;
+    }
+    if (!(state.config && state.config.hasKey)) {
+      setStatus('readerStatus', '还没有配置翻译 API，无法显示译文。', 'error');
+      return;
+    }
+    setStatus('readerStatus', '正在翻译当前页…');
+    for (const index of visiblePdfPageIndexes()) {
+      translatePdfPage(index).catch(() => {});
+    }
+    return;
+  }
   $('translateChapter').disabled = !(state.config && state.config.hasKey);
   translator && translator.stop();
   try { window.__DT && window.__DT.restore && window.__DT.restore(); } catch (err) { /* ignore */ }
@@ -849,7 +945,15 @@ function bindEvents() {
   $('modeSelect').addEventListener('change', () => changeMode($('modeSelect').value));
   $('targetSelect').addEventListener('change', changeTarget);
   $('translateChapter').addEventListener('click', async () => {
-    if (!translator || !state.section || !(state.config && state.config.hasKey)) return;
+    if (!(state.config && state.config.hasKey)) return;
+    if (state.pdf) {
+      if (state.mode === 'original') await changeMode('bilingual');
+      const pages = visiblePdfPageIndexes();
+      setStatus('readerStatus', '正在翻译当前 ' + pages.length + ' 页…');
+      for (const index of pages) translatePdfPage(index).catch(() => {});
+      return;
+    }
+    if (!translator || !state.section) return;
     const stats = translator.chapterStats();
     if ((stats.units > 400 || stats.chars > 50000) && !confirm('本章约 ' + stats.units + ' 段 / ' + stats.chars + ' 字，会分批发送翻译请求。继续？')) return;
     if (state.mode === 'original') await changeMode('bilingual');

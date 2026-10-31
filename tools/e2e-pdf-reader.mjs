@@ -3,6 +3,7 @@
 // 默认验证：导入上限、导入 / 页容器 / 标题；渲染断言需要 RIMEFOX_PDF_RENDER=1
 // （reader 页里的 pdf.js render 目前会卡住，探针页正常，见 HANDOFF §9）。
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,6 +30,35 @@ async function until(fn, ms = 30000, step = 200) {
 }
 
 const HEADED = process.env.RIMEFOX_HEADED === '1';
+
+// 本地假翻译 API（OpenAI 兼容），验证 PDF 译文链路
+const API_PORT = 18700 + Math.floor(Math.random() * 300);
+const API_ORIGIN = 'http://127.0.0.1:' + API_PORT;
+const hits = { requests: 0 };
+const server = http.createServer((req, res) => {
+  if (req.method === 'POST' && req.url.split('?')[0] === '/v1/chat/completions') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      try {
+        const body = JSON.parse(raw);
+        const texts = JSON.parse(body.messages[1].content);
+        hits.requests += 1;
+        const content = JSON.stringify(texts.map((text) => '译:' + String(text)));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ choices: [{ message: { content: content } }] }));
+      } catch (err) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: String(err.message || err) } }));
+      }
+    });
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+await new Promise((resolve) => server.listen(API_PORT, '127.0.0.1', resolve));
+
 const browser = spawn(CHROME, [
   ...(HEADED ? [] : ['--headless=new']),
   '--no-sandbox', '--enable-unsafe-extension-debugging',
@@ -94,6 +124,17 @@ const { targetId } = await send('Target.createTarget', { url: 'chrome-extension:
 const page = await attach(targetId);
 check('阅读器页面加载', !!(await until(() => pageEval(page, "return !!document.getElementById('bookGrid')"), 15000)));
 check('阅读器启动完成', !!(await until(() => pageEval(page, "return !!document.querySelector('.empty-library, .book-card')"), 20000)));
+// 配置假翻译 API（阅读器翻译目标独立，用 zh-CN）
+const cfg = {
+  _v: 6,
+  currentProvider: '__custom__',
+  customProviders: [{ id: '__custom__', name: 'Fake' }],
+  providerConfig: { __custom__: { engine: 'openai', baseUrl: API_ORIGIN + '/v1', apiKey: 'sk-test', model: 'fake' } },
+  targetLang: 'zh-CN', mode: 'dual', lazy: false, thinkingMode: 'off', hoverCompare: false
+};
+await pageEval(page, 'return chrome.storage.local.set({ config: ' + JSON.stringify(cfg) + ' }).then(() => true)');
+await send('Page.reload', {}, page);
+await until(() => pageEval(page, "return !!document.querySelector('.empty-library, .book-card')"), 20000);
 // pdf.js 的 render 在后台标签页会暂停；必须先让页面可见再导入
 await send('Page.bringToFront', {}, page).catch(() => {});
 check('阅读页可见（后台标签页会暂停渲染）', await pageEval(page, "return document.visibilityState" ) === 'visible');
@@ -131,7 +172,26 @@ if (process.env.RIMEFOX_PDF_RENDER === '1') {
 }
 
 check('无未捕获异常', exceptions.length === 0, exceptions.slice(0, 2).join(' | '));
+
+// PDF 译文：切到双语，验证译文注入与请求
+await pageEval(page, "window.scrollTo(0, 0); const m=document.getElementById('modeSelect'); m.value='bilingual'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+const transCount = await until(() => pageEval(page, "return document.querySelectorAll('.pdf-trans').length"), 30000);
+check('PDF 译文出现', !!transCount, transCount ? transCount + ' 段' : '没有译文');
+const transText = await pageEval(page, "const t=document.querySelector('.pdf-trans'); return t ? t.textContent.slice(0,40) : ''");
+check('译文来自翻译接口', /^译:/.test(transText), transText);
+check('翻译请求已发出', hits.requests > 0, hits.requests + ' 次');
+
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='translation'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await until(() => pageEval(page, "return document.getElementById('bookContent').dataset.pdfMode === 'translation'"), 5000);
+const srcDisplay = await pageEval(page, "const s=document.querySelector('.pdf-block .pdf-src'); return s ? getComputedStyle(s).display : 'missing';");
+check('仅译文模式隐藏原文', srcDisplay === 'none', srcDisplay);
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await until(() => pageEval(page, "return document.getElementById('bookContent').dataset.pdfMode === 'original'"), 5000);
+const transDisplay = await pageEval(page, "const t=document.querySelector('.pdf-trans'); return t ? getComputedStyle(t).display : 'missing';");
+check('原文模式隐藏译文', transDisplay === 'none', transDisplay);
+
 const failed = results.filter((one) => !one.ok).length;
 console.log('\n' + (results.length - failed) + ' / ' + results.length + ' 通过');
+try { server.close(); } catch (err) { /* ignore */ }
 try { browser.kill('SIGKILL'); } catch (err) { /* ignore */ }
 process.exit(failed ? 1 : 0);
