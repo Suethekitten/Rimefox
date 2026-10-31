@@ -776,7 +776,21 @@ if (!swTarget) throw new Error('找不到扩展的 service worker');
 const sw = await attach(swTarget.targetId);
 // E2E 只拦截 B 站字幕 CDN：用合成 body 验证扩展的取字幕 / 叠层 / 费用行为，不读取真实字幕内容。
 await send('Fetch.enable', { patterns: [{ urlPattern: 'https://aisubtitle.hdslb.com/*' }] }, sw);
-const swEval = (code) => evaluate(sw, '(async () => {' + code + '})()');
+// Edge 下扩展开启后 service worker 偶尔还没拿到扩展上下文，第一次 evaluate 会报 chrome is not defined；
+// 这不是扩展的问题，等它起来再试，避免整轮 E2E 因启动抖动失败。
+const swEval = async (code) => {
+  let last = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await evaluate(sw, '(async () => {' + code + '})()');
+    } catch (err) {
+      last = err;
+      if (!/chrome is not defined/.test(String(err && err.message))) throw err;
+      await sleep(500);
+    }
+  }
+  throw last;
+};
 const readConfig = () => swEval("return (await chrome.storage.local.get('config')).config;");
 const patchConfig = (patch) => {
   // This fixture writes storage directly; keep the v7 compatibility aliases coherent,
@@ -2125,6 +2139,25 @@ async function bilibiliSubtitleChecks(url, offline) {
   const samples = [];
   for (let i = 0; i < 12; i += 1) { const st = await biliOverlay(); samples.push(st.on && st.nativeHidden ? 'O' : '-'); await sleep(200); }
   check('没有 active 类、只有一条轨道：用原生字幕层兜底接管，且不闪烁', samples.every((x) => x === 'O'), samples.join(''));
+
+  // V8：页面脚本伪造播放器元数据（轮换 cid / id_str / 签名 URL），同一段文字不应再产生付费请求。
+  // 这是真实攻击面：页面主环境的消息没有可信来源，来源层只能靠后台的内容键 + 预算兜底。
+  const beforeForge = stats.texts;
+  const forgeSent = await pageEval(bili, `
+    const bvid = ${JSON.stringify(pageBv)};
+    for (let i = 0; i < 8; i += 1) {
+      const cid = 90000 + i;
+      const body = JSON.stringify({ code: 0, data: { aid: 1, bvid: bvid, cid: cid, page_no: 1,
+        subtitle: { lan: 'en-US', subtitles: [{ id: 1, id_str: 'forged-' + i, lan: 'en-US', lan_doc: 'en-US', type: 1,
+          subtitle_url: '//aisubtitle.hdslb.com/bfs/ai_subtitle/prod/e2e-' + bvid + '-forged-' + i + '.json?auth_key=fake' }] } } });
+      window.postMessage({ source: 'rimefox-bili', type: 'player', url: 'https://api.bilibili.com/x/player/wbi/v2?bvid=' + bvid + '&cid=' + cid, body: body, seq: 500 + i, at: Date.now() }, location.origin);
+    }
+    return 'sent';`);
+  await sleep(2500);
+  const forgedState = await biliOverlay();
+  check('伪造元数据轮换 cid / id_str：同一段文字不再产生付费请求（V8）',
+    forgeSent === 'sent' && stats.texts === beforeForge && !!forgedState && forgedState.on === true,
+    JSON.stringify({ added: stats.texts - beforeForge, on: !!forgedState && forgedState.on, orig: forgedState ? forgedState.orig : '' }));
 
   await sleep(3200); // 等缓存落盘
   const disk = await swEval('return JSON.stringify(await chrome.storage.local.get(null));');
