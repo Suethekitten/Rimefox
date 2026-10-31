@@ -167,3 +167,26 @@ button { cursor: pointer; }
   .toc-panel { position: fixed; inset: 0 auto 0 0; z-index: 60; width: min(86vw, 330px); max-height: none; box-shadow: 0 0 40px rgba(0,0,0,.22); }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+
+/* ---- PDF 阅读 ---- */
+.pdf-pages { display: flex; flex-direction: column; gap: 20px; padding: 8px 0 48px; }
+.pdf-page { position: relative; background: var(--reader-paper); border: 1px solid var(--reader-line); border-radius: 6px; padding: 10px; width: fit-content; max-width: none; }
+.pdf-page:not([data-rendered="1"]) { aspect-ratio: 1 / var(--pdf-ratio, 1.414); }
+.pdf-page canvas { display: block; max-width: none; height: auto; }
+.reader-zoom { font-size: 12px; color: var(--reader-muted); min-width: 44px; text-align: center; }
+.pdf-page-label { font-size: 12px; color: var(--reader-muted); margin-bottom: 6px; }
+.pdf-blocks { margin-top: 10px; border-top: 1px dashed var(--reader-line); padding-top: 8px; }
+.pdf-block { font-size: 15px; line-height: 1.6; margin: 0 0 0.8em; color: var(--reader-ink); }
+.pdf-empty-text { font-size: 13px; color: var(--reader-muted); }
+
+.setting-row input[type="number"] { width: 84px; }
+.setting-row span { color: var(--reader-muted); font-size: 12px; }
+
+.toc-hint { font-size: 12px; color: var(--reader-muted); padding: 4px 2px 8px; }
+
+/* ---- PDF 译文 ---- */
+.pdf-block { margin: 0 0 0.9em; }
+.pdf-src { display: block; }
+.pdf-trans { margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--reader-accent); color: var(--reader-muted); font-size: 14px; line-height: 1.55; }
+#bookContent[data-pdf-mode="original"] .pdf-trans { display: none; }
+#bookContent[data-pdf-mode="translation"] .pdf-src { display: none; }

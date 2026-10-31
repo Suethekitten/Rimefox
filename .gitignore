@@ -23,3 +23,6 @@ desktop.ini
 *.crx
 *.p12
 *.pfx
+
+# real PDFs for the stage-0 probe (downloaded locally, not committed)
+reader/pdf-real/

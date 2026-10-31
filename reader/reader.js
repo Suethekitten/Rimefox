@@ -6,6 +6,8 @@ import { sanitizeXhtml } from '../lib/reader/sanitize.js';
 import { listBooks, getBook, saveBook, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, deleteBookTranslations, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
 import { ReaderTranslator } from '../lib/reader/translate.js';
+import { PdfTranslator } from '../lib/reader/pdf-translate.js';
+import { openPdfDocument, looksLikePdf } from '../lib/reader/pdf.js';
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -13,6 +15,13 @@ const state = {
   book: null,
   doc: null,
   section: null,
+  pdf: null,
+  pdfObserver: null,
+  pdfPage: 0,
+  pdfTrans: null,
+  pdfTranslator: null,
+  pdfZoom: 1,
+  readerTarget: '',
   mode: 'original',
   assets: [],
   noteAssets: [],
@@ -62,12 +71,24 @@ function errorText(err) {
 }
 function runtimeMessage(msg) {
   return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      resolve(value);
+    };
+    // 后台没起来 / 没有响应时不能把阅读器启动卡死
+    const timer = setTimeout(() => finish({ ok: false, error: 'timeout' }), 8000);
     try {
       chrome.runtime.sendMessage(msg, (res) => {
+        clearTimeout(timer);
         const err = chrome.runtime.lastError;
-        resolve(err ? { ok: false, error: err.message } : (res || { ok: false }));
+        finish(err ? { ok: false, error: err.message } : (res || { ok: false }));
       });
-    } catch (err) { resolve({ ok: false, error: err.message }); }
+    } catch (err) {
+      clearTimeout(timer);
+      finish({ ok: false, error: err.message });
+    }
   });
 }
 async function loadConfig() {
@@ -81,6 +102,16 @@ async function loadConfig() {
   return state.config;
 }
 
+// 阅读器自己的翻译配置：目标语言来自 reader settings，不跟随网页翻译的全局设置。
+function readerConfig() {
+  const base = state.config || {};
+  const target = state.readerTarget || base.targetLang || '';
+  const chosen = (base.languages || []).find((language) => language.value === target);
+  const cfg = Object.assign({}, base, { targetLang: target });
+  if (chosen) cfg.activeLanguage = { value: chosen.value, label: chosen.label, code: chosen.code, kind: chosen.kind };
+  return cfg;
+}
+
 function renderTargetSelect() {
   const select = $('targetSelect');
   if (!select) return;
@@ -92,7 +123,7 @@ function renderTargetSelect() {
     option.textContent = language.label;
     select.appendChild(option);
   }
-  const wanted = (state.config && (state.config.targetLang || (state.config.activeLanguage && state.config.activeLanguage.value))) || '';
+  const wanted = state.readerTarget || (state.config && (state.config.targetLang || (state.config.activeLanguage && state.config.activeLanguage.value))) || '';
   if (wanted && !Array.from(select.options).some((option) => option.value === wanted)) {
     const option = document.createElement('option');
     option.value = wanted;
@@ -110,12 +141,23 @@ async function changeTarget() {
   if (!target) return;
   select.disabled = true;
   try {
-    await saveConfig({ targetLang: target });
-    const cfg = await loadConfig();
-    if (!cfg) return;
-    const chosen = (cfg.languages || []).find((language) => language.value === target);
-    cfg.targetLang = target;
-    if (chosen) cfg.activeLanguage = { value: chosen.value, label: chosen.label, code: chosen.code, kind: chosen.kind };
+    // 只改阅读器自己的设置，不动网页翻译的全局 targetLang
+    await saveReaderSettings({ targetLang: target });
+    state.readerTarget = target;
+    if (state.pdf) {
+      state.pdfTrans = new Map();
+      if (state.pdfTranslator) state.pdfTranslator.stop();
+      state.pdfTranslator = null;
+      document.querySelectorAll('.pdf-trans').forEach((node) => node.remove());
+      state.mode = 'original';
+      $('modeSelect').value = 'original';
+      state.book.mode = 'original';
+      $('bookContent').dataset.pdfMode = 'original';
+      try { await saveBook(state.book); } catch (err) { /* ignore */ }
+      setStatus('readerStatus', '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译 PDF。');
+      return;
+    }
+    const cfg = readerConfig();
     if (translator) await translator.configure(cfg);
     if (translator) translator.stop();
     translator = new ReaderTranslator({ onStatus: onTranslateStatus });
@@ -133,7 +175,7 @@ async function changeTarget() {
       const ratio = Math.max(0, Math.min(1, window.scrollY / max));
       await loadSection(state.section.id, '', ratio);
     }
-    setStatus('readerStatus', '目标语言已切换；点「双语」或「翻译本章」按新语言翻译。');
+    setStatus('readerStatus', '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译。');
   } catch (err) {
     setStatus('readerStatus', '切换目标语言失败：' + ((err && err.message) || '未知错误'), 'error');
     renderTargetSelect();
@@ -155,6 +197,7 @@ function applySettings() {
   $('measure').value = String(s.measure || 720);
   $('letterSpacing').value = String(Number(s.letterSpacing) || 0);
   $('paragraphSpacing').value = String(Number(s.paragraphSpacing) || 1.05);
+  $('maxBookMb').value = String(Math.round((Number(s.maxBookBytes) || READER_LIMITS.maxBookBytes) / 1048576));
   $('themeSelect').value = s.theme || 'auto';
   const hasUserFont = !!state.userFontFace;
   const family = s.fontFamily === 'user' && !hasUserFont ? 'serif' : (s.fontFamily || 'serif');
@@ -261,7 +304,7 @@ async function renderLibrary() {
   if (!books.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-library';
-    empty.textContent = '还没有导入 EPUB。选择一本无 DRM 的书开始。';
+    empty.textContent = '还没有导入 EPUB / PDF。选择一本无 DRM 的书开始。';
     grid.appendChild(empty);
   }
   for (const book of books) {
@@ -313,11 +356,12 @@ async function renderLibrary() {
 
 async function importFile(file) {
   if (!file) return;
-  if (file.size > READER_LIMITS.maxBookBytes) {
-    setStatus('libraryStatus', '文件超过 100 MB，0.13.0 不导入。', 'error');
+  const maxBookBytes = (state.settings && Number(state.settings.maxBookBytes)) || READER_LIMITS.maxBookBytes;
+  if (file.size > maxBookBytes) {
+    setStatus('libraryStatus', '文件超过 ' + Math.round(maxBookBytes / 1048576) + ' MB 上限，可在设置里调高。', 'error');
     return;
   }
-  setStatus('libraryStatus', '正在解析 EPUB…');
+  setStatus('libraryStatus', '正在解析…');
   try {
     const est = await estimateUsage();
     if (est.usage && est.quota && est.usage + file.size > READER_LIMITS.maxLibraryBytes) {
@@ -330,6 +374,10 @@ async function importFile(file) {
     if (existing) {
       setStatus('libraryStatus', '这本书已导入，直接打开。', 'ok');
       await openBook(existing);
+      return;
+    }
+    if (/\.pdf$/i.test(file.name) || looksLikePdf(new Uint8Array(buffer))) {
+      await importPdf(file, buffer, hash);
       return;
     }
     const doc = parseEpub(buffer);
@@ -361,7 +409,286 @@ async function importFile(file) {
   }
 }
 
+async function importPdf(file, buffer, hash) {
+  setStatus('libraryStatus', '正在解析 PDF…');
+  // 只存文件、不在这里开 pdf.js 文档：同一次导入里开两个文档会让后一个的 render 卡住。
+  // 元数据在 openPdfBook 里补齐（书名先用文件名）。
+  const record = {
+    id: hash,
+    hash,
+    format: 'pdf',
+    title: file.name.replace(/\.pdf$/i, '') || '未命名 PDF',
+    authors: [],
+    language: '',
+    metadata: {},
+    coverBlob: null,
+    fileBlob: file,
+    toc: [],
+    createdAt: Date.now(),
+    lastOpenedAt: Date.now(),
+    mode: 'original',
+    progress: { sectionId: 'page:1', offsetRatio: 0 }
+  };
+  await saveBook(record);
+  requestPersistence().catch(() => {});
+  setStatus('libraryStatus', '已导入。', 'ok');
+  await renderLibrary();
+  await openBook(record);
+}
+
+function loadPdfDocument(buffer) {
+  return openPdfDocument({
+    data: buffer,
+    loadPdfjs: () => import(chrome.runtime.getURL('reader/vendor/pdfjs/pdf.min.mjs')),
+    workerSrc: chrome.runtime.getURL('reader/vendor/pdfjs/pdf.worker.min.mjs'),
+    cMapUrl: chrome.runtime.getURL('reader/vendor/pdfjs/cmaps/')
+  });
+}
+
+function jumpToPdfPage(n) {
+  const el = document.querySelector('.pdf-page[data-page="' + n + '"]');
+  if (el) el.scrollIntoView({ block: 'start', behavior: 'instant' });
+}
+
+function updatePdfZoomUi() {
+  const pdf = !!state.pdf;
+  const out = $('pdfZoomOut');
+  const label = $('pdfZoomLabel');
+  const zoomIn = $('pdfZoomIn');
+  if (!out || !label || !zoomIn) return;
+  out.hidden = !pdf;
+  zoomIn.hidden = !pdf;
+  label.hidden = !pdf;
+  label.textContent = Math.round(state.pdfZoom * 100) + '%';
+}
+
+function applyPdfZoom(delta) {
+  if (!state.pdf) return;
+  state.pdfZoom = Math.max(0.5, Math.min(3, Math.round((state.pdfZoom + delta) * 20) / 20));
+  updatePdfZoomUi();
+  for (const el of document.querySelectorAll('.pdf-page')) {
+    const canvas = el.querySelector('canvas');
+    if (canvas) canvas.remove();
+    const blocks = el.querySelector('.pdf-blocks');
+    if (blocks) blocks.remove();
+    delete el.dataset.rendered;
+  }
+  renderVisiblePdfPages();
+}
+
+async function renderPdfPage(el, index) {
+  const doc = state.pdf;
+  if (!doc) return;
+  const loaded = await doc.page(index);
+  const content = document.getElementById('bookContent');
+  const baseWidth = Math.max(320, (content ? content.clientWidth : 720) - 56);
+  const cssWidth = Math.round(baseWidth * state.pdfZoom);
+  const dpr = window.devicePixelRatio || 1;
+  // 按屏幕像素比和缩放渲染，避免 CSS 拉伸导致的模糊
+  const renderScale = Math.min(3, Math.max(1.5, dpr) * state.pdfZoom);
+  const canvas = document.createElement('canvas');
+  canvas.style.width = cssWidth + 'px';
+  canvas.style.height = 'auto';
+  el.appendChild(canvas);
+  await doc.render(index, canvas, renderScale);
+  if (loaded.blocks.length) {
+    const panel = document.createElement('div');
+    panel.className = 'pdf-blocks';
+    for (let i = 0; i < loaded.blocks.length; i += 1) {
+      const block = document.createElement('div');
+      block.className = 'pdf-block';
+      block.dataset.block = String(i);
+      const src = document.createElement('span');
+      src.className = 'pdf-src';
+      src.textContent = loaded.blocks[i].text;
+      block.appendChild(src);
+      panel.appendChild(block);
+    }
+    el.appendChild(panel);
+    applyPdfTranslations(index);
+    if (state.mode !== 'original' && state.config && state.config.hasKey) {
+      translatePdfPage(index).catch((err) => setStatus('readerStatus', 'PDF 翻译失败：' + ((err && err.message) || '未知错误'), 'error'));
+    }
+  } else {
+    const note = document.createElement('p');
+    note.className = 'pdf-empty-text';
+    note.textContent = '本页没有可提取的文字（可能是扫描页）。';
+    el.appendChild(note);
+  }
+}
+
+function applyPdfTranslations(index) {
+  const texts = (state.pdfTrans && state.pdfTrans.get(index)) || [];
+  const el = document.querySelector('.pdf-page[data-page="' + index + '"]');
+  if (!el) return;
+  const blocks = el.querySelectorAll('.pdf-block');
+  for (let i = 0; i < blocks.length; i += 1) {
+    const value = texts[i] || '';
+    let trans = blocks[i].querySelector('.pdf-trans');
+    if (!value) {
+      if (trans) trans.remove();
+      continue;
+    }
+    if (!trans) {
+      trans = document.createElement('div');
+      trans.className = 'pdf-trans';
+      blocks[i].appendChild(trans);
+    }
+    trans.textContent = value;
+  }
+}
+
+async function translatePdfPage(index) {
+  if (!state.pdf || !state.config || !state.config.hasKey) return;
+  if (!state.pdfTranslator) state.pdfTranslator = new PdfTranslator({ onStatus: onPdfTranslateStatus });
+  const page = await state.pdf.page(index);
+  const texts = await state.pdfTranslator.translatePage({
+    bookId: state.book && state.book.id,
+    page: page,
+    target: state.readerTarget,
+    style: 'plain'
+  });
+  if (!state.pdfTrans) state.pdfTrans = new Map();
+  state.pdfTrans.set(index, texts);
+  applyPdfTranslations(index);
+}
+
+function onPdfTranslateStatus(status) {
+  if (!status) return;
+  if (status.error) setStatus('readerStatus', 'PDF 翻译失败：' + status.error, 'error');
+  else if (status.translated) setStatus('readerStatus', 'PDF 已翻译 ' + status.translated + ' 段。');
+}
+
+async function openPdfBook(record) {
+  if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } }
+  if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
+  const buffer = await record.fileBlob.arrayBuffer();
+  const doc = await loadPdfDocument(buffer);
+  state.pdf = doc;
+  state.book = record;
+  // 元数据在打开时补齐（导入时只存文件，避免同页开两个 pdf.js 文档）
+  if (doc.metadata && doc.metadata.title && doc.metadata.title !== '未命名 PDF') {
+    record.title = doc.metadata.title;
+    record.authors = doc.metadata.authors || [];
+    record.language = doc.metadata.language || '';
+    record.metadata = doc.metadata;
+    await saveBook(record);
+  }
+  state.doc = null;
+  state.section = null;
+  state.mode = record.mode || 'original';
+  state.pdfTrans = new Map();
+  state.pdfZoom = 1;
+  if (state.pdfTranslator) state.pdfTranslator.stop();
+  state.pdfTranslator = null;
+  updatePdfZoomUi();
+  $('libraryView').hidden = true;
+  $('readerView').hidden = false;
+  $('modeSelect').disabled = false;
+  $('modeSelect').value = state.mode;
+  $('targetSelect').disabled = false;
+  $('tocToggle').disabled = false;
+  $('translateChapter').disabled = !(state.config && state.config.hasKey);
+  const content = $('bookContent');
+  content.textContent = '';
+  content.dataset.pdfMode = state.mode;
+  const wrap = document.createElement('div');
+  wrap.className = 'pdf-pages';
+  content.appendChild(wrap);
+  const first = await doc.page(1);
+  const ratio = first.viewport.height / Math.max(1, first.viewport.width);
+  for (let i = 1; i <= doc.numPages; i += 1) {
+    const pageEl = document.createElement('section');
+    pageEl.className = 'pdf-page';
+    pageEl.dataset.page = String(i);
+    pageEl.style.setProperty('--pdf-ratio', ratio.toFixed(4));
+    const label = document.createElement('div');
+    label.className = 'pdf-page-label';
+    label.textContent = '第 ' + i + ' / ' + doc.numPages + ' 页';
+    pageEl.appendChild(label);
+    wrap.appendChild(pageEl);
+  }
+  $('tocList').textContent = '';
+  const tocWrap = document.createElement('div');
+  let toc = { source: 'pages', entries: [] };
+  try { toc = await doc.toc(); } catch (err) { toc = { source: 'pages', entries: [] }; }
+  if (toc.entries.length) {
+    const hint = document.createElement('div');
+    hint.className = 'toc-hint';
+    hint.textContent = toc.source === 'outline' ? '目录来自 PDF 书签' : '目录来自书内目录页（页码为书内页码）';
+    tocWrap.appendChild(hint);
+    for (const entry of toc.entries) {
+      const row = document.createElement('div');
+      row.className = 'toc-item';
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = entry.title + (entry.page ? ' · p.' + entry.page : '');
+      a.addEventListener('click', (event) => {
+        event.preventDefault();
+        const target = Math.max(1, Math.min(doc.numPages, Number(entry.page) || 1));
+        jumpToPdfPage(target);
+      });
+      row.appendChild(a);
+      tocWrap.appendChild(row);
+    }
+  } else {
+    for (let i = 1; i <= Math.min(doc.numPages, 200); i += 1) {
+      const row = document.createElement('div');
+      row.className = 'toc-item';
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = '第 ' + i + ' 页';
+      a.addEventListener('click', (event) => { event.preventDefault(); jumpToPdfPage(i); });
+      row.appendChild(a);
+      tocWrap.appendChild(row);
+    }
+  }
+  $('tocList').appendChild(tocWrap);
+  setReaderHeader({ title: 'PDF · ' + doc.numPages + ' 页' });
+  // 不用 IntersectionObserver：后台标签页里它不回调，PDF 会一直空白。
+  // 改成按 getBoundingClientRect 判断可视范围，滚动 / 窗口尺寸变化时补渲染。
+  state.pdfObserver = null;
+  renderVisiblePdfPages();
+  requestAnimationFrame(() => renderVisiblePdfPages());
+  record.lastOpenedAt = Date.now();
+  await saveBook(record);
+  const target = Number(String((record.progress && record.progress.sectionId) || '').replace('page:', '')) || 1;
+  if (target > 1) requestAnimationFrame(() => jumpToPdfPage(target));
+}
+
+let pdfRenderQueue = Promise.resolve();
+function visiblePdfPageIndexes() {
+  const margin = 800;
+  const out = [];
+  for (const el of document.querySelectorAll('.pdf-page')) {
+    const rect = el.getBoundingClientRect();
+    if (rect.bottom < -margin || rect.top > window.innerHeight + margin) continue;
+    out.push(Number(el.dataset.page));
+  }
+  return out;
+}
+
+function renderVisiblePdfPages() {
+  if (!state.pdf) return;
+  const margin = 800;
+  for (const el of document.querySelectorAll('.pdf-page')) {
+    const rect = el.getBoundingClientRect();
+    if (rect.bottom < -margin || rect.top > window.innerHeight + margin) continue;
+    if (el.dataset.rendered === '1') continue;
+    // 一页一页排队：pdf.js 的 render task 并发容易互相拖慢
+    el.dataset.rendered = '1';
+    pdfRenderQueue = pdfRenderQueue
+      .then(() => renderPdfPage(el, Number(el.dataset.page)))
+      .catch(() => {});
+  }
+}
+
 function closeReader() {
+  if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
+  if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
+  state.pdfPage = 0;
+  state.pdfZoom = 1;
+  updatePdfZoomUi();
   translator && translator.stop();
   for (const url of state.noteAssets) { try { URL.revokeObjectURL(url); } catch (err) { /* ignore */ } }
   state.noteAssets = [];
@@ -467,7 +794,11 @@ function scrollToFragment(fragment) {
 
 async function openBook(record) {
   if (!state.config) await loadConfig();
-  if (!state.config) return;
+  // 没有配置也能读原文；只有翻译相关入口不可用
+  if (record.format === 'pdf') { await openPdfBook(record); return; }
+  if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
+  if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
+  updatePdfZoomUi();
   try {
     const buffer = await record.fileBlob.arrayBuffer();
     const doc = parseEpub(buffer);
@@ -479,9 +810,9 @@ async function openBook(record) {
     $('modeSelect').disabled = false;
     $('targetSelect').disabled = false;
     $('tocToggle').disabled = false;
-    $('translateChapter').disabled = !state.config.hasKey;
+    $('translateChapter').disabled = !(state.config && state.config.hasKey);
     translator = translator || new ReaderTranslator({ onStatus: onTranslateStatus });
-    await translator.configure(state.config);
+    await translator.configure(readerConfig());
     translator.setDocument(doc);
     $('modeSelect').value = state.mode;
     const progress = record.progress || {};
@@ -523,7 +854,7 @@ async function loadSection(sectionId, fragment, offsetRatio) {
   state.section = sec;
   translator && translator.setDocument(state.doc);
   setReaderHeader(sec);
-  $('translateChapter').disabled = !state.config.hasKey;
+  $('translateChapter').disabled = !(state.config && state.config.hasKey);
   const mode = state.mode || 'original';
   if (translator) await translator.start(state.book, sec, content, mode);
   const ratio = typeof offsetRatio === 'number' ? Math.max(0, Math.min(1, offsetRatio)) : 0;
@@ -567,10 +898,23 @@ function saveProgressSoon() {
   if (state.saveTimer) return;
   state.saveTimer = setTimeout(() => {
     state.saveTimer = 0;
-    if (!state.book || !state.section) return;
+    if (!state.book) return;
     const max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
     const ratio = Math.max(0, Math.min(1, window.scrollY / max));
-    state.book.progress = { sectionId: state.section.id, offsetRatio: ratio };
+    if (state.pdf) {
+      let current = 1;
+      const pages = document.querySelectorAll('.pdf-page');
+      for (const el of pages) {
+        if (el.getBoundingClientRect().top <= 120) current = Number(el.dataset.page);
+        else break;
+      }
+      state.pdfPage = current;
+      state.book.progress = { sectionId: 'page:' + current, offsetRatio: ratio };
+    } else if (state.section) {
+      state.book.progress = { sectionId: state.section.id, offsetRatio: ratio };
+    } else {
+      return;
+    }
     state.book.lastOpenedAt = Date.now();
     saveProgress(state.book.id, state.book.progress).catch(() => {});
   }, 500);
@@ -581,15 +925,31 @@ async function changeMode(mode) {
   $('modeSelect').value = mode;
   state.mode = mode;
   state.book.mode = mode;
-  await saveBook(state.book);
-  $('translateChapter').disabled = !state.config.hasKey;
+  try { await saveBook(state.book); } catch (err) { /* ignore */ }
+  if (state.pdf) {
+    $('bookContent').dataset.pdfMode = mode;
+    if (mode === 'original') {
+      setStatus('readerStatus', '原文模式。');
+      return;
+    }
+    if (!(state.config && state.config.hasKey)) {
+      setStatus('readerStatus', '还没有配置翻译 API，无法显示译文。', 'error');
+      return;
+    }
+    setStatus('readerStatus', '正在翻译当前页…');
+    for (const index of visiblePdfPageIndexes()) {
+      translatePdfPage(index).catch(() => {});
+    }
+    return;
+  }
+  $('translateChapter').disabled = !(state.config && state.config.hasKey);
   translator && translator.stop();
   try { window.__DT && window.__DT.restore && window.__DT.restore(); } catch (err) { /* ignore */ }
   if (mode === 'original') {
     setStatus('readerStatus', '原文模式。');
     return;
   }
-  if (!state.config.hasKey) {
+  if (!(state.config && state.config.hasKey)) {
     setStatus('readerStatus', '还没有配置翻译 API，无法显示译文。', 'error');
     return;
   }
@@ -623,7 +983,15 @@ function bindEvents() {
   $('modeSelect').addEventListener('change', () => changeMode($('modeSelect').value));
   $('targetSelect').addEventListener('change', changeTarget);
   $('translateChapter').addEventListener('click', async () => {
-    if (!translator || !state.section || !state.config.hasKey) return;
+    if (!(state.config && state.config.hasKey)) return;
+    if (state.pdf) {
+      if (state.mode === 'original') await changeMode('bilingual');
+      const pages = visiblePdfPageIndexes();
+      setStatus('readerStatus', '正在翻译当前 ' + pages.length + ' 页…');
+      for (const index of pages) translatePdfPage(index).catch(() => {});
+      return;
+    }
+    if (!translator || !state.section) return;
     const stats = translator.chapterStats();
     if ((stats.units > 400 || stats.chars > 50000) && !confirm('本章约 ' + stats.units + ' 段 / ' + stats.chars + ' 字，会分批发送翻译请求。继续？')) return;
     if (state.mode === 'original') await changeMode('bilingual');
@@ -633,6 +1001,13 @@ function bindEvents() {
     if (!$('settingsDialog').open) $('settingsDialog').showModal();
   });
   $('fullscreenToggle').addEventListener('click', toggleFullscreen);
+  $('pdfZoomOut').addEventListener('click', () => applyPdfZoom(-0.25));
+  $('pdfZoomIn').addEventListener('click', () => applyPdfZoom(0.25));
+  $('bookContent').addEventListener('wheel', (event) => {
+    if (!state.pdf || !event.ctrlKey) return;
+    event.preventDefault();
+    applyPdfZoom(event.deltaY < 0 ? 0.25 : -0.25);
+  }, { passive: false });
   document.addEventListener('fullscreenchange', () => {
     $('fullscreenToggle').textContent = document.fullscreenElement ? '⤡' : '⛶';
     $('fullscreenToggle').title = document.fullscreenElement ? '退出全屏' : '全屏阅读';
@@ -642,6 +1017,11 @@ function bindEvents() {
   $('measure').addEventListener('input', () => saveSettings({ measure: Number($('measure').value) }));
   $('letterSpacing').addEventListener('input', () => saveSettings({ letterSpacing: Number($('letterSpacing').value) }));
   $('paragraphSpacing').addEventListener('input', () => saveSettings({ paragraphSpacing: Number($('paragraphSpacing').value) }));
+  $('maxBookMb').addEventListener('change', () => {
+    const mb = Math.max(50, Math.min(500, Math.round(Number($('maxBookMb').value) || 100)));
+    $('maxBookMb').value = String(mb);
+    saveSettings({ maxBookBytes: mb * 1024 * 1024 });
+  });
   $('themeSelect').addEventListener('change', () => saveSettings({ theme: $('themeSelect').value }));
   $('fontSelect').addEventListener('change', () => saveSettings({ fontFamily: $('fontSelect').value }));
   $('userFontUploadBtn').addEventListener('click', () => $('userFontInput').click());
@@ -651,7 +1031,15 @@ function bindEvents() {
     handleUserFontFile(file);
   });
   $('userFontRemove').addEventListener('click', removeUserFont);
-  window.addEventListener('scroll', saveProgressSoon, { passive: true });
+  window.addEventListener('scroll', () => {
+    saveProgressSoon();
+    if (state.pdf) renderVisiblePdfPages();
+  }, { passive: true });
+  window.addEventListener('resize', () => { if (state.pdf) renderVisiblePdfPages(); }, { passive: true });
+  // pdf.js 的 render 靠 rAF 推进；标签页切到后台会暂停，回来时必须补渲染
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && state.pdf) renderVisiblePdfPages();
+  });
   document.addEventListener('keydown', (event) => {
     if ($('readerView').hidden) return;
     if (event.target && /INPUT|SELECT|TEXTAREA/.test(event.target.tagName)) return;
@@ -687,8 +1075,13 @@ async function boot() {
   await loadUserFont();
   applySettings();
   await loadConfig();
+  // 阅读器的目标语言独立保存；首次打开时继承网页翻译的当前目标，之后互不影响
+  const settings = state.settings || {};
+  const fallback = (state.config && (state.config.targetLang || (state.config.activeLanguage && state.config.activeLanguage.value))) || '';
+  state.readerTarget = settings.targetLang || fallback;
+  renderTargetSelect();
   translator = new ReaderTranslator({ onStatus: onTranslateStatus });
-  if (state.config) await translator.configure(state.config);
+  if (state.config) await translator.configure(readerConfig());
   bindEvents();
   await renderLibrary();
 }

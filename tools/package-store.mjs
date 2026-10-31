@@ -20,6 +20,8 @@ const entries = [];
 // 注意：文档类只排除 .md 本身，不能写成 PRIVACY.*——那会把 lib/privacy.js 一起排掉。
 const excluded = /^(?:\.git|\.github|test|selftest|docs|tools|node_modules|package\.(?:json|ps1|bat)|README\.md|HANDOFF\.md|AGENTS\.md|PRIVACY\.md|CHANGELOG\.md|SECURITY\.md|\.DS_Store)$/i;
 async function collect(name) {
+  // 开发用文件不能进安装包：真实 PDF 样本（上百 MB）和 pdf 探针页 / 夹具
+  if (/^reader\/(?:pdf-real|pdf-samples)(?:\/|$)/.test(name) || /^reader\/pdf-probe\.(?:html|js)$/.test(name)) return;
   const stat = await lstat(resolve(root, name));
   if (stat.isSymbolicLink()) throw Error(`Symlinks are not allowed: ${name}`);
   const base = name.split('/').at(-1);
