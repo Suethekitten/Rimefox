@@ -1,7 +1,7 @@
 // PDF 探针：在扩展页里加载 legacy pdf.js，渲染一页并取文本层，结果写到 window.__probe。
 // 只用于阶段 0 评估，不进正式 reader 流程。
 import * as pdfjsLib from './vendor/pdfjs/pdf.min.mjs';
-import { pageBlocks } from '../lib/reader/pdf-text.js';
+import { pageBlocks, itemsToLines, dropMargins, detectColumns } from '../lib/reader/pdf-text.js';
 
 const params = new URLSearchParams(location.search);
 const name = params.get('sample') || 'single';
@@ -80,6 +80,12 @@ function show(text) {
   out.blocks = blocks.length;
   out.firstBlock = blocks.length ? blocks[0].text.slice(0, 140) : '';
   out.blockSample = blocks.slice(0, 5).map((b) => ({ s: b.text.slice(0, 45), e: b.text.slice(-45) }));
+  const keptLines = dropMargins(itemsToLines(content.items), viewport.height);
+  out.lineCount = keptLines.length;
+  out.bands = detectColumns(keptLines, viewport.width).map((b) => [Math.round(b[0]), Math.round(b[1])]);
+  const wide = keptLines.filter((l) => l.x1 - l.x0 > viewport.width * 0.7);
+  out.wideLines = wide.length;
+  out.wideSample = wide.slice(0, 2).map((l) => ({ t: l.text.slice(0, 60), x0: Math.round(l.x0), x1: Math.round(l.x1) }));
 
   // 前 3 页文本量：真实 PDF 首页常常是标题页
   out.perPage = [out.chars];

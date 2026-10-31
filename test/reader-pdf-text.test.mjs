@@ -68,6 +68,20 @@ t('行距超过阈值断段；行尾连字符拼回单词', function () {
   assert.equal(blocks[1].text, 'A new paragraph starts here.');
 });
 
+t('侧栏与正文分开，不会被合并成一段', function () {
+  const items = [
+    item('Body line one continues', 50, 700, 220),
+    item('Body line two continues', 50, 686, 220),
+    item('Sidebar one', 380, 700, 100),
+    item('Sidebar two', 380, 686, 100)
+  ];
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.deepEqual(blocks.map((block) => block.text), [
+    'Body line one continues Body line two continues',
+    'Sidebar one Sidebar two'
+  ]);
+});
+
 t('pageBlocks：页眉 + 双栏 + 段落 一次跑通', function () {
   const items = [
     item('Journal Header 2026', 10, 820),
