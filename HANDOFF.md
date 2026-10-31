@@ -765,6 +765,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 18. **阿拉伯语维基百科仍有部分段落无法翻译**（0.12.3）：0.12.4 修复的包装链接问题（§14）是已证实的一个原因：「ذكاء اصطناعي」条目离线回放中 2 段 `atom-slot-order` 失败在 0.12.4 归零。尚未在真实页面与真实模型下复核；若仍有段落不翻，请用 `dt:diagnose` 记录失败原因与段落结构。
 19. **字幕付费预算按标签页 + 跨标签页计** —— 5 分钟滑窗 90 次 HTTP / 9 万字符，单页 2400 次 / 200 万字符，跨标签页每窗口 360 次 / 36 万字符；超限后本页暂停自动翻译（换视频或刷新后恢复），目前没有「手动继续」按钮。阈值是保守估计而不是实测基线，正常观看远低于它。它只保证「费用不会无限放大」：页面脚本仍能让来源层换轨道（伪造 cid / id_str），只是同一段文字不再重复计费、不同文字被预算卡住；来源消息本身仍然无法证明真伪（见 §5.4「费用边界」）。
 20. **YouTube 直播 CC 字幕可能完全不翻译**（2026-10-30 反馈）—— 点播是「播放器拉一次整轨」，直播会反复轮询同一条轨道、内容逐段增长，代码里三处假设与它不符：同一轨道再次到达会被整体丢弃（`subtitles.js` 的 identity 早退）、直播响应可能整段是 `aAppend`（解析成 0 句）、`responseType=json` 的回包没被转发。修正在 `fix/youtube-live-captions` 分支（同轨道追加、aAppend 兜底、json 回包），**尚未用真实直播验证**，没有真实直播证据前不合进发版。
+21. **PDF 阅读：canvas 渲染在 reader 页里会卡住**（2026-10-31，PDF 分支）—— 同一份 PDF 在 `reader/pdf-probe.html` 里 `page.render()` 几十毫秒完成，但在 `reader/index.html` 里 render 永远不 resolve（getDocument / getPage / getTextContent 都正常）。已排除：标签页可见性（headed 也一样）、并发渲染（改单页队列仍卡）、缩放比例（1:1 也卡）、`useWorkerFetch`、同一页开两个 pdf.js 文档、reader 的五个 classic 脚本（在探针页预加载后仍正常）、容器可见性。下一步建议：把 `reader/index.html` 的样式与脚本逐项搬进探针页二分；或换 pdf.js 3.11.x 复测。导入、书库、页容器、文本块还原已可用；`tools/e2e-pdf-reader.mjs` 默认只跑导入断言，渲染断言需要 `RIMEFOX_PDF_RENDER=1`。
 
 ---
 
