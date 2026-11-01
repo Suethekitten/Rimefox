@@ -110,7 +110,7 @@
 
 | # | 任务 | 说明 |
 |---|---|---|
-| P2-1 | 会话级 Key 存储（**0.15 排期**） | Key 只存 `storage.session`，关浏览器失效；隐私更彻底。实现：配置拆成「非敏感 config（local）」+「secrets（session，按 provider 存 apiKey）」；首次启动把 local 里已有的 Key 迁到 session 并删除；重启后 hasKey=false，弹窗/设置页提示重新输入。风险：迁移与多标签配置重载，需要单测 + 设置页 E2E |
+| P2-1 | 会话级 Key 存储（**0.15 排期**） | Key 只存 `storage.session`，关浏览器失效；隐私更彻底。实现：配置拆成「非敏感 config（local）」+「secrets（session，按 provider 存 apiKey）」；首次启动把 local 里已有的 Key 迁到 session 并删除；重启后 hasKey=false，弹窗/设置页提示重新输入。风险：迁移与多标签配置重载，需要单测 + 设置页 E2E。补充：① 401 / Key 失效后写全局 `paused`（storage.session），前端拦截所有翻译请求直到重新配置，禁止继续发网络请求；② 广播带 config 指纹（hash），指纹未变不重新拉配置，广播合并/节流，避免多标签风暴 |
 | P2-2 | 站点规则进阶 | 每站点目标语言、按路径匹配、一键导入社区规则 |
 | P2-3 | 自定义提示词按站点 | 现在只有全局追加，后续支持站点覆盖 |
 | P2-4 | 隐私脱敏扩展 | 地址、护照号、英文人名（默认仍关闭，先解决误伤） |
