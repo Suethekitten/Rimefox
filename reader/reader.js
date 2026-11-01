@@ -82,6 +82,10 @@ function formatBytes(n) {
   return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + ' ' + units[i];
 }
 function errorText(err) {
+  const name = err && err.name;
+  if (name === 'PasswordException') return '这个 PDF 有密码保护，凛狐不会绕过。';
+  if (name === 'InvalidPDFException') return '这个 PDF 已损坏或不是有效的 PDF 文件。';
+  if (name === 'MissingPDFException') return 'PDF 文件不完整（可能下载中断）。';
   const code = err && err.code;
   const map = {
     not_epub: '这不是可读取的 EPUB 文件。',
@@ -476,6 +480,52 @@ function jumpToPdfPage(n) {
   if (el) el.scrollIntoView({ block: 'start', behavior: 'instant' });
 }
 
+function jumpToPdfHit(page) {
+  if (!state.pdf) return;
+  const target = Math.max(1, Math.min(state.pdf.numPages, Number(page) || 1));
+  if (state.pdfView === 'flow') {
+    const section = document.querySelector('#pdfFlow .pdf-flow-page[data-page="' + target + '"]');
+    if (section) {
+      section.scrollIntoView({ block: 'start' });
+      ensurePdfFlowPage(section).catch(() => {});
+    }
+  } else {
+    jumpToPdfPage(target);
+  }
+  updatePdfAnchor();
+}
+
+async function searchPdf(query) {
+  const results = $('pdfSearchResults');
+  if (!results) return;
+  results.textContent = '';
+  const q = String(query || '').trim();
+  if (!q || !state.pdf) return;
+  setStatus('readerStatus', '搜索中…');
+  const hits = [];
+  for (let page = 1; page <= state.pdf.numPages && hits.length < 50; page += 1) {
+    const loaded = await state.pdf.page(page);
+    for (const block of loaded.blocks) {
+      const index = block.text.toLowerCase().indexOf(q.toLowerCase());
+      if (index < 0) continue;
+      hits.push({
+        page: page,
+        snippet: block.text.slice(Math.max(0, index - 20), index + q.length + 20)
+      });
+      if (hits.length >= 50) break;
+    }
+  }
+  setStatus('readerStatus', hits.length ? '找到 ' + hits.length + ' 处「' + q + '」' : '没有找到「' + q + '」。');
+  for (const hit of hits) {
+    const row = document.createElement('a');
+    row.href = '#';
+    row.className = 'pdf-search-hit';
+    row.textContent = 'p.' + hit.page + ' · ' + hit.snippet;
+    row.addEventListener('click', (event) => { event.preventDefault(); jumpToPdfHit(hit.page); });
+    results.appendChild(row);
+  }
+}
+
 function updatePdfZoomUi() {
   const pdf = !!state.pdf && state.pdfView === 'pdf';
   const out = $('pdfZoomOut');
@@ -540,6 +590,11 @@ async function renderPdfPage(el, index) {
       panel.appendChild(block);
     }
     el.appendChild(panel);
+    const totalChars = loaded.blocks.reduce((sum, block) => sum + String(block.text || '').length, 0);
+    if (loaded.blocks.length <= 2 && totalChars > 1500) {
+      const label = el.querySelector('.pdf-page-label');
+      if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 复杂版式，文本可能合并';
+    }
     applyPdfTranslations(index);
     if (state.mode !== 'original' && state.config && state.config.hasKey) {
       translatePdfPage(index).catch((err) => setStatus('readerStatus', 'PDF 翻译失败：' + ((err && err.message) || '未知错误'), 'error'));
@@ -690,6 +745,11 @@ async function ensurePdfFlowPage(section) {
     holder.appendChild(block);
   }
   section.appendChild(holder);
+  const totalChars = loaded.blocks.reduce((sum, block) => sum + String(block.text || '').length, 0);
+  if (loaded.blocks.length <= 2 && totalChars > 1500) {
+    const label = section.querySelector('.pdf-flow-label');
+    if (label) label.textContent = '第 ' + pageNo + ' 页 · 复杂版式，文本可能合并';
+  }
   applyPdfTranslations(pageNo);
   if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
     translatePdfPage(pageNo).catch(() => {});
@@ -805,6 +865,10 @@ async function openPdfBook(record) {
   state.pdfLang = savedOption.lang;
   state.pdfAnchor = null;
   setModeOptions('pdf');
+  const pdfNav = document.querySelector('.pdf-nav');
+  if (pdfNav) pdfNav.hidden = false;
+  const searchResults = document.getElementById('pdfSearchResults');
+  if (searchResults) searchResults.textContent = '';
   state.pdfTrans = new Map();
   state.pdfZoom = 1;
   if (state.pdfTranslator) state.pdfTranslator.stop();
@@ -915,6 +979,8 @@ function renderVisiblePdfPages() {
 function closeReader() {
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
+  const pdfNav = document.querySelector('.pdf-nav');
+  if (pdfNav) pdfNav.hidden = true;
   state.pdfPage = 0;
   state.pdfZoom = 1;
   updatePdfZoomUi();
@@ -1024,7 +1090,10 @@ function scrollToFragment(fragment) {
 async function openBook(record) {
   if (!state.config) await loadConfig();
   // 没有配置也能读原文；只有翻译相关入口不可用
-  if (record.format === 'pdf') { await openPdfBook(record); return; }
+  if (record.format === 'pdf') {
+    try { await openPdfBook(record); } catch (err) { setStatus('libraryStatus', errorText(err), 'error'); closeReader(); }
+    return;
+  }
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   updatePdfZoomUi();
@@ -1035,6 +1104,8 @@ async function openBook(record) {
     state.doc = doc;
     state.mode = record.mode || 'original';
     setModeOptions('epub');
+    const pdfNav = document.querySelector('.pdf-nav');
+    if (pdfNav) pdfNav.hidden = true;
     $('libraryView').hidden = true;
     $('readerView').hidden = false;
     $('modeSelect').disabled = false;
@@ -1235,6 +1306,33 @@ function bindEvents() {
   $('pdfFitWidth').addEventListener('click', () => setPdfZoom(1));
   $('pdfFitColumn').addEventListener('click', () => setPdfZoom(1.9));
   $('pdfFlowBack').addEventListener('click', () => changeMode('pdf-original'));
+  $('pdfJumpGo').addEventListener('click', () => {
+    if (!state.pdf) return;
+    const page = Number($('pdfJumpInput').value);
+    if (!page) return;
+    jumpToPdfHit(page);
+  });
+  $('pdfJumpInput').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    $('pdfJumpGo').click();
+  });
+  $('pdfSearchGo').addEventListener('click', () => searchPdf($('pdfSearchInput').value));
+  $('pdfSearchInput').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    $('pdfSearchGo').click();
+  });
+  $('pdfTranslateStop').addEventListener('click', () => {
+    if (state.pdfTranslator) state.pdfTranslator.stop();
+    state.pdfTransPending = 0;
+    state.pdfTransDone = 0;
+    state.pdfTranslating = new Set();
+    const progress = $('pdfProgress');
+    if (progress) progress.hidden = true;
+    $('pdfTranslateStop').hidden = true;
+    setStatus('readerStatus', '已停止翻译。');
+  });
   $('bookContent').addEventListener('wheel', (event) => {
     if (!state.pdf || !event.ctrlKey) return;
     event.preventDefault();

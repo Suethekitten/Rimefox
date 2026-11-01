@@ -196,6 +196,18 @@ await sleep(1500);
 const pageAfter = await pageEval(page, "let cur = 1; for (const el of document.querySelectorAll('.pdf-page')) { if (el.getBoundingClientRect().top <= 140) cur = Number(el.dataset.page); else break; } return cur;");
 check('流式切回原版：跳到对应页', pageAfter >= 4, '第 ' + pageAfter + ' 页');
 
+// 跳页 + 全文搜索 + 损坏 PDF 提示
+await pageEval(page, "const i=document.getElementById('pdfJumpInput'); i.value='3'; document.getElementById('pdfJumpGo').click(); return true;");
+await sleep(900);
+const jumpPage = await pageEval(page, "let cur=1; for (const el of document.querySelectorAll('.pdf-page')) { if (el.getBoundingClientRect().top <= 140) cur=Number(el.dataset.page); else break; } return cur;");
+check('跳页到第 3 页', jumpPage === 3, jumpPage);
+await pageEval(page, "document.getElementById('pdfSearchInput').value='Ethical'; document.getElementById('pdfSearchGo').click(); return true;");
+const searchHits = await until(() => pageEval(page, "return document.querySelectorAll('.pdf-search-hit').length"), 20000);
+check('全文搜索有结果', !!searchHits, searchHits ? searchHits + ' 条' : '没有结果');
+await pageEval(page, "const a=document.querySelector('.pdf-search-hit'); if (a) a.click(); return true;");
+await sleep(900);
+
+
 check('无未捕获异常', exceptions.length === 0, exceptions.slice(0, 2).join(' | '));
 
 // PDF 译文：切到双语，验证译文注入、请求、进度与延迟
@@ -239,6 +251,17 @@ await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='fl
 await sleep(600);
 const flowPageAfter = await pageEval(page, "let cur=1; for (const s of document.querySelectorAll('#pdfFlow .pdf-flow-page')) { if (s.getBoundingClientRect().top <= 120) cur=Number(s.dataset.page); else break; } return cur;");
 check('流式内切换译文模式锚点不变', flowPageAfter === flowPageBefore, flowPageBefore + ' -> ' + flowPageAfter);
+
+// 损坏 PDF：放在最后，导入失败会回到书库
+const badPdf = path.join(os.tmpdir(), 'rimefox-corrupt-' + Date.now() + '.pdf');
+fs.writeFileSync(badPdf, 'this is not a pdf file');
+const badDoc = await send('DOM.getDocument', { depth: 0, pierce: true }, page);
+const badInput = await send('DOM.querySelector', { nodeId: badDoc.root.nodeId, selector: '#fileInput' }, page);
+await send('DOM.setFileInputFiles', { nodeId: badInput.nodeId, files: [badPdf] }, page);
+await pageEval(page, "document.getElementById('fileInput').dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await sleep(1500);
+const badStatus = await pageEval(page, "return (document.getElementById('libraryStatus')||{}).textContent || '';");
+check('损坏 PDF 给出明确提示', /损坏|有效的 PDF/.test(badStatus), badStatus);
 
 const failed = results.filter((one) => !one.ok).length;
 console.log('\n' + (results.length - failed) + ' / ' + results.length + ' 通过');

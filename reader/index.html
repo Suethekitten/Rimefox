@@ -58,6 +58,11 @@
 <main id="readerView" class="reader-view" hidden>
   <aside id="tocPanel" class="toc-panel" data-dt-ui aria-label="目录">
     <div class="toc-head"><strong>目录</strong><button id="tocClose" class="reader-button" type="button">×</button></div>
+    <div class="pdf-nav" hidden>
+      <div class="pdf-nav-row"><input id="pdfJumpInput" type="number" min="1" placeholder="页码"><button id="pdfJumpGo" class="reader-button" type="button">跳页</button></div>
+      <div class="pdf-nav-row"><input id="pdfSearchInput" type="search" placeholder="搜索全文"><button id="pdfSearchGo" class="reader-button" type="button">搜索</button></div>
+      <div id="pdfSearchResults" class="pdf-search-results"></div>
+    </div>
     <div id="tocList" class="toc-list"></div>
   </aside>
   <section id="readerScroll" class="reader-scroll">
@@ -69,6 +74,7 @@
 <div id="pdfProgress" class="pdf-progress" hidden>
       <div class="pdf-progress-track"><div id="pdfProgressBar" class="pdf-progress-bar"></div></div>
       <span id="pdfProgressText" class="pdf-progress-text"></span>
+      <button id="pdfTranslateStop" class="reader-button" type="button" hidden>停止</button>
     </div>
     <article id="bookContent" class="reader-content"></article>
   </section>
