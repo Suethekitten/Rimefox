@@ -153,5 +153,15 @@ t('项目符号另起一段', function () {
   ]);
 });
 
+t('LaTeX base64 垃圾从文本里剔除', function () {
+  const items = [
+    item('<latexitsha1_base64="AbC+/==">', 50, 700, 200),
+    item('</latexit>', 250, 700, 50),
+    item('1. Local Feature CNN', 50, 686, 150)
+  ];
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.deepEqual(blocks.map((b) => b.text), ['1. Local Feature CNN']);
+});
+
 console.log('\n' + pass + ' 通过 / ' + (pass + fail) + ' 总数');
 if (fail) process.exit(1);

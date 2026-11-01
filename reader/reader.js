@@ -21,6 +21,9 @@ const state = {
   pdfTrans: null,
   pdfTranslator: null,
   pdfZoom: 1,
+  pdfTransDone: 0,
+  pdfTransPending: 0,
+  pdfProgressTimer: 0,
   readerTarget: '',
   mode: 'original',
   assets: [],
@@ -538,19 +541,57 @@ function applyPdfTranslations(index) {
   }
 }
 
+function renderPdfProgress() {
+  const el = $('pdfProgress');
+  if (!el) return;
+  const done = state.pdfTransDone;
+  const pending = state.pdfTransPending;
+  if (!pending && !done) { el.hidden = true; return; }
+  el.hidden = false;
+  const total = Math.max(1, done + pending);
+  $('pdfProgressBar').style.width = Math.round((done / total) * 100) + '%';
+  $('pdfProgressText').textContent = 'PDF 翻译中 ' + done + '/' + total;
+}
+
+function beginPdfTranslation() {
+  if (state.pdfProgressTimer) { clearTimeout(state.pdfProgressTimer); state.pdfProgressTimer = 0; }
+  state.pdfTransDone = 0;
+  state.pdfTransPending = 0;
+  renderPdfProgress();
+}
+
+function endPdfProgressIfIdle() {
+  if (state.pdfTransPending) return;
+  if (state.pdfProgressTimer) clearTimeout(state.pdfProgressTimer);
+  state.pdfProgressTimer = setTimeout(() => {
+    state.pdfProgressTimer = 0;
+    const el = $('pdfProgress');
+    if (el) el.hidden = true;
+  }, 600);
+}
+
 async function translatePdfPage(index) {
   if (!state.pdf || !state.config || !state.config.hasKey) return;
   if (!state.pdfTranslator) state.pdfTranslator = new PdfTranslator({ onStatus: onPdfTranslateStatus });
-  const page = await state.pdf.page(index);
-  const texts = await state.pdfTranslator.translatePage({
-    bookId: state.book && state.book.id,
-    page: page,
-    target: state.readerTarget,
-    style: 'plain'
-  });
-  if (!state.pdfTrans) state.pdfTrans = new Map();
-  state.pdfTrans.set(index, texts);
-  applyPdfTranslations(index);
+  state.pdfTransPending += 1;
+  renderPdfProgress();
+  try {
+    const page = await state.pdf.page(index);
+    const texts = await state.pdfTranslator.translatePage({
+      bookId: state.book && state.book.id,
+      page: page,
+      target: state.readerTarget,
+      style: 'plain'
+    });
+    if (!state.pdfTrans) state.pdfTrans = new Map();
+    state.pdfTrans.set(index, texts);
+    applyPdfTranslations(index);
+  } finally {
+    state.pdfTransPending = Math.max(0, state.pdfTransPending - 1);
+    state.pdfTransDone += 1;
+    renderPdfProgress();
+    endPdfProgressIfIdle();
+  }
 }
 
 function onPdfTranslateStatus(status) {
@@ -937,6 +978,7 @@ async function changeMode(mode) {
       return;
     }
     setStatus('readerStatus', '正在翻译当前页…');
+    beginPdfTranslation();
     for (const index of visiblePdfPageIndexes()) {
       translatePdfPage(index).catch(() => {});
     }
@@ -988,6 +1030,7 @@ function bindEvents() {
       if (state.mode === 'original') await changeMode('bilingual');
       const pages = visiblePdfPageIndexes();
       setStatus('readerStatus', '正在翻译当前 ' + pages.length + ' 页…');
+      beginPdfTranslation();
       for (const index of pages) translatePdfPage(index).catch(() => {});
       return;
     }

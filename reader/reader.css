@@ -176,7 +176,7 @@ button { cursor: pointer; }
 .reader-zoom { font-size: 12px; color: var(--reader-muted); min-width: 44px; text-align: center; }
 .pdf-page-label { font-size: 12px; color: var(--reader-muted); margin-bottom: 6px; }
 .pdf-blocks { margin-top: 10px; border-top: 1px dashed var(--reader-line); padding-top: 8px; }
-.pdf-block { font-size: 15px; line-height: 1.6; margin: 0 0 0.8em; color: var(--reader-ink); }
+.pdf-block { font-size: calc(var(--reader-font-size, 18px) * 0.84); line-height: 1.6; margin: 0 0 0.8em; color: var(--reader-ink); }
 .pdf-empty-text { font-size: 13px; color: var(--reader-muted); }
 
 .setting-row input[type="number"] { width: 84px; }
@@ -187,6 +187,11 @@ button { cursor: pointer; }
 /* ---- PDF 译文 ---- */
 .pdf-block { margin: 0 0 0.9em; }
 .pdf-src { display: block; }
-.pdf-trans { margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--reader-accent); color: var(--reader-muted); font-size: 14px; line-height: 1.55; }
+.pdf-trans { margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--reader-accent); color: var(--reader-muted); font-size: calc(var(--reader-font-size, 18px) * 0.78); line-height: 1.55; }
 #bookContent[data-pdf-mode="original"] .pdf-trans { display: none; }
 #bookContent[data-pdf-mode="translation"] .pdf-src { display: none; }
+
+.pdf-progress { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin: 0 0 10px; background: var(--reader-paper); border: 1px solid var(--reader-line); border-radius: 8px; font-size: 12px; color: var(--reader-muted); }
+.pdf-progress-track { flex: 1; height: 4px; background: var(--reader-line); border-radius: 999px; overflow: hidden; }
+.pdf-progress-bar { height: 100%; width: 0; background: var(--reader-accent); transition: width .2s; }
+.pdf-progress-text { white-space: nowrap; }
