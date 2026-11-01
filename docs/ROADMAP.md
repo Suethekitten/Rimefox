@@ -145,6 +145,15 @@
 | PDF | 单 text item 双栏兜底、跨页段落合并（有样本再验证） |
 | 翻译 | 真实 API 延迟实测、失败重试与断网提示 |
 
+**P2-1 设计要点（记录，未开工）**
+
+- 配置拆分：`storage.local` 存非敏感 config；`storage.session` 存 secrets（按 provider 的 apiKey）。
+- 迁移：模块级串行 promise；读 local → 写 session → 确认成功 → 删 local，并写版本标记防重复。旧 Key 不强制迁移，升级后一次性询问「是否改为仅本次会话」。
+- 设置：默认 session；提供「在此设备上记住密钥」开关 → 勾选写 local，取消则回 session。
+- paused：401 / Key 失效时写 `storage.session` 的全局暂停状态；UI、前端请求、后台 translate 入口三层拦截，不再发网络请求；换到有 Key 的 provider 或重新配置后清除。
+- 广播：`config:updated` 带 config 指纹（不含 Key 明文）；指纹未变不重拉配置；后台做 150–300ms 合并并按标签间隔发送，避免多标签风暴。
+- 测试：迁移幂等（并发初始化）、重启后 hasKey=false、401 进入 paused 且不发请求、20 标签广播压力。
+
 | 版本 | 内容 |
 |---|---|
 | **0.9.0** | 缓存键按命中术语（前置）+ 术语表一键收录（P1-3）+ 输入框翻译（P1-1）+ 振假名修复，详见 4.1 |
