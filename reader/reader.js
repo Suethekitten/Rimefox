@@ -9,6 +9,29 @@ import { ReaderTranslator } from '../lib/reader/translate.js';
 import { PdfTranslator } from '../lib/reader/pdf-translate.js';
 import { openPdfDocument, looksLikePdf } from '../lib/reader/pdf.js';
 
+const PDF_MODE_OPTIONS = [
+  { value: 'pdf-original', text: '原版版面', view: 'pdf', lang: 'original' },
+  { value: 'flow-original', text: '流式原版', view: 'flow', lang: 'original' },
+  { value: 'flow-bilingual', text: '流式双语', view: 'flow', lang: 'bilingual' },
+  { value: 'flow-translation', text: '流式仅译文', view: 'flow', lang: 'translation' }
+];
+const EPUB_MODE_OPTIONS = [
+  { value: 'original', text: '原文' },
+  { value: 'bilingual', text: '双语' },
+  { value: 'translation', text: '仅译文' }
+];
+function setModeOptions(kind) {
+  const select = $('modeSelect');
+  if (!select) return;
+  select.textContent = '';
+  for (const option of (kind === 'pdf' ? PDF_MODE_OPTIONS : EPUB_MODE_OPTIONS)) {
+    const item = document.createElement('option');
+    item.value = option.value;
+    item.textContent = option.text;
+    select.appendChild(item);
+  }
+}
+
 const $ = (id) => document.getElementById(id);
 const state = {
   config: null,
@@ -454,7 +477,7 @@ function jumpToPdfPage(n) {
 }
 
 function updatePdfZoomUi() {
-  const pdf = !!state.pdf;
+  const pdf = !!state.pdf && state.pdfView === 'pdf';
   const out = $('pdfZoomOut');
   const label = $('pdfZoomLabel');
   const zoomIn = $('pdfZoomIn');
@@ -463,11 +486,15 @@ function updatePdfZoomUi() {
   zoomIn.hidden = !pdf;
   label.hidden = !pdf;
   label.textContent = Math.round(state.pdfZoom * 100) + '%';
+  const fitWidth = document.getElementById('pdfFitWidth');
+  const fitColumn = document.getElementById('pdfFitColumn');
+  if (fitWidth) fitWidth.hidden = !pdf;
+  if (fitColumn) fitColumn.hidden = !pdf;
 }
 
-function applyPdfZoom(delta) {
+function setPdfZoom(value) {
   if (!state.pdf) return;
-  state.pdfZoom = Math.max(0.5, Math.min(3, Math.round((state.pdfZoom + delta) * 20) / 20));
+  state.pdfZoom = Math.max(0.5, Math.min(3, Math.round(Number(value) * 20) / 20));
   updatePdfZoomUi();
   for (const el of document.querySelectorAll('.pdf-page')) {
     const canvas = el.querySelector('canvas');
@@ -477,6 +504,11 @@ function applyPdfZoom(delta) {
     delete el.dataset.rendered;
   }
   renderVisiblePdfPages();
+}
+
+function applyPdfZoom(delta) {
+  if (!state.pdf) return;
+  setPdfZoom(state.pdfZoom + delta);
 }
 
 async function renderPdfPage(el, index) {
@@ -520,11 +552,9 @@ async function renderPdfPage(el, index) {
   }
 }
 
-function applyPdfTranslations(index) {
-  const texts = (state.pdfTrans && state.pdfTrans.get(index)) || [];
-  const el = document.querySelector('.pdf-page[data-page="' + index + '"]');
-  if (!el) return;
-  const blocks = el.querySelectorAll('.pdf-block');
+function applyPdfTranslationsTo(root, texts) {
+  if (!root) return;
+  const blocks = root.querySelectorAll('.pdf-block');
   for (let i = 0; i < blocks.length; i += 1) {
     const value = texts[i] || '';
     let trans = blocks[i].querySelector('.pdf-trans');
@@ -539,6 +569,22 @@ function applyPdfTranslations(index) {
     }
     trans.textContent = value;
   }
+}
+
+function applyPdfTranslations(index) {
+  const texts = (state.pdfTrans && state.pdfTrans.get(index)) || [];
+  applyPdfTranslationsTo(document.querySelector('.pdf-page[data-page="' + index + '"]'), texts);
+  applyPdfTranslationsTo(document.querySelector('#pdfFlow .pdf-flow-page[data-page="' + index + '"]'), texts);
+}
+
+function visibleFlowPageIndexes() {
+  const out = [];
+  for (const section of document.querySelectorAll('#pdfFlow .pdf-flow-page')) {
+    const rect = section.getBoundingClientRect();
+    if (rect.bottom < -700 || rect.top > window.innerHeight + 700) continue;
+    out.push(Number(section.dataset.page));
+  }
+  return out;
 }
 
 function renderPdfProgress() {
@@ -572,6 +618,9 @@ function endPdfProgressIfIdle() {
 
 async function translatePdfPage(index) {
   if (!state.pdf || !state.config || !state.config.hasKey) return;
+  state.pdfTranslating = state.pdfTranslating || new Set();
+  if (state.pdfTranslating.has(index)) return;
+  state.pdfTranslating.add(index);
   if (!state.pdfTranslator) state.pdfTranslator = new PdfTranslator({ onStatus: onPdfTranslateStatus });
   state.pdfTransPending += 1;
   renderPdfProgress();
@@ -587,6 +636,7 @@ async function translatePdfPage(index) {
     state.pdfTrans.set(index, texts);
     applyPdfTranslations(index);
   } finally {
+    state.pdfTranslating.delete(index);
     state.pdfTransPending = Math.max(0, state.pdfTransPending - 1);
     state.pdfTransDone += 1;
     renderPdfProgress();
@@ -598,6 +648,137 @@ function onPdfTranslateStatus(status) {
   if (!status) return;
   if (status.error) setStatus('readerStatus', 'PDF 翻译失败：' + status.error, 'error');
   else if (status.translated) setStatus('readerStatus', 'PDF 已翻译 ' + status.translated + ' 段。');
+}
+
+function buildPdfFlow() {
+  let flow = document.getElementById('pdfFlow');
+  if (flow) return flow;
+  flow = document.createElement('div');
+  flow.id = 'pdfFlow';
+  flow.className = 'pdf-flow';
+  for (let i = 1; i <= state.pdf.numPages; i += 1) {
+    const section = document.createElement('section');
+    section.className = 'pdf-flow-page';
+    section.dataset.page = String(i);
+    section.dataset.loaded = '0';
+    const label = document.createElement('div');
+    label.className = 'pdf-flow-label';
+    label.textContent = '第 ' + i + ' 页';
+    section.appendChild(label);
+    flow.appendChild(section);
+  }
+  $('bookContent').appendChild(flow);
+  return flow;
+}
+
+async function ensurePdfFlowPage(section) {
+  if (!section || section.dataset.loaded === '1' || !state.pdf) return;
+  section.dataset.loaded = '1';
+  const pageNo = Number(section.dataset.page);
+  const loaded = await state.pdf.page(pageNo);
+  const holder = document.createElement('div');
+  holder.className = 'pdf-flow-blocks';
+  for (let i = 0; i < loaded.blocks.length; i += 1) {
+    const block = document.createElement('div');
+    block.className = 'pdf-block';
+    block.dataset.page = String(pageNo);
+    block.dataset.block = String(i);
+    const src = document.createElement('span');
+    src.className = 'pdf-src';
+    src.textContent = loaded.blocks[i].text;
+    block.appendChild(src);
+    holder.appendChild(block);
+  }
+  section.appendChild(holder);
+  applyPdfTranslations(pageNo);
+  if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
+    translatePdfPage(pageNo).catch(() => {});
+  }
+}
+
+function ensureVisiblePdfFlowPages() {
+  const flow = document.getElementById('pdfFlow');
+  if (!flow) return;
+  for (const section of flow.querySelectorAll('.pdf-flow-page')) {
+    const rect = section.getBoundingClientRect();
+    if (rect.bottom < -700 || rect.top > window.innerHeight + 700) continue;
+    ensurePdfFlowPage(section).catch(() => {});
+  }
+}
+
+function updatePdfAnchor() {
+  if (!state.pdf) return;
+  if (state.pdfView === 'flow') {
+    let target = null;
+    for (const section of document.querySelectorAll('#pdfFlow .pdf-flow-page')) {
+      if (section.getBoundingClientRect().top <= 120) target = section;
+      else break;
+    }
+    if (target) {
+      const firstBlock = target.querySelector('.pdf-block .pdf-src');
+      state.pdfAnchor = {
+        page: Number(target.dataset.page),
+        text: firstBlock ? firstBlock.textContent.slice(0, 40) : ''
+      };
+    }
+    return;
+  }
+  let current = 1;
+  for (const el of document.querySelectorAll('.pdf-page')) {
+    if (el.getBoundingClientRect().top <= 120) current = Number(el.dataset.page);
+    else break;
+  }
+  state.pdfAnchor = { page: current, text: '' };
+}
+
+async function findPdfPageByText(text, near) {
+  if (!text || !state.pdf) return 0;
+  const start = Math.max(1, near - 6);
+  const end = Math.min(state.pdf.numPages, near + 6);
+  for (let page = start; page <= end; page += 1) {
+    try {
+      const loaded = await state.pdf.page(page);
+      if (loaded.blocks.some((block) => block.text.includes(text))) return page;
+    } catch (err) { /* 跳过 */ }
+  }
+  return 0;
+}
+
+async function applyPdfViewMode() {
+  if (!state.pdf) return;
+  const content = $('bookContent');
+  const pages = content.querySelector('.pdf-pages');
+  const flow = state.pdfView === 'flow' ? buildPdfFlow() : document.getElementById('pdfFlow');
+  content.dataset.pdfMode = state.pdfLang;
+  content.classList.toggle('pdf-flow-mode', state.pdfView === 'flow');
+  if (pages) pages.hidden = state.pdfView === 'flow';
+  if (flow) flow.hidden = state.pdfView !== 'flow';
+  const flowBanner = document.getElementById('pdfFlowBanner');
+  if (flowBanner) flowBanner.hidden = state.pdfView !== 'flow';
+  updatePdfZoomUi();
+  if (state.pdfView === 'flow') {
+    const anchorPage = state.pdfAnchor && state.pdfAnchor.page ? state.pdfAnchor.page : 1;
+    const section = flow && flow.querySelector('.pdf-flow-page[data-page="' + anchorPage + '"]');
+    if (section) section.scrollIntoView({ block: 'start' });
+    ensureVisiblePdfFlowPages();
+    if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
+      beginPdfTranslation();
+      for (const index of visibleFlowPageIndexes()) translatePdfPage(index).catch(() => {});
+    }
+  } else {
+    let page = state.pdfAnchor && state.pdfAnchor.page ? state.pdfAnchor.page : 1;
+    if (state.pdfAnchor && state.pdfAnchor.text) {
+      const found = await findPdfPageByText(state.pdfAnchor.text, page);
+      if (found) page = found;
+    }
+    jumpToPdfPage(page);
+    renderVisiblePdfPages();
+    if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
+      beginPdfTranslation();
+      for (const index of visiblePdfPageIndexes()) translatePdfPage(index).catch(() => {});
+    }
+  }
+  updatePdfAnchor();
 }
 
 async function openPdfBook(record) {
@@ -617,7 +798,13 @@ async function openPdfBook(record) {
   }
   state.doc = null;
   state.section = null;
-  state.mode = record.mode || 'original';
+  const savedMode = record.pdfMode || 'pdf-original';
+  const savedOption = PDF_MODE_OPTIONS.find((option) => option.value === savedMode) || PDF_MODE_OPTIONS[0];
+  state.mode = savedOption.lang;
+  state.pdfView = savedOption.view;
+  state.pdfLang = savedOption.lang;
+  state.pdfAnchor = null;
+  setModeOptions('pdf');
   state.pdfTrans = new Map();
   state.pdfZoom = 1;
   if (state.pdfTranslator) state.pdfTranslator.stop();
@@ -626,13 +813,13 @@ async function openPdfBook(record) {
   $('libraryView').hidden = true;
   $('readerView').hidden = false;
   $('modeSelect').disabled = false;
-  $('modeSelect').value = state.mode;
+  $('modeSelect').value = savedMode;
   $('targetSelect').disabled = false;
   $('tocToggle').disabled = false;
   $('translateChapter').disabled = !(state.config && state.config.hasKey);
   const content = $('bookContent');
   content.textContent = '';
-  content.dataset.pdfMode = state.mode;
+  content.dataset.pdfMode = state.pdfLang;
   const wrap = document.createElement('div');
   wrap.className = 'pdf-pages';
   content.appendChild(wrap);
@@ -689,12 +876,13 @@ async function openPdfBook(record) {
   // 不用 IntersectionObserver：后台标签页里它不回调，PDF 会一直空白。
   // 改成按 getBoundingClientRect 判断可视范围，滚动 / 窗口尺寸变化时补渲染。
   state.pdfObserver = null;
+  const target = Number(String((record.progress && record.progress.sectionId) || '').replace('page:', '')) || 1;
+  if (target > 1) state.pdfAnchor = { page: target, text: '' };
   renderVisiblePdfPages();
   requestAnimationFrame(() => renderVisiblePdfPages());
+  await applyPdfViewMode();
   record.lastOpenedAt = Date.now();
   await saveBook(record);
-  const target = Number(String((record.progress && record.progress.sectionId) || '').replace('page:', '')) || 1;
-  if (target > 1) requestAnimationFrame(() => jumpToPdfPage(target));
 }
 
 let pdfRenderQueue = Promise.resolve();
@@ -846,6 +1034,7 @@ async function openBook(record) {
     state.book = record;
     state.doc = doc;
     state.mode = record.mode || 'original';
+    setModeOptions('epub');
     $('libraryView').hidden = true;
     $('readerView').hidden = false;
     $('modeSelect').disabled = false;
@@ -943,12 +1132,8 @@ function saveProgressSoon() {
     const max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
     const ratio = Math.max(0, Math.min(1, window.scrollY / max));
     if (state.pdf) {
-      let current = 1;
-      const pages = document.querySelectorAll('.pdf-page');
-      for (const el of pages) {
-        if (el.getBoundingClientRect().top <= 120) current = Number(el.dataset.page);
-        else break;
-      }
+      updatePdfAnchor();
+      const current = (state.pdfAnchor && state.pdfAnchor.page) || 1;
       state.pdfPage = current;
       state.book.progress = { sectionId: 'page:' + current, offsetRatio: ratio };
     } else if (state.section) {
@@ -963,27 +1148,28 @@ function saveProgressSoon() {
 
 async function changeMode(mode) {
   if (!state.book) return;
+  if (state.pdf) {
+    const option = PDF_MODE_OPTIONS.find((item) => item.value === mode);
+    if (!option) return;
+    state.pdfView = option.view;
+    state.pdfLang = option.lang;
+    state.mode = option.lang;
+    state.book.pdfMode = mode;
+    $('modeSelect').value = mode;
+    try { await saveBook(state.book); } catch (err) { /* ignore */ }
+    const hasKey = state.config && state.config.hasKey;
+    if (option.lang !== 'original' && !hasKey) {
+      setStatus('readerStatus', '还没有配置翻译 API，流式视图可看原文。', 'error');
+    } else {
+      setStatus('readerStatus', option.text + '模式。');
+    }
+    await applyPdfViewMode();
+    return;
+  }
   $('modeSelect').value = mode;
   state.mode = mode;
   state.book.mode = mode;
   try { await saveBook(state.book); } catch (err) { /* ignore */ }
-  if (state.pdf) {
-    $('bookContent').dataset.pdfMode = mode;
-    if (mode === 'original') {
-      setStatus('readerStatus', '原文模式。');
-      return;
-    }
-    if (!(state.config && state.config.hasKey)) {
-      setStatus('readerStatus', '还没有配置翻译 API，无法显示译文。', 'error');
-      return;
-    }
-    setStatus('readerStatus', '正在翻译当前页…');
-    beginPdfTranslation();
-    for (const index of visiblePdfPageIndexes()) {
-      translatePdfPage(index).catch(() => {});
-    }
-    return;
-  }
   $('translateChapter').disabled = !(state.config && state.config.hasKey);
   translator && translator.stop();
   try { window.__DT && window.__DT.restore && window.__DT.restore(); } catch (err) { /* ignore */ }
@@ -1027,8 +1213,8 @@ function bindEvents() {
   $('translateChapter').addEventListener('click', async () => {
     if (!(state.config && state.config.hasKey)) return;
     if (state.pdf) {
-      if (state.mode === 'original') await changeMode('bilingual');
-      const pages = visiblePdfPageIndexes();
+      if (state.pdfLang === 'original') await changeMode('flow-bilingual');
+      const pages = state.pdfView === 'flow' ? visibleFlowPageIndexes() : visiblePdfPageIndexes();
       setStatus('readerStatus', '正在翻译当前 ' + pages.length + ' 页…');
       beginPdfTranslation();
       for (const index of pages) translatePdfPage(index).catch(() => {});
@@ -1046,6 +1232,9 @@ function bindEvents() {
   $('fullscreenToggle').addEventListener('click', toggleFullscreen);
   $('pdfZoomOut').addEventListener('click', () => applyPdfZoom(-0.25));
   $('pdfZoomIn').addEventListener('click', () => applyPdfZoom(0.25));
+  $('pdfFitWidth').addEventListener('click', () => setPdfZoom(1));
+  $('pdfFitColumn').addEventListener('click', () => setPdfZoom(1.9));
+  $('pdfFlowBack').addEventListener('click', () => changeMode('pdf-original'));
   $('bookContent').addEventListener('wheel', (event) => {
     if (!state.pdf || !event.ctrlKey) return;
     event.preventDefault();
@@ -1076,9 +1265,19 @@ function bindEvents() {
   $('userFontRemove').addEventListener('click', removeUserFont);
   window.addEventListener('scroll', () => {
     saveProgressSoon();
-    if (state.pdf) renderVisiblePdfPages();
+    if (!state.pdf) return;
+    if (state.pdfView === 'flow') {
+      ensureVisiblePdfFlowPages();
+      updatePdfAnchor();
+    } else {
+      renderVisiblePdfPages();
+    }
   }, { passive: true });
-  window.addEventListener('resize', () => { if (state.pdf) renderVisiblePdfPages(); }, { passive: true });
+  window.addEventListener('resize', () => {
+    if (!state.pdf) return;
+    if (state.pdfView === 'flow') ensureVisiblePdfFlowPages();
+    else renderVisiblePdfPages();
+  }, { passive: true });
   // pdf.js 的 render 靠 rAF 推进；标签页切到后台会暂停，回来时必须补渲染
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && state.pdf) renderVisiblePdfPages();

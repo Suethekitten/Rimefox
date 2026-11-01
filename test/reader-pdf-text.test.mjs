@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 
 import { itemsToLines, dropMargins, orderColumns, groupParagraphs, pageBlocks, parsePrintedToc, findRepeatedBandTexts } from '../lib/reader/pdf-text.js';
+import { splitLongText } from '../lib/reader/pdf-translate.js';
 
 let pass = 0;
 let fail = 0;
@@ -161,6 +162,14 @@ t('LaTeX base64 垃圾从文本里剔除', function () {
   ];
   const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
   assert.deepEqual(blocks.map((b) => b.text), ['1. Local Feature CNN']);
+});
+
+t('超长块按句末标点切开', function () {
+  const text = ('句子。'.repeat(400));
+  const parts = splitLongText(text, 500);
+  assert.ok(parts.length > 2);
+  assert.ok(parts.every((part) => part.length <= 500));
+  assert.equal(parts.join(''), text);
 });
 
 console.log('\n' + pass + ' 通过 / ' + (pass + fail) + ' 总数');

@@ -195,3 +195,16 @@ button { cursor: pointer; }
 .pdf-progress-track { flex: 1; height: 4px; background: var(--reader-line); border-radius: 999px; overflow: hidden; }
 .pdf-progress-bar { height: 100%; width: 0; background: var(--reader-accent); transition: width .2s; }
 .pdf-progress-text { white-space: nowrap; }
+
+/* ---- PDF 流式阅读 ---- */
+.pdf-flow { max-width: 760px; margin: 0 auto; padding: 8px 0 48px; }
+.pdf-flow-page { margin: 0 0 26px; }
+.pdf-flow-label { font-size: 12px; color: var(--reader-muted); border-top: 1px dashed var(--reader-line); padding-top: 8px; margin: 0 0 10px; }
+.pdf-flow-blocks { font-size: calc(var(--reader-font-size, 18px) * 0.95); line-height: 1.75; }
+.pdf-flow .pdf-block { font-size: calc(var(--reader-font-size, 18px) * 0.95); }
+.pdf-flow[hidden] { display: none; }
+.pdf-flow-mode .pdf-pages { display: none; }
+
+/* ---- PDF 文字模式提示条 ---- */
+.pdf-flow-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; margin: 0 0 10px; border: 1px solid var(--reader-line); border-radius: 8px; background: var(--reader-paper); font-size: 12px; color: var(--reader-muted); }
+.pdf-flow-banner button { flex: 0 0 auto; }

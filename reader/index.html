@@ -27,6 +27,8 @@
     <button id="pdfZoomOut" class="reader-button" type="button" title="缩小" hidden>−</button>
     <span id="pdfZoomLabel" class="reader-zoom" hidden>100%</span>
     <button id="pdfZoomIn" class="reader-button" type="button" title="放大" hidden>＋</button>
+    <button id="pdfFitWidth" class="reader-button" type="button" title="适合宽度" hidden>适合宽度</button>
+    <button id="pdfFitColumn" class="reader-button" type="button" title="单栏放大" hidden>单栏</button>
     <button id="settingsToggle" class="reader-button" type="button" title="阅读设置">Aa</button>
   </div>
 </header>
@@ -60,7 +62,11 @@
   </aside>
   <section id="readerScroll" class="reader-scroll">
     <div id="readerStatus" class="reader-status" role="status"></div>
-    <div id="pdfProgress" class="pdf-progress" hidden>
+    <div id="pdfFlowBanner" class="pdf-flow-banner" hidden>
+  <span>当前为纯文字重排，图表 / 公式请切回「原版版面」查看。</span>
+  <button id="pdfFlowBack" class="reader-button" type="button">切换原版版面</button>
+</div>
+<div id="pdfProgress" class="pdf-progress" hidden>
       <div class="pdf-progress-track"><div id="pdfProgressBar" class="pdf-progress-bar"></div></div>
       <span id="pdfProgressText" class="pdf-progress-text"></span>
     </div>

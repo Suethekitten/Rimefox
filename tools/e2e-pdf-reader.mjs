@@ -183,12 +183,25 @@ check('缩放比例显示', zoomLabel === '125%', zoomLabel);
 await pageEval(page, "document.getElementById('pdfZoomOut').click(); return true;");
 await sleep(800);
 
+// 流式视图 + 位置同步
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='flow-original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+const flowReady = await until(() => pageEval(page, "return document.querySelectorAll('#pdfFlow .pdf-block').length"), 15000);
+check('流式视图渲染文本块', !!flowReady, flowReady ? flowReady + ' 块' : '没有文本块');
+await pageEval(page, "const s=document.querySelector('#pdfFlow .pdf-flow-page[data-page=\"5\"]'); if (s) s.scrollIntoView({block:'start'}); return true;");
+await sleep(900);
+await pageEval(page, "window.dispatchEvent(new Event('scroll')); return true;");
+await sleep(400);
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='pdf-original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await sleep(1500);
+const pageAfter = await pageEval(page, "let cur = 1; for (const el of document.querySelectorAll('.pdf-page')) { if (el.getBoundingClientRect().top <= 140) cur = Number(el.dataset.page); else break; } return cur;");
+check('流式切回原版：跳到对应页', pageAfter >= 4, '第 ' + pageAfter + ' 页');
+
 check('无未捕获异常', exceptions.length === 0, exceptions.slice(0, 2).join(' | '));
 
 // PDF 译文：切到双语，验证译文注入、请求、进度与延迟
 await pageEval(page, "window.scrollTo(0, 0); return true;");
 const t0 = Date.now();
-await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='bilingual'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='flow-bilingual'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
 const progressShown = await until(() => pageEval(page, "return !document.getElementById('pdfProgress').hidden"), 2000);
 const transCount = await until(() => pageEval(page, "return document.querySelectorAll('.pdf-trans').length"), 30000);
 const elapsed = Date.now() - t0;
@@ -199,11 +212,11 @@ check('翻译请求已发出', hits.requests > 0, hits.requests + ' 次');
 check('翻译开始显示进度条', !!progressShown);
 check('双语切换延迟 < 3s', elapsed < 3000, elapsed + 'ms');
 
-await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='translation'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='flow-translation'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
 await until(() => pageEval(page, "return document.getElementById('bookContent').dataset.pdfMode === 'translation'"), 5000);
 const srcDisplay = await pageEval(page, "const s=document.querySelector('.pdf-block .pdf-src'); return s ? getComputedStyle(s).display : 'missing';");
 check('仅译文模式隐藏原文', srcDisplay === 'none', srcDisplay);
-await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='pdf-original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
 await until(() => pageEval(page, "return document.getElementById('bookContent').dataset.pdfMode === 'original'"), 5000);
 const transDisplay = await pageEval(page, "const t=document.querySelector('.pdf-trans'); return t ? getComputedStyle(t).display : 'missing';");
 check('原文模式隐藏译文', transDisplay === 'none', transDisplay);
@@ -214,16 +227,18 @@ await sleep(400);
 const blockFont = await pageEval(page, "const b=document.querySelector('.pdf-block'); return b ? getComputedStyle(b).fontSize : ''");
 check('PDF 文本块跟随阅读字号', parseFloat(blockFont) > 15, blockFont);
 
-// 模式切换不改变滚动位置（不重建页面）
-await pageEval(page, "window.scrollTo(0, 1200); return true;");
-await sleep(400);
-const scrollBefore = await pageEval(page, "return Math.round(window.scrollY)");
-await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='translation'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
-await sleep(500);
-await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
-await sleep(500);
-const scrollAfter = await pageEval(page, "return Math.round(window.scrollY)");
-check('切换显示模式后滚动位置不变', Math.abs(scrollAfter - scrollBefore) <= 20, scrollBefore + ' -> ' + scrollAfter);
+// 流式视图内切换译文模式，锚点页保持不变
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='flow-original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await sleep(800);
+await pageEval(page, "const s=document.querySelectorAll('#pdfFlow .pdf-flow-page')[4]; if (s) s.scrollIntoView({block:'start'}); return true;");
+await sleep(700);
+await pageEval(page, "window.dispatchEvent(new Event('scroll')); return true;");
+await sleep(300);
+const flowPageBefore = await pageEval(page, "let cur=1; for (const s of document.querySelectorAll('#pdfFlow .pdf-flow-page')) { if (s.getBoundingClientRect().top <= 120) cur=Number(s.dataset.page); else break; } return cur;");
+await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='flow-translation'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await sleep(600);
+const flowPageAfter = await pageEval(page, "let cur=1; for (const s of document.querySelectorAll('#pdfFlow .pdf-flow-page')) { if (s.getBoundingClientRect().top <= 120) cur=Number(s.dataset.page); else break; } return cur;");
+check('流式内切换译文模式锚点不变', flowPageAfter === flowPageBefore, flowPageBefore + ' -> ' + flowPageAfter);
 
 const failed = results.filter((one) => !one.ok).length;
 console.log('\n' + (results.length - failed) + ' / ' + results.length + ' 通过');
