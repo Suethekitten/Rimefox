@@ -170,6 +170,7 @@ t('超长块按句末标点切开', function () {
   assert.ok(parts.length > 2);
   assert.ok(parts.every((part) => part.length <= 500));
   assert.equal(parts.join(''), text);
+  assert.ok(parts.every((part) => part.endsWith('。')));
 });
 
 console.log('\n' + pass + ' 通过 / ' + (pass + fail) + ' 总数');
