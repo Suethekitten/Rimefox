@@ -74,8 +74,8 @@ const single = buildPdf([{
 const left = [];
 const right = [];
 for (let i = 0; i < 14; i += 1) {
-  left.push('Left column line ' + (i + 1) + ': the quick brown fox jumps over the lazy dog again.');
-  right.push('Right column line ' + (i + 1) + ': a second stream of text must stay separate from the first.');
+  left.push('Left column line ' + (i + 1) + ': quick brown fox.');
+  right.push('Right column line ' + (i + 1) + ': separate stream.');
 }
 const columns = buildPdf([{
   content: textBlock(left, 50, 780, 13) + textBlock(right, 310, 780, 13)
