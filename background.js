@@ -1224,6 +1224,8 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 // 标签页关闭后清掉记忆
 chrome.tabs.onRemoved.addListener((tabId) => {
   subtitleBudgets.delete(tabId);
+  subtitleBudgetSavedAt.delete(tabId);
+  subtitleBudgetWrites.delete(tabId);
   try {
     chrome.storage.session.remove(['resume:' + tabId, SUBTITLE_BUDGET_MARK + tabId]).catch(() => {});
   } catch (err) {

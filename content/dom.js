@@ -2039,7 +2039,8 @@
     });
   };
 
-  // 按站点规则的根逐个收集；任何一个根收满了上限都算本轮收满
+  // 按站点规则的根逐个收集；任何一个根收满了上限都算本轮收满。
+  // 所有根共用同一个输出数组：以前每个根 concat 一次，匹配上千个根时是 O(n²)。
   DT.collectAll = function (accept) {
     var out = [];
     var full = false;
@@ -2056,7 +2057,7 @@
         full = true;
         break;
       }
-      out = out.concat(DT.collect(roots[i], accept));
+      DT.collect(roots[i], accept, out);
       if (DT.lastCollectFull) full = true;
     }
     if (out.length >= MAX_UNITS) full = true;
@@ -2064,8 +2065,9 @@
     return out;
   };
 
-  DT.collect = function (root, accept) {
-    var out = [];
+  DT.collect = function (root, accept, sharedOut) {
+    var out = sharedOut || [];
+    var before = out.length;
     var start = root || document.body;
     DT.lastCollectFull = false;
     if (!start) return out;
@@ -2090,7 +2092,7 @@
       walkSeen = null;
     }
     DT.lastCollectFull = out.length >= MAX_UNITS;
-    DT.log('collect units:', out.length);
+    DT.log('collect units:', out.length - before);
     return out;
   };
 

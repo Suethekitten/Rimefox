@@ -109,6 +109,12 @@ test('a missing long-block slice cannot become a successful cached paragraph', a
   assert.equal(f.rows.size, 0);
 });
 
+test('a failed PDF page request rejects and writes no cache', async () => {
+  const f = fixture(() => ({ ok: false, error: '网络失败' }));
+  await assert.rejects(() => f.translator.translatePage(args), /网络失败/);
+  assert.equal(f.rows.size, 0);
+});
+
 test('formula-only blocks are not sent to the translation API', async () => {
   const f = fixture();
   const formulaPage = {

@@ -209,8 +209,98 @@ check('原文状态点「翻译本章」切回双语并注入', await pageEval("
 await pageEval("const b=document.querySelector('.book-actions button:last-child'); b && b.click(); return true;");
 await until(() => pageEval("return document.querySelectorAll('.book-card').length === 0"), 10000);
 check('删除书：书卡消失、回到书库', await pageEval("return document.querySelectorAll('.book-card').length === 0 && !document.getElementById('libraryView').hidden;"));
-const dbLeft = await pageEval("return new Promise((resolve) => { const req = indexedDB.open('rimefox-reader'); req.onsuccess = () => { const db = req.result; const tx = db.transaction(['books', 'translations', 'failures', 'progress'], 'readonly'); Promise.all(['books', 'translations', 'failures', 'progress'].map((name) => new Promise((done) => { const q = tx.objectStore(name).count(); q.onsuccess = () => done(q.result); q.onerror = () => done(-1); }))).then((counts) => resolve({ books: counts[0], translations: counts[1], failures: counts[2], progress: counts[3] })); }; req.onerror = () => resolve({ error: 'open' }); })");
-check('删除书清理原书 / 译文 / 进度 / 失败记录', dbLeft && dbLeft.books === 0 && dbLeft.translations === 0 && dbLeft.failures === 0 && dbLeft.progress === 0, JSON.stringify(dbLeft));
+const dbLeft = await pageEval("return new Promise((resolve) => { const req = indexedDB.open('rimefox-reader'); req.onsuccess = () => { const db = req.result; const tx = db.transaction(['books', 'translations', 'failures', 'progress', 'files'], 'readonly'); Promise.all(['books', 'translations', 'failures', 'progress', 'files'].map((name) => new Promise((done) => { const q = tx.objectStore(name).count(); q.onsuccess = () => done(q.result); q.onerror = () => done(-1); }))).then((counts) => resolve({ books: counts[0], translations: counts[1], failures: counts[2], progress: counts[3], files: counts[4] })); }; req.onerror = () => resolve({ error: 'open' }); })");
+check('删除书清理原书 / 译文 / 进度 / 失败记录 / 文件', dbLeft && dbLeft.books === 0 && dbLeft.translations === 0 && dbLeft.failures === 0 && dbLeft.progress === 0 && dbLeft.files === 0, JSON.stringify(dbLeft));
+
+// 0.16.0 把整本书从 books.fileBlob 搬到 files。用真实 v3 库验证一次升级迁移。
+const legacyB64 = makeEpub().toString('base64');
+await send('Page.navigate', { url: 'chrome-extension://' + extId + '/welcome/index.html' }, page);
+await sleep(800);
+const seeded = await pageEval(`
+return new Promise((resolve) => {
+  const openV3 = () => {
+    const req = indexedDB.open('rimefox-reader', 3);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      db.createObjectStore('books', { keyPath: 'id' });
+      const tr = db.createObjectStore('translations', { keyPath: 'key' });
+      tr.createIndex('bookId', 'bookId', { unique: false });
+      const fa = db.createObjectStore('failures', { keyPath: 'key' });
+      fa.createIndex('bookId', 'bookId', { unique: false });
+      db.createObjectStore('progress', { keyPath: 'bookId' });
+      db.createObjectStore('fonts', { keyPath: 'id' });
+      db.createObjectStore('settings', { keyPath: 'id' });
+    };
+    req.onerror = () => resolve(false);
+    req.onsuccess = () => {
+      const db = req.result;
+      const raw = atob('${legacyB64}');
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'application/epub+zip' });
+      const tx = db.transaction(['books', 'progress'], 'readwrite');
+      tx.objectStore('books').put({ id: 'legacy-book', hash: 'legacy-book', format: 'epub', title: 'Legacy Book', authors: ['Old'], language: 'en', metadata: {}, coverBlob: null, fileBlob: blob, toc: [], createdAt: 1, lastOpenedAt: 1, mode: 'original' });
+      tx.objectStore('progress').put({ bookId: 'legacy-book', sectionId: '', offsetRatio: 0, updatedAt: 1 });
+      tx.oncomplete = () => { db.close(); resolve(true); };
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    };
+  };
+  const del = indexedDB.deleteDatabase('rimefox-reader');
+  del.onsuccess = openV3;
+  del.onerror = openV3;
+  del.onblocked = () => resolve(false);
+})`);
+check('旧版 v3 书库已写入', seeded === true, String(seeded));
+await send('Page.navigate', { url: 'chrome-extension://' + extId + '/reader/index.html' }, page);
+await until(() => pageEval("return !!document.getElementById('bookGrid')"), 15000);
+const legacyCard = await until(() => pageEval("return Array.from(document.querySelectorAll('.book-card')).some((c) => c.textContent.includes('Legacy Book'))"), 15000);
+check('v3 → v4 升级后旧书仍在书库', !!legacyCard);
+const migrated = await pageEval(`
+return new Promise((resolve) => {
+  const req = indexedDB.open('rimefox-reader');
+  req.onsuccess = () => {
+    const db = req.result;
+    const tx = db.transaction(['books', 'files'], 'readonly');
+    const book = tx.objectStore('books').get('legacy-book');
+    const file = tx.objectStore('files').get('legacy-book');
+    tx.oncomplete = () => resolve({
+      book: !!book.result,
+      blobInMeta: !!(book.result && book.result.fileBlob),
+      file: !!(file.result && file.result.blob && file.result.blob.size > 0)
+    });
+    tx.onerror = () => resolve({ error: true });
+  };
+  req.onerror = () => resolve({ error: true });
+})`);
+check('迁移把原书搬到 files，books 不再带 fileBlob', migrated && migrated.book && migrated.file && !migrated.blobInMeta, JSON.stringify(migrated));
+await pageEval("const c = Array.from(document.querySelectorAll('.book-card')).find((x) => x.textContent.includes('Legacy Book')); c.querySelector('.reader-button').click(); return true;");
+const legacyOpened = await until(() => pageEval("return !document.getElementById('readerView').hidden && document.getElementById('bookContent').textContent.includes('First Chapter')"), 15000);
+check('升级后的旧书能正常打开和阅读', !!legacyOpened);
+await pageEval("document.getElementById('backToLibrary').click(); return true;");
+await until(() => pageEval("return !document.getElementById('libraryView').hidden"), 10000);
+await pageEval("const c = Array.from(document.querySelectorAll('.book-card')).find((x) => x.textContent.includes('Legacy Book')); c.querySelector('.book-actions button:last-child').click(); return true;");
+await until(() => pageEval("return document.querySelectorAll('.book-card').length === 0"), 10000);
+const legacyLeft = await pageEval("return new Promise((resolve) => { const req = indexedDB.open('rimefox-reader'); req.onsuccess = () => { const db = req.result; const tx = db.transaction(['books', 'progress', 'files'], 'readonly'); Promise.all(['books', 'progress', 'files'].map((name) => new Promise((done) => { const q = tx.objectStore(name).count(); q.onsuccess = () => done(q.result); q.onerror = () => done(-1); }))).then((counts) => resolve({ books: counts[0], progress: counts[1], files: counts[2] })); }; req.onerror = () => resolve({ error: 'open' }); })");
+check('删除旧书清理 books / progress / files', legacyLeft && legacyLeft.books === 0 && legacyLeft.progress === 0 && legacyLeft.files === 0, JSON.stringify(legacyLeft));
+
+// 重导入已有书：即使书库估算已接近 500MB，也应该直接打开已有书，而不是被容量检查误拦。
+const doc2 = await send('DOM.getDocument', { depth: -1, pierce: true }, page);
+const input2 = await send('DOM.querySelector', { nodeId: doc2.root.nodeId, selector: '#fileInput' }, page);
+await send('DOM.setFileInputFiles', { nodeId: input2.nodeId, files: [epubPath] }, page);
+await pageEval("document.getElementById('fileInput').dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await until(() => pageEval("return !document.getElementById('readerView').hidden"), 15000);
+await pageEval("document.getElementById('backToLibrary').click(); return true;");
+await until(() => pageEval("return !document.getElementById('libraryView').hidden"), 10000);
+await pageEval("navigator.storage.estimate = async () => ({ usage: 490 * 1024 * 1024, quota: 10 * 1024 * 1024 * 1024 }); return true;");
+const doc3 = await send('DOM.getDocument', { depth: -1, pierce: true }, page);
+const input3 = await send('DOM.querySelector', { nodeId: doc3.root.nodeId, selector: '#fileInput' }, page);
+await send('DOM.setFileInputFiles', { nodeId: input3.nodeId, files: [epubPath] }, page);
+await pageEval("document.getElementById('fileInput').dispatchEvent(new Event('change',{bubbles:true})); return true;");
+await until(() => pageEval("return !document.getElementById('readerView').hidden"), 15000);
+const dupStatus = await pageEval("return document.getElementById('libraryStatus').textContent");
+const dupCards = await pageEval("return document.querySelectorAll('.book-card').length");
+check('书库接近上限时重复导入已有书不被误拦', /已导入/.test(dupStatus) && dupCards === 1, dupStatus);
 check('阅读器无未捕获异常', exceptions.length === 0, exceptions.join(' | '));
 console.log('\n[阅读器 E2E]');
 console.log(hits.requests + ' 请求 / ' + hits.texts + ' 条；异常 ' + exceptions.length);

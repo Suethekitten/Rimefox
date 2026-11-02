@@ -3,7 +3,7 @@
 // 翻译复用 content/dom.js 的 collect/inject，缓存由 reader 自己管理。
 import { parseEpub, EpubError } from '../lib/reader/epub.js';
 import { sanitizeXhtml } from '../lib/reader/sanitize.js';
-import { listBooks, getBook, saveBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, deleteBookTranslations, READER_LIMITS } from '../lib/reader/store.js';
+import { listBooks, getBook, saveBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
 import { LOCAL_SECRETS, SESSION_SECRETS } from '../lib/config-storage.js';
 import { ReaderTranslator } from '../lib/reader/translate.js';
@@ -15,6 +15,9 @@ import { isComplexPage } from '../lib/reader/pdf-text.js';
 const PDF_TRANS_MAX = 24;
 let pdfViewEpoch = 0;
 let pdfModeTimer = 0;
+let pdfFlowScrollRaf = 0;
+let openSeq = 0;
+let searchSeq = 0;
 const PDF_MODE_OPTIONS = [
   { value: 'pdf-original', text: '原版版面', view: 'pdf', lang: 'original' },
   { value: 'flow-original', text: '流式原版', view: 'flow', lang: 'original' },
@@ -53,6 +56,7 @@ const state = {
   pdfIdentity: '',
   pdfStopped: false,
   pdfTranslating: new Map(),
+  pdfTransFails: new Map(),
   pdfZoom: 1,
   pdfTransDone: 0,
   pdfTransPending: 0,
@@ -226,7 +230,6 @@ async function changeTarget() {
     translator.setDocument(state.doc);
     try { window.__DT && window.__DT.restore && window.__DT.restore(); } catch (err) { /* ignore */ }
     for (const node of Array.from(document.querySelectorAll('#bookContent [data-dt-target]'))) node.remove();
-    try { await deleteBookTranslations(state.book.id); } catch (err) { /* cache cleanup is best effort */ }
     state.mode = 'original';
     $('modeSelect').value = 'original';
     state.book.mode = 'original';
@@ -427,17 +430,17 @@ async function importFile(file) {
   }
   setStatus('libraryStatus', '正在解析…');
   try {
-    const est = await estimateUsage();
-    if (est.usage && est.quota && est.usage + file.size > READER_LIMITS.maxLibraryBytes) {
-      setStatus('libraryStatus', '书库接近 500 MB，请先删除一本书。', 'error');
-      return;
-    }
     const buffer = await file.arrayBuffer();
     const hash = await sha256(buffer);
     const existing = await getBook(hash);
     if (existing) {
       setStatus('libraryStatus', '这本书已导入，直接打开。', 'ok');
       await openBook(existing);
+      return;
+    }
+    const est = await estimateUsage();
+    if (est.usage && est.quota && est.usage + file.size > READER_LIMITS.maxLibraryBytes) {
+      setStatus('libraryStatus', '书库接近 500 MB，请先删除一本书。', 'error');
       return;
     }
     if (/\.pdf$/i.test(file.name) || looksLikePdf(new Uint8Array(buffer))) {
@@ -535,10 +538,15 @@ async function searchPdf(query) {
   results.textContent = '';
   const q = String(query || '').trim();
   if (!q || !state.pdf) return;
+  const doc = state.pdf;
+  const token = ++searchSeq;
+  const alive = () => token === searchSeq && doc === state.pdf;
   setStatus('readerStatus', '搜索中…');
   const hits = [];
-  for (let page = 1; page <= state.pdf.numPages && hits.length < 50; page += 1) {
-    const loaded = await state.pdf.page(page);
+  for (let page = 1; page <= doc.numPages && hits.length < 50; page += 1) {
+    if (!alive()) return;
+    const loaded = await doc.page(page);
+    if (!alive()) return;
     for (const block of loaded.blocks) {
       const index = block.text.toLowerCase().indexOf(q.toLowerCase());
       if (index < 0) continue;
@@ -549,8 +557,10 @@ async function searchPdf(query) {
       if (hits.length >= 50) break;
     }
   }
+  if (!alive()) return;
   setStatus('readerStatus', hits.length ? '找到 ' + hits.length + ' 处「' + q + '」' : '没有找到「' + q + '」。');
   for (const hit of hits) {
+    if (!alive()) return;
     const row = document.createElement('a');
     row.href = '#';
     row.className = 'pdf-search-hit';
@@ -705,6 +715,7 @@ function cancelPdfTranslations(clear) {
   if (state.pdfTranslator) state.pdfTranslator.stop();
   state.pdfTranslator = null;
   state.pdfTranslating = new Map();
+  state.pdfTransFails = new Map();
   state.pdfStopped = true;
   state.pdfTransDone = 0;
   state.pdfTransPending = 0;
@@ -739,6 +750,9 @@ function endPdfProgressIfIdle() {
 async function translatePdfPage(index) {
   if (!state.pdf || !state.config || !state.config.hasKey || state.config.authPaused || state.pdfStopped) return;
   if (state.pdfTranslating.has(index)) return;
+  // 失败后短时间内不重复请求；滚动回来只重试过了退避期的页。
+  const failedAt = state.pdfTransFails.get(index);
+  if (failedAt && Date.now() - failedAt < 15000) return;
   const token = {};
   const jobs = state.pdfTranslating;
   jobs.set(index, token);
@@ -763,6 +777,7 @@ async function translatePdfPage(index) {
       config: config
     });
     if (!current() || !texts) return;
+    state.pdfTransFails.delete(index);
     if (!state.pdfTrans) state.pdfTrans = new Map();
     if (state.pdfTrans.has(index)) state.pdfTrans.delete(index);
     state.pdfTrans.set(index, texts);
@@ -772,6 +787,9 @@ async function translatePdfPage(index) {
       applyPdfTranslations(oldest);
     }
     applyPdfTranslations(index);
+  } catch (err) {
+    if (current()) state.pdfTransFails.set(index, Date.now());
+    throw err;
   } finally {
     if (jobs.get(index) === token) jobs.delete(index);
     if (current()) {
@@ -863,6 +881,17 @@ function ensureVisiblePdfFlowPages() {
     if (rect.bottom < -700 || rect.top > window.innerHeight + 700) continue;
     ensurePdfFlowPage(section).catch(() => {});
   }
+}
+
+// 滚动事件可到 60–120 次/秒；每帧最多扫一次，避免 600 页时持续触发布局。
+function schedulePdfFlowScroll() {
+  if (pdfFlowScrollRaf) return;
+  pdfFlowScrollRaf = requestAnimationFrame(() => {
+    pdfFlowScrollRaf = 0;
+    if (!state.pdf || state.pdfView !== 'flow') return;
+    ensureVisiblePdfFlowPages();
+    updatePdfAnchor();
+  });
 }
 
 function stablePdfPage() {
@@ -980,18 +1009,28 @@ async function applyPdfViewMode(epoch) {
   updatePdfAnchor();
 }
 
-async function openPdfBook(record) {
+async function openPdfBook(record, seq) {
+  if (seq !== openSeq) return;
   cancelPdfTranslations(true);
   pdfViewEpoch += 1;
   clearTimeout(pdfModeTimer);
+  if (pdfFlowScrollRaf) { cancelAnimationFrame(pdfFlowScrollRaf); pdfFlowScrollRaf = 0; }
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   const file = await getBookFile(record.id);
+  if (seq !== openSeq) return;
   if (!file) throw new Error('书文件丢失，请重新导入。');
   const buffer = await file.arrayBuffer();
+  if (seq !== openSeq) return;
   const doc = await loadPdfDocument(buffer);
+  if (seq !== openSeq) { try { doc.destroy(); } catch (err) { /* ignore */ } return; }
   state.pdf = doc;
   state.pdfIdentity = await pdfCacheIdentity(readerConfig(), state.readerTarget, 'plain');
+  if (seq !== openSeq) {
+    if (state.pdf === doc) state.pdf = null;
+    try { doc.destroy(); } catch (err) { /* ignore */ }
+    return;
+  }
   state.pdfStopped = false;
   state.book = record;
   // 元数据在打开时补齐（导入时只存文件，避免同页开两个 pdf.js 文档）
@@ -1001,6 +1040,7 @@ async function openPdfBook(record) {
     record.language = doc.metadata.language || '';
     record.metadata = doc.metadata;
     await saveBook(record);
+    if (seq !== openSeq) return;
   }
   state.doc = null;
   state.section = null;
@@ -1034,6 +1074,11 @@ async function openPdfBook(record) {
   wrap.className = 'pdf-pages';
   content.appendChild(wrap);
   const first = await doc.page(1);
+  if (seq !== openSeq) {
+    if (state.pdf === doc) state.pdf = null;
+    try { doc.destroy(); } catch (err) { /* ignore */ }
+    return;
+  }
   const ratio = first.viewport.height / Math.max(1, first.viewport.width);
   for (let i = 1; i <= doc.numPages; i += 1) {
     const pageEl = document.createElement('section');
@@ -1050,6 +1095,11 @@ async function openPdfBook(record) {
   const tocWrap = document.createElement('div');
   let toc = { source: 'pages', entries: [] };
   try { toc = await doc.toc(); } catch (err) { toc = { source: 'pages', entries: [] }; }
+  if (seq !== openSeq) {
+    if (state.pdf === doc) state.pdf = null;
+    try { doc.destroy(); } catch (err) { /* ignore */ }
+    return;
+  }
   if (toc.entries.length) {
     const hint = document.createElement('div');
     hint.className = 'toc-hint';
@@ -1091,6 +1141,7 @@ async function openPdfBook(record) {
   renderVisiblePdfPages();
   requestAnimationFrame(() => renderVisiblePdfPages());
   await applyPdfViewMode();
+  if (seq !== openSeq) return;
   record.lastOpenedAt = Date.now();
   await saveBook(record);
 }
@@ -1168,9 +1219,12 @@ function renderVisiblePdfPages() {
 }
 
 function closeReader() {
+  openSeq += 1;
+  searchSeq += 1;
   cancelPdfTranslations(true);
   pdfViewEpoch += 1;
   clearTimeout(pdfModeTimer);
+  if (pdfFlowScrollRaf) { cancelAnimationFrame(pdfFlowScrollRaf); pdfFlowScrollRaf = 0; }
   state.pdfIdentity = '';
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
@@ -1283,10 +1337,16 @@ function scrollToFragment(fragment) {
 }
 
 async function openBook(record) {
+  const seq = ++openSeq;
   await loadConfig();
+  if (seq !== openSeq) return;
   // 没有配置也能读原文；只有翻译相关入口不可用
   if (record.format === 'pdf') {
-    try { await openPdfBook(record); } catch (err) { setStatus('libraryStatus', errorText(err), 'error'); closeReader(); }
+    try { await openPdfBook(record, seq); } catch (err) {
+      if (seq !== openSeq) return;
+      setStatus('libraryStatus', errorText(err), 'error');
+      closeReader();
+    }
     return;
   }
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
@@ -1295,9 +1355,12 @@ async function openBook(record) {
   updatePdfZoomUi();
   try {
     const file = await getBookFile(record.id);
+    if (seq !== openSeq) return;
     if (!file) throw new Error('书文件丢失，请重新导入。');
     const buffer = await file.arrayBuffer();
+    if (seq !== openSeq) return;
     const doc = parseEpub(buffer);
+    if (seq !== openSeq) return;
     state.book = record;
     state.doc = doc;
     state.mode = record.mode || 'original';
@@ -1312,6 +1375,7 @@ async function openBook(record) {
     $('translateChapter').disabled = !(state.config && state.config.hasKey && !state.config.authPaused);
     translator = translator || new ReaderTranslator({ onStatus: onTranslateStatus });
     await translator.configure(readerConfig());
+    if (seq !== openSeq) return;
     translator.setDocument(doc);
     $('modeSelect').value = state.mode;
     const progress = record.progress || {};
@@ -1320,9 +1384,11 @@ async function openBook(record) {
     renderToc(doc.toc, $('tocList'));
     if (!sec) throw new Error('章节为空');
     await loadSection(sec.id, '', progress.offsetRatio || 0);
+    if (seq !== openSeq) return;
     record.lastOpenedAt = Date.now();
     await saveBook(record);
   } catch (err) {
+    if (seq !== openSeq) return;
     setStatus('libraryStatus', errorText(err), 'error');
     closeReader();
   }
@@ -1332,6 +1398,7 @@ async function loadSection(sectionId, fragment, offsetRatio) {
   if (!state.doc) return;
   const sec = state.doc.sections.find((one) => one.id === sectionId);
   if (!sec) return;
+  const seq = openSeq;
   translator && translator.stop();
   try { window.__DT && window.__DT.restore && window.__DT.restore(); } catch (err) { /* ignore */ }
   for (const url of state.assets) { try { URL.revokeObjectURL(url); } catch (err) { /* ignore */ } }
@@ -1356,6 +1423,7 @@ async function loadSection(sectionId, fragment, offsetRatio) {
   $('translateChapter').disabled = !(state.config && state.config.hasKey && !state.config.authPaused);
   const mode = state.mode || 'original';
   if (translator) await translator.start(state.book, sec, content, mode);
+  if (seq !== openSeq) return;
   const ratio = typeof offsetRatio === 'number' ? Math.max(0, Math.min(1, offsetRatio)) : 0;
   requestAnimationFrame(() => {
     if (fragment) scrollToFragment(fragment);
@@ -1573,8 +1641,7 @@ function bindEvents() {
     saveProgressSoon();
     if (!state.pdf) return;
     if (state.pdfView === 'flow') {
-      ensureVisiblePdfFlowPages();
-      updatePdfAnchor();
+      schedulePdfFlowScroll();
     } else {
       renderVisiblePdfPages();
     }

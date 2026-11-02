@@ -28,6 +28,7 @@
     var overlay = null;
     var shown = '';
     var shownOverlay = null;
+    var activePlayer = null;
     var last = null; // 上一句已显示的内容，句间空档时用来兜底
     var processSeq = 0; // 异步解析 / 取原文轨道的代际：晚开始的 process 覆盖早开始的
     var replayAskedFor = ''; // 已经为哪个视频向来源层要过一次 replay（每个视频最多一次）
@@ -361,6 +362,13 @@
 
     function render(state) {
       var player = state && state.player;
+      var show = !!(state && state.orig && player);
+      // 关闭字幕翻译后每 200ms 仍会调用 render(null)。没有在接管、也没有叠层时直接返回，
+      // 不再每次 tick 都查一遍 DOM。
+      if (!show && !activePlayer) {
+        if (overlay && overlay.style.display !== 'none') overlay.style.display = 'none';
+        return;
+      }
       var nodes = [];
       try {
         nodes = doc.querySelectorAll('.' + ACTIVE_CLASS);
@@ -371,7 +379,9 @@
         if (el !== player) el.classList.remove(ACTIVE_CLASS);
       });
       // 没有可显示的内容就交还给原生字幕：以前先加隐藏类再判空，句间空档会两边都没有
-      if (!state || !state.orig || !player) {
+      if (!show) {
+        if (activePlayer) activePlayer.classList.remove(ACTIVE_CLASS);
+        activePlayer = null;
         if (player) player.classList.remove(ACTIVE_CLASS);
         if (overlay) overlay.style.display = 'none';
         shown = '';
@@ -380,6 +390,7 @@
       }
       ensureStyle();
       player.classList.add(ACTIVE_CLASS);
+      activePlayer = player;
       var surface = ensureOverlay(player);
 
       // 字号跟播放器高度走（全屏时变大）；控制条显示时往上让一让。
