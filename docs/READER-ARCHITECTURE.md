@@ -1,6 +1,6 @@
-# EPUB 阅读器架构（0.13.0）
+# EPUB 阅读器架构（0.13.0，存储更新至 0.16.0）
 
-> 状态：0.13.0 实现契约。EPUB 是第一个文档适配器；PDF 只预留接口，不在本版实现。
+> 状态：0.13.0 实现契约；0.16.0 起 IndexedDB v4 把原书文件拆到 `files` 存储。EPUB 是第一个文档适配器；PDF 已在 0.14.0 接入，契约见 [PDF-HANDOFF](PDF-HANDOFF.md)。
 > 阅读器入口：`reader/index.html`（扩展页，不是 content script）。
 > 翻译仍走 `background.js` 的 `translate` 路由；不新增 Provider、不新增翻译服务器。
 
@@ -118,12 +118,16 @@ key = epub-v1|bookId|bookHash|sectionId|contentHash|targetLang|style|intensity|p
 
 ## 6. IndexedDB schema
 
-数据库：`rimefox-reader`（version 3；v1 → v2 新增 `progress`，v2 → v3 新增 `fonts`，旧书仍可读）
+数据库：`rimefox-reader`（version 4；v1 → v2 新增 `progress`，v2 → v3 新增 `fonts`，v3 → v4 新增 `files`，旧书仍可读）
 
 ```text
 books        keyPath: id
   { id, hash, format, title, authors[], language, metadata,
-    coverBlob, fileBlob, toc, createdAt, lastOpenedAt, mode }
+    coverBlob, toc, createdAt, lastOpenedAt, mode }
+  // 0.16.0 起不再存 fileBlob：整本书移到 files，保存进度 / 元数据不再重写整本文件
+
+files        keyPath: id
+  { id, blob }                              // 原书文件，按书 id 一一对应
 
 progress     keyPath: bookId
   { bookId, sectionId, offsetRatio, updatedAt }

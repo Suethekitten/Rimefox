@@ -1,6 +1,6 @@
 # PDF 阅读器交接：现状、限制与 OCR 准备
 
-状态：**PDF 自 0.14.0 发布，内部定位测试版**（2026-11-01 拍板，不作正式推广）。后续维护交给协助者。
+状态：**PDF 自 0.14.0 发布，定位内部测试版**（2026-11-01 拍板，不作正式推广）；0.16.0 完成多栏 / 目录 / 公式 / 表格文本质量与稳定性修复。后续维护交给协助者。
 用户向变更看 [CHANGELOG](../CHANGELOG.md)；排期看 [ROADMAP](ROADMAP.md)；技术问题总表看 [HANDOFF §9](../HANDOFF.md#9-已知问题技术清单) 第 21–26 条。
 
 ## 1. 代码在哪
@@ -39,7 +39,7 @@
 - `PdfTranslator.epoch` 与阅读器文档代际共同检查缓存读取、模型响应和视图写回；关闭 / 换书 / 停止后旧任务不能覆盖当前视图或修改新进度。停止保留已完成的译文，并禁止滚动自动续发，直到明确重新翻译。
 - 长块全部切片成功后才写入整块缓存；缺片不把部分译文当成完整结果保存。
 
-## 3. 已知限制（0.14.0）
+## 3. 已知限制（截至 0.16.0）
 
 1. **印刷版目录页码是书内页码**，和 PDF 物理页有前目录偏移；点击可能差几页。没有做页偏移映射。
 2. **极少数页仍可能被 pdf.js 编码成单个 text item**：坐标上没有断点，自动拆栏只剩提示，不静默切坏。2026-11-02 复核本地 OBP 样本时发现，第 20 页实际是 4 栏页面（标题横跨多栏），旧逻辑被跨栏标题干扰后回退到「按中线分左右」，导致整页碎成大量小块；现已改为按行首 x 聚类识别栏，4 栏顺序正常。真正单 item 的页面本地样本未复现。
@@ -126,7 +126,7 @@ node tools/e2e-pdf-probe.mjs
 - CHANGELOG 3–6 条、每条一句话、≤90 字；发版前 `python tools/check-release-notes.py <版本号>`
 - 打包：`node tools/package-store.mjs --release`（用户包）/ `node tools/package-store.mjs`（商店包）；已排除 `reader/pdf-real`、`pdf-samples`、`pdf-probe`
 - 推 main 且 manifest 版本变化会触发 Release workflow；同版本只发一次
-- 0.14.0 是**内部测试版**：GitHub Release 保持正常标签，不作正式推广
+- PDF 仍按**内部测试版**维护：GitHub Release 保持正常标签，不作正式推广
 
 ## 9. 文档地图
 
@@ -134,7 +134,7 @@ node tools/e2e-pdf-probe.mjs
 |---|---|
 | PDF 实现与维护交接（本文） | `docs/PDF-HANDOFF.md` |
 | 已知问题全表 | `HANDOFF.md` §9（PDF 是 21–26 条） |
-| 0.14.0 实施记录 | `HANDOFF.md` §14 |
+| 0.16.0 实施记录 | `HANDOFF.md` §14 与 [PDF 文本质量归档](archive/2026-11-02-pdf-quality-0.16.0.md) |
 | 接下来做什么、优先级 | `ROADMAP.md`（P1-4 已完成，P2-11 OCR） |
 | OCR 评估细节 | `docs/archive/2026-10-31-ocr-candidates.md` |
 | 阅读器接口 / BookDocument | `docs/READER-ARCHITECTURE.md` |

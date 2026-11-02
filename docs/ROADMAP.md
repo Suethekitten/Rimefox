@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-01；本轮开发基线为 [0.14.1](https://github.com/Suethekitten/Rimefox/releases/tag/v0.14.1)，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.15.0 会话密钥、鉴权暂停与配置同步已完成，并包含 PDF 缓存修复；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-02；当前版本为 0.16.0，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.0 完成 PDF 文本质量、阅读器存储与稳定性修复；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -83,6 +83,8 @@
 | 0.13.2 | 字幕费用保护与稳定性：内容缓存、付费预算、分 P 切换与字幕来源修复 |
 | 0.14.0 | PDF 阅读与翻译：导入、目录、缩放、文本提取、译文与按页缓存；内部定位测试版 |
 | 0.14.1 | PDF 可用性修复：错误提示、跳页、搜索、停止翻译、长块切分与阅读字号 |
+| 0.15.0 | 会话密钥与翻译暂停：Key 默认仅本次会话、可选设备记忆、旧用户迁移、鉴权失败全局暂停与恢复；含 0.14.2 的 PDF 缓存与生命周期修复 |
+| 0.16.0 | PDF 文本质量与稳定性：多栏顺序、目录条目、公式占位、脚注剥离、表格单元格；版式切换与滚动渲染稳定；阅读器存储拆分；配置导入清 Key 与明文 HTTP 警告 |
 
 ---
 
@@ -125,7 +127,7 @@
 | P2-8 | 更多界面语言 | 目前中英文；有需求再加 |
 | P2-9 | 翻译引擎内部优化（不加请求、不加设置） | 轻量上下文、片段稳定映射、低成本质检、术语一致性：现状、成本、风险和下一步最小任务见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)；不定版本 |
 | P2-10 | 拆 `main.js` | 把纯函数（离屏距离、取批上限、退避时间表）挪到 `core.js`，只动这两个文件 + 自检页；P1-5 的前置（原 HANDOFF §10） |
-| P2-12 | ✅ PDF 表格 / 公式文本清洗（低风险项本地完成，待发版） | 表格仅在单栏页且数据行带数字时按单元格拆（不重建合并单元格）；公式残渣换 `[公式]` 占位且公式块不送翻；脚注标记 / 上标编号剥离；目录页不再被当成第二栏。跨页段落合并、表格结构重建与公式识别仍未做，见 [PDF 维护交接](PDF-HANDOFF.md) |
+| P2-12 | ✅ PDF 表格 / 公式文本清洗（**0.16.0 已完成**） | 表格仅在单栏页且数据行带数字时按单元格拆（不重建合并单元格）；公式残渣换 `[公式]` 占位且公式块不送翻；脚注标记 / 上标编号剥离；目录页不再被当成第二栏。跨页段落合并、表格结构重建与公式识别仍未做，见 [PDF 维护交接](PDF-HANDOFF.md) |
 | P2-11 | PDF 扫描件 OCR（未来版本，**准备中**） | 准备工作已开始：候选 PaddleOCR.js / Tesseract.js / Scribe.js 的体积、许可与适配性评估完成（见 [归档评估](archive/2026-10-31-ocr-candidates.md)），探针计划已定；尚未跑探针、未集成代码。下一步：Tesseract 基线探针，再决定是否值得为 PaddleOCR 付 40–60 MB 可选增强包 |
 
 ### P3 — 明确暂不做
@@ -147,10 +149,16 @@ P2-1 的会话 Key、可选设备记忆、旧用户迁移选择、鉴权失败�
 
 实现契约只在 [HANDOFF §4.7](../HANDOFF.md#47-配置会话凭据与鉴权暂停0150) 与 [PDF-HANDOFF](PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复) 维护；完成范围、验证命令和未测边界见 [0.15 归档](archive/2026-11-01-session-keys-0.15.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
 
+### 0.16.0（实现与验证）
+
+P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB v4 文件拆分、版式切换与滚动渲染稳定性、页面与译文缓存上限，以及配置导入清 Key 与明文 HTTP 警告均已完成。三处版本号与 CHANGELOG 已统一为 0.16.0；推送与发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.0) 和 [Actions](https://github.com/Suethekitten/Rimefox/actions/workflows/release.yml) 为准。
+
+实现契约见 [HANDOFF §14](../HANDOFF.md#14-本版技术记录0160) 与 [PDF-HANDOFF](PDF-HANDOFF.md)；完成范围与未测边界见 [0.16 归档](archive/2026-11-02-pdf-quality-0.16.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
+
 ### 下一步
 
-1. 本地试用 0.15.0，重点检查个人服务商的设备记忆选择与旧配置迁移；补真实 YouTube 正片字幕验收（本轮受广告阻塞）和 Edge 复验，并核实 Actions / Release 的实际结果。
-2. P2-12 的低风险项已在本地实现并用 OBP / 合成样本验证：表格按单元格拆、公式 `[公式]` 占位不送翻、脚注剥离、目录页不再当第二栏、多栏按行首聚类排序。跨页段落合并（PDF-HANDOFF §4 第 1 条）与真实 API 延迟仍待排期；真实延迟要用服务商配置实测，不能用假接口结果代替。
+1. 本地试用 0.16.0，重点检查旧书库迁移后的打开 / 删除、快速切换版式与大 PDF 滚动缩放；核实 Actions / Release 的实际结果。
+2. 跨页段落合并（PDF-HANDOFF §4 第 1 条）与真实 API 延迟仍待排期；真实延迟要用服务商配置实测，不能用假接口结果代替。
 3. P2-11 继续做 OCR 基线探针；真实 API 延迟与质量实测单列任务，不能用假接口结果代替。
 
 | 版本 | 内容 |
