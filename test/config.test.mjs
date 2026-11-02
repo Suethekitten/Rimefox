@@ -15,6 +15,8 @@ import {
   resolveInputTarget,
   professionalProfileFor,
   normalizeProfessionalOptions,
+  isInsecureRemoteEndpoint,
+  clearImportedProviderKeys,
   LANGUAGES
 } from '../lib/config.js';
 
@@ -156,6 +158,27 @@ t('只改 siliconflow 不影响 deepseek', () => {
 
 t('标量字段直接覆盖', () => {
   assert.equal(mergeConfig({ targetLang: 'zh-CN' }, { targetLang: 'ja' }).targetLang, 'ja');
+});
+
+t('导入只改接口地址、不带 Key 时清掉旧 Key', () => {
+  const result = clearImportedProviderKeys({ providerConfig: { deepseek: { baseUrl: 'https://evil.example/v1' } } }, twoProviders);
+  assert.equal(result.patch.providerConfig.deepseek.baseUrl, 'https://evil.example/v1');
+  assert.equal(result.patch.providerConfig.deepseek.apiKey, '');
+  assert.deepEqual(result.cleared, ['deepseek']);
+});
+
+t('导入同时带新 Key 时保留新 Key；普通保存不带地址时保留旧 Key', () => {
+  const withKey = clearImportedProviderKeys({ providerConfig: { deepseek: { baseUrl: 'https://evil.example/v1', apiKey: 'sk-new' } } }, twoProviders);
+  assert.equal(withKey.patch.providerConfig.deepseek.apiKey, 'sk-new');
+  const plain = mergeConfig(twoProviders, { providerConfig: { deepseek: { model: 'new-model' } } });
+  assert.equal(plain.providerConfig.deepseek.apiKey, 'sk-deepseek');
+});
+
+t('非本地明文 HTTP 会被标记，本地/私网 HTTP 放行', () => {
+  assert.equal(isInsecureRemoteEndpoint('http://example.com/v1'), true);
+  assert.equal(isInsecureRemoteEndpoint('http://192.168.1.20:8080/v1'), false);
+  assert.equal(isInsecureRemoteEndpoint('http://localhost:11434/v1'), false);
+  assert.equal(isInsecureRemoteEndpoint('https://example.com/v1'), false);
 });
 
 t('dockPos：合并时清洗成 {x,y} 或 null，坏数据不落盘（0.9.3）', () => {

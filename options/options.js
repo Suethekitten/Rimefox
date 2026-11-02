@@ -18,10 +18,12 @@ import {
   IMPORT_SCHEMA,
   pickImportedConfig,
   mergeCustomProviderLists,
+  clearImportedProviderKeys,
   localIso,
   activeConfig,
   slotFor,
-  mergeConfig
+  mergeConfig,
+  isInsecureRemoteEndpoint
 } from '../lib/config.js';
 import { listModels, engineList } from '../lib/provider.js';
 import { providerById } from '../lib/providers.js';
@@ -1159,6 +1161,11 @@ $('save').addEventListener('click', async () => {
     return;
   }
   const patch = configPatchSince(savedForm || {}, readForm());
+  const insecure = Object.keys(patch.providerConfig || {}).find((id) => {
+    const one = patch.providerConfig[id];
+    return one && isInsecureRemoteEndpoint(one.baseUrl);
+  });
+  if (insecure && !confirm('服务商「' + insecure + '」使用明文 HTTP，API Key 会在网络上明文传输。仍要保存吗？')) return;
   try {
     currentCfg = await saveConfig(patch);
     applyConfig(currentCfg);
@@ -1426,7 +1433,15 @@ $('importFile').addEventListener('change', async (event) => {
     const parsed = pickImportedConfig(raw, {
       currentLanguages: (currentCfg && currentCfg.customLanguages) || []
     });
-    const patch = parsed.config;
+    let patch = parsed.config;
+    const insecure = Object.keys(patch.providerConfig || {}).find((id) => {
+      const one = patch.providerConfig[id];
+      return one && isInsecureRemoteEndpoint(one.baseUrl);
+    });
+    if (insecure && !confirm('导入的配置里服务商「' + insecure + '」使用明文 HTTP，API Key 会在网络上明文传输。仍要导入吗？')) return;
+    const keyReset = clearImportedProviderKeys(patch, currentCfg);
+    patch = keyReset.patch;
+    const clearedKeys = keyReset.cleared;
     // 语言按 id 合并：文件里的同 id 语言更新，本机独有的语言保留，不因一次导入被清掉。
     let droppedLanguages = 0;
     if (patch.customLanguages) {
@@ -1467,6 +1482,7 @@ $('importFile').addEventListener('change', async (event) => {
       (id) => patch.providerConfig[id] && patch.providerConfig[id].apiKey
     );
     if (!importedKey) msg += '（文件里没有 API Key，请手动填）';
+    if (clearedKeys.length) msg += '；' + clearedKeys.join('、') + ' 的接口地址已改变，原 Key 已清除，请重新填写';
     setResult($('cfgResult'), msg, parsed.rejected.length ? 'bad' : 'ok');
   } catch (err) {
     setResult($('cfgResult'), '导入失败：' + err.message, 'bad');

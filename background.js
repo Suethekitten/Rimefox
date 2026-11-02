@@ -1,5 +1,5 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
-import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget, languageInfoFor, languageOptions, customLanguageFingerprint, normalizeTargetLang, styleFingerprint, normalizeIntensity, publicConfig } from './lib/config.js';
+import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget, languageInfoFor, languageOptions, customLanguageFingerprint, normalizeTargetLang, styleFingerprint, normalizeIntensity, publicConfig, hotkeyLabel } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint, hasKeepMarks } from './lib/prompt.js';
 import { looksUntranslatedForTarget } from './lib/lang-guard.js';
 import { chat, ApiError } from './lib/provider.js';
@@ -1066,7 +1066,8 @@ const ROUTES = {
         activeLanguage: languageInfoFor(cfg.targetLang, cfg.customLanguages),
         languages: languageOptions(cfg.customLanguages),
         page: pageAppearance(cfg, sender),
-        providers: providerChoices(cfg)
+        providers: providerChoices(cfg),
+        hotkeyLabel: hotkeyLabel(cfg.hotkey)
       }
     };
   },

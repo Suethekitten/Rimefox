@@ -3,7 +3,7 @@
 // 翻译复用 content/dom.js 的 collect/inject，缓存由 reader 自己管理。
 import { parseEpub, EpubError } from '../lib/reader/epub.js';
 import { sanitizeXhtml } from '../lib/reader/sanitize.js';
-import { listBooks, getBook, saveBook, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, deleteBookTranslations, READER_LIMITS } from '../lib/reader/store.js';
+import { listBooks, getBook, saveBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, deleteBookTranslations, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
 import { LOCAL_SECRETS, SESSION_SECRETS } from '../lib/config-storage.js';
 import { ReaderTranslator } from '../lib/reader/translate.js';
@@ -12,6 +12,9 @@ import { pdfCacheIdentity } from '../lib/reader/pdf-cache.js';
 import { openPdfDocument, looksLikePdf } from '../lib/reader/pdf.js';
 import { isComplexPage } from '../lib/reader/pdf-text.js';
 
+const PDF_TRANS_MAX = 24;
+let pdfViewEpoch = 0;
+let pdfModeTimer = 0;
 const PDF_MODE_OPTIONS = [
   { value: 'pdf-original', text: '原版版面', view: 'pdf', lang: 'original' },
   { value: 'flow-original', text: '流式原版', view: 'flow', lang: 'original' },
@@ -255,7 +258,10 @@ function applySettings() {
   $('measure').value = String(s.measure || 720);
   $('letterSpacing').value = String(Number(s.letterSpacing) || 0);
   $('paragraphSpacing').value = String(Number(s.paragraphSpacing) || 1.05);
-  $('maxBookMb').value = String(Math.round((Number(s.maxBookBytes) || READER_LIMITS.maxBookBytes) / 1048576));
+  const maxBookMb = Math.round((Number(s.maxBookBytes) || READER_LIMITS.maxBookBytes) / 1048576);
+  $('maxBookMb').value = String(maxBookMb);
+  const dropNote = $('dropNote');
+  if (dropNote) dropNote.textContent = '支持无 DRM 的 EPUB 2/3 与文本型 PDF，单本最大 ' + maxBookMb + ' MB（设置里可调）';
   $('themeSelect').value = s.theme || 'auto';
   const hasUserFont = !!state.userFontFace;
   const family = s.fontFamily === 'user' && !hasUserFont ? 'serif' : (s.fontFamily || 'serif');
@@ -450,13 +456,13 @@ async function importFile(file) {
       language: doc.metadata.language,
       metadata: doc.metadata,
       coverBlob,
-      fileBlob: file,
       toc: doc.toc,
       createdAt: Date.now(),
       lastOpenedAt: Date.now(),
       mode: 'original',
       progress: { sectionId: first ? first.id : '', offsetRatio: 0 }
     };
+    await saveBookFile(record.id, file);
     await saveBook(record);
     requestPersistence().catch(() => {});
     setStatus('libraryStatus', '已导入。', 'ok');
@@ -480,13 +486,13 @@ async function importPdf(file, buffer, hash) {
     language: '',
     metadata: {},
     coverBlob: null,
-    fileBlob: file,
     toc: [],
     createdAt: Date.now(),
     lastOpenedAt: Date.now(),
     mode: 'original',
     progress: { sectionId: 'page:1', offsetRatio: 0 }
   };
+  await saveBookFile(record.id, file);
   await saveBook(record);
   requestPersistence().catch(() => {});
   setStatus('libraryStatus', '已导入。', 'ok');
@@ -594,6 +600,8 @@ async function renderPdfPage(el, index) {
   if (!doc) return;
   const loaded = await doc.page(index);
   if (doc !== state.pdf || !el.isConnected) return;
+  // 失败重试 / 缩放后重画时先清掉上一轮的画布、文本块和错误提示，避免叠加。
+  for (const old of el.querySelectorAll('canvas, .pdf-blocks, .pdf-render-failed')) old.remove();
   const content = document.getElementById('bookContent');
   const baseWidth = Math.max(320, (content ? content.clientWidth : 720) - 56);
   const cssWidth = Math.round(baseWidth * state.pdfZoom);
@@ -756,7 +764,13 @@ async function translatePdfPage(index) {
     });
     if (!current() || !texts) return;
     if (!state.pdfTrans) state.pdfTrans = new Map();
+    if (state.pdfTrans.has(index)) state.pdfTrans.delete(index);
     state.pdfTrans.set(index, texts);
+    while (state.pdfTrans.size > PDF_TRANS_MAX) {
+      const oldest = state.pdfTrans.keys().next().value;
+      state.pdfTrans.delete(oldest);
+      applyPdfTranslations(oldest);
+    }
     applyPdfTranslations(index);
   } finally {
     if (jobs.get(index) === token) jobs.delete(index);
@@ -797,33 +811,47 @@ function buildPdfFlow() {
 }
 
 async function ensurePdfFlowPage(section) {
-  if (!section || section.dataset.loaded === '1' || !state.pdf) return;
+  if (!section || !state.pdf) return;
+  if (section.dataset.loaded === '1') {
+    const loadedPage = Number(section.dataset.page);
+    if (state.pdfLang !== 'original' && state.config && state.config.hasKey && !state.config.authPaused
+        && !(state.pdfTrans && state.pdfTrans.has(loadedPage))) {
+      translatePdfPage(loadedPage).catch(() => {});
+    }
+    return;
+  }
   section.dataset.loaded = '1';
   const pageNo = Number(section.dataset.page);
   const doc = state.pdf;
-  const loaded = await doc.page(pageNo);
-  if (doc !== state.pdf || !section.isConnected) return;
-  const holder = document.createElement('div');
-  holder.className = 'pdf-flow-blocks';
-  for (let i = 0; i < loaded.blocks.length; i += 1) {
-    const block = document.createElement('div');
-    block.className = 'pdf-block';
-    block.dataset.page = String(pageNo);
-    block.dataset.block = String(i);
-    const src = document.createElement('span');
-    src.className = 'pdf-src';
-    src.textContent = loaded.blocks[i].text;
-    block.appendChild(src);
-    holder.appendChild(block);
-  }
-  section.appendChild(holder);
-  if (isComplexPage(loaded.blocks)) {
-    const label = section.querySelector('.pdf-flow-label');
-    if (label) label.textContent = '第 ' + pageNo + ' 页 · 复杂版式，文本顺序可能不准确';
-  }
-  applyPdfTranslations(pageNo);
-  if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
-    translatePdfPage(pageNo).catch(() => {});
+  try {
+    const loaded = await doc.page(pageNo);
+    if (doc !== state.pdf || !section.isConnected) return;
+    const holder = document.createElement('div');
+    holder.className = 'pdf-flow-blocks';
+    for (let i = 0; i < loaded.blocks.length; i += 1) {
+      const block = document.createElement('div');
+      block.className = 'pdf-block';
+      block.dataset.page = String(pageNo);
+      block.dataset.block = String(i);
+      const src = document.createElement('span');
+      src.className = 'pdf-src';
+      src.textContent = loaded.blocks[i].text;
+      block.appendChild(src);
+      holder.appendChild(block);
+    }
+    section.appendChild(holder);
+    if (isComplexPage(loaded.blocks)) {
+      const label = section.querySelector('.pdf-flow-label');
+      if (label) label.textContent = '第 ' + pageNo + ' 页 · 复杂版式，文本顺序可能不准确';
+    }
+    applyPdfTranslations(pageNo);
+    if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
+      translatePdfPage(pageNo).catch(() => {});
+    }
+  } catch (err) {
+    // 加载失败不能永久标成 loaded，否则滚动回来也不会再试。
+    if (doc === state.pdf && section.isConnected) section.dataset.loaded = '0';
+    throw err;
   }
 }
 
@@ -837,30 +865,67 @@ function ensureVisiblePdfFlowPages() {
   }
 }
 
+function stablePdfPage() {
+  const flow = document.getElementById('pdfFlow');
+  if (flow && !flow.hidden) {
+    let page = 0;
+    let lastRect = null;
+    for (const section of flow.querySelectorAll('.pdf-flow-page')) {
+      const rect = section.getBoundingClientRect();
+      if (rect.top > 120) break;
+      if (!section.querySelector('.pdf-flow-blocks')) {
+        if (lastRect && lastRect.bottom < -120) page = 0;
+        break;
+      }
+      page = Number(section.dataset.page);
+      lastRect = rect;
+    }
+    if (page) return page;
+    const first = Array.from(flow.querySelectorAll('.pdf-flow-page'))
+      .find((section) => section.querySelector('.pdf-flow-blocks'));
+    if (first) {
+      const top = first.getBoundingClientRect().top;
+      if (top > -120 && top <= 400) return Number(first.dataset.page);
+    }
+    return 0;
+  }
+  const pages = document.querySelector('.pdf-pages');
+  if (pages && !pages.hidden) {
+    let page = 0;
+    let lastRect = null;
+    for (const el of pages.querySelectorAll('.pdf-page')) {
+      const rect = el.getBoundingClientRect();
+      if (rect.top > 120) break;
+      if (!el.querySelector('canvas')) {
+        if (lastRect && lastRect.bottom < -120) page = 0;
+        break;
+      }
+      page = Number(el.dataset.page);
+      lastRect = rect;
+    }
+    if (page) return page;
+    const first = Array.from(pages.querySelectorAll('.pdf-page'))
+      .find((el) => el.querySelector('canvas'));
+    if (first) {
+      const top = first.getBoundingClientRect().top;
+      if (top > -120 && top <= 400) return Number(first.dataset.page);
+    }
+    return 0;
+  }
+  return 0;
+}
+
 function updatePdfAnchor() {
   if (!state.pdf) return;
+  const page = stablePdfPage();
+  if (!page) return;
+  let text = '';
   if (state.pdfView === 'flow') {
-    // 顶部工具栏可能让第一页的 top 大于阈值；此时仍应回到第一页，不能沿用旧页码。
-    let target = document.querySelector('#pdfFlow .pdf-flow-page');
-    for (const section of document.querySelectorAll('#pdfFlow .pdf-flow-page')) {
-      if (section.getBoundingClientRect().top <= 120) target = section;
-      else break;
-    }
-    if (target) {
-      const firstBlock = target.querySelector('.pdf-block .pdf-src');
-      state.pdfAnchor = {
-        page: Number(target.dataset.page),
-        text: firstBlock ? firstBlock.textContent.slice(0, 40) : ''
-      };
-    }
-    return;
+    const section = document.querySelector('#pdfFlow .pdf-flow-page[data-page="' + page + '"]');
+    const firstBlock = section && section.querySelector('.pdf-block .pdf-src');
+    text = firstBlock ? firstBlock.textContent.slice(0, 40) : '';
   }
-  let current = 1;
-  for (const el of document.querySelectorAll('.pdf-page')) {
-    if (el.getBoundingClientRect().top <= 120) current = Number(el.dataset.page);
-    else break;
-  }
-  state.pdfAnchor = { page: current, text: '' };
+  state.pdfAnchor = { page: page, text: text };
 }
 
 async function findPdfPageByText(text, near) {
@@ -876,8 +941,9 @@ async function findPdfPageByText(text, near) {
   return 0;
 }
 
-async function applyPdfViewMode() {
+async function applyPdfViewMode(epoch) {
   if (!state.pdf) return;
+  if (epoch != null && epoch !== pdfViewEpoch) return;
   const content = $('bookContent');
   const pages = content.querySelector('.pdf-pages');
   const flow = state.pdfView === 'flow' ? buildPdfFlow() : document.getElementById('pdfFlow');
@@ -901,6 +967,7 @@ async function applyPdfViewMode() {
     let page = state.pdfAnchor && state.pdfAnchor.page ? state.pdfAnchor.page : 1;
     if (state.pdfAnchor && state.pdfAnchor.text) {
       const found = await findPdfPageByText(state.pdfAnchor.text, page);
+      if (epoch != null && epoch !== pdfViewEpoch) return;
       if (found) page = found;
     }
     jumpToPdfPage(page);
@@ -915,9 +982,13 @@ async function applyPdfViewMode() {
 
 async function openPdfBook(record) {
   cancelPdfTranslations(true);
+  pdfViewEpoch += 1;
+  clearTimeout(pdfModeTimer);
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
-  const buffer = await record.fileBlob.arrayBuffer();
+  const file = await getBookFile(record.id);
+  if (!file) throw new Error('书文件丢失，请重新导入。');
+  const buffer = await file.arrayBuffer();
   const doc = await loadPdfDocument(buffer);
   state.pdf = doc;
   state.pdfIdentity = await pdfCacheIdentity(readerConfig(), state.readerTarget, 'plain');
@@ -1025,34 +1096,81 @@ async function openPdfBook(record) {
 }
 
 let pdfRenderQueue = Promise.resolve();
-function visiblePdfPageIndexes() {
-  const margin = 800;
+function pdfPageWindow(margin) {
+  const root = document.querySelector('.pdf-pages');
+  if (!root || root.hidden) return [];
+  const pages = Array.from(root.querySelectorAll('.pdf-page'));
+  if (!pages.length) return [];
+  const topLimit = -(margin || 800);
+  // 页面按顺序堆叠，先二分找到第一个仍在上边距内的页，再从它往后扫；
+  // 不再为每一页读一次 getBoundingClientRect（500 页时每次滚动省下大量布局计算）。
+  let lo = 0;
+  let hi = pages.length - 1;
+  let first = pages.length;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const rect = pages[mid].getBoundingClientRect();
+    if (rect.top + rect.height >= topLimit) {
+      first = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  const bottomLimit = window.innerHeight + (margin || 800);
   const out = [];
-  for (const el of document.querySelectorAll('.pdf-page')) {
-    const rect = el.getBoundingClientRect();
-    if (rect.bottom < -margin || rect.top > window.innerHeight + margin) continue;
-    out.push(Number(el.dataset.page));
+  for (let i = first; i < pages.length; i += 1) {
+    if (pages[i].getBoundingClientRect().top > bottomLimit) break;
+    out.push(pages[i]);
   }
   return out;
 }
 
+function visiblePdfPageIndexes() {
+  return pdfPageWindow(800).map((el) => Number(el.dataset.page));
+}
+
 function renderVisiblePdfPages() {
   if (!state.pdf) return;
-  const margin = 800;
-  for (const el of document.querySelectorAll('.pdf-page')) {
-    const rect = el.getBoundingClientRect();
-    if (rect.bottom < -margin || rect.top > window.innerHeight + margin) continue;
+  const pages = pdfPageWindow(800);
+  for (const el of pages) {
     if (el.dataset.rendered === '1') continue;
     // 一页一页排队：pdf.js 的 render task 并发容易互相拖慢
     el.dataset.rendered = '1';
     pdfRenderQueue = pdfRenderQueue
       .then(() => renderPdfPage(el, Number(el.dataset.page)))
-      .catch(() => {});
+      .catch((err) => {
+        if (!el.isConnected) return;
+        delete el.dataset.rendered;
+        let note = el.querySelector('.pdf-render-failed');
+        if (!note) {
+          note = document.createElement('p');
+          note.className = 'pdf-empty-text pdf-render-failed';
+          el.appendChild(note);
+        }
+        note.textContent = '本页渲染失败，点击重试。';
+        note.onclick = () => {
+          note.remove();
+          delete el.dataset.rendered;
+          renderVisiblePdfPages();
+        };
+      });
+  }
+  // 译文内存只保留最近页；滚回旧页时直接复用 IndexedDB 缓存补回来。
+  if (state.pdfLang !== 'original' && state.config && state.config.hasKey && !state.config.authPaused) {
+    for (const el of pages) {
+      const page = Number(el.dataset.page);
+      if (el.dataset.rendered !== '1') continue;
+      if (state.pdfTrans && state.pdfTrans.has(page)) continue;
+      translatePdfPage(page).catch(() => {});
+    }
   }
 }
 
 function closeReader() {
   cancelPdfTranslations(true);
+  pdfViewEpoch += 1;
+  clearTimeout(pdfModeTimer);
   state.pdfIdentity = '';
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
@@ -1176,7 +1294,9 @@ async function openBook(record) {
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   updatePdfZoomUi();
   try {
-    const buffer = await record.fileBlob.arrayBuffer();
+    const file = await getBookFile(record.id);
+    if (!file) throw new Error('书文件丢失，请重新导入。');
+    const buffer = await file.arrayBuffer();
     const doc = parseEpub(buffer);
     state.book = record;
     state.doc = doc;
@@ -1298,8 +1418,11 @@ function saveProgressSoon() {
 async function changeMode(mode) {
   if (!state.book) return;
   if (state.pdf) {
+    const epoch = ++pdfViewEpoch;
+    const stable = stablePdfPage();
+    if (stable) state.pdfAnchor = { page: stable, text: '' };
     await loadConfig();
-    if (!state.pdf || !state.book) return;
+    if (epoch !== pdfViewEpoch || !state.pdf || !state.book) return;
     const option = PDF_MODE_OPTIONS.find((item) => item.value === mode);
     if (!option) return;
     state.pdfView = option.view;
@@ -1309,6 +1432,7 @@ async function changeMode(mode) {
     state.book.pdfMode = mode;
     $('modeSelect').value = mode;
     try { await saveBook(state.book); } catch (err) { /* ignore */ }
+    if (epoch !== pdfViewEpoch) return;
     const hasKey = state.config && state.config.hasKey && !state.config.authPaused;
     if (option.lang !== 'original' && state.config && state.config.authPaused) {
       setStatus('readerStatus', '接口鉴权失败，翻译已暂停；请在设置中更新密钥或测试连接。', 'error');
@@ -1317,7 +1441,11 @@ async function changeMode(mode) {
     } else {
       setStatus('readerStatus', option.text + '模式。');
     }
-    await applyPdfViewMode();
+    // 快速连点时只应用最后一次；120ms 足够合并一次真实点击，又不会让用户觉得卡。
+    clearTimeout(pdfModeTimer);
+    pdfModeTimer = setTimeout(() => {
+      if (epoch === pdfViewEpoch) applyPdfViewMode(epoch).catch(() => {});
+    }, 120);
     return;
   }
   $('modeSelect').value = mode;

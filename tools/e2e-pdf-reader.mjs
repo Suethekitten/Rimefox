@@ -318,6 +318,15 @@ await chooseMode('flow-bilingual');
 await idle();
 check('仅译文 / 双语切换不重复付费', hits.requests === before);
 
+// 快速连点版式：最后一次应生效，且不能被未渲染占位页把锚点带到很远。
+await pageEval(page, "const s=document.getElementById('modeSelect'); ['pdf-original','flow-original','flow-bilingual','flow-translation','flow-original','pdf-original','flow-bilingual'].forEach((v) => { s.value=v; s.dispatchEvent(new Event('change',{bubbles:true})); }); return true;");
+await until(() => pageEval(page, "return !!document.querySelector('#pdfFlow .pdf-flow-page .pdf-flow-blocks')"), 8000);
+await sleep(200);
+const rapidState = await pageEval(page, "const f=document.querySelector('#pdfFlow .pdf-flow-page'); return { mode: document.getElementById('modeSelect').value, flow: !!document.getElementById('pdfFlow'), blocks: document.querySelectorAll('#pdfFlow .pdf-flow-blocks').length, top: f ? Math.round(f.getBoundingClientRect().top) : null };");
+const rapidTop = rapidState && rapidState.top;
+check('快速切换版式后仍停留在第一页', rapidTop != null && rapidTop >= -120 && rapidTop <= 400, String(rapidTop));
+await idle();
+
 await send('Page.reload', {}, page);
 await until(() => pageEval(page, 'return !!document.querySelector(".book-card .reader-button")'));
 await pageEval(page, 'document.querySelector(".book-card .reader-button").click(); return true;');
