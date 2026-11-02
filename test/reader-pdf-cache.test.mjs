@@ -108,3 +108,18 @@ test('a missing long-block slice cannot become a successful cached paragraph', a
   assert.deepEqual(await f.translator.translatePage({ ...args, page: longPage }), ['']);
   assert.equal(f.rows.size, 0);
 });
+
+test('formula-only blocks are not sent to the translation API', async () => {
+  const f = fixture();
+  const formulaPage = {
+    pageNo: 1,
+    blocks: [
+      { text: '[公式]', noTranslate: true, kind: 'formula' },
+      { text: 'Body text follows the formula.' }
+    ]
+  };
+  const out = await f.translator.translatePage({ ...args, page: formulaPage });
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0].texts, ['Body text follows the formula.']);
+  assert.deepEqual(out, ['', '中文译文。']);
+});

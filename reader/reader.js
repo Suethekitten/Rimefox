@@ -10,6 +10,7 @@ import { ReaderTranslator } from '../lib/reader/translate.js';
 import { PdfTranslator } from '../lib/reader/pdf-translate.js';
 import { pdfCacheIdentity } from '../lib/reader/pdf-cache.js';
 import { openPdfDocument, looksLikePdf } from '../lib/reader/pdf.js';
+import { isComplexPage } from '../lib/reader/pdf-text.js';
 
 const PDF_MODE_OPTIONS = [
   { value: 'pdf-original', text: '原版版面', view: 'pdf', lang: 'original' },
@@ -619,10 +620,9 @@ async function renderPdfPage(el, index) {
       panel.appendChild(block);
     }
     el.appendChild(panel);
-    const totalChars = loaded.blocks.reduce((sum, block) => sum + String(block.text || '').length, 0);
-    if (loaded.blocks.length <= 2 && totalChars > 1500) {
+    if (isComplexPage(loaded.blocks)) {
       const label = el.querySelector('.pdf-page-label');
-      if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 复杂版式，文本可能合并';
+      if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 复杂版式，文本顺序可能不准确';
     }
     applyPdfTranslations(index);
     if (state.mode !== 'original' && state.config && state.config.hasKey) {
@@ -817,10 +817,9 @@ async function ensurePdfFlowPage(section) {
     holder.appendChild(block);
   }
   section.appendChild(holder);
-  const totalChars = loaded.blocks.reduce((sum, block) => sum + String(block.text || '').length, 0);
-  if (loaded.blocks.length <= 2 && totalChars > 1500) {
+  if (isComplexPage(loaded.blocks)) {
     const label = section.querySelector('.pdf-flow-label');
-    if (label) label.textContent = '第 ' + pageNo + ' 页 · 复杂版式，文本可能合并';
+    if (label) label.textContent = '第 ' + pageNo + ' 页 · 复杂版式，文本顺序可能不准确';
   }
   applyPdfTranslations(pageNo);
   if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {

@@ -2,7 +2,7 @@
 // 运行：node test/reader-pdf-text.test.mjs
 import assert from 'node:assert/strict';
 
-import { itemsToLines, dropMargins, orderColumns, groupParagraphs, pageBlocks, parsePrintedToc, findRepeatedBandTexts } from '../lib/reader/pdf-text.js';
+import { itemsToLines, dropMargins, orderColumns, groupParagraphs, pageBlocks, parsePrintedToc, findRepeatedBandTexts, isFormulaOnly, isComplexPage, PDF_LONG_BLOCK_LIMIT, stripFootnoteMarkers, stripLatexArtifacts } from '../lib/reader/pdf-text.js';
 import { splitLongText } from '../lib/reader/pdf-translate.js';
 
 let pass = 0;
@@ -154,14 +154,15 @@ t('项目符号另起一段', function () {
   ]);
 });
 
-t('LaTeX base64 垃圾从文本里剔除', function () {
+t('LaTeX base64 垃圾从文本里剔除，公式位置留占位', function () {
   const items = [
     item('<latexitsha1_base64="AbC+/==">', 50, 700, 200),
     item('</latexit>', 250, 700, 50),
     item('1. Local Feature CNN', 50, 686, 150)
   ];
   const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
-  assert.deepEqual(blocks.map((b) => b.text), ['1. Local Feature CNN']);
+  assert.deepEqual(blocks.map((b) => b.text), ['[公式] 1. Local Feature CNN']);
+  assert.equal(stripLatexArtifacts('x ' + 'A'.repeat(80) + ' y'), 'x [公式] y');
 });
 
 t('超长块按句末标点切开', function () {
@@ -173,5 +174,116 @@ t('超长块按句末标点切开', function () {
   assert.ok(parts.every((part) => part.endsWith('。')));
 });
 
+t('跨栏标题下的 4 栏按列顺序输出，不被标题粘成一片', function () {
+  const items = [{ str: 'A Very Wide Title Across Columns', transform: [1, 0, 0, 1, 54, 900], width: 500, height: 30 }];
+  for (let c = 0; c < 4; c += 1) {
+    for (let r = 0; r < 4; r += 1) {
+      items.push({ str: 'C' + c + 'L' + r, transform: [1, 0, 0, 1, 54 + c * 174, 700 - r * 14], width: 100, height: 12 });
+    }
+  }
+  const blocks = pageBlocks({ items: items }, { width: 792, height: 1080 });
+  assert.deepEqual(blocks.map((block) => block.text), [
+    'A Very Wide Title Across Columns',
+    'C0L0 C0L1 C0L2 C0L3',
+    'C1L0 C1L1 C1L2 C1L3',
+    'C2L0 C2L1 C2L2 C2L3',
+    'C3L0 C3L1 C3L2 C3L3'
+  ]);
+});
+
+t('左右栏间距只有 12pt 时也不会被拼成一句', function () {
+  const items = [];
+  for (let r = 0; r < 6; r += 1) {
+    items.push(item('Left line ' + r + ' continues the sentence.', 50, 700 - r * 14, 166));
+    items.push(item('Right line ' + r + ' is separate.', 228, 700 - r * 14, 162));
+  }
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.equal(blocks.length, 2);
+  assert.ok(blocks[0].text.startsWith('Left line 0'));
+  assert.ok(!blocks[0].text.includes('Right'));
+  assert.ok(blocks[1].text.startsWith('Right line 0'));
+});
+
+t('同一栏内被 justified 间隙拆开的碎片会拼回一行', function () {
+  const items = [
+    { str: 'submerged', transform: [1, 0, 0, 1, 54, 700], width: 55.992, height: 12 },
+    { str: 'natural', transform: [1, 0, 0, 1, 121.992, 700], width: 37.3, height: 12 },
+    { str: 'heritage.', transform: [1, 0, 0, 1, 171.337, 700], width: 44.664, height: 12 }
+  ];
+  for (let r = 1; r < 6; r += 1) items.push(item('continuation ' + r, 54, 700 - r * 14, 162));
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.ok(blocks[0].text.startsWith('submerged natural heritage.'));
+});
+
+t('表格按单元格拆开，正文不跨过表格合并', function () {
+  const items = [
+    item('Table 1: results', 50, 760, 100),
+    item('Name', 50, 700, 30), item('Qty', 200, 700, 20), item('Price', 350, 700, 30),
+    item('Alice', 50, 680, 30), item('2', 200, 680, 5), item('10.00', 350, 680, 30),
+    item('Bob', 50, 660, 20), item('5', 200, 660, 5), item('25.00', 350, 660, 30),
+    item('After the table, body text resumes.', 50, 600, 200),
+    item('A footnote marker[1] stays out of the sentence.', 50, 560, 250)
+  ];
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.deepEqual(blocks.filter((block) => block.kind === 'table-cell').map((block) => block.text), [
+    'Name', 'Qty', 'Price', 'Alice', '2', '10.00', 'Bob', '5', '25.00'
+  ]);
+  assert.deepEqual(blocks.filter((block) => block.kind !== 'table-cell').map((block) => block.text), [
+    'Table 1: results',
+    'After the table, body text resumes.',
+    'A footnote marker stays out of the sentence.'
+  ]);
+});
+
+t('只有公式占位的块标记为不翻译', function () {
+  const blocks = pageBlocks({
+    items: [
+      { str: '<latexitsha1_base64="AbC+/==">', transform: [1, 0, 0, 1, 50, 700], width: 200, height: 12 },
+      item('Body text follows after the formula.', 50, 640, 200)
+    ]
+  }, { width: 595, height: 842 });
+  assert.equal(blocks[0].text, '[公式]');
+  assert.equal(blocks[0].noTranslate, true);
+  assert.equal(blocks[1].noTranslate, false);
+  assert.equal(isFormulaOnly('[公式]'), true);
+  assert.equal(isFormulaOnly('[公式] 正文'), false);
+});
+
+t('脚注标记与 Unicode 上标从正文剥离', function () {
+  assert.equal(stripFootnoteMarkers('Text[1] more[2,3].'), 'Text more.');
+  assert.equal(stripFootnoteMarkers('结论¹ 很重要。'), '结论 很重要。');
+  const blocks = pageBlocks({
+    items: [item('A sentence with a marker[4].', 50, 700, 200)]
+  }, { width: 595, height: 842 });
+  assert.deepEqual(blocks.map((block) => block.text), ['A sentence with a marker.']);
+});
+
+t('长块阈值集中管理，默认值与阅读器提示共用', function () {
+  assert.equal(splitLongText('a'.repeat(PDF_LONG_BLOCK_LIMIT)).length, 1);
+  assert.ok(splitLongText('句子。'.repeat(Math.ceil(PDF_LONG_BLOCK_LIMIT / 3) + 1)).length > 1);
+});
+
+t('印刷版目录页保持「标题 + 页码」成对，不被当成双栏', function () {
+  const items = Array.from({ length: 6 }, (_, i) => item(
+    'Chapter ' + (i + 1) + ' ......... ' + ((i + 1) * 5),
+    50,
+    760 - i * 14,
+    300
+  ));
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.equal(blocks.length, 6);
+  assert.ok(blocks[0].text.startsWith('Chapter 1'));
+  assert.ok(blocks[0].text.endsWith('5'));
+  assert.ok(blocks[5].text.startsWith('Chapter 6'));
+  assert.ok(blocks[5].text.endsWith('30'));
+});
+
+t('复杂页检测覆盖「块太大」和「碎块太多」两种情况', function () {
+  assert.equal(isComplexPage([{ text: 'x'.repeat(PDF_LONG_BLOCK_LIMIT + 1) }]), true);
+  assert.equal(isComplexPage(Array.from({ length: 40 }, () => ({ text: 'short' }))), true);
+  assert.equal(isComplexPage(Array.from({ length: 40 }, () => ({ text: 'short', kind: 'toc' }))), false);
+  assert.equal(isComplexPage(Array.from({ length: 40 }, () => ({ text: 'short', kind: 'table-cell' }))), false);
+  assert.equal(isComplexPage([{ text: 'A normal paragraph.' }]), false);
+});
 console.log('\n' + pass + ' 通过 / ' + (pass + fail) + ' 总数');
 if (fail) process.exit(1);
