@@ -18,6 +18,7 @@ let pdfModeTimer = 0;
 let pdfFlowScrollRaf = 0;
 let openSeq = 0;
 let searchSeq = 0;
+const pdfPageTimers = new Map();
 const PDF_MODE_OPTIONS = [
   { value: 'pdf-original', text: '原版版面', view: 'pdf', lang: 'original' },
   { value: 'flow-original', text: '流式原版', view: 'flow', lang: 'original' },
@@ -716,6 +717,7 @@ function cancelPdfTranslations(clear) {
   state.pdfTranslator = null;
   state.pdfTranslating = new Map();
   state.pdfTransFails = new Map();
+  clearPdfPageTimers();
   state.pdfStopped = true;
   state.pdfTransDone = 0;
   state.pdfTransPending = 0;
@@ -801,6 +803,35 @@ async function translatePdfPage(index) {
   }
 }
 
+// 滚动时不要给“一闪而过”的页排队送翻：页面停满 400ms 且仍在可视范围才发请求。
+// 否则快速拖到 250 页会一次排几十页，进度看起来一直卡在 2/64。
+const PDF_PAGE_TRANSLATE_DELAY = 400;
+function pdfPageVisible(index) {
+  if (!state.pdf) return false;
+  const selector = state.pdfView === 'flow'
+    ? '#pdfFlow .pdf-flow-page[data-page="' + index + '"]'
+    : '.pdf-pages .pdf-page[data-page="' + index + '"]';
+  const el = document.querySelector(selector);
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  return rect.bottom >= -800 && rect.top <= window.innerHeight + 800;
+}
+
+function schedulePdfPageTranslation(index) {
+  if (!state.pdf || pdfPageTimers.has(index)) return;
+  const timer = setTimeout(() => {
+    pdfPageTimers.delete(index);
+    if (!state.pdf || !pdfPageVisible(index)) return;
+    translatePdfPage(index).catch(() => {});
+  }, PDF_PAGE_TRANSLATE_DELAY);
+  pdfPageTimers.set(index, timer);
+}
+
+function clearPdfPageTimers() {
+  for (const timer of pdfPageTimers.values()) clearTimeout(timer);
+  pdfPageTimers.clear();
+}
+
 function onPdfTranslateStatus(status) {
   if (!status) return;
   if (status.error) setStatus('readerStatus', 'PDF 翻译失败：' + status.error, 'error');
@@ -834,7 +865,7 @@ async function ensurePdfFlowPage(section) {
     const loadedPage = Number(section.dataset.page);
     if (state.pdfLang !== 'original' && state.config && state.config.hasKey && !state.config.authPaused
         && !(state.pdfTrans && state.pdfTrans.has(loadedPage))) {
-      translatePdfPage(loadedPage).catch(() => {});
+      schedulePdfPageTranslation(loadedPage);
     }
     return;
   }
@@ -864,7 +895,7 @@ async function ensurePdfFlowPage(section) {
     }
     applyPdfTranslations(pageNo);
     if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
-      translatePdfPage(pageNo).catch(() => {});
+      schedulePdfPageTranslation(pageNo);
     }
   } catch (err) {
     // 加载失败不能永久标成 loaded，否则滚动回来也不会再试。
@@ -1213,7 +1244,7 @@ function renderVisiblePdfPages() {
       const page = Number(el.dataset.page);
       if (el.dataset.rendered !== '1') continue;
       if (state.pdfTrans && state.pdfTrans.has(page)) continue;
-      translatePdfPage(page).catch(() => {});
+      schedulePdfPageTranslation(page);
     }
   }
 }
