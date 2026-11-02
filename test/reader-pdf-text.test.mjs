@@ -278,6 +278,43 @@ t('印刷版目录页保持「标题 + 页码」成对，不被当成双栏', fu
   assert.ok(blocks[5].text.endsWith('30'));
 });
 
+t('目录标题换行并回同一条，页码仍留在条目末尾', function () {
+  const items = [
+    item('Water Resources Planning and Management:', 50, 760, 220),
+    item('An Overview ......... 1', 50, 746, 220),
+    item('1.1 Introduction ......... 1', 50, 732, 220),
+    item('1.2 Planning and Management Issues: Some Case', 50, 718, 300),
+    item('Studies ......... 2', 50, 704, 200),
+    item('1.3 Why Plan ......... 3', 50, 690, 200),
+    item('1.4 Conclusion ......... 4', 50, 676, 200)
+  ];
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.deepEqual(blocks.map((block) => block.text), [
+    'Water Resources Planning and Management: An Overview......... 1',
+    '1.1 Introduction......... 1',
+    '1.2 Planning and Management Issues: Some Case Studies......... 2',
+    '1.3 Why Plan......... 3',
+    '1.4 Conclusion......... 4'
+  ]);
+});
+
+t('目录页左侧章编号不会被粘到 Contents 上', function () {
+  const items = [
+    item('Contents', 150, 760, 80),
+    item('1', 150, 746, 5),
+    item('Water Resources Planning and Management:', 170, 746, 260),
+    item('An Overview ......... 1', 170, 732, 240),
+    item('1.1 Introduction ......... 1', 170, 718, 240),
+    item('1.2 Planning ......... 2', 170, 704, 240),
+    item('1.3 Why Plan ......... 3', 170, 690, 240),
+    item('1.4 Conclusion ......... 4', 170, 676, 240)
+  ];
+  const blocks = pageBlocks({ items: items }, { width: 595, height: 842 });
+  assert.equal(blocks[0].text, 'Contents');
+  assert.equal(blocks[1].text, '1 Water Resources Planning and Management: An Overview......... 1');
+  assert.ok(blocks.slice(2).every((block) => !block.text.startsWith('Contents')));
+});
+
 t('复杂页检测覆盖「块太大」和「碎块太多」两种情况', function () {
   assert.equal(isComplexPage([{ text: 'x'.repeat(PDF_LONG_BLOCK_LIMIT + 1) }]), true);
   assert.equal(isComplexPage(Array.from({ length: 40 }, () => ({ text: 'short' }))), true);
