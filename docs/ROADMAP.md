@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-01；当前发布基线为 [0.14.1](https://github.com/Suethekitten/Rimefox/releases/tag/v0.14.1)，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.15.0 会话密钥、鉴权暂停与配置同步已在本地完成，并包含 PDF 缓存修复；按用户要求尚未推送，下一步见 §4。
+> 最近更新：2026-11-01；本轮开发基线为 [0.14.1](https://github.com/Suethekitten/Rimefox/releases/tag/v0.14.1)，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.15.0 会话密钥、鉴权暂停与配置同步已完成，并包含 PDF 缓存修复；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -95,7 +95,7 @@
 | P0-1 | ✅ **表单 / 菜单 / 对话框被整块替换** | 0.7.2：`textOf` 跳过隐藏子树、含控件的容器强制下钻、替换时跳过隐藏节点；新增 2 条自检 | 已完成 |
 | P0-2 | ✅ **商店包补 MIT 署名** | 0.7.1 补丁：allowlist 加入 `LICENSE` / `THIRD-PARTY-NOTICES.md` / `licenses/`，出包时缺一个直接报错，测试同步 | 已完成 |
 | P0-3 | ✅ **公开仓库安全设置** | 2026-10-22 开启：Private vulnerability reporting、Secret Protection（secret scanning）、Push protection、Dependency graph + Dependabot alerts / security updates | 已完成 |
-| P0-4 | ✅ **PDF 切换目标语言后复用旧译文** | 本地修复与真实 Chrome 回归已完成；边界见 [PDF 维护交接](PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复)，发布状态见 §4 | 本地完成，纳入 0.15.0 |
+| P0-4 | ✅ **PDF 切换目标语言后复用旧译文** | 本地修复与真实 Chrome 回归已完成；边界见 [PDF 维护交接](PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复)，发布状态见 §4 | 已完成，纳入 0.15.0 |
 
 ### P1 — 功能缺口
 
@@ -115,7 +115,7 @@
 
 | # | 任务 | 说明 |
 |---|---|---|
-| P2-1 | ✅ 会话级 Key 存储（**0.15.0 本地完成**） | 新 Key 默认仅存会话，可选择设备记忆；旧 Key 保留原策略并提供迁移选择；配套鉴权暂停与配置同步。当前状态见 §4，技术契约见 [HANDOFF §4.7](../HANDOFF.md#47-配置会话凭据与鉴权暂停0150) |
+| P2-1 | ✅ 会话级 Key 存储（**0.15.0 已完成**） | 新 Key 默认仅存会话，可选择设备记忆；旧 Key 保留原策略并提供迁移选择；配套鉴权暂停与配置同步。当前状态见 §4，技术契约见 [HANDOFF §4.7](../HANDOFF.md#47-配置会话凭据与鉴权暂停0150) |
 | P2-2 | 站点规则进阶 | 每站点目标语言、按路径匹配、一键导入社区规则 |
 | P2-3 | 自定义提示词按站点 | 现在只有全局追加，后续支持站点覆盖 |
 | P2-4 | 隐私脱敏扩展 | 地址、护照号、英文人名（默认仍关闭，先解决误伤） |
@@ -141,15 +141,15 @@
 
 ## 4. 近期安排
 
-### 0.15.0（本地已完成，未推送）
+### 0.15.0（实现与验证）
 
-P2-1 的会话 Key、可选设备记忆、旧用户迁移选择、鉴权失败全局暂停与配置广播合并已完成；同时纳入此前拟作 0.14.2 的 P0-4 PDF 缓存与任务生命周期修复。三处版本号及 CHANGELOG 已统一为 0.15.0 本地候选；用户要求完成后再决定是否推送，当前没有发布。
+P2-1 的会话 Key、可选设备记忆、旧用户迁移选择、鉴权失败全局暂停与配置广播合并已完成；同时纳入此前拟作 0.14.2 的 P0-4 PDF 缓存与任务生命周期修复。三处版本号及 CHANGELOG 已统一为 0.15.0，用户已明确授权推送；实际发布结果以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.15.0) 和 [Actions](https://github.com/Suethekitten/Rimefox/actions/workflows/release.yml) 为准。
 
 实现契约只在 [HANDOFF §4.7](../HANDOFF.md#47-配置会话凭据与鉴权暂停0150) 与 [PDF-HANDOFF](PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复) 维护；完成范围、验证命令和未测边界见 [0.15 归档](archive/2026-11-01-session-keys-0.15.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
 
 ### 下一步
 
-1. 本地试用 0.15.0，重点检查个人服务商的设备记忆选择与旧配置迁移；补真实 YouTube 正片字幕验收（本轮受广告阻塞）和 Edge 复验，再决定是否推送并核实 Actions / Release。
+1. 本地试用 0.15.0，重点检查个人服务商的设备记忆选择与旧配置迁移；补真实 YouTube 正片字幕验收（本轮受广告阻塞）和 Edge 复验，并核实 Actions / Release 的实际结果。
 2. P2-12 先建立表格 / 公式 / 脚注样本，再判断清洗是否会误删正文或医学数字；单 text item 双栏兜底、跨页段落合并也需要可回放样本，不纳入已完成的 0.15.0。
 3. P2-11 继续做 OCR 基线探针；真实 API 延迟与质量实测单列任务，不能用假接口结果代替。
 
