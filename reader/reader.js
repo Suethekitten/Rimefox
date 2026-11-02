@@ -216,11 +216,27 @@ async function changeTarget() {
     await saveReaderSettings({ targetLang: target });
     state.readerTarget = target;
     if (state.pdf) {
+      const previousLang = state.pdfLang;
+      const previousView = state.pdfView;
       cancelPdfTranslations(true);
-      setPdfOriginalMode();
+      state.pdfStopped = false;
       state.pdfIdentity = await pdfCacheIdentity(readerConfig(), target, 'plain');
+      if (previousLang === 'original') {
+        setPdfOriginalMode();
+      } else {
+        // 保持原来的版式（流式双语 / 仅译文），只换目标语言后自动重译当前可见页。
+        state.pdfView = previousView;
+        state.pdfLang = previousLang;
+        state.mode = previousLang;
+        $('modeSelect').value = state.book.pdfMode || (previousView === 'flow' ? 'flow-bilingual' : 'pdf-original');
+      }
       try { await saveBook(state.book); } catch (err) { /* ignore */ }
-      setStatus('readerStatus', '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译 PDF。');
+      if (previousLang === 'original') {
+        setStatus('readerStatus', '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译 PDF。');
+      } else {
+        await applyPdfViewMode();
+        setStatus('readerStatus', '目标语言已切换，正在按新语言重新翻译。');
+      }
       return;
     }
     const cfg = readerConfig();
@@ -645,7 +661,7 @@ async function renderPdfPage(el, index) {
     }
     applyPdfTranslations(index);
     if (state.mode !== 'original' && state.config && state.config.hasKey) {
-      translatePdfPage(index).catch((err) => setStatus('readerStatus', 'PDF 翻译失败：' + ((err && err.message) || '未知错误'), 'error'));
+      schedulePdfPageTranslation(index);
     }
   } else {
     const note = document.createElement('p');
@@ -707,6 +723,8 @@ function beginPdfTranslation() {
   if (state.pdfProgressTimer) { clearTimeout(state.pdfProgressTimer); state.pdfProgressTimer = 0; }
   state.pdfTransDone = 0;
   state.pdfTransPending = 0;
+  // 用户明确点「翻译本章」/ 切模式时，失败退避要清零，否则刚失败过的页会被 15s 退避直接跳过。
+  state.pdfTransFails = new Map();
   renderPdfProgress();
 }
 
@@ -813,6 +831,9 @@ function pdfPageVisible(index) {
     : '.pdf-pages .pdf-page[data-page="' + index + '"]';
   const el = document.querySelector(selector);
   if (!el) return false;
+  // 流式页在文本加载前只有一个标签，高度很矮，会被误判成“可视”；
+  // 等它真正加载出文本块后再允许排队翻译。
+  if (state.pdfView === 'flow' && el.dataset.loaded !== '1') return false;
   const rect = el.getBoundingClientRect();
   return rect.bottom >= -800 && rect.top <= window.innerHeight + 800;
 }
@@ -1021,7 +1042,7 @@ async function applyPdfViewMode(epoch) {
     ensureVisiblePdfFlowPages();
     if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
       beginPdfTranslation();
-      for (const index of visibleFlowPageIndexes()) translatePdfPage(index).catch(() => {});
+      for (const index of visibleFlowPageIndexes()) schedulePdfPageTranslation(index);
     }
   } else {
     let page = state.pdfAnchor && state.pdfAnchor.page ? state.pdfAnchor.page : 1;
@@ -1034,7 +1055,7 @@ async function applyPdfViewMode(epoch) {
     renderVisiblePdfPages();
     if (state.pdfLang !== 'original' && state.config && state.config.hasKey) {
       beginPdfTranslation();
-      for (const index of visiblePdfPageIndexes()) translatePdfPage(index).catch(() => {});
+      for (const index of visiblePdfPageIndexes()) schedulePdfPageTranslation(index);
     }
   }
   updatePdfAnchor();
@@ -1600,7 +1621,7 @@ function bindEvents() {
       const pages = state.pdfView === 'flow' ? visibleFlowPageIndexes() : visiblePdfPageIndexes();
       setStatus('readerStatus', '正在翻译当前 ' + pages.length + ' 页…');
       beginPdfTranslation();
-      for (const index of pages) translatePdfPage(index).catch(() => {});
+      for (const index of pages) schedulePdfPageTranslation(index);
       return;
     }
     if (!translator || !state.section) return;

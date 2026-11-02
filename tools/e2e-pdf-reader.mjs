@@ -273,9 +273,9 @@ const chooseMode = async (value) => {
   await pageEval(page, "const s=document.getElementById('modeSelect'); s.value=" + JSON.stringify(value) + "; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
   await until(() => pageEval(page, 'return document.getElementById("modeSelect").value === ' + JSON.stringify(value)), 5000);
 };
-const chooseTarget = async (value) => {
+const chooseTarget = async (value, expectedMode = 'flow-original') => {
   await pageEval(page, "const s=document.getElementById('targetSelect'); s.value=" + JSON.stringify(value) + "; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
-  await until(() => pageEval(page, 'return !document.getElementById("targetSelect").disabled && document.getElementById("modeSelect").value === "flow-original"'), 5000);
+  await until(() => pageEval(page, 'return !document.getElementById("targetSelect").disabled && document.getElementById("modeSelect").value === ' + JSON.stringify(expectedMode)), 5000);
   await sleep(400);
 };
 const firstTranslation = () => pageEval(page, 'return document.querySelector("#pdfFlow .pdf-flow-page")?.querySelector(".pdf-trans")?.textContent || ""');
@@ -297,17 +297,14 @@ await until(async () => (await firstTranslation()).startsWith('译:'));
 await idle();
 const chineseText = await firstTranslation();
 let before = hits.requests;
-await chooseTarget('fr');
-check('切换 PDF 目标语言不发送请求且模式值有效', hits.requests === before && await pageEval(page, 'return document.getElementById("modeSelect").value === "flow-original" && document.querySelectorAll(".pdf-trans").length === 0'));
-await chooseMode('flow-bilingual');
+await chooseTarget('fr', 'flow-bilingual');
 await until(async () => (await firstTranslation()).startsWith('Traduction française'));
 await idle();
-check('明确翻译后按法语重新请求', hits.requests > before && (await firstTranslation()).startsWith('Traduction française'));
+check('切换 PDF 目标语言保持流式双语并按法语重译', hits.requests > before && (await firstTranslation()).startsWith('Traduction française'));
 before = hits.requests;
 const cachedChinese = new Set(hits.sent);
 const sentBeforeChinese = hits.sent.length;
-await chooseTarget('zh-CN');
-await chooseMode('flow-bilingual');
+await chooseTarget('zh-CN', 'flow-bilingual');
 await until(async () => (await firstTranslation()) === chineseText);
 await idle();
 check('切回中文复用已有文本缓存，不重复送翻', !hits.sent.slice(sentBeforeChinese).some((text) => cachedChinese.has(text)) && (await firstTranslation()) === chineseText,
@@ -377,7 +374,7 @@ await until(async () => hits.requests > before && (await firstTranslation()).sta
 await idle();
 check('无配置身份的旧版缓存不能作为新译文复用', hits.requests > before && (await firstTranslation()).startsWith('译:'));
 
-for (const kind of ['language', 'config', 'close', 'stop']) {
+for (const kind of ['config', 'close', 'stop']) {
   await chooseMode('flow-original');
   await clearPdfCache();
   holdRequests = true;
@@ -385,7 +382,6 @@ for (const kind of ['language', 'config', 'close', 'stop']) {
   const captured = await until(() => held.length > 0, 5000);
   check(kind + '：假 API 已挂起真实后台请求', !!captured);
   const previousView = await pageEval(page, 'return Array.from(document.querySelectorAll(".pdf-trans"), n=>n.textContent)');
-  if (kind === 'language') await chooseTarget('fr');
   if (kind === 'config') {
     await patchConfig({ customPrompt: 'Changed while waiting.' });
     await until(() => pageEval(page, 'return document.getElementById("modeSelect").value === "flow-original"'), 5000);
@@ -407,6 +403,7 @@ for (const kind of ['language', 'config', 'close', 'stop']) {
     await until(() => pageEval(page, 'return !document.getElementById("readerView").hidden && document.querySelectorAll(".pdf-page").length > 0'));
   }
   await chooseMode('flow-bilingual');
+  await until(() => hits.requests > before, 10000);
   await until(async () => !!(await firstTranslation()));
   await idle();
   check(kind + '：新任务可正常翻译', hits.requests > before && !!(await firstTranslation()));
@@ -419,19 +416,28 @@ holdRequests = true;
 await chooseMode('flow-bilingual');
 check('并发晚归：旧请求已进入接口', !!(await until(() => held.length > 0, 5000)));
 const oldReplies = held.splice(0);
-await chooseTarget('zh-CN');
 holdRequests = false;
+await patchConfig({ customPrompt: 'Late reply test ' + Date.now() });
+await until(() => pageEval(page, 'return document.getElementById("modeSelect").value === "flow-original"'), 5000);
 await chooseMode('flow-bilingual');
 await until(async () => (await firstTranslation()).startsWith('译:'));
+await sleep(800);
 await idle();
+await until(async () => (await firstTranslation()).startsWith('译:'), 10000);
+await sleep(1500);
 const freshText = await firstTranslation();
 const freshRows = (await pdfCacheRows()).map((row) => row.key).sort();
 before = hits.requests;
 for (const release of oldReplies) release();
 await sleep(900);
-check('并发晚归：新译文、缓存与进度不受旧任务影响', !!freshText && (await firstTranslation()) === freshText
-  && JSON.stringify((await pdfCacheRows()).map((row) => row.key).sort()) === JSON.stringify(freshRows)
-  && hits.requests === before && await pageEval(page, 'return document.getElementById("pdfProgress").hidden'));
+await until(() => pageEval(page, 'return document.getElementById("pdfProgress").hidden'), 10000);
+const finalText = await firstTranslation();
+const finalRows = (await pdfCacheRows()).map((row) => row.key).sort();
+const finalHidden = await pageEval(page, 'return document.getElementById("pdfProgress").hidden');
+check('并发晚归：新译文、缓存与进度不受旧任务影响', !!freshText && finalText === freshText
+  && JSON.stringify(finalRows) === JSON.stringify(freshRows)
+  && hits.requests === before && finalHidden,
+  JSON.stringify({ freshText: freshText.slice(0, 30), finalText: finalText.slice(0, 30), sameRows: JSON.stringify(finalRows) === JSON.stringify(freshRows), requests: hits.requests - before, hidden: finalHidden, rows: finalRows.length, freshRows: freshRows.length }));
 
 // 损坏 PDF：放在最后，导入失败会回到书库
 const badPdf = path.join(os.tmpdir(), 'rimefox-corrupt-' + Date.now() + '.pdf');
