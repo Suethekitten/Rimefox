@@ -84,7 +84,8 @@ const MAP_ZH = [
   ['Reading on a rainy day', '雨天的阅读'],
   ['Essays', '随笔'],
   ['Notes', '笔记'],
-  ['About', '关于']
+  ['About', '关于'],
+  ['Northwind Journal — a demo page', '凛狐示例页面 · 仅用于商店截图演示']
 ];
 const MAP = ZH ? MAP_ZH : MAP_EN;
 function translate(text) {
@@ -323,7 +324,9 @@ for (const [route, name] of [['/demo-light.html', NAME.light], ['/demo-dark.html
   await tabMsg(tab.tabId, { type: 'dt:toggle' });
   await until(() => pageEval(tab, "return document.querySelectorAll('[data-dt-target]').length >= 6"), 40000);
   await settled(tab);
-  await sleep(3200); // 等“已翻译 N 段”的 toast 自己消失，别把它拍进商店图
+  // 等 toast 彻底消失（错误提示可能比成功提示停留更久），别把它拍进商店图
+  await until(() => pageEval(tab, "return !document.querySelector('#dt-toast-root div')"), 20000);
+  await sleep(500);
   await pageEval(tab, 'window.scrollTo(0,0); return true');
   await sleep(600);
   await capture(tab, path.join(OUT, name));
@@ -371,7 +374,11 @@ for (const [route, name] of [['/demo-light.html', NAME.light], ['/demo-dark.html
   await capture({ s: ext }, path.join(OUT, NAME.privacy));
   await clickNav('#sec-translate');
   await sleep(900);
-  await scrollTo('#glossaryList', 340);
+  // 滚到术语表整张卡片：标题 / 说明 / 列表都在画面里
+  await evaluate(
+    ext,
+    "(() => { const el = document.getElementById('glossaryList'); if (!el) return -1; const card = el.closest('.card') || el; const y = card.getBoundingClientRect().top + window.scrollY - 24; window.scrollTo(0, Math.max(0, y)); return window.scrollY; })()"
+  );
   await sleep(600);
   await capture({ s: ext }, path.join(OUT, NAME.glossary));
 }
