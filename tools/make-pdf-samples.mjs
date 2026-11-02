@@ -1,7 +1,9 @@
-// 生成 PDF 探针用的三份夹具（不依赖第三方库）：
+// 生成 PDF 探针与阅读器 E2E 夹具（不依赖第三方库）：
 //   single.pdf  单栏文章
 //   columns.pdf 双栏排版
 //   scan.pdf    只有图形、没有文本层（模拟扫描页）
+//   cjk.pdf     中文 CID 字体 / cmaps
+//   reader.pdf  可搜索、多页的阅读器回归样本
 // 运行：node tools/make-pdf-samples.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -110,8 +112,15 @@ function buildCjkPdf() {
   return Buffer.from(out, 'latin1');
 }
 const cjk = buildCjkPdf();
+const reader = buildPdf(Array.from({ length: 8 }, (_, i) => ({
+  content: textBlock([
+    ...prose.map((line) => 'Page ' + (i + 1) + ': ' + line),
+    'Ethical principles are discussed in the middle of page ' + (i + 1) + '.',
+    ...prose.map((line) => 'Section ' + (i + 1) + ': ' + line)
+  ], 60, 780, 16)
+})));
 
-for (const [name, buf] of [['single.pdf', single], ['columns.pdf', columns], ['scan.pdf', scan], ['cjk.pdf', cjk]]) {
+for (const [name, buf] of [['single.pdf', single], ['columns.pdf', columns], ['scan.pdf', scan], ['cjk.pdf', cjk], ['reader.pdf', reader]]) {
   fs.writeFileSync(path.join(outDir, name), buf);
   console.log(name, buf.length, 'bytes');
 }

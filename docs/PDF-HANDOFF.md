@@ -25,7 +25,17 @@
 
 渲染：`renderVisiblePdfPages` 只处理可视范围 ±800px → 串行队列 `pdfRenderQueue` → `renderPdfPage`（canvas 基准宽 = `#bookContent` 宽 − padding，渲染倍率 = `max(1.5, dpr) × zoom`，上限 3）→ 文本块面板 → `applyPdfTranslations`。
 
-翻译：`translatePdfPage` → `PdfTranslator.translatePage`（≤16 段 / 3600 字一批）→ 缓存 key `pdf|bookId|page:N|块序号|FNV` → 写回块下方。
+翻译：`translatePdfPage` → `PdfTranslator.translatePage`（≤16 段 / 3600 字一批）→ 按下列身份读取 reader 缓存 → 写回块下方。
+
+### PDF 译文缓存与任务生命周期（0.14.2 本地修复）
+
+- 键为 `pdf-v2|bookId|page:N|块序号|配置身份|原文 FNV`；读取还要核对记录的配置身份与完整 source，避免哈希碰撞误用。原书与进度、EPUB 缓存不迁移。
+- 配置身份由 `lib/reader/pdf-cache.js` 统一生成 SHA-256：包含目标语言元数据、风格 / 强度、服务商 / 协议 / 规范化地址 / 模型、术语 / 提示词、专业策略版本 / 选项、隐私选项、温度与思考配置。显示模式、外观与 API Key 不参与；切回原语言或配置可以复用其译文。
+- 旧 `pdf|...` 条目缺少完整配置身份，保留但不复用；下次翻译按当前配置重新生成，删除书时照常一并清理。
+- 阅读器请求带 `pdfCacheIdentity`；后台取到当前配置后用同一实现核对，不一致则返回 `errorCode: 'config_changed'`，不发送模型请求，避免设置页与阅读器之间的竞态污染缓存。
+- 切目标语言或有效翻译配置会作废旧任务、撤去旧译文并回到有效的原文模式；仅修改配置 / 下拉框不翻译。外观变化保留当前译文。页面监听可信扩展页的 storage 变化，并在明确翻译前重拉去 Key 的配置。
+- `PdfTranslator.epoch` 与阅读器文档代际共同检查缓存读取、模型响应和视图写回；关闭 / 换书 / 停止后旧任务不能覆盖当前视图或修改新进度。停止保留已完成的译文，并禁止滚动自动续发，直到明确重新翻译。
+- 长块全部切片成功后才写入整块缓存；缺片不把部分译文当成完整结果保存。
 
 ## 3. 已知限制（0.14.0）
 
@@ -89,17 +99,21 @@
 # 全部 Node 单测（含 pdf-text 纯函数）
 node --test test/*.test.mjs
 
+# PDF 缓存 / 取消 / 配置隔离；后台快照竞态
+node --test test/reader-pdf-cache.test.mjs test/background-state.test.mjs
+
 # EPUB 阅读器 E2E（真实 Chrome + 假翻译 API）
 node tools/e2e-reader.mjs
 
-# PDF 阅读器 E2E（含渲染/缩放/译文；默认跑完整断言）
-RIMEFOX_PDF_RENDER=1 node tools/e2e-pdf-reader.mjs
+# PDF 阅读器 E2E（默认用仓库合成 PDF + 按目标语言回包的假 API）
+node tools/e2e-pdf-reader.mjs
 
 # 探针：批量真实 PDF（文件放 reader/pdf-real/，cases.json 指定页码）
 node tools/e2e-pdf-probe.mjs
 ```
 
 - 真 PDF 样本与 `cases.json` 都在 `reader/pdf-real/`，**已 gitignore**，不要提交
+- 合成阅读器样本由 `node tools/make-pdf-samples.mjs` 生成；E2E 覆盖语言 / 配置切换、重开缓存、旧响应晚归与停止，不等同于真实模型质量验收
 - 后台标签页里 pdf.js 渲染会停（rAF 暂停）：E2E 用 `Page.bringToFront`，产品侧靠 `visibilitychange` 补渲染
 - Chrome 114 最低版本用 `--legacy-load` 跑探针（`tools/e2e-pdf-probe.mjs <chrome> --legacy-load`）
 

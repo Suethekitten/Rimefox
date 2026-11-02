@@ -14,3 +14,4 @@
 *.ico  binary
 *.zip  binary
 *.crx  binary
+*.pdf  binary

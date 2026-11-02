@@ -40,6 +40,20 @@ const add = (source, target, overwrite = false) => send({ type: 'glossary:add', 
 const translate = text => send({ type: 'translate', target: 'zh-CN', texts: [text] });
 const setSlot = patch => saveConfig({ providerConfig: { __custom__: patch } });
 
+test('stale PDF configuration identity is rejected before any API request', async () => {
+  const { pdfCacheIdentity } = await import('../lib/reader/pdf-cache.js');
+  const cfg = await getConfig();
+  const identity = await pdfCacheIdentity(cfg, 'zh-CN');
+  const safe = (await send({ type: 'config:get' })).config;
+  assert.equal(await pdfCacheIdentity(safe, 'zh-CN'), identity, '去 Key 的阅读器配置与后台身份必须一致');
+  await saveConfig({ customPrompt: 'Use a different style.' });
+  const count = calls.length;
+  const result = await send({ type: 'translate', texts: ['PDF configuration race'], target: 'zh-CN', noCache: true, pdfCacheIdentity: identity });
+  assert.equal(result.errorCode, 'config_changed');
+  assert.equal(calls.length, count);
+  await saveConfig({ customPrompt: cfg.customPrompt });
+});
+
 test('concurrent additions preserve both entries and unrelated settings', async () => {
   const before = await getConfig();
   const results = await Promise.all([add('alpha', '甲'), add('beta', '乙')]);

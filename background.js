@@ -24,6 +24,7 @@ import { createUsageStats } from './lib/usage.js';
 import { INLINE_VERSION, inspectInline } from './lib/inline.js';
 import { isTrustedBilibiliSubtitleUrl, isBilibiliVideoPage, SUBTITLE_FETCH_MAX_BYTES, readTextCapped } from './lib/subtitle-source.js';
 import { SUBTITLE_BUDGET, SUBTITLE_BUDGET_ALL_TABS, createBudgetState, budgetReserve, budgetSettle, budgetRelease, budgetSnapshot } from './lib/subtitle-budget.js';
+import { pdfCacheIdentity } from './lib/reader/pdf-cache.js';
 
 // 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
 const usageStats = createUsageStats();
@@ -374,6 +375,10 @@ async function handleTranslate(msg, sender) {
   const intensity = style === 'plain'
     ? 'standard'
     : normalizeIntensity(msg.intensity !== undefined ? msg.intensity : cfg.funIntensity);
+  // 阅读器快照可能已落后于设置页；不得把新配置的结果写进旧配置的 PDF 缓存。
+  if (msg.pdfCacheIdentity !== undefined && msg.pdfCacheIdentity !== await pdfCacheIdentity(cfg, target, style)) {
+    return { ok: false, errorCode: 'config_changed', error: '翻译配置已变化，请重新翻译。' };
+  }
   // AI 精翻：默认关闭；开启时只把有限上下文并进正常翻译请求，不额外发起复核。
   // 隐私脱敏开启时整段上下文都不发送（标题 / 章节也可能绕过脱敏），并记录降级。
   const aiContextEnabled = cfg.aiContextEnabled === true;

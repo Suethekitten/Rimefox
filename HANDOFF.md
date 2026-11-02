@@ -772,6 +772,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 25. **PDF 译文叠加已接入（2026-10-31，PDF 分支）** —— `lib/reader/pdf-translate.js` 按页分块（≤16 段 / 3600 字）调用 `translate`，译文写在原文块下方；三种模式：原文隐藏译文、双语同时显示、仅译文隐藏原文。译文缓存复用 reader IndexedDB（key = `pdf|bookId|page:N|块序号|FNV`），目标语言用阅读器自己的 `readerTarget`，与网页翻译隔离。`tools/e2e-pdf-reader.mjs` 起本地假 API 验证：译文出现、来自接口、模式切换与可见性，共 18 项断言。
 26. **PDF 0.14.0 剩余已知限制（维护交接见 [docs/PDF-HANDOFF.md](docs/PDF-HANDOFF.md)）** —— ① 印刷版目录页码是「书内页码」，跳转可能差前目录的页数（没有做页偏移映射）；② 少数页两栏被 pdf.js 编码成单个 text item（示例 OBP 第 20 页），仍可能合并成一段；③ 扫描件 0 文本，OCR 排到未来版本（ROADMAP P2-11，准备工作已开始：候选评估与探针计划就绪，尚未跑探针/未集成）；④ 跨栏 / 跨页段落仍按页分块，段落会在页边界断开；⑤ 高倍缩放需要横向滚动页面（不自动换行）；⑥ 没有流式 / 重排阅读模式，字号只影响下方文本块，画布不重排；⑦ 表格 / 公式文本未清洗（0.15+ 分两步，见 ROADMAP P2-12）。
 27. **PDF 可用性补丁（2026-11-01）** —— 加密 / 损坏 PDF 的明确错误提示；目录面板增加「跳页」与「全文搜索」（最多 50 条，跨页搜索）；翻译进度条增加「停止」（PdfTranslator epoch 作废旧批次）；单 text item 的复杂页面在页标签上标注「复杂版式，文本可能合并」（真正拆栏仍待 0.15 兜底）。
+28. **PDF 译文缓存未隔离目标语言 / 翻译配置（0.14.2 本地已修，待发布）** —— 升级缓存身份并隔离阅读器任务代际；目标语言 / 配置变化不再误用旧译文，关闭 / 停止后的旧响应不写回。契约与旧缓存处理只在 [PDF 维护交接](docs/PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复) 维护；验证见 §14。
 
 ---
 
@@ -860,52 +861,14 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.13.0 / 0.13.1 / 0.13.2）
+## 14. 本版技术记录（0.14.2 本地待发布）
 
-> 每次发版整节替换成这一版的内容（规则见 [AGENTS.md](AGENTS.md)）；旧版本的技术细节看 git log 和 commit message。
+> 每次发版整节替换；旧版本记录看 git log。三处版本号仍为已发布版本，获得发布许可后统一更新。
 
-0.13.0 新增本地 EPUB 阅读与翻译。它不是一个新翻译引擎：阅读器只负责文档解析、清洗、章节渲染和按书队列；行内格式、双语 / 仅译文注入、方向和字体仍由 `content/dom.js` 的 `DT.collect` / `DT.inject` 完成。
-
-- **阅读器边界**：`reader/index.html` 是扩展页，不是 content script；弹窗新增 EPUB 入口。`lib/reader/epub.js` 只做 ZIP → container.xml → OPF → spine/nav 的结构解析；`lib/reader/sanitize.js` 用 allowlist 构造 DOM，禁用脚本、远程资源和表单。`lib/vendor/fflate.browser.mjs` 为 fflate 0.8.2（MIT），仅用于同步解压。
-- **文档契约**：`BookDocument` / `DocumentAdapter` / `Section` / `ReadingProgress` 与 PDF 预留边界见 [docs/READER-ARCHITECTURE.md](docs/READER-ARCHITECTURE.md)。PDF 不在 0.13.0 实现，不引入 pdf.js；未来 PDF 共享书库、进度、翻译队列与缓存，但不共享 XHTML renderer。
-- **本地数据**：`rimefox-reader` IndexedDB 保存原书 Blob、封面、元数据、目录、进度和该书译文；单本上限约 100 MB、书库约 500 MB，不申请 `unlimitedStorage`。删除书会删除该书译文与失败记录；同一文件按 SHA-256 去重。
-- **翻译费用**：阅读器发送 `noCache: true`，不让整本书进入现有 512 KB 全局缓存；reader 自身按 `epub-v1|bookId|bookHash|sectionId|contentHash|target|style|intensity|provider|model|professional|language|glossary/prompt` 隔离。自动只翻当前视口 + 后 2 屏，接近章末时预取下一章开头；手动「翻译本章」只翻当前 section；切章取消旧代际。
-- **安全**：ZIP 单条 / 总展开 / 压缩比限制，拒绝路径穿越；`rights.xml` 和非字体 `encryption.xml` 拒绝，纯字体混淆（IDPF / Adobe）允许但不加载出版字体；固定版式拒绝。XHTML 只保留标题、段落、列表、引用、图片、图注、简单表格、基础行内标签、链接和脚注；不把不可信字符串写入 `innerHTML`。
-- **测试**：`test/reader-contract.test.mjs` 静态契约；`test/reader-smoke.html` 真实 Chrome 解析 / 清洗冒烟；`tools/e2e-reader.mjs` 真实扩展 + 真实 reader 页 + 真实 IndexedDB + 假 API，覆盖导入、章节、目录、图片、链接、脚本清除、双语注入、行内粗体、缓存命中、模式记忆、原文恢复、章末预取下一章和删除。
-- **真实页面验收（2026-10-31）**：用户在本机真实扩展里导入样例 EPUB（`dist/reader-sample.epub`，自造内容），确认目录、章节、图片、跨章内部链接与脚注跳转、双语 / 仅译文、关闭页面再打开后的进度恢复均正常；只剩删除书的清理未抽测（E2E 已覆盖）。
-
-- **限制 / 未完成**：0.13.0 只支持无 DRM、可重排的 EPUB 2/3；固定版式、漫画、音频 / 视频、PDF、MOBI/AZW3、OCR、跨设备同步、高亮 / 批注和完整屏幕阅读器审计不在本轮范围。真实大型出版社 EPUB、移动端、RTL 和大型书库仍需独立 QA；本地 reader E2E 使用合成 EPUB + 假 API，不等同于真实书库验收。PDF 目前只有接口文档。
-
-### 0.14.1 — PDF 可用性修复（本地待发布）
-
-- 加密 / 损坏 PDF 明确提示；打开失败回到书库。
-- 目录面板新增「跳页」与「全文搜索」（最多 50 条，点击跳转）。
-- 翻译进度条可「停止」，`PdfTranslator` epoch 作废旧批次。
-- 复杂版式页在标签上提示「文本可能合并」；超过 1500 字的块按句末标点切分（中文句号无空格也能切）。
-- 阅读字号设置现在会作用于 PDF 文本块与译文。
-
-### 0.14.0 — PDF 阅读与译文（本地待发布）
-
-- 新增 PDF 导入 / 阅读：pdf.js legacy + cmaps，书库、页容器、进度、目录三档兜底（outline → 印刷版目录页 → 页列表）。
-- 文本块还原：按内容流顺序拼行（中文双栏不再串栏）、页眉页脚 / 栏目横幅过滤、项目符号分段、目录跨行标题合并；复杂并排版面仍可能合并。
-- 渲染：按屏幕像素比 + 缩放倍率渲染，支持按钮 / Ctrl+滚轮缩放（50%–300%）。
-- 译文：按页分块、复用 reader 缓存、三种显示模式；目标语言走 reader settings，与网页翻译隔离。
-- 设置：单本上限 50–500 MB（默认 100 MB）。
-- 范围外：扫描件 OCR（2026-11-01 拍板排到未来版本；准备工作已开始：候选评估与探针计划见 [docs/archive/2026-10-31-ocr-candidates.md](docs/archive/2026-10-31-ocr-candidates.md)，尚未跑探针/未集成）、跨页段落合并。
-- **内部定位：测试版**（2026-11-01 拍板）。GitHub Release v0.14.0 保持正常标签（不改 pre-release），但不作正式对外推广；后续维护交给协助者。
-
-### 0.13.2 — 字幕费用与稳定性
-
-- **V8 费用身份**：Bilibili 字幕的计费缓存身份从 `subtitle-v1:platform|videoKey|trackKey|lang` 改为固定内容键 `subtitle-v1:content`（`background.js` 的 `scope.subtitle`，发送方场景按标签页 URL 判定）。cid / id_str / 轨道 / 源语言只留在运行时轨道身份、`source.matches()` 与显示里；同一段文字重放（伪造元数据、切 P 失败、播放器重拉）命中同一份缓存，不再产生第二次付费请求。YouTube 不改契约，仍是原来的身份。`memoryOnly` 判据不变（前缀 `subtitle-v1:`），字幕译文仍只进内存 / session。
-- **V8 费用兜底**：新增 `lib/subtitle-budget.js`，后台按标签页（另加一份跨标签页总量）记字幕预算；在 `translateBatchWithRetry` / 复核的**每次实际发送前**预留（一次 chat 最多 2 次 HTTP），`finally` 里按 `meta.http` 回填，并另按整批字符数记账。账本（含窗口）串行写 `chrome.storage.session`，状态按 slot 缓存 Promise；阈值是保守估计（见 §5.4）。超限时整批失败并返回 `errorCode: 'subtitle_budget'`，`content/subtitles.js` 把轨道标成 `blocked`、停止自动翻译并提示一次，换视频 / 刷新恢复；没有「手动继续」。
-- **V8 边界**：两条 `postMessage` 消息的来源仍然无法证明（页面可以伪造 `{source:'rimefox-bili'}`），本次不假装能验证；防护是「不重复计费 + 预算上限」，不是消息认证。cid 一致性检查只防正常使用中的错轨，不防伪造（页面 DOM / `__INITIAL_STATE__` 都是页面写的）。
-- **V9**：`subtitles-source.js` 的 `adShowing()` 之前调用不存在的 `player()`，`p.v !== current` 时抛 ReferenceError、整条回包被丢掉；改为 `playerView()`。
-- **V10–V14**：分 P 判断改为「地址栏没有 `?p` 按第 1 P 算」，旧 P 轨道立即失效（V10）；来源层只接受递增且不超过上次 200 的 `seq`（V11）；`id_str` 只认字符串 / 数字、对象退回 `id`（V12）；后台取字幕改为流式读、超过 2 MB 立即停（V13），并跟随 CDN 跳转、按最终地址校验白名单（V14，`lib/subtitle-source.js` 的 `readTextCapped`）。V15（钩子可被页面识别）仍是加固项。
-- **测试**：新增 `test/subtitle-budget.test.mjs`（预留 / 回填 / 窗口 / 字符上限 / 持久化 / 损坏数据）与 `test/subtitle-budget-pipeline.test.mjs`（真实 background + 假 fetch：换 cid 只请求一次、换源语言共用、YouTube 契约不变、换目标语言重新计费、预算封顶、标签页隔离、session 持久化）。E2E 的离线 Bilibili 增加「页面脚本伪造元数据轮换 cid / id_str → 0 条新送翻」，并给 service worker 的首次 evaluate 加了启动抖动重试。
-- **真实页面验收（2026-10-31）**：B 站真实视频 + AI 字幕轨确认「原文 + 译文」正常；人工字幕轨、全屏 / 网页全屏 / 小窗下的叠层位置仍未验证。
-- **限制**：预算阈值没有真实用量基线，是按保守估计定的；跨标签页总额度只有纯函数覆盖，没有端到端用例；会话缓存淘汰 / 浏览器重启后的行为未专项验证；同文本跨语言共用译文只验证了「只请求一次」，没做译文质量夹具。
-
-
+- PDF 缓存、后台配置快照校验与阅读器任务代际契约统一见 [PDF-HANDOFF](docs/PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复)，不在这里重复。
+- 本地已修目标语言 / 翻译配置串缓存、旧响应晚归、停止后自动续发、长块缺片落缓存与顶部页码定位；不修改 DOM 翻译引擎。
+- 实施与验证记录见 [归档](docs/archive/2026-11-01-pdf-cache-0.14.2.md)，运行命令与覆盖边界在那里维护。
+- 候选发版说明已写入 CHANGELOG；发布与否仍须按 [AGENTS.md](AGENTS.md) 获取明确许可。
 
 ## 15. 专业翻译引擎
 

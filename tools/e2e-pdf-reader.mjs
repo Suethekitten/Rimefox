@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // PDF 阅读页 E2E：真实扩展 + 真实 reader 页 + 本地 PDF。
-// 默认验证：导入上限、导入 / 页容器 / 标题；渲染断言需要 RIMEFOX_PDF_RENDER=1
-// （reader 页里的 pdf.js render 目前会卡住，探针页正常，见 HANDOFF §9）。
+// 默认使用仓库合成 PDF，验证渲染、译文、缓存身份与旧响应；不调用真实付费 API。
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -10,8 +9,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CHROME = process.env.RIMEFOX_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const PDF = process.argv[2] || path.join(ROOT, 'reader', 'pdf-real', 'user.pdf');
+const CHROME = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
+  ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  : process.platform === 'win32' ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : 'google-chrome');
+const PDF = process.argv[2] || path.join(ROOT, 'reader', 'pdf-samples', 'reader.pdf');
 const PORT = 20600 + Math.floor(Math.random() * 300);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-pdf-reader-'));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,9 +35,11 @@ const HEADED = process.env.RIMEFOX_HEADED === '1';
 // 本地假翻译 API（OpenAI 兼容），验证 PDF 译文链路
 const API_PORT = 18700 + Math.floor(Math.random() * 300);
 const API_ORIGIN = 'http://127.0.0.1:' + API_PORT;
-const hits = { requests: 0 };
+const hits = { requests: 0, targets: [], sent: [] };
+let holdRequests = false;
+const held = [];
 const server = http.createServer((req, res) => {
-  if (req.method === 'POST' && req.url.split('?')[0] === '/v1/chat/completions') {
+  if (req.method === 'POST' && /\/v1\/chat\/completions$/.test(req.url.split('?')[0])) {
     let raw = '';
     req.on('data', (chunk) => { raw += chunk; });
     req.on('end', () => {
@@ -44,9 +47,19 @@ const server = http.createServer((req, res) => {
         const body = JSON.parse(raw);
         const texts = JSON.parse(body.messages[1].content);
         hits.requests += 1;
-        const content = JSON.stringify(texts.map((text) => '译:' + String(text)));
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ choices: [{ message: { content: content } }] }));
+        const french = /Français|\(fr\)/.test(String(body.messages[0].content));
+        hits.targets.push(french ? 'fr' : 'zh-CN');
+        hits.sent.push(...texts.map((text) => JSON.stringify([french ? 'fr' : 'zh-CN', body.model, body.messages[0].content, text])));
+        const number = hits.requests;
+        const content = JSON.stringify(texts.map((text, i) => french
+          ? 'Traduction française de contrôle ' + number + '-' + i + '. ' + 'Ce texte vérifie la lecture et la mémoire. '.repeat(Math.ceil(String(text).length / 48))
+          : '译:这是阅读器回归测试的中文译文，第' + number + '次请求第' + i + '段。' + '用于验证缓存身份的中文译文。'.repeat(Math.ceil(String(text).length / 24))));
+        const reply = () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }));
+        };
+        if (holdRequests) held.push(reply);
+        else reply();
       } catch (err) {
         res.writeHead(400, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: { message: String(err.message || err) } }));
@@ -66,6 +79,8 @@ const browser = spawn(CHROME, [
   '--remote-debugging-port=' + PORT, '--remote-allow-origins=*',
   '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check', 'about:blank'
 ], { stdio: 'ignore' });
+process.on('exit', () => { try { browser.kill('SIGKILL'); } catch (err) { /* cleanup */ } });
+process.on('SIGTERM', () => process.exit(143));
 
 let version = null;
 for (let i = 0; i < 100; i += 1) {
@@ -120,6 +135,7 @@ async function setInputFile(session, file, dispatch) {
 }
 
 const { id: extId } = await send('Extensions.loadUnpacked', { path: ROOT });
+console.log('Loaded extension ' + extId + ' from ' + ROOT);
 const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/reader/index.html' });
 const page = await attach(targetId);
 check('阅读器页面加载', !!(await until(() => pageEval(page, "return !!document.getElementById('bookGrid')"), 15000)));
@@ -156,7 +172,7 @@ check('页标题/页数正确', !!(await pageEval(page, "const s=document.getEle
 const tocCount = await pageEval(page, "return document.querySelectorAll('#tocList a').length");
 check('目录面板有可跳转条目', tocCount > 0, tocCount + ' 条');
 
-if (process.env.RIMEFOX_PDF_RENDER === '1') {
+if (process.env.RIMEFOX_PDF_RENDER !== '0') {
   const canvas = await until(() => pageEval(page, "return document.querySelectorAll('.pdf-page canvas').length"), 30000);
   check('首页 canvas 渲染', !!canvas, canvas ? canvas + ' 个' : '没有 canvas');
   const blocks = await until(() => pageEval(page, "return document.querySelectorAll('.pdf-block').length"), 30000);
@@ -168,7 +184,7 @@ if (process.env.RIMEFOX_PDF_RENDER === '1') {
   const canvases2 = await pageEval(page, "return document.querySelectorAll('.pdf-page canvas').length");
   check('滚动后第二页也被渲染', canvases2 >= 2, canvases2 + ' 个 canvas');
 } else {
-  console.log('  NOTE 跳过 canvas / 文本块断言：reader 页里 pdf.js render 已知会卡住（探针页正常）');
+  console.log('  NOTE 按 RIMEFOX_PDF_RENDER=0 跳过 canvas / 文本块断言');
 }
 
 // 缩放：回到顶部再测，避免第一页在可视区外没被重渲染
@@ -251,6 +267,162 @@ await pageEval(page, "const m=document.getElementById('modeSelect'); m.value='fl
 await sleep(600);
 const flowPageAfter = await pageEval(page, "let cur=1; for (const s of document.querySelectorAll('#pdfFlow .pdf-flow-page')) { if (s.getBoundingClientRect().top <= 120) cur=Number(s.dataset.page); else break; } return cur;");
 check('流式内切换译文模式锚点不变', flowPageAfter === flowPageBefore, flowPageBefore + ' -> ' + flowPageAfter);
+
+// 缓存与生命周期：所有操作走真实阅读器控件、后台和 IndexedDB。
+const chooseMode = async (value) => {
+  await pageEval(page, "const s=document.getElementById('modeSelect'); s.value=" + JSON.stringify(value) + "; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  await until(() => pageEval(page, 'return document.getElementById("modeSelect").value === ' + JSON.stringify(value)), 5000);
+};
+const chooseTarget = async (value) => {
+  await pageEval(page, "const s=document.getElementById('targetSelect'); s.value=" + JSON.stringify(value) + "; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  await until(() => pageEval(page, 'return !document.getElementById("targetSelect").disabled && document.getElementById("modeSelect").value === "flow-original"'), 5000);
+  await sleep(400);
+};
+const firstTranslation = () => pageEval(page, 'return document.querySelector("#pdfFlow .pdf-flow-page")?.querySelector(".pdf-trans")?.textContent || ""');
+const idle = async () => {
+  await until(() => pageEval(page, 'return document.getElementById("pdfProgress").hidden'), 10000);
+  await sleep(300);
+};
+const clearPdfCache = () => pageEval(page, 'return import("/lib/reader/store.js").then(async s => { const books=await s.listBooks(); await s.deleteBookTranslations(books[0].id); return true; })');
+const pdfCacheRows = () => pageEval(page, 'return new Promise((resolve,reject)=>{ const r=indexedDB.open("rimefox-reader"); r.onsuccess=()=>{const db=r.result;const q=db.transaction("translations").objectStore("translations").getAll();q.onsuccess=()=>{db.close();resolve(q.result)};q.onerror=()=>reject(q.error)};r.onerror=()=>reject(r.error)})');
+const patchConfig = (patch) => pageEval(page, 'return import("/lib/config.js").then(m=>m.saveConfig(' + JSON.stringify(patch) + ')).then(()=>true)');
+
+await idle();
+await chooseMode('flow-original');
+await pageEval(page, 'window.scrollTo(0,0); window.dispatchEvent(new Event("scroll")); return true;');
+await sleep(800);
+await chooseMode('flow-bilingual');
+check('滚回顶部再切模式仍停留第一页', await pageEval(page, 'return document.querySelector("#pdfFlow .pdf-flow-page").getBoundingClientRect().top >= -120'));
+await until(async () => (await firstTranslation()).startsWith('译:'));
+await idle();
+const chineseText = await firstTranslation();
+let before = hits.requests;
+await chooseTarget('fr');
+check('切换 PDF 目标语言不发送请求且模式值有效', hits.requests === before && await pageEval(page, 'return document.getElementById("modeSelect").value === "flow-original" && document.querySelectorAll(".pdf-trans").length === 0'));
+await chooseMode('flow-bilingual');
+await until(async () => (await firstTranslation()).startsWith('Traduction française'));
+await idle();
+check('明确翻译后按法语重新请求', hits.requests > before && (await firstTranslation()).startsWith('Traduction française'));
+before = hits.requests;
+const cachedChinese = new Set(hits.sent);
+const sentBeforeChinese = hits.sent.length;
+await chooseTarget('zh-CN');
+await chooseMode('flow-bilingual');
+await until(async () => (await firstTranslation()) === chineseText);
+await idle();
+check('切回中文复用已有文本缓存，不重复送翻', !hits.sent.slice(sentBeforeChinese).some((text) => cachedChinese.has(text)) && (await firstTranslation()) === chineseText,
+  JSON.stringify({ newRequests: hits.requests - before, textMatches: (await firstTranslation()) === chineseText }));
+before = hits.requests;
+await chooseMode('flow-translation');
+await chooseMode('flow-bilingual');
+await idle();
+check('仅译文 / 双语切换不重复付费', hits.requests === before);
+
+await send('Page.reload', {}, page);
+await until(() => pageEval(page, 'return !!document.querySelector(".book-card .reader-button")'));
+await pageEval(page, 'document.querySelector(".book-card .reader-button").click(); return true;');
+await until(() => pageEval(page, 'return !document.getElementById("readerView").hidden && document.querySelectorAll(".pdf-page").length > 0'));
+await chooseMode('flow-bilingual');
+await until(async () => (await firstTranslation()) === chineseText);
+await idle();
+check('重开阅读页仍复用正确语言的 IndexedDB 缓存', hits.requests === before && (await firstTranslation()) === chineseText);
+
+const changes = [
+  ['模型', { providerConfig: { __custom__: { model: 'fake-second' } } }],
+  ['接口地址', { providerConfig: { __custom__: { baseUrl: API_ORIGIN + '/second/v1' } } }],
+  ['提示词', { customPrompt: 'Use formal wording.' }],
+  ['术语', { glossary: [{ source: 'paragraph', target: '段落', note: '回归测试' }] }]
+];
+for (const [label, patch] of changes) {
+  before = hits.requests;
+  await patchConfig(patch);
+  await until(() => pageEval(page, 'return document.getElementById("modeSelect").value === "flow-original" && !document.querySelector(".pdf-trans")'), 5000);
+  await sleep(400);
+  check('修改' + label + '不自动翻译并撤去旧配置译文', hits.requests === before && !(await firstTranslation()));
+  await chooseMode('flow-bilingual');
+  await until(async () => hits.requests > before && (await firstTranslation()).startsWith('译:'));
+  await idle();
+  check('明确翻译后不复用旧' + label + '缓存', hits.requests > before && (await firstTranslation()).startsWith('译:'));
+}
+before = hits.requests;
+await patchConfig({ uiTheme: 'dark' });
+await sleep(500);
+check('外观变化保留译文与模式且不发送请求', hits.requests === before && !!(await firstTranslation()) && await pageEval(page, 'return document.getElementById("modeSelect").value === "flow-bilingual"'));
+await patchConfig({ providerConfig: cfg.providerConfig, customPrompt: '', glossary: [] });
+await until(() => pageEval(page, 'return document.getElementById("modeSelect").value === "flow-original"'), 5000);
+await chooseMode('flow-bilingual');
+await until(async () => (await firstTranslation()) === chineseText);
+await idle();
+check('切回原配置可复用原来的缓存', hits.requests === before && (await firstTranslation()) === chineseText);
+
+await chooseMode('flow-original');
+const legacySource = (await pdfCacheRows()).find((row) => row.sectionId === 'page:1' && row.key.split('|')[3] === '0');
+await clearPdfCache();
+if (!legacySource) throw new Error('Legacy cache test requires the translated first block');
+const legacyRecord = { ...legacySource, key: 'pdf|' + legacySource.bookId + '|page:1|0|' + legacySource.contentHash, translated: '旧版错误缓存' };
+delete legacyRecord.cacheIdentity;
+await pageEval(page, 'return import("/lib/reader/store.js").then(s=>s.putTranslation(' + JSON.stringify(legacyRecord) + ')).then(()=>true)');
+before = hits.requests;
+await chooseMode('flow-bilingual');
+await until(async () => hits.requests > before && (await firstTranslation()).startsWith('译:'));
+await idle();
+check('无配置身份的旧版缓存不能作为新译文复用', hits.requests > before && (await firstTranslation()).startsWith('译:'));
+
+for (const kind of ['language', 'config', 'close', 'stop']) {
+  await chooseMode('flow-original');
+  await clearPdfCache();
+  holdRequests = true;
+  await chooseMode('flow-bilingual');
+  const captured = await until(() => held.length > 0, 5000);
+  check(kind + '：假 API 已挂起真实后台请求', !!captured);
+  const previousView = await pageEval(page, 'return Array.from(document.querySelectorAll(".pdf-trans"), n=>n.textContent)');
+  if (kind === 'language') await chooseTarget('fr');
+  if (kind === 'config') {
+    await patchConfig({ customPrompt: 'Changed while waiting.' });
+    await until(() => pageEval(page, 'return document.getElementById("modeSelect").value === "flow-original"'), 5000);
+  }
+  if (kind === 'close') await pageEval(page, 'document.getElementById("backToLibrary").click(); return true;');
+  if (kind === 'stop') await pageEval(page, 'document.getElementById("pdfTranslateStop").click(); window.dispatchEvent(new Event("scroll")); return true;');
+  before = hits.requests;
+  holdRequests = false;
+  for (const release of held.splice(0)) release();
+  await sleep(900);
+  const cacheRows = await pdfCacheRows();
+  const currentView = await pageEval(page, 'return Array.from(document.querySelectorAll(".pdf-trans"), n=>n.textContent)');
+  const viewUnchanged = kind === 'stop' ? JSON.stringify(currentView) === JSON.stringify(previousView) : currentView.length === 0;
+  check(kind + '：旧响应不写入视图 / 缓存、不再补发', hits.requests === before && cacheRows.length === 0 && viewUnchanged,
+    JSON.stringify({ requests: hits.requests - before, cached: cacheRows.length, viewUnchanged }));
+  if (kind === 'close') {
+    await until(() => pageEval(page, 'return !!document.querySelector(".book-card .reader-button")'));
+    await pageEval(page, 'document.querySelector(".book-card .reader-button").click(); return true;');
+    await until(() => pageEval(page, 'return !document.getElementById("readerView").hidden && document.querySelectorAll(".pdf-page").length > 0'));
+  }
+  await chooseMode('flow-bilingual');
+  await until(async () => !!(await firstTranslation()));
+  await idle();
+  check(kind + '：新任务可正常翻译', hits.requests > before && !!(await firstTranslation()));
+}
+
+// 新任务先完成，再放回旧响应；旧 finally 也不能破坏新任务的视图与进度。
+await chooseMode('flow-original');
+await clearPdfCache();
+holdRequests = true;
+await chooseMode('flow-bilingual');
+check('并发晚归：旧请求已进入接口', !!(await until(() => held.length > 0, 5000)));
+const oldReplies = held.splice(0);
+await chooseTarget('zh-CN');
+holdRequests = false;
+await chooseMode('flow-bilingual');
+await until(async () => (await firstTranslation()).startsWith('译:'));
+await idle();
+const freshText = await firstTranslation();
+const freshRows = (await pdfCacheRows()).map((row) => row.key).sort();
+before = hits.requests;
+for (const release of oldReplies) release();
+await sleep(900);
+check('并发晚归：新译文、缓存与进度不受旧任务影响', !!freshText && (await firstTranslation()) === freshText
+  && JSON.stringify((await pdfCacheRows()).map((row) => row.key).sort()) === JSON.stringify(freshRows)
+  && hits.requests === before && await pageEval(page, 'return document.getElementById("pdfProgress").hidden'));
 
 // 损坏 PDF：放在最后，导入失败会回到书库
 const badPdf = path.join(os.tmpdir(), 'rimefox-corrupt-' + Date.now() + '.pdf');

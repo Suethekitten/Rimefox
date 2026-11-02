@@ -7,6 +7,7 @@ import { listBooks, getBook, saveBook, deleteBook, saveProgress, sha256, getRead
 import { saveConfig } from '../lib/config.js';
 import { ReaderTranslator } from '../lib/reader/translate.js';
 import { PdfTranslator } from '../lib/reader/pdf-translate.js';
+import { pdfCacheIdentity } from '../lib/reader/pdf-cache.js';
 import { openPdfDocument, looksLikePdf } from '../lib/reader/pdf.js';
 
 const PDF_MODE_OPTIONS = [
@@ -43,6 +44,10 @@ const state = {
   pdfPage: 0,
   pdfTrans: null,
   pdfTranslator: null,
+  pdfGeneration: 0,
+  pdfIdentity: '',
+  pdfStopped: false,
+  pdfTranslating: new Map(),
   pdfZoom: 1,
   pdfTransDone: 0,
   pdfTransPending: 0,
@@ -59,6 +64,7 @@ const state = {
   translating: false
 };
 let translator = null;
+let configSequence = 0;
 
 function toast(message, kind) {
   const el = $('readerToast');
@@ -122,8 +128,24 @@ function runtimeMessage(msg) {
   });
 }
 async function loadConfig() {
+  const sequence = ++configSequence;
   const res = await runtimeMessage({ type: 'config:get' });
-  state.config = res && res.ok ? res.config : null;
+  const config = res && res.ok ? res.config : null;
+  const doc = state.pdf;
+  const target = state.readerTarget;
+  const identity = doc && config ? await pdfCacheIdentity(config, target, 'plain') : '';
+  if (sequence !== configSequence) return state.config;
+  const changed = doc && doc === state.pdf && target === state.readerTarget
+    && state.pdfIdentity && state.pdfIdentity !== identity;
+  state.config = config;
+  if (changed) {
+    cancelPdfTranslations(true);
+    setPdfOriginalMode();
+    state.pdfIdentity = identity;
+    await applyPdfViewMode();
+    setStatus('readerStatus', '翻译配置已变化；请选择双语或点「翻译本章」使用新配置。');
+  }
+  if (state.book) $('translateChapter').disabled = !(config && config.hasKey);
   if (!state.config) {
     setStatus('libraryStatus', '无法读取扩展配置，请重新打开阅读器。', 'error');
     return null;
@@ -175,14 +197,9 @@ async function changeTarget() {
     await saveReaderSettings({ targetLang: target });
     state.readerTarget = target;
     if (state.pdf) {
-      state.pdfTrans = new Map();
-      if (state.pdfTranslator) state.pdfTranslator.stop();
-      state.pdfTranslator = null;
-      document.querySelectorAll('.pdf-trans').forEach((node) => node.remove());
-      state.mode = 'original';
-      $('modeSelect').value = 'original';
-      state.book.mode = 'original';
-      $('bookContent').dataset.pdfMode = 'original';
+      cancelPdfTranslations(true);
+      setPdfOriginalMode();
+      state.pdfIdentity = await pdfCacheIdentity(readerConfig(), target, 'plain');
       try { await saveBook(state.book); } catch (err) { /* ignore */ }
       setStatus('readerStatus', '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译 PDF。');
       return;
@@ -565,6 +582,7 @@ async function renderPdfPage(el, index) {
   const doc = state.pdf;
   if (!doc) return;
   const loaded = await doc.page(index);
+  if (doc !== state.pdf || !el.isConnected) return;
   const content = document.getElementById('bookContent');
   const baseWidth = Math.max(320, (content ? content.clientWidth : 720) - 56);
   const cssWidth = Math.round(baseWidth * state.pdfZoom);
@@ -576,6 +594,7 @@ async function renderPdfPage(el, index) {
   canvas.style.height = 'auto';
   el.appendChild(canvas);
   await doc.render(index, canvas, renderScale);
+  if (doc !== state.pdf || !el.isConnected) return;
   if (loaded.blocks.length) {
     const panel = document.createElement('div');
     panel.className = 'pdf-blocks';
@@ -655,10 +674,38 @@ function renderPdfProgress() {
 }
 
 function beginPdfTranslation() {
+  $('pdfTranslateStop').hidden = false;
   if (state.pdfProgressTimer) { clearTimeout(state.pdfProgressTimer); state.pdfProgressTimer = 0; }
   state.pdfTransDone = 0;
   state.pdfTransPending = 0;
   renderPdfProgress();
+}
+
+// 清理整代任务；旧 finally 不能删掉新一代同页任务或修改新进度。
+function cancelPdfTranslations(clear) {
+  state.pdfGeneration += 1;
+  if (state.pdfTranslator) state.pdfTranslator.stop();
+  state.pdfTranslator = null;
+  state.pdfTranslating = new Map();
+  state.pdfStopped = true;
+  state.pdfTransDone = 0;
+  state.pdfTransPending = 0;
+  clearTimeout(state.pdfProgressTimer);
+  state.pdfProgressTimer = 0;
+  $('pdfProgress').hidden = true;
+  if (clear) {
+    state.pdfTrans = new Map();
+    document.querySelectorAll('.pdf-trans').forEach((node) => node.remove());
+  }
+}
+
+function setPdfOriginalMode() {
+  state.mode = 'original';
+  state.pdfLang = 'original';
+  const mode = state.pdfView === 'flow' ? 'flow-original' : 'pdf-original';
+  $('modeSelect').value = mode;
+  if (state.book) state.book.pdfMode = mode;
+  $('bookContent').dataset.pdfMode = 'original';
 }
 
 function endPdfProgressIfIdle() {
@@ -672,30 +719,43 @@ function endPdfProgressIfIdle() {
 }
 
 async function translatePdfPage(index) {
-  if (!state.pdf || !state.config || !state.config.hasKey) return;
-  state.pdfTranslating = state.pdfTranslating || new Set();
+  if (!state.pdf || !state.config || !state.config.hasKey || state.pdfStopped) return;
   if (state.pdfTranslating.has(index)) return;
-  state.pdfTranslating.add(index);
+  const token = {};
+  const jobs = state.pdfTranslating;
+  jobs.set(index, token);
+  const generation = state.pdfGeneration;
+  const doc = state.pdf;
+  const bookId = state.book && state.book.id;
+  const target = state.readerTarget;
+  const config = readerConfig();
   if (!state.pdfTranslator) state.pdfTranslator = new PdfTranslator({ onStatus: onPdfTranslateStatus });
+  const currentTranslator = state.pdfTranslator;
+  const current = () => generation === state.pdfGeneration && doc === state.pdf && currentTranslator === state.pdfTranslator;
   state.pdfTransPending += 1;
   renderPdfProgress();
   try {
-    const page = await state.pdf.page(index);
-    const texts = await state.pdfTranslator.translatePage({
-      bookId: state.book && state.book.id,
+    const page = await doc.page(index);
+    if (!current()) return;
+    const texts = await currentTranslator.translatePage({
+      bookId: bookId,
       page: page,
-      target: state.readerTarget,
-      style: 'plain'
+      target: target,
+      style: 'plain',
+      config: config
     });
+    if (!current() || !texts) return;
     if (!state.pdfTrans) state.pdfTrans = new Map();
     state.pdfTrans.set(index, texts);
     applyPdfTranslations(index);
   } finally {
-    state.pdfTranslating.delete(index);
-    state.pdfTransPending = Math.max(0, state.pdfTransPending - 1);
-    state.pdfTransDone += 1;
-    renderPdfProgress();
-    endPdfProgressIfIdle();
+    if (jobs.get(index) === token) jobs.delete(index);
+    if (current()) {
+      state.pdfTransPending = Math.max(0, state.pdfTransPending - 1);
+      state.pdfTransDone += 1;
+      renderPdfProgress();
+      endPdfProgressIfIdle();
+    }
   }
 }
 
@@ -730,7 +790,9 @@ async function ensurePdfFlowPage(section) {
   if (!section || section.dataset.loaded === '1' || !state.pdf) return;
   section.dataset.loaded = '1';
   const pageNo = Number(section.dataset.page);
-  const loaded = await state.pdf.page(pageNo);
+  const doc = state.pdf;
+  const loaded = await doc.page(pageNo);
+  if (doc !== state.pdf || !section.isConnected) return;
   const holder = document.createElement('div');
   holder.className = 'pdf-flow-blocks';
   for (let i = 0; i < loaded.blocks.length; i += 1) {
@@ -769,7 +831,8 @@ function ensureVisiblePdfFlowPages() {
 function updatePdfAnchor() {
   if (!state.pdf) return;
   if (state.pdfView === 'flow') {
-    let target = null;
+    // 顶部工具栏可能让第一页的 top 大于阈值；此时仍应回到第一页，不能沿用旧页码。
+    let target = document.querySelector('#pdfFlow .pdf-flow-page');
     for (const section of document.querySelectorAll('#pdfFlow .pdf-flow-page')) {
       if (section.getBoundingClientRect().top <= 120) target = section;
       else break;
@@ -842,11 +905,14 @@ async function applyPdfViewMode() {
 }
 
 async function openPdfBook(record) {
+  cancelPdfTranslations(true);
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   const buffer = await record.fileBlob.arrayBuffer();
   const doc = await loadPdfDocument(buffer);
   state.pdf = doc;
+  state.pdfIdentity = await pdfCacheIdentity(readerConfig(), state.readerTarget, 'plain');
+  state.pdfStopped = false;
   state.book = record;
   // 元数据在打开时补齐（导入时只存文件，避免同页开两个 pdf.js 文档）
   if (doc.metadata && doc.metadata.title && doc.metadata.title !== '未命名 PDF') {
@@ -977,6 +1043,8 @@ function renderVisiblePdfPages() {
 }
 
 function closeReader() {
+  cancelPdfTranslations(true);
+  state.pdfIdentity = '';
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   const pdfNav = document.querySelector('.pdf-nav');
@@ -1088,13 +1156,14 @@ function scrollToFragment(fragment) {
 }
 
 async function openBook(record) {
-  if (!state.config) await loadConfig();
+  await loadConfig();
   // 没有配置也能读原文；只有翻译相关入口不可用
   if (record.format === 'pdf') {
     try { await openPdfBook(record); } catch (err) { setStatus('libraryStatus', errorText(err), 'error'); closeReader(); }
     return;
   }
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
+  cancelPdfTranslations(true);
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   updatePdfZoomUi();
   try {
@@ -1220,11 +1289,14 @@ function saveProgressSoon() {
 async function changeMode(mode) {
   if (!state.book) return;
   if (state.pdf) {
+    await loadConfig();
+    if (!state.pdf || !state.book) return;
     const option = PDF_MODE_OPTIONS.find((item) => item.value === mode);
     if (!option) return;
     state.pdfView = option.view;
     state.pdfLang = option.lang;
     state.mode = option.lang;
+    if (option.lang !== 'original') state.pdfStopped = false;
     state.book.pdfMode = mode;
     $('modeSelect').value = mode;
     try { await saveBook(state.book); } catch (err) { /* ignore */ }
@@ -1282,8 +1354,10 @@ function bindEvents() {
   $('modeSelect').addEventListener('change', () => changeMode($('modeSelect').value));
   $('targetSelect').addEventListener('change', changeTarget);
   $('translateChapter').addEventListener('click', async () => {
+    await loadConfig();
     if (!(state.config && state.config.hasKey)) return;
     if (state.pdf) {
+      state.pdfStopped = false;
       if (state.pdfLang === 'original') await changeMode('flow-bilingual');
       const pages = state.pdfView === 'flow' ? visibleFlowPageIndexes() : visiblePdfPageIndexes();
       setStatus('readerStatus', '正在翻译当前 ' + pages.length + ' 页…');
@@ -1324,12 +1398,7 @@ function bindEvents() {
     $('pdfSearchGo').click();
   });
   $('pdfTranslateStop').addEventListener('click', () => {
-    if (state.pdfTranslator) state.pdfTranslator.stop();
-    state.pdfTransPending = 0;
-    state.pdfTransDone = 0;
-    state.pdfTranslating = new Set();
-    const progress = $('pdfProgress');
-    if (progress) progress.hidden = true;
+    cancelPdfTranslations(false);
     $('pdfTranslateStop').hidden = true;
     setStatus('readerStatus', '已停止翻译。');
   });
@@ -1423,6 +1492,10 @@ async function boot() {
   translator = new ReaderTranslator({ onStatus: onTranslateStatus });
   if (state.config) await translator.configure(readerConfig());
   bindEvents();
+  // 阅读器是可信扩展页；只重拉去 Key 的配置，配置变化不自动触发付费翻译。
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.config) loadConfig().catch(() => {});
+  });
   await renderLibrary();
 }
 
