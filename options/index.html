@@ -94,6 +94,14 @@
                 <span class="row-desc" id="apiKeyHint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
               </span>
               <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." autocomplete="off" />
+              <label class="row-text"><input id="rememberKey" type="checkbox" /> <span>在此设备上记住密钥</span></label>
+              <span class="row-desc">默认保留在当前会话中，关闭浏览器或重载扩展后需重新填写；勾选后保存到本机。</span>
+              <div id="keyMigration" hidden>
+                <p>旧版本曾在本机保存密钥，要改为仅本次会话吗？</p>
+                <button type="button" id="migrateSession" class="btn">改为仅本次会话</button>
+                <button type="button" id="keepLocalKey" class="btn">继续在设备上记住</button>
+              </div>
+              <p id="authStatus" class="row-desc" role="status"></p>
             </div>
           </div>
 

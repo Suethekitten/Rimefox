@@ -441,6 +441,11 @@
       if (res && res.ok && res.config) {
         var prevConfig = DT.state.config || {};
         DT.state.config = res.config;
+        if (res.fingerprint) DT.state.configFingerprint = res.fingerprint;
+        if (res.config.authPaused) {
+          cancelRun();
+          DT.state.lastError = '接口鉴权失败，翻译已暂停；请在设置中更新密钥或测试连接。';
+        }
         // 配置里的默认趣味风格只在本页还没有亲手选过时同步；
         // 用户在本页的下拉选择优先，配置广播不能覆盖，也不能改变已经生效的 style。
         if (!DT.state.selectedStyleExplicit && DT.STYLE_IDS.indexOf(res.config.funStyle) >= 0) {
@@ -642,7 +647,7 @@
   // opts: { reset: 是否清零统计, silent: 是否不弹提示 }
   async function translatePage(opts) {
     var options = opts || {};
-    if (running || !DT.state.enabled) return;
+    if (running || !DT.state.enabled || (DT.state.config && DT.state.config.authPaused)) return;
     pruneOrderFailures();
     // 配置目标已回退但页面还是旧目标译文：暂停动态补翻，避免两种目标语言混排；
     // 明确点「重新翻译」或「开始翻译」后 applyConfigTarget() 会清掉这个标记。
@@ -662,7 +667,7 @@
     var progressed = false; // 本轮是否有单元完成或失败
 
     function cancelled() {
-      return myRun !== runId;
+      return myRun !== runId || !!(DT.state.config && DT.state.config.authPaused);
     }
 
     function wantRetry(ms) {
@@ -1302,6 +1307,10 @@
   // ---------------- 开关 ----------------
   async function enable() {
     var cfg = await loadConfig();
+    if (cfg && cfg.authPaused) {
+      DT.toast('接口鉴权失败，翻译已暂停；请在设置中更新密钥或测试连接。');
+      return summarize();
+    }
     // 内容脚本拿不到 Key 本身（后台只给 hasKey），见 background.js 的 config:get
     if (!cfg || !cfg.hasKey) {
       DT.toast('还没配置 API Key：点扩展图标 → 设置');
@@ -1439,7 +1448,7 @@
   // ---------------- 动态内容 ----------------
   var incrementalDue = 0;
   function scheduleIncremental() {
-    if (!DT.state.enabled) return;
+    if (!DT.state.enabled || (DT.state.config && DT.state.config.authPaused)) return;
     debugStats.incrementalScanCount += 1;
     // 防抖，但要有上限：持续更新的页面（聊天 / 论坛 / 直播）每次变动都重置 600ms，
     // 会永远等不到翻译。第一次变动定一个截止时间，之后只提前不推迟。
@@ -1898,6 +1907,7 @@
     // 不再自己监听 storage.onChanged：那个事件带着完整配置（含 API Key）。
     // 失败退避一并清零 —— 多半是刚把 Key 改对了，接着把没翻成的补上。
     if (msg.type === 'dt:configChanged') {
+      if (msg.fingerprint && msg.fingerprint === DT.state.configFingerprint) return false;
       loadConfig().then(function () {
         resetFailures();
         // 换了服务商 / Key / 模型后，上一批“模型输出语言错误”不应永久挡住这段；

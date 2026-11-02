@@ -792,6 +792,7 @@ const swEval = async (code) => {
   throw last;
 };
 const readConfig = () => swEval("return (await chrome.storage.local.get('config')).config;");
+const readTrustedConfig = (session) => evaluate(session, 'chrome.runtime.sendMessage({type:"config:trustedGet"}).then(r=>r.config)');
 const patchConfig = (patch) => {
   // This fixture writes storage directly; keep the v7 compatibility aliases coherent,
   // as saveConfig does for the actual popup/options controls tested below.
@@ -1834,7 +1835,8 @@ async function optionsChecks() {
     return cfg.glossary && cfg.glossary.length ? cfg : null;
   }, 8000);
   check('导入配置：术语表一起导入', imported && imported.glossary[0].target === '凛狐', await evaluate(o, "document.getElementById('cfgResult').textContent"));
-  check('导入后本机服务商的 Key 还在', imported && imported.providerConfig.__custom__ && imported.providerConfig.__custom__.apiKey === 'sk-test', imported && Object.keys(imported.providerConfig).join(','));
+  const importedTrusted = await readTrustedConfig(o);
+  check('导入后本机服务商的 Key 还在', importedTrusted?.providerConfig?.__custom__?.apiKey === 'sk-test', imported && Object.keys(imported.providerConfig).join(','));
   await evaluate(o, "document.getElementById('refreshCache') && document.getElementById('refreshCache').click(); true");
   await sleep(800);
   const cacheText = await evaluate(o, "(document.getElementById('cacheStats') || {}).textContent || ''");
@@ -1920,7 +1922,7 @@ async function glossaryNotesChecks(o) {
   check('JSON：界面导出保留说明且默认不带 API Key', exported?.config?.glossary?.find(one => one.source === 'response')?.note === edited && !exported?.config?.providerConfig?.__custom__?.apiKey);
   await importFile('#importFile', JSON.stringify({ app: 'rimefox', schema: 1, config: { targetLang: 'zh-CN', mode: 'dual', theme: 'underline', glossary: [{ source: 'response', target: 'JSON首选译法' }] } }), 'json');
   const jsonImported = await until(async () => { const cfg = await readConfig(); return cfg.glossary.find(one => one.source === 'response' && one.target === 'JSON首选译法'); });
-  check('JSON：旧条目未提供说明时保留原说明与 Key', jsonImported?.note === edited && (await readConfig()).providerConfig.__custom__.apiKey === 'sk-test');
+  check('JSON：旧条目未提供说明时保留原说明与 Key', jsonImported?.note === edited && (await readTrustedConfig(o)).providerConfig.__custom__.apiKey === 'sk-test');
   await inRow('response', "details.open=true;details.scrollIntoView({block:'center'});return true;");
   const screenshot = await send('Page.captureScreenshot', { format: 'png' }, o);
   fs.writeFileSync(path.join(WORK, 'glossary-notes-wide.png'), Buffer.from(screenshot.data, 'base64'));
@@ -2270,7 +2272,16 @@ async function youtubeChecks(url) {
   check('接管期间原生字幕被收起（不两套叠在一起）', hidden, hidden);
   const sentFirst = stats.texts - sentBefore;
   check('字幕按批送翻（第一次打开会请求）', sentFirst > 0, '送翻 ' + sentFirst + ' 条');
-  if (!overlay) return;
+  if (!overlay) {
+    const diagnostic = {
+      captions: captionResponses.filter((r) => r.v === vid),
+      runtime: await contentEval(yt, '({ hasKey: !!window.__DT.state.config.hasKey, paused: !!window.__DT.state.config.authPaused, subtitleTranslate: window.__DT.state.config.subtitleTranslate, subtitles: window.__DT.subtitleRuntime.instance.inspect() })'),
+      player: await pageEval(yt, 'const p=document.getElementById("movie_player"),v=p&&p.querySelector("video");return {state:p&&p.getPlayerState(),caption:document.querySelector(".caption-window")?.textContent||"",video:v&&{time:v.currentTime,paused:v.paused,ready:v.readyState,error:v.error?.code}};')
+    };
+    console.log('YouTube diagnostic', JSON.stringify(diagnostic));
+    fs.writeFileSync(path.join(WORK, 'youtube-diagnostic.json'), JSON.stringify(diagnostic, null, 2));
+    return;
+  }
 
   // 字幕译文进了缓存：在页面的内容脚本里把刚才显示的那句再送翻一次，后台应直接从缓存给、不发请求。
   // （不用刷新页面验证：刷新后常有跳不过的贴片广告，一等就是几分钟）
@@ -3001,7 +3012,10 @@ async function customLanguageLifecycleChecks() {
   check('删除前：自定义粤语译文带标准代码 lang', !!ready && langBefore === 'yue-Hant-HK', String(langBefore));
   const before = stats.requests;
   await patchConfig({ customLanguages: [], targetLang: 'zh-CN' });
-  await sleep(900);
+  await until(async () => {
+    const st = await tabMsg(tab.tabId, { type: 'dt:status' });
+    return st && st.configTarget === 'zh-CN';
+  });
   const status = await tabMsg(tab.tabId, { type: 'dt:status' });
   const langAfter = await pageEval(tab, "var n=document.querySelector('[data-dt-target]'); return n ? n.getAttribute('lang') : null;");
   check('删除在用语言：不重新请求，旧译文保持原语言', stats.requests === before && status && status.target === yue.id && status.configTarget === 'zh-CN' && status.targetPending === true && langAfter === 'yue-Hant-HK', JSON.stringify({ requests: stats.requests - before, target: status && status.target, configTarget: status && status.configTarget, pending: status && status.targetPending, lang: langAfter }));
@@ -3131,7 +3145,10 @@ async function dockHideChecks() {
   check('鼠标移开：重新半隐藏', !!closedOk && closed.right > closed.vw && closed.visible >= closed.width / 2 - 1, JSON.stringify(closed));
 
   await patchConfig({ dockSide: 'left', dockPos: null });
-  await sleep(900);
+  await until(async () => {
+    const m = await ballInfo();
+    return m.left < 0 && m.visible >= m.width / 2 - 1 && m.visible <= m.width / 2 + 2;
+  }, 6000);
   const left = await ballInfo();
   check('左侧贴边半隐藏：至少露出半个小球', left.left < 0 && left.visible >= left.width / 2 - 1, JSON.stringify(left));
 
@@ -3160,7 +3177,10 @@ async function dockHideChecks() {
   );
 
   await patchConfig({ dockAutoHide: false, dockSide: 'right', dockPos: null });
-  await sleep(900);
+  await until(async () => {
+    const m = await ballInfo();
+    return m.right <= m.vw && m.left >= 0 && m.transform === 'none';
+  }, 6000);
   const off = await ballInfo();
   check('关闭自动隐藏：完整显示', off.right <= off.vw && off.left >= 0, JSON.stringify(off));
 

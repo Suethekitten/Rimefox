@@ -1,6 +1,7 @@
 import {
   DEFAULTS,
   getConfig,
+  configPatchSince,
   saveConfig,
   THEMES,
   languageOptions,
@@ -71,6 +72,7 @@ const fields = {
   engine: $('engine'),
   baseUrl: $('baseUrl'),
   apiKey: $('apiKey'),
+  rememberKey: $('rememberKey'),
   model: $('model'),
   thinkingMode: $('thinkingMode'),
   thinkingExtra: $('thinkingExtra'),
@@ -553,6 +555,9 @@ function applyConfig(cfg) {
   fields.engine.value = slot.engine;
   fields.baseUrl.value = slot.baseUrl || '';
   fields.apiKey.value = slot.apiKey || '';
+  fields.rememberKey.checked = slot.keyStorage === 'local';
+  $('keyMigration').hidden = !cfg.keyMigrationPending;
+  $('authStatus').textContent = cfg.authPaused ? t('鉴权失败，翻译已暂停；更新密钥或测试连接后恢复。') : !slot.apiKey ? t('本次会话尚未配置密钥。') : '';
   fields.model.value = slot.model || '';
   fields.thinkingMode.value = cfg.thinkingMode || DEFAULTS.thinkingMode;
   fields.thinkingExtra.value = cfg.thinkingExtra || '';
@@ -639,6 +644,7 @@ function readForm() {
       engine: one.engine || 'openai',
       baseUrl: one.baseUrl || '',
       apiKey: one.apiKey || '',
+      keyStorage: one.keyStorage === 'local' ? 'local' : 'session',
       model: one.model || ''
     };
   });
@@ -773,6 +779,7 @@ function scheduleModelFetch() {
 }
 
 async function fetchModels(manual) {
+  if (currentCfg && currentCfg.authPaused) return;
   const baseUrl = fields.baseUrl.value.trim();
   const apiKey = fields.apiKey.value.trim();
   if (!baseUrl || !apiKey) {
@@ -805,6 +812,7 @@ function formOf() {
     engine: fields.engine.value,
     baseUrl: fields.baseUrl.value,
     apiKey: fields.apiKey.value,
+    keyStorage: fields.rememberKey.checked ? 'local' : 'session',
     model: fields.model.value
   };
 }
@@ -829,12 +837,28 @@ function loadProvider(id) {
   fields.engine.value = slot.engine;
   fields.baseUrl.value = slot.baseUrl || '';
   fields.apiKey.value = slot.apiKey || '';
+  fields.rememberKey.checked = slot.keyStorage === 'local';
   fields.model.value = slot.model || '';
   picker.setItems([]);
   picker.close();
   updateEngineHints();
   updateKeyLink(keyLink, providerById(slot.provider));
   picker.updateHint();
+}
+
+for (const [id, policy] of [['migrateSession', 'session'], ['keepLocalKey', 'local']]) {
+  $(id).addEventListener('click', async () => {
+    if (savebar.dataset.dirty === 'true') {
+      setResult($('saveResult'), t('请先保存当前更改，再选择密钥保存方式。'), 'bad');
+      return;
+    }
+    try {
+      currentCfg = await saveConfig({ keyMigration: policy });
+      applyConfig(currentCfg);
+      rememberSaved(currentCfg);
+      markSaved(currentCfg);
+    } catch (err) { setResult($('saveResult'), err.message, 'bad'); }
+  });
 }
 
 // 切换服务商：各用各的地址 / Key / 模型
@@ -941,7 +965,7 @@ function countChanges(a, b) {
       new Set(Object.keys(pa).concat(Object.keys(pb))).forEach((id) => {
         const sa = pa[id] || {};
         const sb = pb[id] || {};
-        ['engine', 'baseUrl', 'apiKey', 'model'].forEach((f) => {
+        ['engine', 'baseUrl', 'apiKey', 'model', 'keyStorage'].forEach((f) => {
           if ((sa[f] || '') !== (sb[f] || '')) n += 1;
         });
       });
@@ -1101,6 +1125,10 @@ async function init() {
 // 有未保存的改动时只同步界面外观，并提示保存会以这里为准
 function onConfigElsewhere(next) {
   const merged = mergeConfig(DEFAULTS, next);
+  // 输入事件的脏状态计数可能还在下一轮定时器里，不能据旧标志覆盖刚输入的内容。
+  updateDirty();
+  $('authStatus').textContent = merged.authPaused ? t('鉴权失败，翻译已暂停；更新密钥或测试连接后恢复。') : !activeConfig(merged).apiKey ? t('本次会话尚未配置密钥。') : '';
+  currentCfg.authPaused = merged.authPaused;
   if (savebar.dataset.dirty !== 'true') {
     currentCfg = merged;
     applyConfig(currentCfg);
@@ -1130,10 +1158,10 @@ $('save').addEventListener('click', async () => {
     (ruleErrors.length ? fields.siteRules : fields.customCss).scrollIntoView({ block: 'center', behavior: 'smooth' });
     return;
   }
-  const patch = readForm();
-  const active = activeConfig(patch);
+  const patch = configPatchSince(savedForm || {}, readForm());
   try {
     currentCfg = await saveConfig(patch);
+    applyConfig(currentCfg);
   } catch (err) {
     setResult($('saveResult'), err.message, 'bad');
     return;
@@ -1147,7 +1175,7 @@ $('save').addEventListener('click', async () => {
   rememberSaved(currentCfg);
   markSaved(currentCfg);
   glossaryEditor.render(); // 清洗后的结果（去空行 / 去重）反映到表格
-  if (active.apiKey) setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
+  if (activeConfig(currentCfg).apiKey) setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
   else setResult($('saveResult'), '已保存，但还没有填 API Key，翻译会失败。', 'bad');
 });
 
@@ -1181,7 +1209,8 @@ $('test').addEventListener('click', async () => {
   btn.disabled = true;
   setResult($('testResult'), '测试中…');
   try {
-    currentCfg = await saveConfig(readForm()); // 先落盘，后台读的是存储里的配置
+    currentCfg = await saveConfig(configPatchSince(savedForm || {}, readForm()));
+    applyConfig(currentCfg);
     rememberSaved(currentCfg);
     markSaved(currentCfg);
     const res = await new Promise((resolve, reject) => {
@@ -1332,6 +1361,7 @@ $('clearCache').addEventListener('click', async () => {
 // 解析与校验在 lib/config.js 的 pickImportedConfig 里（纯函数，可被 node 直接测试）。
 function buildExport(includeKey) {
   const cfg = { ...currentCfg };
+  ['authPaused', 'credentialRevision', 'credentialsRevision', '_storageRevision', 'keyMigrationPending'].forEach((key) => { delete cfg[key]; });
   // Key 藏在每个服务商的配置里：导出时逐个处理
   cfg.providerConfig = {};
   Object.keys(currentCfg.providerConfig || {}).forEach((id) => {

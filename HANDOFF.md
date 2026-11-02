@@ -57,7 +57,10 @@ edge-bilingual/
 ├── _locales/              manifest 文案（zh_CN / en）：名称、简介按浏览器界面语言显示
 ├── background.js          service worker：消息中枢、并发闸门、批处理、缓存、重试
 ├── lib/
-│   ├── config.js          配置默认值 + 存储读写 + 版本迁移（v8）
+│   ├── config.js          配置默认值 + 存储门面 + 版本迁移（v9）
+│   ├── config-storage.js  后台配置 / 凭据串行队列、写入日志恢复、按服务商保存策略
+│   ├── auth-state.js      实际 HTTP 发送前的凭据 / 暂停检查与旧失败隔离
+│   ├── config-broadcast.js 配置指纹、合并广播与按标签错开发送
 │   ├── professional/      专业 Registry、策略、上下文、本地校验与有限严格复核；医学适配现有 medical/
 │   ├── ai-context.js      AI 精翻的上下文预算 / 提示词 / 缓存指纹（纯函数，复用 professional/context 的规范化）
 │   ├── provider.js        接口门面：chat() / listModels()，按 engine 分发
@@ -160,7 +163,8 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | type | 入参 | 返回 | 说明 |
 |---|---|---|---|
 | `translate` | `{texts: string[], target: string, style?: string, intensity?: string, noCache?: boolean, pageLang?: string, documentContext?: object}` | `{ok, results: (string\|null)[], alignments, validations, context, failed, cached, error}` | 核心翻译。`results[i]` 为 `null` 表示该段失败。`target: 'auto'` 跟随 `pageLang`；`noCache` 不读写缓存。`style` 是趣味风格，`intensity` 是 light / standard / exaggerated（只对非 plain 生效）。`context` 只回报上下文模式 / 字符数 / 条数，不含正文。可选专业上下文与质量结果见 [专业引擎](docs/PROFESSIONAL-TRANSLATION.md)。|
-| `config:get` | — | `{ok, config}` | 读配置。**不含 `apiKey`**，换成 `hasKey: boolean`（Key 不进内容脚本）。`config.page` 是后台按发送方网址算好的 `{accent, customCss, typo, site, night, provider}`（自定义 CSS 已清洗、站点规则已匹配） |
+| `config:get` | — | `{ok, config, fingerprint}` | 公开配置不含 `apiKey`，只带 `hasKey`、鉴权暂停和非敏感修订号。`config.page` 由后台按网址计算；指纹用于跳过重复通知，见 §4.7 |
+| `config:trustedGet` / `config:save` | 保存时 `{patch}` | `{ok, config}` | 仅扩展自己的可信页面可调用，返回合成的设置与凭据；网页内容脚本不能调用，见 §4.7 |
 | `mode:set` | `{mode}` | `{ok}` | 悬浮入口切显示方式后记进配置；只接受 `dual` / `translation`，内容脚本改不了别的配置项 |
 | `hover:set` | `{value: boolean}` | `{ok, value}` / `{ok:false,error}` | 悬浮入口切悬停对照；只接受严格布尔值，内容脚本不能改其他配置项 |
 | `glossary:add` | `{source, target, overwrite?}` | `{ok, action}` / `{ok:false,error}` | 划词气泡「加入术语表」。两个字符串各 ≤200 字，清洗 / 去重 / 限条数复用 upsertGlossaryEntry；读取、合并和保存都在 saveConfig 的同一队列内，按最新数据处理并发收录。action 是 added / updated / same（已有这条）/ conflict（同名原文另有译法，带 current 回去问用户，确认后带 overwrite: true 再来）。错误：too_long / bad_value / full（满 500 条）|
@@ -185,7 +189,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | `dt:retranslate` | — | 快照 | 清空重翻 |
 | `dt:diagnose` | — | 诊断报告对象 | 见第 7 节 |
 | `dt:translateInput` | — | 无 | 右键菜单「凛狐：翻译输入框内容」：翻译当前聚焦的输入框（有选区只翻最初选区），原地写回；等待期间内容、DOM 端点或焦点变化，以及返回时正在输入法组词，均取消写回 |
-| `dt:configChanged` | — | 无 | 后台在 `storage.onChanged` 时广播；内容脚本重拉配置、清零失败退避并补扫。内容脚本**不要**自己监听 `storage.onChanged`（事件里带完整配置含 Key） |
+| `dt:configChanged` | `{fingerprint}` | 无 | 后台合并存储变化后广播；指纹相同不重拉，鉴权暂停时停止发送。内容脚本不要监听 storage，见 §4.7 |
 
 ### 接口层（协议 / 服务商 / 思考模式）
 
@@ -213,15 +217,15 @@ lib/
 }
 ```
 
-**配置按「服务商」分槽，不是按协议**：
+**运行时配置按「服务商」分槽，不是按协议**（以下是可信页面 / 后台合成视图，存储布局见 §4.7）：
 
 ```js
 {
   currentProvider: 'deepseek',
   providerConfig: {
-    deepseek:    { engine, baseUrl, apiKey, model },
-    siliconflow: { engine, baseUrl, apiKey, model },
-    __custom__:  { engine, baseUrl, apiKey, model }   // 自定义（可命名、可多个）
+    deepseek:    { engine, baseUrl, apiKey, model, keyStorage },
+    siliconflow: { engine, baseUrl, apiKey, model, keyStorage },
+    __custom__:  { engine, baseUrl, apiKey, model, keyStorage } // 自定义（可命名、可多个）
   },
   customProviders: [{ id: '__custom__', name: '我的中转 A' }]
 }
@@ -229,7 +233,7 @@ lib/
 
 > 为什么不能按协议：DeepSeek 与硅基流动都走 OpenAI 协议，按协议存会让两家的 Key 互相覆盖（0.4.9 踩过这个坑）。
 
-**迁移**：`lib/config.js` 的 `migrateConfig()` 是纯函数，v3 → … → v8 逐级升级；迁移前把原配置备份到 `storage.config_backup_v3`。加字段只加不删。
+**迁移**：`lib/config.js` 的 `migrateConfig()` 负责纯配置字段升级；v9 的凭据分离与去 Key 的配置备份由后台存储队列负责，见 §4.7。
 
 **思考模式**（`thinkingMode`）三态，**默认 `off`**（0.5.1 起；翻译不需要推理，开着既慢又可能把预算用光）：
 
@@ -271,6 +275,18 @@ lib/
 - 测试：`test/reader-contract.test.mjs`（静态契约）、`test/reader-smoke.html`（真实 Chrome 的解析/清洗冒烟）、`tools/e2e-reader.mjs`（真实扩展 + 假 API + 合成 EPUB）。
 
 ---
+
+### 4.7 配置、会话凭据与鉴权暂停（0.15.0）
+
+- **单一写入者**：`config.js` 的扩展页面客户端通过 `config:trustedGet` / `config:save` 交给后台；后台 `config-storage.js` 用同一条串行队列处理读取、迁移、保存、暂停与恢复。两个可信路由校验发送方扩展 ID 和扩展页 URL，网页内容脚本不能拿 Key 或写任意设置。
+- **布局**：`storage.local.config` 只存非敏感设置与每个服务商的 `keyStorage`（session / local）；显式设备记忆的凭据在 `rimefox.secrets.local`；会话凭据和暂停在 `storage.session` 的 `rimefox.secrets.session`。两种区域均限制为 `TRUSTED_CONTEXTS`；`getConfig()` 为可信页面和后台合成完整视图，`publicConfig()` 剥 Key 后才给内容脚本。
+- **旧用户选择**：旧 config 中的 Key 先转为设备记忆，显示一次迁移选择，不擅自改成会话。选择 session 后清理设备凭据与 `config_backup_v3` 等旧配置副本；新填 Key 默认 session。删除服务商会删除两处凭据，恢复默认保留接口；导入的新 Key 沿用已有保存选择或默认 session，导出只有显式勾选才包含 Key。
+- **写失败 / 回收恢复**：先写并读回校验 session 的 pending 日志 → local 一次提交设置、设备凭据、去 Key 备份与 `_storageRevision` → 完成 session。worker 中断后按 local 提交标记选择恢复 next 或保留旧状态；未确认目标写入前不删除旧 Key。完整关闭浏览器或扩展重载会清 session，单独回收 worker 不会。
+- **并发编辑**：设置页通过 `configPatchSince()` 只提交相对已保存表单的字段变化，独立窗口的独立修改可合并；同一字段仍按最后保存。处理外部更新前同步计算脏状态，保护刚输入、尚未到定时器的草稿；暂停提示可独立更新，不覆盖草稿。
+- **暂停边界**：`auth-state.js` 在每次实际模型 HTTP 发送前检查当前凭据修订号和 session 暂停状态，包含排队、重试、思考回退和严格复核。401，或明确标识无效 Key 的 400 / 403，记录暂停；普通权限 403、限流、断网不按 Key 失效处理。已发出的请求无法撤回，但后续发送会被拦住。
+- **恢复与晚归**：凭据修订号是随机版本加非敏感接口身份，不是 Key 散列。更正 Key / 切换可用接口使旧暂停不再适用；只有可信扩展页可调用测试连接绕过暂停，成功后解除匹配版本的暂停。旧 Key 的晚归失败不能暂停新 Key，网页不能借 `test` 或自报继续标记解除后台暂停。
+- **广播**：`config-broadcast.js` 用公开配置生成 SHA-256 指纹，排除 Key 和写入日志 ID，保留随机凭据版本以识别 hasKey 未变的替换；合并短时存储变化并错开发给标签页，不等待前一标签应答才发送下一条；单条应答超时不阻塞后续广播，按标签跳过已送达指纹。内容脚本保存指纹，重复通知不再拉配置；可信设置页 / 弹窗监听相关存储事件后合并重拉，不把密钥传播到网页。
+- **验证与现有边界**：生命周期命令见 `node tools/e2e-session-keys.mjs`；完整实施记录见 [0.15 验证归档](docs/archive/2026-11-01-session-keys-0.15.0.md)。隐私保存期与主动导出边界只在 [PRIVACY.md](PRIVACY.md) 维护。
 
 ## 5. ★ 核心算法：切分与注入（最容易改坏的部分）
 
@@ -535,6 +551,8 @@ chrome-extension://<扩展ID>/selftest/index.html
 ### 7.1b Node 单测（接口层）
 ```
 node test/engines.test.mjs     # 三种协议的请求构造 / 回包解析 / 错误映射 / 模型列表请求
+node test/session-keys.test.mjs # 会话 / 设备 Key、旧配置迁移、日志恢复、并发保存与配置广播
+node test/auth-pause-pipeline.test.mjs # 真实后台 + 假 API：鉴权暂停、旧请求隔离与可信恢复
 node test/config.test.mjs      # 配置迁移 / 按服务商隔离 / 导入校验（含术语表）/ 删除自定义服务商 / 输入框目标语言
 node test/providers.test.mjs   # 提供商模板完整性 + 关闭思考参数
 node test/parse.test.mjs       # 回包解析 parseArray / parseAlignedArray（结构化句子对齐）/ 换行规范化 / 写入前校验 / 思考过程兜底 / 输出长度护栏 / 单条拆句拼回
@@ -593,6 +611,7 @@ node tools/e2e-extension.mjs --chosun-live  # 真实朝鲜日报正文的韩文�
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
 node tools/e2e-extension.mjs --bilibili-live  # 真实 B 站视频页评论区验收（需要能上 bilibili.com；未登录只显示首屏，滚动 / 楼中楼会显示未验证）
 node tools/e2e-extension.mjs --headed --science-live  # 真实 Science Advances 论文页（Cloudflare 需要 headed；只验证引用识别 / 注入 / 还原，不调用真实模型）
+node tools/e2e-session-keys.mjs             # 会话 Key、设备记忆、完整浏览器重启 / 扩展重载、20 标签与鉴权暂停
 node tools/e2e-extension.mjs --selftest-only  # 只跑离线自检页
 node tools/e2e-extension.mjs --medical-only   # 只跑弹窗 + 医学专业模式
 node tools/stability-audit.mjs                # 真实 Chrome 长文 / 大量段落 / 动态 / 内存基准（直接页面）
@@ -676,7 +695,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | 键 | 默认 | 作用 |
 |---|---|---|
 | `currentProvider` | `deepseek` | 当前服务商（内置模板 id，或 `__custom__` / `custom:N`） |
-| `providerConfig` | `{}` | 按服务商存的 `{engine, baseUrl, apiKey, model}`，**Key 不进内容脚本** |
+| `providerConfig` | `{}` | 可信运行时合成 `{engine, baseUrl, apiKey, model, keyStorage}`；落盘布局见 §4.7，Key 不进内容脚本 |
 | `customProviders` | `[]` | 用户保存并命名的自定义服务商 `[{id, name}]` |
 | `temperature` | 0.2 | 采样温度，随请求发送；选了文言文 / 猫娘时由风格自带的温度覆盖（`prompt.js` 的 `temperatureFor`） |
 | `timeoutMs` | 60000 | 单次请求的「多久没收到数据」超时；另有 180s 总上限（见 §6 坑 18） |
@@ -737,7 +756,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `medicalMode` | false | 医学开关的旧版兼容别名，与 `professionalProfile` 同步。|
 | `glossary` | `[]` | 术语表 `[{source, target, category?, note?}]`，全局一份。说明、固定/语境译法、CSV/JSON 兼容和按命中失效的缓存规则见 [术语表帮助](docs/GLOSSARY.md)。划词收录仍走 `glossary:add`，覆盖译法保留原分类和说明。|
 | `debug` | false | 输出调试日志 |
-| `_v` | 8 | 配置版本（迁移逻辑在 `migrateConfig`；v8 只新增自定义语言 / 趣味强度 / AI 精翻字段，专业字段与旧值保留） |
+| `_v` | `CONFIG_VERSION` | 配置格式版本以 `lib/config.js` 为准；凭据迁移另由 §4.7 的日志与提交标记保证幂等 |
 
 ---
 
@@ -770,9 +789,9 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 23. **PDF 批量实测（11 份新样本，2026-10-31）** —— eLife 4 份 + Scientific Reports 7 份，全部解析成功：11–39 页、首页 256–4592 字、块 4–9 个、总耗时 128–213 ms；30 页连续取文本 146 ms、JS 堆 5–6 MB（图多的文件首页堆可到 23–30 MB）。eLife 两栏被正确识别（栏区间 [37,153]/[169,573]），Nature 单栏。栏目标题横幅（RESEARCH ARTICLE / OPEN）与跨页页眉已修（整行重复 + 顶部横幅词表 + 卷期行）；印刷版目录已要求页码位于右侧 45% 外，避免把图注当条目。
 24. **PDF 扫描件 / 中文书 / 教材实测（5 份，2026-10-31）** —— ① 蠶書（NLC 扫描，8 页）：全文 **0 字**，纯图片 PDF，不 OCR 无法翻译；阅读器逐页显示「本页没有可提取的文字（可能是扫描页）」。② Pro Git（501 页，中文）：CJK 文本提取正常、outline 22 条、30 页文本 69 ms、堆 7 MB；封面 0 字。③ 中文期刊（11 页）：**双栏正确识别** [54,287]/[308,541]、每页 1700–2000 字；行/栏改按内容流拼接后不再串栏。④ Pacific Food Systems 教材（545 页 ×2，print 版）：outline 18 条、单栏、每页约 1250 字、30 页 33 ms、堆 4 MB；项目符号名单已改为逐条分段（2 块 → 18 块）。扫描件 OCR 已拍板排到未来版本（ROADMAP P2-11），候选评估见 [docs/archive/2026-10-31-ocr-candidates.md](docs/archive/2026-10-31-ocr-candidates.md)。
 25. **PDF 译文叠加已接入（2026-10-31，PDF 分支）** —— `lib/reader/pdf-translate.js` 按页分块（≤16 段 / 3600 字）调用 `translate`，译文写在原文块下方；三种模式：原文隐藏译文、双语同时显示、仅译文隐藏原文。译文缓存复用 reader IndexedDB（key = `pdf|bookId|page:N|块序号|FNV`），目标语言用阅读器自己的 `readerTarget`，与网页翻译隔离。`tools/e2e-pdf-reader.mjs` 起本地假 API 验证：译文出现、来自接口、模式切换与可见性，共 18 项断言。
-26. **PDF 0.14.0 剩余已知限制（维护交接见 [docs/PDF-HANDOFF.md](docs/PDF-HANDOFF.md)）** —— ① 印刷版目录页码是「书内页码」，跳转可能差前目录的页数（没有做页偏移映射）；② 少数页两栏被 pdf.js 编码成单个 text item（示例 OBP 第 20 页），仍可能合并成一段；③ 扫描件 0 文本，OCR 排到未来版本（ROADMAP P2-11，准备工作已开始：候选评估与探针计划就绪，尚未跑探针/未集成）；④ 跨栏 / 跨页段落仍按页分块，段落会在页边界断开；⑤ 高倍缩放需要横向滚动页面（不自动换行）；⑥ 没有流式 / 重排阅读模式，字号只影响下方文本块，画布不重排；⑦ 表格 / 公式文本未清洗（0.15+ 分两步，见 ROADMAP P2-12）。
-27. **PDF 可用性补丁（2026-11-01）** —— 加密 / 损坏 PDF 的明确错误提示；目录面板增加「跳页」与「全文搜索」（最多 50 条，跨页搜索）；翻译进度条增加「停止」（PdfTranslator epoch 作废旧批次）；单 text item 的复杂页面在页标签上标注「复杂版式，文本可能合并」（真正拆栏仍待 0.15 兜底）。
-28. **PDF 译文缓存未隔离目标语言 / 翻译配置（0.14.2 本地已修，待发布）** —— 升级缓存身份并隔离阅读器任务代际；目标语言 / 配置变化不再误用旧译文，关闭 / 停止后的旧响应不写回。契约与旧缓存处理只在 [PDF 维护交接](docs/PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复) 维护；验证见 §14。
+26. **PDF 0.14.0 剩余已知限制（维护交接见 [docs/PDF-HANDOFF.md](docs/PDF-HANDOFF.md)）** —— ① 印刷版目录页码是「书内页码」，跳转可能差前目录的页数（没有做页偏移映射）；② 少数页两栏被 pdf.js 编码成单个 text item（示例 OBP 第 20 页），仍可能合并成一段；③ 扫描件 0 文本，OCR 排到未来版本（ROADMAP P2-11，准备工作已开始：候选评估与探针计划就绪，尚未跑探针/未集成）；④ 跨栏 / 跨页段落仍按页分块，段落会在页边界断开；⑤ 高倍缩放需要横向滚动页面（不自动换行）；⑥ 没有流式 / 重排阅读模式，字号只影响下方文本块，画布不重排；⑦ 表格 / 公式文本未清洗（后续候选，见 ROADMAP P2-12）。
+27. **PDF 可用性补丁（2026-11-01）** —— 加密 / 损坏 PDF 的明确错误提示；目录面板增加「跳页」与「全文搜索」（最多 50 条，跨页搜索）；翻译进度条增加「停止」（PdfTranslator epoch 作废旧批次）；单 text item 的复杂页面在页标签上标注「复杂版式，文本可能合并」（真正拆栏仍待样本验证后排期）。
+28. **PDF 译文缓存未隔离目标语言 / 翻译配置（本地已修，纳入 0.15.0 候选）** —— 升级缓存身份并隔离阅读器任务代际；目标语言 / 配置变化不再误用旧译文，关闭 / 停止后的旧响应不写回。契约与旧缓存处理只在 [PDF 维护交接](docs/PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复) 维护；验证见 §14。
 
 ---
 
@@ -861,14 +880,13 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.14.2 本地待发布）
+## 14. 本版技术记录（0.15.0 本地候选，未推送）
 
-> 每次发版整节替换；旧版本记录看 git log。三处版本号仍为已发布版本，获得发布许可后统一更新。
-
-- PDF 缓存、后台配置快照校验与阅读器任务代际契约统一见 [PDF-HANDOFF](docs/PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复)，不在这里重复。
-- 本地已修目标语言 / 翻译配置串缓存、旧响应晚归、停止后自动续发、长块缺片落缓存与顶部页码定位；不修改 DOM 翻译引擎。
-- 实施与验证记录见 [归档](docs/archive/2026-11-01-pdf-cache-0.14.2.md)，运行命令与覆盖边界在那里维护。
-- 候选发版说明已写入 CHANGELOG；发布与否仍须按 [AGENTS.md](AGENTS.md) 获取明确许可。
+- 完成会话 Key / 可选设备记忆、旧用户迁移选择、去 Key 备份、写入日志与后台统一串行队列；具体契约只在 §4.7 维护。
+- 完成鉴权失败全局暂停、发送前检查、旧凭据晚归隔离与可信测试连接恢复；设置页 / 弹窗、网页、EPUB / PDF 共用暂停状态。
+- 完成公开配置指纹、合并广播、重复通知跳过、设置页按字段提交与外部更新草稿保护。
+- 包含此前未发布的 PDF 缓存 / 生命周期 / 顶部定位修复，契约见 [PDF-HANDOFF](docs/PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复)，当时记录见 [PDF 修复归档](docs/archive/2026-11-01-pdf-cache-0.14.2.md)。
+- 本轮实施与验证记录见 [0.15 归档](docs/archive/2026-11-01-session-keys-0.15.0.md)。按用户要求仅在本地完成候选版本，推送与发布仍未授权。
 
 ## 15. 专业翻译引擎
 

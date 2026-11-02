@@ -26,11 +26,13 @@ assert.equal(config._v, CONFIG_VERSION);
 assert.equal(config.professionalProfile, 'medical');
 assert.equal(config.medicalMode, true);
 assert.deepEqual(config.professionalOptions, { quality: 'balanced', subdomain: 'auto', maxReviewRequests: 1 });
-assert.deepEqual(config.providerConfig, legacy.providerConfig);
+assert.deepEqual(config.providerConfig, { 'custom:2': { ...legacy.providerConfig['custom:2'], keyStorage: 'local' } });
 assert.deepEqual(config.glossary, legacy.glossary);
 for (const key of ['customPrompt', 'customCss', 'uiLang', 'liquidGlass', 'nightSites']) assert.deepEqual(config[key], legacy[key], key);
 assert.deepEqual((await local.get('translationCache')).translationCache, cache);
-assert.deepEqual((await local.get('config_backup_v3')).config_backup_v3, legacy);
+const safeBackup = structuredClone(legacy);
+delete safeBackup.providerConfig['custom:2'].apiKey;
+assert.deepEqual((await local.get('config_backup_v3')).config_backup_v3, safeBackup);
 console.log('  ✓ v6 存储迁移保留医学模式、接口、术语、个性化设置及缓存');
 
 config = await saveConfig({ professionalProfile: 'general', medicalMode: true });

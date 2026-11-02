@@ -68,6 +68,7 @@ export function stashCurrentProvider(cfg, current, form) {
     engine: (form && form.engine) || 'openai',
     baseUrl: ((form && form.baseUrl) || '').trim(),
     apiKey: ((form && form.apiKey) || '').trim(),
+    keyStorage: form && form.keyStorage === 'local' ? 'local' : 'session',
     model: ((form && form.model) || '').trim()
   };
 }

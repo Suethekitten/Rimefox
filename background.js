@@ -1,5 +1,5 @@
 // Service worker：翻译中枢。所有请求只发生在后台，content script 不直接碰 API Key。
-import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget, languageInfoFor, languageOptions, customLanguageFingerprint, normalizeTargetLang, styleFingerprint, normalizeIntensity } from './lib/config.js';
+import { getConfig, saveConfig, activeConfig, styleById, providerChoices, resolveInputTarget, languageInfoFor, languageOptions, customLanguageFingerprint, normalizeTargetLang, styleFingerprint, normalizeIntensity, publicConfig } from './lib/config.js';
 import { systemPrompt, temperatureFor, promptFingerprint, hasKeepMarks } from './lib/prompt.js';
 import { looksUntranslatedForTarget } from './lib/lang-guard.js';
 import { chat, ApiError } from './lib/provider.js';
@@ -25,6 +25,9 @@ import { INLINE_VERSION, inspectInline } from './lib/inline.js';
 import { isTrustedBilibiliSubtitleUrl, isBilibiliVideoPage, SUBTITLE_FETCH_MAX_BYTES, readTextCapped } from './lib/subtitle-source.js';
 import { SUBTITLE_BUDGET, SUBTITLE_BUDGET_ALL_TABS, createBudgetState, budgetReserve, budgetSettle, budgetRelease, budgetSnapshot } from './lib/subtitle-budget.js';
 import { pdfCacheIdentity } from './lib/reader/pdf-cache.js';
+import { configStore, LOCAL_SECRETS, SESSION_SECRETS } from './lib/config-storage.js';
+import { authGuard, authErrorCode } from './lib/auth-state.js';
+import { configFingerprint, createConfigBroadcaster } from './lib/config-broadcast.js';
 
 // 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
 const usageStats = createUsageStats();
@@ -134,6 +137,7 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
       }
       const active = activeConfig(cfg);
       const raw = await chat({
+        ...authGuard(cfg),
         meta,
         engine: active.engine,
         baseUrl: active.baseUrl,
@@ -357,6 +361,7 @@ async function handleTranslate(msg, sender) {
   await cache.ready;
   const cacheEpoch = cache.epoch ? cache.epoch() : 0;
   const cfg = await getConfig();
+  if (cfg.authPaused) return { credentialRevision: cfg.credentialRevision, ok: false, errorCode: 'auth_paused', error: '接口鉴权失败，翻译已暂停；请在设置中更新密钥或测试连接。', results: (msg.texts || []).map(() => null) };
   maxParallel = Math.max(1, Math.min(16, Number(cfg.concurrency) || 6));
 
   // 输入框翻译（0.9.0）：target 传 'auto' = 跟随页面语言（页面把 <html lang> 一起发来，语言表只有这里一份）。
@@ -671,7 +676,7 @@ async function handleTranslate(msg, sender) {
         if (!reserved) throw new ApiError('字幕翻译请求已达本页上限，已暂停自动翻译', 0, 'subtitle-budget');
       }
       const raw = await chat({
-        ...active, temperature: 0, timeoutMs: Number(cfg.timeoutMs) || 60000,
+        ...authGuard(cfg), ...active, temperature: 0, timeoutMs: Number(cfg.timeoutMs) || 60000,
         thinkingMode: cfg.thinkingMode, thinkingExtra: cfg.thinkingExtra, maxHttpAttempts: 1,
         maxTokens: Math.min(8000, 512 + reviewSource.length * 2), meta,
         messages: [
@@ -833,12 +838,12 @@ async function handleTranslate(msg, sender) {
         : { mode: 'ai', omitted: 'no-context', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } })
       : { mode: 'off', omitted: '', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } };
   if (results.length && failed === results.length) {
-    return { ok: false, error: describeError(firstError), errorCode: budgetBlocked ? 'subtitle_budget' : '', results, alignments, validations, inlineErrors, outputErrors, context: contextReport };
+    return { ok: false, error: describeError(firstError), credentialRevision: cfg.credentialRevision, errorCode: authErrorCode(firstError) || (budgetBlocked ? 'subtitle_budget' : ''), results, alignments, validations, inlineErrors, outputErrors, context: contextReport };
   }
 
   return {
     ok: true,
-    errorCode: budgetBlocked ? 'subtitle_budget' : '',
+    credentialRevision: cfg.credentialRevision, errorCode: authErrorCode(firstError) || (budgetBlocked ? 'subtitle_budget' : ''),
     results,
     alignments,
     validations,
@@ -851,14 +856,17 @@ async function handleTranslate(msg, sender) {
   };
 }
 
-async function handleTest() {
+async function handleTest(msg, sender) {
+  if (!trustedPage(sender)) return { ok: false, error: '测试连接仅限扩展设置页' };
   const cfg = await getConfig();
   const active = activeConfig(cfg);
   if (!active.apiKey) return { ok: false, error: '还没有填写 API Key' };
   const started = Date.now();
   const meta = {};
+  const guard = authGuard(cfg, { allowPaused: true });
   try {
     const raw = await chat({
+      ...guard,
       engine: active.engine,
       baseUrl: active.baseUrl,
       apiKey: active.apiKey,
@@ -875,6 +883,7 @@ async function handleTest() {
       ]
     });
     const parsed = parseArray(raw, 2);
+    await guard.resume();
     return {
       ok: true,
       ms: Date.now() - started,
@@ -1023,7 +1032,17 @@ async function handleSubtitleFetch(msg, sender) {
 }
 
 // ---------------- 消息路由 ----------------
+function trustedPage(sender) {
+  return !!(sender && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL('')));
+}
+async function trustedConfig(msg, sender) {
+  if (!trustedPage(sender)) return { ok: false, error: '此操作仅限扩展设置页' };
+  return { ok: true, config: msg.type === 'config:save' ? await saveConfig(msg.patch) : await getConfig() };
+}
+
 const ROUTES = {
+  'config:trustedGet': trustedConfig,
+  'config:save': trustedConfig,
   translate: handleTranslate,
   'subtitle:fetch': handleSubtitleFetch,
   test: handleTest,
@@ -1035,19 +1054,13 @@ const ROUTES = {
   // 内容脚本跑在网页的渲染进程里，渲染进程一旦被攻破，它手里的东西都可能被读走。
   'config:get': async (msg, sender) => {
     const cfg = await getConfig();
-    // 嵌套的 providerConfig 里也有 Key：逐个剥掉，只留协议、地址和模型
-    const providerConfig = {};
-    Object.keys(cfg.providerConfig || {}).forEach((id) => {
-      const one = cfg.providerConfig[id] || {};
-      providerConfig[id] = { engine: one.engine, baseUrl: one.baseUrl, model: one.model, hasKey: !!one.apiKey };
-    });
-    const { providerConfig: _omit, ...rest } = cfg;
+    const safe = publicConfig(cfg);
+    const fingerprint = await configFingerprint(safe);
     return {
       ok: true,
+      fingerprint,
       config: {
-        ...rest,
-        providerConfig,
-        hasKey: !!activeConfig(cfg).apiKey,
+        ...safe,
         // 内容脚本不能 import：目标语言的安全展示 / 检测元数据随配置下发；
         // 内部 id 与 BCP 47 code 分开，方向 / 字体只拿 code。
         activeLanguage: languageInfoFor(cfg.targetLang, cfg.customLanguages),
@@ -1182,7 +1195,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   Promise.resolve()
     .then(() => route(msg, sender))
     .then((result) => sendResponse(result))
-    .catch((err) => sendResponse({ ok: false, error: describeError(err) }));
+    .catch((err) => sendResponse({ ok: false, error: describeError(err), errorCode: authErrorCode(err) }));
   return true; // 异步应答
 });
 
@@ -1217,15 +1230,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
-// API Key 存在 storage.local，而 local 默认对内容脚本开放（内容脚本能直接 get 到整份配置）。
+// API Key 按保存策略放在 session / local，两种区域都限制为可信扩展上下文。
 // 收紧成只有扩展自己的页面 / service worker 可读。浏览器不支持对 local 设置时静默跳过：
 // 我们自己的代码本来也不再把 Key 发给内容脚本（见 config:get）。
 function restrictStorage() {
   try {
-    const p = chrome.storage.local.setAccessLevel
-      ? chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
-      : null;
-    if (p && p.catch) p.catch(() => {});
+    for (const area of [chrome.storage.local, chrome.storage.session]) {
+      const p = area && area.setAccessLevel ? area.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }) : null;
+      if (p && p.catch) p.catch(() => {});
+    }
   } catch (err) {
     /* 不支持 */
   }
@@ -1291,21 +1304,16 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 chrome.runtime.onStartup.addListener(syncSelectionMenu);
 
-// 配置变了（设置页保存、弹窗切模式）就通知所有标签页重新拉一次（去掉 Key 的）配置。
-// 以前内容脚本自己监听 storage.onChanged，但那样事件里带着完整配置（含 Key），
-// 而且 local 收紧访问后内容脚本也收不到了。
+const configBroadcast = createConfigBroadcaster({
+  read: async () => publicConfig(await getConfig()),
+  tabs: () => chrome.tabs.query({}),
+  send: (id, payload) => chrome.tabs.sendMessage(id, payload)
+});
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !changes.config) return;
-  syncSelectionMenu();
-  chrome.tabs.query({}).then(
-    (tabs) => {
-      tabs.forEach((tab) => {
-        if (tab.id == null) return;
-        chrome.tabs.sendMessage(tab.id, { type: 'dt:configChanged' }).catch(() => {});
-      });
-    },
-    () => {}
-  );
+  if ((area === 'local' && (changes.config || changes[LOCAL_SECRETS])) || (area === 'session' && changes[SESSION_SECRETS])) {
+    syncSelectionMenu();
+    configBroadcast.schedule();
+  }
 });
 
 // 首次安装：打开欢迎页 / 新手引导。更新扩展、浏览器重启都不打开。

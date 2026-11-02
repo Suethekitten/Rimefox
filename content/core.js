@@ -3,7 +3,7 @@
   'use strict';
 
   var DT = (window.__DT = window.__DT || {});
-  DT.VERSION = '0.14.1';
+  DT.VERSION = '0.15.0';
   // 允许重复注入：页面还没加载完就打开弹窗 / 按快捷键时，后台补注入（ensureInjected）的这批脚本
   // 会和 manifest 声明的那批各跑一次。只初始化一次：再跑会清空 DT.state 和 onConfig 的订阅，
   // 而 main.js、appearance.js、dock.js 这些已经启动过的模块不会重新订阅，站点规则 / 外观就再也不生效
@@ -138,6 +138,9 @@
   }
 
   DT.send = function (msg, timeoutMs) {
+    if (msg && msg.type === 'translate' && DT.state.config && DT.state.config.authPaused) {
+      return Promise.resolve({ ok: false, errorCode: 'auth_paused', error: '接口鉴权失败，翻译已暂停；请在设置中更新密钥或测试连接。', results: (msg.texts || []).map(function () { return null; }) });
+    }
     var limit = timeoutMs || 90000;
     return new Promise(function (resolve, reject) {
       // 上下文已失效时直接给出结论，不再白跑一次调用
@@ -167,6 +170,7 @@
 
       try {
         chrome.runtime.sendMessage(msg, function (res) {
+          if (res && res.errorCode === 'auth_paused' && DT.state.config && res.credentialRevision === DT.state.config.credentialRevision) DT.state.config.authPaused = true;
           var err = chrome.runtime.lastError;
           if (err) finish(reject, new Error(friendlyError(err.message)));
           else finish(resolve, res);

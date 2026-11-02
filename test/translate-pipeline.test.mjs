@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 
 import { makeArea } from './_fake-storage.mjs';
+import { saveConfig } from '../lib/config.js';
 
 let pass = 0;
 let fail = 0;
@@ -259,6 +260,11 @@ await t('在途的那次失败：等着它的请求拿到同一个失败原因�
     gate.restore();
   }
   reply = (texts) => JSON.stringify(texts.map((one) => 'T:' + one));
+  const rejectedCalls = calls.length;
+  const paused = await translate(['失败的段落〔8〕']);
+  assert.equal(paused.errorCode, 'auth_paused');
+  assert.equal(calls.length, rejectedCalls, '401 后不能继续发请求');
+  await saveConfig({ providerConfig: { deepseek: { apiKey: 'mock-recovered-key' } } });
   const again = await translate(['失败的段落〔8〕']);
   assert.equal(again.results[0], 'T:失败的段落〔8〕', '失败后不能一直挂在「在途」上');
 });

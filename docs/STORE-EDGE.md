@@ -227,7 +227,7 @@ Test steps:
 Notes:
 - All JavaScript and CSS are packaged in the extension; no remote code is loaded or executed. API responses are parsed as JSON or text only.
 - The broad host permission is needed because both the pages and the API endpoint are chosen by the user. The extension does not read browsing history, does not run on unopened sites, and shows no ads.
-- The API key is stored with chrome.storage.local restricted to trusted extension contexts, and is only sent as an authentication header to the endpoint the user configured.
+- New API keys default to session storage; users can choose device persistence. Both areas are restricted to trusted extension contexts. Keys are sent only as authentication headers to the configured endpoint; retention and migration details are in the linked privacy policy.
 - If the temporary key cannot be used, the settings UI can still be inspected, but live translation cannot be verified.
 ```
 
@@ -269,7 +269,7 @@ Notes:
 | `<all_urls>` 被质疑过宽 | 用上表的权限理由；强调页面和接口都由用户选择 |
 | YouTube / Bilibili `world: "MAIN"` 被当成侵入页面 | 说明只在 manifest 列出的 YouTube 域和哔哩哔哩视频页读取播放器已加载的字幕，默认关闭，非官方 |
 | 隐私政策与实际行为不一致 | 本次补了输入框翻译；以后改数据流必须同步 `PRIVACY.md` / `privacy.en.md` / 本文 |
-| API Key 明文存 `chrome.storage.local`（政策 1.5.5「认证信息要安全」） | 已是 `TRUSTED_CONTEXTS`、网页脚本读不到；更彻底的做法是会话级存储（ROADMAP P2-1）。真被问到，按现状如实说明 |
+| API Key 的本地保存（政策 1.5.5「认证信息要安全」） | 会话 / 设备选择与保存期按 [PRIVACY.md](../PRIVACY.md#保存在本机的数据) 如实说明；两处存储均限制可信扩展上下文，不宣称本地加密 |
 | 只声明一种语言却宣传中英双语界面（政策 1.7） | 0.9.6 起 `_locales` 带 `zh_CN` + `en`，两种语言各一份 listing，已解决 |
 | 审核环境版本差异 | `documentPictureInPicture` 有特性检测并回退，不阻塞 |
 

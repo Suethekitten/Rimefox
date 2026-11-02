@@ -1,5 +1,6 @@
 import {
   getConfig,
+  activeConfig,
   saveConfig,
   languageOptions,
   hotkeyLabel,
@@ -99,7 +100,8 @@ function sendToBg(msg) {
 // 状态点颜色 + 进度条（文字仍由下面的 render 填）
 function renderState() {
   let state = 'idle';
-  if (!supported) state = 'unsupported';
+  if (currentCfg.authPaused) state = 'error';
+  else if (!supported) state = 'unsupported';
   else if (status.busy) state = 'busy';
   else if (status.failed && status.lastError) state = 'error';
   else if (status.enabled) state = 'on';
@@ -240,10 +242,21 @@ function render() {
     const stale = t('页面上下文已更新；已译内容保持不变，重新翻译后使用新上下文。');
     detail = detail ? detail + '\n' + stale : stale;
   }
+  if (supported && !activeConfig(currentCfg).apiKey) {
+    el.toggle.disabled = !status.enabled;
+    title = t('本次会话尚未配置密钥。');
+    detail = t('本次会话尚未配置密钥。');
+  }
   paintStatus(title, count, detail);
 }
 
 function paintStatus(title, count, detail) {
+  if (currentCfg.authPaused) {
+    title = t('翻译已暂停');
+    detail = t('鉴权失败，翻译已暂停；更新密钥或测试连接后恢复。');
+    count = '';
+    el.toggle.disabled = !supported || !status.enabled;
+  }
   el.statusTitle.textContent = title;
   el.statusCount.textContent = count;
   el.statusCount.hidden = !count;
@@ -704,6 +717,7 @@ el.diagnose.addEventListener('click', async () => {
 
 // ---------------- 快捷翻译（不依赖页面） ----------------
 async function runQuickTranslate() {
+  if (currentCfg.authPaused) { el.stat.textContent = t('鉴权失败，翻译已暂停；更新密钥或测试连接后恢复。'); return; }
   const text = el.quickInput.value.trim();
   if (!text) {
     el.quickInput.focus();

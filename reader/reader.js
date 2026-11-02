@@ -5,6 +5,7 @@ import { parseEpub, EpubError } from '../lib/reader/epub.js';
 import { sanitizeXhtml } from '../lib/reader/sanitize.js';
 import { listBooks, getBook, saveBook, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, deleteBookTranslations, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
+import { LOCAL_SECRETS, SESSION_SECRETS } from '../lib/config-storage.js';
 import { ReaderTranslator } from '../lib/reader/translate.js';
 import { PdfTranslator } from '../lib/reader/pdf-translate.js';
 import { pdfCacheIdentity } from '../lib/reader/pdf-cache.js';
@@ -137,7 +138,16 @@ async function loadConfig() {
   if (sequence !== configSequence) return state.config;
   const changed = doc && doc === state.pdf && target === state.readerTarget
     && state.pdfIdentity && state.pdfIdentity !== identity;
+  const wasPaused = state.config && state.config.authPaused;
   state.config = config;
+  if (config && config.authPaused) {
+    if (doc) cancelPdfTranslations(false);
+    if (translator) translator.stop();
+    setStatus('readerStatus', '接口鉴权失败，翻译已暂停；请在设置中更新密钥或测试连接。', 'error');
+  } else if (translator && config) {
+    await translator.configure(readerConfig());
+    if (wasPaused && state.section && !doc) await translator.start(state.book, state.section, $('bookContent'), state.mode);
+  }
   if (changed) {
     cancelPdfTranslations(true);
     setPdfOriginalMode();
@@ -145,7 +155,7 @@ async function loadConfig() {
     await applyPdfViewMode();
     setStatus('readerStatus', '翻译配置已变化；请选择双语或点「翻译本章」使用新配置。');
   }
-  if (state.book) $('translateChapter').disabled = !(config && config.hasKey);
+  if (state.book) $('translateChapter').disabled = !(config && config.hasKey && !config.authPaused);
   if (!state.config) {
     setStatus('libraryStatus', '无法读取扩展配置，请重新打开阅读器。', 'error');
     return null;
@@ -719,7 +729,7 @@ function endPdfProgressIfIdle() {
 }
 
 async function translatePdfPage(index) {
-  if (!state.pdf || !state.config || !state.config.hasKey || state.pdfStopped) return;
+  if (!state.pdf || !state.config || !state.config.hasKey || state.config.authPaused || state.pdfStopped) return;
   if (state.pdfTranslating.has(index)) return;
   const token = {};
   const jobs = state.pdfTranslating;
@@ -946,7 +956,7 @@ async function openPdfBook(record) {
   $('modeSelect').value = savedMode;
   $('targetSelect').disabled = false;
   $('tocToggle').disabled = false;
-  $('translateChapter').disabled = !(state.config && state.config.hasKey);
+  $('translateChapter').disabled = !(state.config && state.config.hasKey && !state.config.authPaused);
   const content = $('bookContent');
   content.textContent = '';
   content.dataset.pdfMode = state.pdfLang;
@@ -1180,7 +1190,7 @@ async function openBook(record) {
     $('modeSelect').disabled = false;
     $('targetSelect').disabled = false;
     $('tocToggle').disabled = false;
-    $('translateChapter').disabled = !(state.config && state.config.hasKey);
+    $('translateChapter').disabled = !(state.config && state.config.hasKey && !state.config.authPaused);
     translator = translator || new ReaderTranslator({ onStatus: onTranslateStatus });
     await translator.configure(readerConfig());
     translator.setDocument(doc);
@@ -1224,7 +1234,7 @@ async function loadSection(sectionId, fragment, offsetRatio) {
   state.section = sec;
   translator && translator.setDocument(state.doc);
   setReaderHeader(sec);
-  $('translateChapter').disabled = !(state.config && state.config.hasKey);
+  $('translateChapter').disabled = !(state.config && state.config.hasKey && !state.config.authPaused);
   const mode = state.mode || 'original';
   if (translator) await translator.start(state.book, sec, content, mode);
   const ratio = typeof offsetRatio === 'number' ? Math.max(0, Math.min(1, offsetRatio)) : 0;
@@ -1300,8 +1310,10 @@ async function changeMode(mode) {
     state.book.pdfMode = mode;
     $('modeSelect').value = mode;
     try { await saveBook(state.book); } catch (err) { /* ignore */ }
-    const hasKey = state.config && state.config.hasKey;
-    if (option.lang !== 'original' && !hasKey) {
+    const hasKey = state.config && state.config.hasKey && !state.config.authPaused;
+    if (option.lang !== 'original' && state.config && state.config.authPaused) {
+      setStatus('readerStatus', '接口鉴权失败，翻译已暂停；请在设置中更新密钥或测试连接。', 'error');
+    } else if (option.lang !== 'original' && !hasKey) {
       setStatus('readerStatus', '还没有配置翻译 API，流式视图可看原文。', 'error');
     } else {
       setStatus('readerStatus', option.text + '模式。');
@@ -1313,15 +1325,15 @@ async function changeMode(mode) {
   state.mode = mode;
   state.book.mode = mode;
   try { await saveBook(state.book); } catch (err) { /* ignore */ }
-  $('translateChapter').disabled = !(state.config && state.config.hasKey);
+  $('translateChapter').disabled = !(state.config && state.config.hasKey && !state.config.authPaused);
   translator && translator.stop();
   try { window.__DT && window.__DT.restore && window.__DT.restore(); } catch (err) { /* ignore */ }
   if (mode === 'original') {
     setStatus('readerStatus', '原文模式。');
     return;
   }
-  if (!(state.config && state.config.hasKey)) {
-    setStatus('readerStatus', '还没有配置翻译 API，无法显示译文。', 'error');
+  if (!(state.config && state.config.hasKey && !state.config.authPaused)) {
+    setStatus('readerStatus', state.config && state.config.authPaused ? '接口鉴权失败，翻译已暂停；请在设置中更新密钥或测试连接。' : '还没有配置翻译 API，无法显示译文。', 'error');
     return;
   }
   await translator.start(state.book, state.section, $('bookContent'), mode);
@@ -1355,7 +1367,7 @@ function bindEvents() {
   $('targetSelect').addEventListener('change', changeTarget);
   $('translateChapter').addEventListener('click', async () => {
     await loadConfig();
-    if (!(state.config && state.config.hasKey)) return;
+    if (!(state.config && state.config.hasKey && !state.config.authPaused)) return;
     if (state.pdf) {
       state.pdfStopped = false;
       if (state.pdfLang === 'original') await changeMode('flow-bilingual');
@@ -1494,7 +1506,7 @@ async function boot() {
   bindEvents();
   // 阅读器是可信扩展页；只重拉去 Key 的配置，配置变化不自动触发付费翻译。
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.config) loadConfig().catch(() => {});
+    if ((area === 'local' && (changes.config || changes[LOCAL_SECRETS])) || (area === 'session' && changes[SESSION_SECRETS])) loadConfig().catch(() => {});
   });
   await renderLibrary();
 }

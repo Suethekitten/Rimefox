@@ -1,6 +1,6 @@
 # 隐私说明
 
-最后更新：2026-10-27。
+最后更新：2026-11-01。
 
 > **English summary**: Rimefox has no author-operated server or telemetry. See the [full English privacy policy](docs/privacy.en.md). Page text you choose to translate is sent only to the API endpoint **you** configure (DeepSeek, OpenAI-compatible, Anthropic, Gemini…), under that provider's privacy policy. An optional, off-by-default local masking feature replaces reliably detectable sensitive values with placeholders before sending and restores them locally; the mapping never leaves the request. Your API key, settings and translation cache are stored locally; the key is also sent to your configured provider for authentication. No analytics, no telemetry, no third-party SDKs.
 
@@ -17,7 +17,7 @@
 | 随手翻译（弹窗） | 你在弹窗输入框里填的文字 |
 | 输入框翻译（快捷键 / 右键菜单） | 你在网页输入框或可编辑区域里选中的文字，或整个框里的文字；密码框与支付类字段不会翻译 |
 | 视频字幕双语（YouTube / 哔哩哔哩，默认关闭） | 当前视频的字幕文字（只发播放位置往后约 90 秒） |
-| EPUB 阅读翻译（用户主动打开） | 当前视口附近和「翻译本章」时当前章节的正文；不含原书文件、图片、目录、脚注元数据或阅读进度 |
+| EPUB / PDF 阅读翻译（用户主动打开） | 当前视口附近和主动翻译的章节 / 页面的正文；不含原书文件、图片、目录、脚注元数据或阅读进度 |
 | AI 精翻（默认关闭） | 在整页翻译请求中额外带上：当前文章标题、章节标题、本文明确给出的缩写定义、同一文章容器内相邻的有限正文片段（有长度和数量上限）。不发送整页全文、导航、评论、广告、隐藏内容或编辑器草稿 |
 | 测试连接 | 两句固定的英文测试句 |
 
@@ -69,14 +69,15 @@ YouTube 与哔哩哔哩页面脚本会在本地观察播放器加载的字幕元
 |---|---|---|
 | 界面语言、主题、术语表、自定义提示词、自定义目标语言 | `chrome.storage.local` | 界面语言与主题仅本机使用；自定义语言的名称 / 代码 / 说明会在作为目标语言翻译时随请求发送；主题还在扩展页面 localStorage 缓存以避免闪白 |
 | 外观、站点规则、夜间模式网站名单、译文自定义 CSS | `chrome.storage.local` | 仅本机使用，不随翻译请求发送；强调色等外观也在扩展页面 localStorage 缓存以避免闪白 |
-| 设置与 API Key | `chrome.storage.local` | 收紧为只有扩展自己的页面和后台可读，网页里的脚本拿不到；内容脚本也只知道「有没有 Key」 |
+| API Key | 默认 `chrome.storage.session`；选择「在此设备上记住密钥」后为 `chrome.storage.local` | 默认在关闭浏览器或重载扩展后失效；旧用户升级时保留设备记忆，选择迁移后清理旧配置与备份中的 Key；两种存储均仅可信扩展页面和后台可读，内容脚本只知道 hasKey 与暂停状态 |
+| 鉴权暂停与凭据修订号 | 暂停在 `chrome.storage.session`，随机修订号随对应 Key 保存 | 后台回收后仍保留；配置广播不包含 Key 或 Key 的散列 |
 | 翻译缓存（会话） | `chrome.storage.session` | 翻过的原文和译文，关闭浏览器即清空；视频字幕译文按视频 / 分 P / 字幕轨隔离，只放在这一层 |
 | 翻译缓存（磁盘） | `chrome.storage.local` | 只存短文本（原文 + 译文 ≤ 160 字符），上限 512 KB；按网站域名和模型分开存；不存视频字幕，也不含视频标识 |
-| EPUB 原书、封面、进度和该书译文 | 扩展页 IndexedDB (`rimefox-reader`) | 只在本机；原书最大约 100 MB/本、书库约 500 MB；删除书会删除原书、进度和该书译文；不进入全局翻译缓存 |
+| EPUB / PDF 原书、封面、进度和该书译文 | 扩展页 IndexedDB (`rimefox-reader`) | 只在本机；原书最大约 100 MB/本、书库约 500 MB；删除书会删除原书、进度和该书译文；不进入全局翻译缓存 |
 | 用户上传的阅读字体 | 扩展页 IndexedDB (`rimefox-reader` 的 `fonts`) | 只在本机，不上传；可在阅读设置里移除，移除即删除 Blob |
 | 标签页「正在翻译」状态 | `chrome.storage.session` | 刷新后自动接着翻用，关闭标签页即删除 |
 
-设置页「缓存与迁移」可以随时清空翻译缓存；设置、Key、术语表和提示词保留到你修改、删除或卸载扩展。请检查各服务商保存的 Key；在服务商控制台撤销 Key 才能使已泄露的副本失效。磁盘缓存按容量淘汰，不承诺固定天数；卸载扩展会删除扩展的本地存储。第三方已收到的数据按其保留政策处理，清空本机不会删除第三方副本。主动导出的文件和剪贴板副本需自行清除。
+设置页「缓存与迁移」可以随时清空翻译缓存；设置、设备记忆 Key、术语表和提示词保留到你修改、删除或卸载扩展，会话 Key 的保留期见上表。配置导出默认不带 Key，主动勾选包含 Key 时会将当前会话或设备密钥写入导出文件，该文件和剪贴板副本需自行清除。请检查各服务商保存的 Key；在服务商控制台撤销 Key 才能使已泄露的副本失效。磁盘缓存按容量淘汰，不承诺固定天数；卸载扩展会删除扩展的本地存储。第三方已收到的数据按其保留政策处理，清空本机不会删除第三方副本。
 
 ## 不会做的事
 

@@ -83,6 +83,12 @@ test('stopping while reading cache prevents sending or returning stale text', as
   assert.equal(f.calls.length, 0);
 });
 
+test('a paused PDF translator does not send a frontend translation message', async () => {
+  const f = fixture();
+  assert.equal(await f.translator.translatePage({ ...args, config: { ...base, authPaused: true } }), null);
+  assert.equal(f.calls.length, 0);
+});
+
 test('stopped HTTP responses neither return to the view nor populate PDF cache', async () => {
   let release;
   let entered;
