@@ -322,5 +322,113 @@ t('复杂页检测覆盖「块太大」和「碎块太多」两种情况', funct
   assert.equal(isComplexPage(Array.from({ length: 40 }, () => ({ text: 'short', kind: 'table-cell' }))), false);
   assert.equal(isComplexPage([{ text: 'A normal paragraph.' }]), false);
 });
+// ---- 0.16 QA：文本层静默丢正文（H1–H22）的回归
+const it = (str, x, y, size = 10, width) => ({ str, transform: [size, 0, 0, size, x, y], width: width == null ? str.length * size * 0.5 : width, height: size });
+const A4 = { width: 595, height: 842 };
+const textsOf = (blocks) => blocks.map((b) => b.text);
+
+t('H1 跨页页眉只在上下边带里删除，页面中部以页眉开头的正文保留', function () {
+  const pages = [1, 2, 3, 4].map((p) => ({ height: 842, items: [it('Smith et al.', 72, 800, 9), it('Table ' + p, 72, 760), it('Body text of page ' + p + ' goes here.', 72, 500)] }));
+  const dropTexts = findRepeatedBandTexts(pages);
+  const out = textsOf(pageBlocks({ items: [it('Smith et al.', 72, 800, 9), it('Table 3 shows that the treated group improved by twelve points,', 72, 500), it('while the control group stayed flat.', 72, 488), it('Smith et al. (2019) reported the same effect in adults.', 72, 460)] }, A4, { dropTexts }));
+  assert.ok(out.join(' ').includes('Table 3 shows'));
+  assert.ok(out.join(' ').includes('Smith et al. (2019)'));
+  assert.ok(!out.includes('Smith et al.'));
+});
+
+t('H1 每页开头相同的正文不会被学成页眉（只看最外侧几行）', function () {
+  const pages = [1, 2, 3].map((p) => ({ height: 842, items: [it('Journal of Testing ' + p, 72, 812, 8), ...['First body line', 'Second body line', 'Third body line', 'Fourth body line'].map((s, i) => it(s + ' repeated on every page.', 72, 780 - i * 14))] }));
+  assert.deepEqual(findRepeatedBandTexts(pages), ['Journal of Testing #', 'First body line repeated on every page.', 'Second body line repeated on every page.']);
+});
+
+t('H2 单栏页的居中标题 / 作者行不生成假栏，段尾不被挪到页末', function () {
+  const out = textsOf(pageBlocks({ items: [it('Robust Estimation Of Layout Order', 250, 760, 14), it('Alice Author, Bob Writer', 260, 740), it('The first paragraph runs across the full text width of this page and', 72, 700), it('ends here.', 72, 688), it('The second paragraph also runs across the full text width of the page', 72, 664), it('and ends here too.', 72, 652)] }, A4));
+  assert.equal(out[0], 'Robust Estimation Of Layout Order');
+  assert.ok(out.some((s) => s.endsWith('and ends here.')));
+  assert.ok(out[out.length - 1].endsWith('and ends here too.'));
+});
+
+t('H3/H4 上下标保留在正文里并保持一行', function () {
+  const a = textsOf(pageBlocks({ items: [it('The 21', 72, 700, 12, 33), it('st', 105, 704, 8, 7), it(' century: 10', 112, 700, 12, 60), it('6', 172, 704, 8, 4), it(' users, 25 km', 176, 700, 12, 70), it('2', 246, 704, 8, 4), it('.', 250, 700, 12, 3), it('Water is H', 72, 680, 12, 58), it('2', 130, 676, 7, 4), it('O.', 134, 680, 12, 12)] }, A4));
+  assert.deepEqual(a, ['The 21st century: 10⁶ users, 25 km². Water is H₂O.']);
+  const b = textsOf(pageBlocks({ items: [it('The rate was 10', 72, 700, 11, 75), it('-3', 147, 704.4, 9.2, 8), it(' s', 155, 700, 11, 8), it('-1', 163, 704.4, 9.2, 8), it(' and x', 171, 700, 11, 28), it('2', 199, 704.4, 9.2, 5), it(' grew.', 204, 700, 11, 30), it('Next line of the same paragraph continues normally here.', 72, 686, 11)] }, A4));
+  assert.deepEqual(b, ['The rate was 10⁻³ s⁻¹ and x² grew. Next line of the same paragraph continues normally here.']);
+});
+
+t('H5/H6 单位、指数、同位素、区间、下标不是脚注；真正的引用仍剥离', function () {
+  assert.equal(stripFootnoteMarkers('The flat is 50 m², 10⁶ cells, E = mc², the ¹⁴C isotope, Ca²⁺ ions.'), 'The flat is 50 m², 10⁶ cells, E = mc², the ¹⁴C isotope, Ca²⁺ ions.');
+  assert.equal(stripFootnoteMarkers('Inputs are scaled to [0, 1]; the code reads a[0] and b[10]; kernel [3, 3].'), 'Inputs are scaled to [0, 1]; the code reads a[0] and b[10]; kernel [3, 3].');
+  assert.equal(stripFootnoteMarkers('The effect¹² was large [4, 5]. As shown.³'), 'The effect was large. As shown.');
+});
+
+t('H7/H11 正文里的 open / Letter / Article / Vol. 2 / 第2期 不被当横幅或卷期行', function () {
+  const out = textsOf(pageBlocks({ items: [it('To finish the setup, download the archive and then', 72, 700), it('open the settings panel and choose Extensions from the list.', 72, 688), it('Letter grades are assigned at the end of the term.', 72, 664), it('Vol. 2 of the series covers the medieval period.', 72, 760), it('第2期工程计划于2025年完工，总投资约三亿元。', 72, 740, 12)] }, A4)).join(' ');
+  assert.ok(/then open the settings/.test(out));
+  assert.ok(/Letter grades/.test(out));
+  assert.ok(/Vol\. 2 of the series/.test(out));
+  assert.ok(out.includes('第2期工程'));
+  const header = textsOf(pageBlocks({ items: [it('Vol. 12, No. 3', 72, 820, 8), it('第 12 卷 第 3 期', 300, 810, 8), it('OPEN', 40, 780), it('Body line here.', 72, 400)] }, A4));
+  assert.deepEqual(header, ['Body line here.']);
+});
+
+t('H8 窄页边距的首末行正文保留，页码和小字页眉仍去掉', function () {
+  const items = [];
+  for (let i = 0; i < 6; i += 1) items.push(it('Body line ' + (i + 1) + ' of a page with 0.5 inch margins.', 36, 797 - i * 150, 11));
+  const out = textsOf(pageBlocks({ items }, A4)).join(' ');
+  assert.ok(out.includes('Body line 1') && out.includes('Body line 6'));
+  const noise = textsOf(pageBlocks({ items: [it('Journal header in small print', 72, 825, 7), it('A body paragraph line.', 72, 700, 11), it('Another body line.', 72, 686, 11), it('12', 290, 20, 11)] }, A4));
+  assert.deepEqual(noise, ['A body paragraph line. Another body line.']);
+});
+
+t('H9 数学「. . .」双栏页不是目录', function () {
+  const L = ['Let x1, . . . , xn be samples', 'and y1, . . . , yn their labels.', 'For i = 1, . . . , n define', 'weights w1, . . . , wk and', 'sum r1 + . . . + rn as risk.', 'This is the usual objective.'];
+  const R = ['Assumption 1 bounds moments,', 'which holds in practice.', 'Assumption 2 is a margin', 'condition near the boundary.', 'Both give the optimal rate', 'shown in Section 4.'];
+  const blocks = pageBlocks({ items: [...L.map((s, i) => it(s, 50, 700 - i * 12)), ...R.map((s, i) => it(s, 310, 700 - i * 12))] }, A4);
+  assert.ok(blocks.every((b) => b.kind !== 'toc'));
+  assert.equal(blocks.length, 2);
+  assert.ok(blocks[1].text.startsWith('Assumption 1'));
+});
+
+t('H10/H19/H20 1.5 倍行距不一行一段；中文折行不插空格；复合词保留连字符', function () {
+  const out = textsOf(pageBlocks({ items: [it('本文采用一点五倍行距排版，这是学位论文最常见的格式要求，句子会跨行继', 72, 700, 12), it('续，翻译单元必须保持完整。', 72, 676.6, 12), it('Double-spaced manuscripts put 24 pt between baselines, so this', 72, 600, 12), it('sentence is split into two translation units.', 72, 576, 12)] }, A4));
+  assert.equal(out.length, 2);
+  assert.ok(out[0].includes('跨行继续'));
+  assert.deepEqual(textsOf(pageBlocks({ items: [it('The method is well-', 72, 700), it('known and self-', 72, 688), it('supervised. A hyphen-', 72, 676), it('ated word.', 72, 664)] }, A4)), ['The method is well-known and self-supervised. A hyphenated word.']);
+});
+
+t('H12 十六进制哈希和 DNA 序列不当成 base64 公式', function () {
+  assert.equal(stripLatexArtifacts('9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'), '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08');
+  assert.equal(stripLatexArtifacts('ATGGCTAGCTAGGCTTACGATCGATCGGCTAGCTAGCTTAGGCTAGCATCGATCGATGCTAGCTAG'), 'ATGGCTAGCTAGGCTTACGATCGATCGGCTAGCTAGCTTAGGCTAGCATCGATCGATGCTAGCTAG');
+  assert.equal(stripLatexArtifacts('x AAAB7HicbVBNS8NAEJ3Ur1q/oh69BIvgqSQi6LHoxWMF+wFtKJvtpl262ZZAAAB7HicbVBNS8NAEJ y'), 'x [公式] y');
+});
+
+t('H14 双栏页底部的跨栏图注留在最后', function () {
+  const items = [];
+  for (let i = 0; i < 6; i += 1) items.push(it('Left column sentence ' + (i + 1) + ' goes on.', 50, 760 - i * 12));
+  for (let i = 0; i < 6; i += 1) items.push(it('Right column sentence ' + (i + 1) + ' goes on.', 310, 760 - i * 12));
+  items.push(it('Figure 4: full-width caption printed at the BOTTOM of the page under both columns.', 50, 300));
+  const out = textsOf(pageBlocks({ items }, A4));
+  assert.ok(out[0].startsWith('Left column'));
+  assert.ok(out[out.length - 1].startsWith('Figure 4'));
+});
+
+t('H16/H17 假粗体去重；首字下沉拼回；单字中文标题保留', function () {
+  assert.deepEqual(textsOf(pageBlocks({ items: [it('Chapter Summary', 72, 700, 14), it('Chapter Summary', 72.3, 700, 14)] }, A4)), ['Chapter Summary']);
+  const out = textsOf(pageBlocks({ items: [it('T', 72, 676, 36, 22), it('he history of the valley begins long before', 98, 700), it('the first settlers arrived in the region.', 98, 688), it('序', 280, 600, 20), it('本书的写作始于十年前的一次旅行。', 72, 560, 12)] }, A4));
+  assert.ok(out[0].startsWith('The history'));
+  assert.ok(out.includes('序'));
+});
+
+t('H21 目录标题去掉点线，以数字结尾的标题保留', function () {
+  const items = [it('1 Introduction', 72, 700, 11), it('. . . . . . . . . . . . . . .', 160, 700, 11), it('1', 520, 700, 11), it('2 Migrating to Windows 10', 72, 682, 11), it('15', 520, 682, 11), it('3 Python 3', 72, 664, 11), it('29', 520, 664, 11), it('4 Results', 72, 646, 11), it('43', 520, 646, 11)];
+  assert.deepEqual(parsePrintedToc(items, { maxPage: 300, pageWidth: 595 }), [{ title: '1 Introduction', page: 1 }, { title: '2 Migrating to Windows 10', page: 15 }, { title: '3 Python 3', page: 29 }, { title: '4 Results', page: 43 }]);
+});
+
+t('H22 长文本硬切不拆代理对', function () {
+  const parts = splitLongText('A'.repeat(1499) + '😀' + 'B'.repeat(200));
+  assert.ok(!/[\uD800-\uDBFF]$/.test(parts[0]));
+  assert.equal(parts.join(''), 'A'.repeat(1499) + '😀' + 'B'.repeat(200));
+});
+
 console.log('\n' + pass + ' 通过 / ' + (pass + fail) + ' 总数');
 if (fail) process.exit(1);

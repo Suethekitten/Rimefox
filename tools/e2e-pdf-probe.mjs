@@ -10,7 +10,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2).filter((one) => !one.startsWith('--'));
 const LEGACY = process.argv.includes('--legacy-load'); // Chrome <126 没有 Extensions.loadUnpacked
-const CHROME = args[0] || process.env.RIMEFOX_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const CHROME = args[0] || process.env.RIMEFOX_CHROME || process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
+  ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  : process.platform === 'win32' ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : 'google-chrome');
 const PORT = 20200 + Math.floor(Math.random() * 300);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-pdf-probe-'));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -102,7 +104,13 @@ const cases = [
   { sample: 'plos', dir: 'real' },
   { sample: 'elife', dir: 'real' },
   { sample: 'user', dir: 'real' }
-];
+].filter((one) => {
+  // reader/pdf-real/ 是 gitignore 的本机私有样本：缺文件时跳过并说明，而不是算失败。
+  if (one.dir !== 'real') return true;
+  const exists = fs.existsSync(path.join(ROOT, 'reader', 'pdf-real', one.sample + '.pdf'));
+  if (!exists) console.log('skip (private sample not present): ' + one.sample);
+  return exists;
+});
 // 本地真实 PDF 用例（reader/pdf-real/cases.json，目录已 gitignore）
 const extraCases = path.join(ROOT, 'reader', 'pdf-real', 'cases.json');
 if (fs.existsSync(extraCases)) {
@@ -126,4 +134,6 @@ for (const result of results) console.log(JSON.stringify(result));
 const failed = results.filter((result) => !result.ok).length;
 console.log(failed ? 'FAILED ' + failed : 'ALL OK');
 try { browser.kill('SIGKILL'); } catch (err) { /* ignore */ }
+await sleep(300);
+try { fs.rmSync(profile, { recursive: true, force: true }); } catch (err) { /* ignore */ }
 process.exit(failed ? 1 : 0);
