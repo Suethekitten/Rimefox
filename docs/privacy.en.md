@@ -52,7 +52,7 @@ Subtitle translation is off by default. A packaged MAIN-world script nevertheles
 | User-uploaded reading font | Extension-page IndexedDB `rimefox-reader` (`fonts`), local only and never uploaded. Removing the font deletes the stored blob. |
 | Per-tab translation resume state | chrome.storage.session; removed on tab close. |
 
-Both local and session extension storage are restricted to trusted extension contexts. Content scripts receive configuration without API keys. Configuration exports omit keys by default; explicitly including keys writes current session or remembered keys into the export file without encryption. Remove exported files and clipboard copies yourself; extension storage is not a password vault.
+Both local and session extension storage are restricted to trusted extension contexts, except for a few milliseconds right after browser start-up before the extension's background worker applies the restriction; exploiting that window requires an already-compromised web page renderer. Content scripts receive configuration without API keys. Configuration exports omit keys by default; explicitly including keys writes current session or remembered keys into the export file without encryption. Remove exported files and clipboard copies yourself; extension storage is not a password vault.
 
 ## Your controls
 

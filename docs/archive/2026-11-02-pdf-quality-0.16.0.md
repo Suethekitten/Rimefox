@@ -1,6 +1,6 @@
 # PDF 文本质量与稳定性实施记录（0.16.0）
 
-> 记录日期：2026-11-02。当前实现契约见 [HANDOFF §14](../../HANDOFF.md#14-本版技术记录0162)，PDF 文本层边界见 [PDF-HANDOFF](../PDF-HANDOFF.md)，后续优先级见 [ROADMAP](../ROADMAP.md#4-近期安排)。
+> 记录日期：2026-11-02。当前实现契约见 [HANDOFF §14](../../HANDOFF.md#14-本版技术记录0163)，PDF 文本层边界见 [PDF-HANDOFF](../PDF-HANDOFF.md)，后续优先级见 [ROADMAP](../ROADMAP.md#4-近期安排)。
 
 ## 基线与交付范围
 

@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-03；当前版本为 0.16.2，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.2 优化大 PDF 打开、PDF 配置身份缓存与网页点击补扫；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-03；当前版本为 0.16.3，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.3 修复 0.16.1 独立 QA 的阅读器、PDF 文本层、会话密钥与字幕费用问题；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -87,6 +87,7 @@
 | 0.16.0 | PDF 文本质量与稳定性：多栏顺序、目录条目、公式占位、脚注剥离、表格单元格；版式切换与滚动渲染稳定；阅读器存储拆分；配置导入清 Key 与明文 HTTP 警告 |
 | 0.16.1 | 阅读器与稳定性修复：PDF 搜索 / 并发打开 / 重导入、失败页重试与流式滚动、切换目标语言保持版式、EPUB 语言缓存、字幕预算与站点规则开销 |
 | 0.16.2 | 大 PDF 打开优化：首屏先渲染、目录延后并行、页眉扫描与本页取字并行；PDF 配置身份缓存；网页点击补扫按控件和媒体区域收敛 |
+| 0.16.3 | 0.16.1 独立 QA 修复：PDF 文本层不再丢正文、PDF / EPUB 计费放大、EPUB 缓存身份与阅读设置、会话 Key 保存与迁移范围、YouTube 字幕预算、合成快捷键与错误回显 |
 
 ---
 
@@ -155,7 +156,7 @@ P2-1 的会话 Key、可选设备记忆、旧用户迁移选择、鉴权失败�
 
 P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB v4 文件拆分、版式切换与滚动渲染稳定性、页面与译文缓存上限，以及配置导入清 Key 与明文 HTTP 警告均已完成。三处版本号与 CHANGELOG 已统一为 0.16.0；推送与发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.0) 和 [Actions](https://github.com/Suethekitten/Rimefox/actions/workflows/release.yml) 为准。
 
-实现契约见 [HANDOFF §14](../HANDOFF.md#14-本版技术记录0162) 与 [PDF-HANDOFF](PDF-HANDOFF.md)；完成范围与未测边界见 [0.16 归档](archive/2026-11-02-pdf-quality-0.16.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
+实现契约见 [HANDOFF §14](../HANDOFF.md#14-本版技术记录0163) 与 [PDF-HANDOFF](PDF-HANDOFF.md)；完成范围与未测边界见 [0.16 归档](archive/2026-11-02-pdf-quality-0.16.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
 
 ### 0.16.1（补丁）
 
