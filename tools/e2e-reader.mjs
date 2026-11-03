@@ -180,7 +180,9 @@ check('切回 zh-CN 后原文重置', await pageEval("return document.getElement
 await pageEval("const s=document.getElementById('modeSelect'); s.value='bilingual'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
 await pageEval("document.querySelector('#tocList a').click(); return true;");
 
-await sleep(500);
+// 阅读器有 400 ms 停留防抖：等这一章的译文落地后再记请求数。
+await until(() => pageEval("return !!document.querySelector('#bookContent [data-dt-target]')"), 15000);
+await sleep(800);
 check('目录跳转', await pageEval("return document.getElementById('bookContent').textContent.includes('First Chapter');"));
 
 const firstRequests = hits.requests;

@@ -3,7 +3,7 @@
 // 翻译复用 content/dom.js 的 collect/inject，缓存由 reader 自己管理。
 import { parseEpub, EpubError } from '../lib/reader/epub.js';
 import { sanitizeXhtml } from '../lib/reader/sanitize.js';
-import { listBooks, getBook, saveBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, READER_LIMITS } from '../lib/reader/store.js';
+import { listBooks, getBook, saveBook, createBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
 import { LOCAL_SECRETS, SESSION_SECRETS } from '../lib/config-storage.js';
 import { ReaderTranslator } from '../lib/reader/translate.js';
@@ -214,6 +214,7 @@ async function changeTarget() {
   try {
     // 只改阅读器自己的设置，不动网页翻译的全局 targetLang
     await saveReaderSettings({ targetLang: target });
+    state.settings = Object.assign({}, state.settings || {}, { targetLang: target });
     state.readerTarget = target;
     if (state.pdf) {
       const previousLang = state.pdfLang;
@@ -362,7 +363,8 @@ async function removeUserFont() {
 async function saveSettings(patch) {
   state.settings = Object.assign({}, state.settings || {}, patch);
   applySettings();
-  try { await saveReaderSettings(state.settings); } catch (err) { /* ignore */ }
+  // 只写这次改动的字段：整行写回会把旧快照里的 targetLang 等字段带回去。
+  try { await saveReaderSettings(patch); } catch (err) { /* ignore */ }
 }
 
 function coverNode(book) {
@@ -441,7 +443,10 @@ async function renderLibrary() {
 async function importFile(file) {
   if (!file) return;
   const maxBookBytes = (state.settings && Number(state.settings.maxBookBytes)) || READER_LIMITS.maxBookBytes;
-  if (file.size > maxBookBytes) {
+  // 单本上限只拦新书：已在书库里的书（之后调低了上限）重新导入时仍直接打开（QA G7）。
+  // 超过设置页最大可选值的文件不读进内存，直接拒绝。
+  const tooBig = file.size > maxBookBytes;
+  if (tooBig && file.size > READER_LIMITS.maxSelectableBookBytes) {
     setStatus('libraryStatus', '文件超过 ' + Math.round(maxBookBytes / 1048576) + ' MB 上限，可在设置里调高。', 'error');
     return;
   }
@@ -451,8 +456,14 @@ async function importFile(file) {
     const hash = await sha256(buffer);
     const existing = await getBook(hash);
     if (existing) {
+      // 书记录还在但文件丢了（例如另一个标签页删书时本页把记录写回）：用这次选的文件补上。
+      if (!(await getBookFile(hash))) await saveBookFile(hash, file);
       setStatus('libraryStatus', '这本书已导入，直接打开。', 'ok');
       await openBook(existing);
+      return;
+    }
+    if (tooBig) {
+      setStatus('libraryStatus', '文件超过 ' + Math.round(maxBookBytes / 1048576) + ' MB 上限，可在设置里调高。', 'error');
       return;
     }
     const est = await estimateUsage();
@@ -483,7 +494,7 @@ async function importFile(file) {
       progress: { sectionId: first ? first.id : '', offsetRatio: 0 }
     };
     await saveBookFile(record.id, file);
-    await saveBook(record);
+    await createBook(record);
     requestPersistence().catch(() => {});
     setStatus('libraryStatus', '已导入。', 'ok');
     await renderLibrary();
@@ -513,7 +524,7 @@ async function importPdf(file, buffer, hash) {
     progress: { sectionId: 'page:1', offsetRatio: 0 }
   };
   await saveBookFile(record.id, file);
-  await saveBook(record);
+  await createBook(record);
   requestPersistence().catch(() => {});
   setStatus('libraryStatus', '已导入。', 'ok');
   await renderLibrary();
