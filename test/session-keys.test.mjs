@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { makeArea } from './_fake-storage.mjs';
 import { createConfigStore, LOCAL_SECRETS, SESSION_SECRETS } from '../lib/config-storage.js';
-import { activeConfig, publicConfig, configPatchSince } from '../lib/config.js';
+import { activeConfig, publicConfig, configPatchSince, configFormPatch } from '../lib/config.js';
 import { configFingerprint, createConfigBroadcaster } from '../lib/config-broadcast.js';
 
 const key = 'mock-secret-for-session-test';
@@ -183,4 +183,84 @@ test('a silent tab does not block other tabs or future broadcasts', async () => 
     await broadcaster.flush();
     assert.deepEqual(sent, [1, 2, 3, 1, 2, 3]);
   } finally { release(); }
+});
+
+// chrome.storage 读回时键已排序：模拟这一点，确认新服务商排在已有会话 Key 之前也能保存（QA F2）。
+function sortedArea() {
+  const area = makeArea({ clone: true });
+  const sort = (value) => Array.isArray(value) ? value.map(sort) : value && typeof value === 'object'
+    ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, sort(value[k])])) : value;
+  const get = area.get.bind(area);
+  area.get = async (keys) => sort(await get(keys));
+  return area;
+}
+
+test('session staging verification ignores key order chrome.storage applies on read', async () => {
+  const local = sortedArea();
+  const session = sortedArea();
+  const store = createConfigStore({ local, session });
+  await store.save({ currentProvider: 'deepseek', providerConfig: { deepseek: slot } });
+  for (const id of ['anthropic', '__custom__']) {
+    const extra = id === '__custom__' ? { customProviders: [{ id, name: 'Mock' }] } : {};
+    const saved = await store.save({ ...extra, currentProvider: id, providerConfig: { [id]: { ...slot, apiKey: 'mock-' + id } } });
+    assert.equal(activeConfig(saved).apiKey, 'mock-' + id);
+  }
+});
+
+test('the one-time legacy choice only moves legacy keys, not keys chosen after the upgrade (QA F3)', async () => {
+  for (const policy of ['session', 'local']) {
+    const e = env();
+    await e.local.set({ config });
+    await e.store.get();
+    await e.store.save({ providerConfig: {
+      siliconflow: { ...slot, apiKey: 'mock-new-remembered', keyStorage: 'local' },
+      zhipu: { ...slot, apiKey: 'mock-new-session', keyStorage: 'session' }
+    } });
+    assert.equal((await e.store.get()).keyMigrationPending, true);
+    const migrated = await e.store.save({ keyMigration: policy });
+    assert.equal(migrated.keyMigrationPending, false);
+    assert.equal(migrated.providerConfig.deepseek.keyStorage, policy);
+    assert.equal(migrated.providerConfig.siliconflow.keyStorage, 'local');
+    assert.equal(migrated.providerConfig.zhipu.keyStorage, 'session');
+    const disk = JSON.stringify(await e.local.get(null));
+    assert.ok(disk.includes('mock-new-remembered'));
+    assert.ok(!disk.includes('mock-new-session'));
+    assert.equal(disk.includes(key), policy === 'local');
+  }
+});
+
+test('re-entering a legacy key as session-only drops it from the migration prompt', async () => {
+  const e = env();
+  await e.local.set({ config });
+  await e.store.get();
+  const saved = await e.store.save({ providerConfig: { deepseek: { apiKey: 'mock-replaced', keyStorage: 'session' } } });
+  assert.equal(saved.keyMigrationPending, false);
+  assert.ok(!JSON.stringify(await e.local.get(null)).includes('mock-replaced'));
+});
+
+test('0.16 configs with a pending prompt but no recorded scope only migrate device keys', async () => {
+  const e = env();
+  await e.store.save({ providerConfig: { zhipu: { ...slot, apiKey: 'mock-session-only' } } });
+  await e.store.save({ providerConfig: { deepseek: { ...slot, keyStorage: 'local' } } });
+  const disk = await e.local.get('config');
+  delete disk.config.keyMigrationProviders;
+  disk.config.keyMigrationPending = true;
+  await e.local.set(disk);
+  assert.deepEqual((await e.store.get()).keyMigrationProviders, ['deepseek']);
+  const kept = await e.store.save({ keyMigration: 'local' });
+  assert.equal(kept.providerConfig.zhipu.keyStorage, 'session');
+  assert.ok(!JSON.stringify(await e.local.get(null)).includes('mock-session-only'));
+});
+
+test('a Key edited in one settings window keeps that window\'s remember choice (QA F4)', async () => {
+  const e = env();
+  const initial = await e.store.save({ providerConfig: { deepseek: { ...slot, keyStorage: 'session' } } });
+  const windowA = structuredClone(initial);
+  const windowB = structuredClone(initial);
+  windowB.providerConfig.deepseek.keyStorage = 'local';
+  await e.store.save(configFormPatch(initial, windowB));
+  windowA.providerConfig.deepseek.apiKey = 'mock-typed-in-window-a';
+  const saved = await e.store.save(configFormPatch(initial, windowA));
+  assert.equal(activeConfig(saved).keyStorage, 'session');
+  assert.ok(!JSON.stringify(await e.local.get(null)).includes('mock-typed-in-window-a'));
 });

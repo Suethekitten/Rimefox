@@ -1,7 +1,7 @@
 import {
   DEFAULTS,
   getConfig,
-  configPatchSince,
+  configFormPatch,
   saveConfig,
   THEMES,
   languageOptions,
@@ -1160,7 +1160,7 @@ $('save').addEventListener('click', async () => {
     (ruleErrors.length ? fields.siteRules : fields.customCss).scrollIntoView({ block: 'center', behavior: 'smooth' });
     return;
   }
-  const patch = configPatchSince(savedForm || {}, readForm());
+  const patch = configFormPatch(savedForm || {}, readForm());
   const insecure = Object.keys(patch.providerConfig || {}).find((id) => {
     const one = patch.providerConfig[id];
     return one && isInsecureRemoteEndpoint(one.baseUrl);
@@ -1216,7 +1216,7 @@ $('test').addEventListener('click', async () => {
   btn.disabled = true;
   setResult($('testResult'), '测试中…');
   try {
-    currentCfg = await saveConfig(configPatchSince(savedForm || {}, readForm()));
+    currentCfg = await saveConfig(configFormPatch(savedForm || {}, readForm()));
     applyConfig(currentCfg);
     rememberSaved(currentCfg);
     markSaved(currentCfg);
@@ -1368,7 +1368,7 @@ $('clearCache').addEventListener('click', async () => {
 // 解析与校验在 lib/config.js 的 pickImportedConfig 里（纯函数，可被 node 直接测试）。
 function buildExport(includeKey) {
   const cfg = { ...currentCfg };
-  ['authPaused', 'credentialRevision', 'credentialsRevision', '_storageRevision', 'keyMigrationPending'].forEach((key) => { delete cfg[key]; });
+  ['authPaused', 'credentialRevision', 'credentialsRevision', '_storageRevision', 'keyMigrationPending', 'keyMigrationProviders'].forEach((key) => { delete cfg[key]; });
   // Key 藏在每个服务商的配置里：导出时逐个处理
   cfg.providerConfig = {};
   Object.keys(currentCfg.providerConfig || {}).forEach((id) => {
