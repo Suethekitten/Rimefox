@@ -2832,6 +2832,12 @@ async function controlChecks() {
 
   const sentBefore = stats.sent.length;
   const faq = await openTab(ORIGIN + '/fm-faq.html');
+  // 翻译前收集这一页初始可见的单元：面板再次展开时，这些已经翻过的文本一次都不该重复送翻。
+  // 不能拿全局 stats.requests 当判据——别的标签页（例如上一节的 inline-links）补扫也会进同一个计数器。
+  const faqUnits = await contentEval(
+    faq,
+    '(function () { try { return (window.__DT.collect(document.body) || []).map(function (u) { return u.text; }); } catch (err) { return []; } })()'
+  );
   await tabMsg(faq.tabId, { type: 'dt:toggle' });
   const faqReady = await until(() => pageEval(faq, "return document.querySelectorAll('[data-dt-target]').length >= 4"), 20000);
   await settled(faq);
@@ -2846,18 +2852,25 @@ async function controlChecks() {
     };`
   );
   const qName = "What’s included in Freedom Mobile’s Roam Beyond Travel Data eSIM?";
+  const faqAnswer = 'The plan includes 5GB of data in over 100 destinations, plus unlimited calls and texts within Canada.';
   const qSent = stats.sent.slice(sentBefore).filter((t) => String(t).includes(qName)).length;
   check('FAQ 问题实际发送给模型', qSent >= 1, 'sent=' + JSON.stringify(stats.sent.slice(sentBefore).filter((t) => String(t).includes('What’s included')).map((t) => String(t).slice(0, 80))));
   check('FAQ 问题翻译为中文（控件内部标题）', !!faqReady && /[\u4e00-\u9fff]/.test(faqText.q) && faqText.target, JSON.stringify(faqText));
   check('FAQ 控件保留 aria / SVG 图标', faqText.aria === 'false' && faqText.svg, JSON.stringify({ aria: faqText.aria, svg: faqText.svg }));
 
-  const requestsBefore = stats.requests;
   const qCountBefore = stats.sent.filter((t) => String(t).includes(qName)).length;
+  const sentLenBefore = stats.sent.length;
   check('FAQ 点击：真实鼠标展开', await clickAt(faq, '#fmbtn'), 'clicked');
-  await sleep(220);
+  await sleep(180);
   const opened = await pageEval(faq, "return {expanded:document.querySelector('#fmbtn').getAttribute('aria-expanded'),hidden:document.querySelector('#fmpanel').hidden,carrot:getComputedStyle(document.querySelector('#fmcarrot')).transform,svg:!!document.querySelector('#fmcarrot svg')};");
   check('FAQ 鼠标展开：aria-expanded / panel / 图标正确', opened.expanded === 'true' && opened.hidden === false && opened.svg, JSON.stringify(opened));
-  check('FAQ 标题再次展开不重复请求', stats.requests === requestsBefore && stats.sent.filter((t) => String(t).includes(qName)).length === qCountBefore, JSON.stringify({ requests: stats.requests - requestsBefore, q: stats.sent.length }));
+  // 点击补扫有 300ms 防抖：等新露出的答案翻完再判定，不能抢在补扫之前把「还没发请求」当成通过。
+  // 只比较这一页自己的单元：全局计数器里还混着别的标签页的补扫，重复请求的判据不能是「全局新增 0 次」。
+  const answerShown = await until(() => pageEval(faq, "return !!document.querySelector('#fmans [data-dt-target]')"), 8000);
+  const newTexts = stats.sent.slice(sentLenBefore);
+  const resent = newTexts.filter((text) => faqUnits.indexOf(text) >= 0);
+  check('FAQ 标题再次展开不重复请求', faqUnits.length >= 8 && resent.length === 0 && stats.sent.filter((t) => String(t).includes(qName)).length === qCountBefore, JSON.stringify({ units: faqUnits.length, resent, newCount: newTexts.length, newTexts: newTexts.slice(0, 8) }));
+  check('FAQ 展开后新露出的答案补翻一次', !!answerShown && stats.sent.filter((t) => t === faqAnswer).length === 1, JSON.stringify({ shown: !!answerShown, sends: stats.sent.filter((t) => t === faqAnswer).length }));
 
   await clickAt(faq, '#fmbtn');
   await sleep(160);
