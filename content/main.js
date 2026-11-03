@@ -1415,6 +1415,8 @@
     document.addEventListener(
       'keydown',
       function (event) {
+        // 只认用户真按的键：网页脚本 dispatchEvent 合成的按键（isTrusted=false）不能发起付费翻译（QA F5）
+        if (!event.isTrusted) return;
         var spec = (DT.state.config && DT.state.config.hotkey) || 'alt+a';
         if (!DT.matchesHotkey(event, spec)) return;
         // 正在输入框 / 可编辑区域里打字：不抢这个键
@@ -1434,6 +1436,7 @@
     document.addEventListener(
       'keydown',
       function (event) {
+        if (!event.isTrusted) return; // 同上：合成按键不触发输入框翻译
         var spec = (DT.state.config && DT.state.config.inputHotkey) || 'alt+i';
         if (!DT.matchesHotkey(event, spec)) return;
         if (event.isComposing || event.keyCode === 229) return; // 输入法拼字中

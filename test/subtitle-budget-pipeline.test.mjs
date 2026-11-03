@@ -122,6 +122,16 @@ await t('轮换身份 + 新文本：请求数被后台预算卡住，且返回�
   assert.match(String(last.error), /上限/);
 });
 
+await t('YouTube 字幕同样受标签页预算约束：伪造轨道 / 语言不能无限计费（QA S1）', async function () {
+  calls = [];
+  let last = null;
+  for (let i = 0; i < 100; i += 1) {
+    last = await sendSub(['Forged YouTube line ' + i], 'youtube|vid' + i + '|lang' + i + ':manual|en', 15, 'https://www.youtube.com/watch?v=vid' + i);
+  }
+  assert.equal(calls.length, 89);
+  assert.equal(last.errorCode, 'subtitle_budget');
+});
+
 await t('预算按标签页隔离：换一个标签页仍是完整额度（跨标签页总量另算）', async function () {
   calls = [];
   const res = await sendSub(['另一个标签页的字幕'], 'bilibili|BV1xx411c7mD:1|en-id:en-US|en-US', 9);

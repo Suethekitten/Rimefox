@@ -392,11 +392,13 @@ async function handleTranslate(msg, sender) {
   const glossary = normalizeGlossary(cfg.glossary);
   const inlineProtocol = msg.inlineProtocol === INLINE_VERSION;
   // 字幕请求只看发送方场景（标签页地址），不看消息里自报的身份：
-  // - Bilibili：缓存身份固定为文本，另按标签页计付费预算（V8）；
-  // - YouTube：本次不动它的契约，缓存身份仍是原来的 platform|video|track|lang。
+  // - Bilibili：缓存身份固定为文本（V8）；
+  // - YouTube：缓存身份仍是原来的 platform|video|track|lang；
+  // - 两个平台都按标签页 + 跨标签页计付费预算。
   const subtitleScene = subtitleSceneOf(sender);
   const subtitleRequest = subtitleScene !== '' && typeof msg.cacheScope === 'string' && /^[A-Za-z0-9_:|.\-]{1,200}$/.test(msg.cacheScope);
-  const subtitleSpend = subtitleRequest && subtitleScene === 'bilibili' ? await subtitleSpendFor(sender) : null;
+  // 付费预算按标签页记账，两个平台都要：YouTube 字幕同样经页面可伪造的消息进入，换一个 lang 就是新轨道（QA S1）。
+  const subtitleSpend = subtitleRequest ? await subtitleSpendFor(sender) : null;
   const professionalBase = createProfessionalEngine(cfg, {
     target, style, documentContext: msg.documentContext,
     excludeSources: new Set(glossary.map(one => one.source))
