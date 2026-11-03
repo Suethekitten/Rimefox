@@ -10,6 +10,19 @@
   if (DT.__coreReady) return;
   DT.__coreReady = true;
 
+  // 扩展重载后，旧的字幕内容脚本已经失效，但它留在播放器上的隐藏类 / 叠层不会被新上下文接管。
+  // 清理掉，避免 YouTube 原生字幕被旧类一直隐藏。
+  try {
+    document.querySelectorAll('.rimefox-subs-on').forEach(function (el) {
+      el.classList.remove('rimefox-subs-on');
+    });
+    document.querySelectorAll('.rimefox-subs').forEach(function (el) {
+      el.remove();
+    });
+  } catch (err) {
+    /* 非页面环境忽略 */
+  }
+
   DT.state = {
     enabled: false,
     mode: 'dual',
