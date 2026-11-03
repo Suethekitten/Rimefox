@@ -822,15 +822,18 @@ await swEval(
 );
 
 // 新开一个标签页，等内容脚本起来（它会在 <html> 上写 data-dt）
-// cache:clear 只接受扩展页面（内容脚本不能清空共享缓存）：从一个隐藏的设置页发。
-let trustedPageSession = null;
+// cache:clear 只接受扩展页面（内容脚本不能清空共享缓存）：临时开一个设置页发，发完就关，
+// 不让一个常驻的设置页参与后续用例（它会响应配置广播）。
 async function clearCache() {
-  if (!trustedPageSession) {
-    const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html', background: true });
-    trustedPageSession = await attach(targetId);
-    await until(() => evaluate(trustedPageSession, 'document.readyState === "complete"'), 10000);
+  const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html', background: true });
+  try {
+    const session = await attach(targetId);
+    // 新建的标签页先是 about:blank：等它真正到达扩展页、拿到 chrome.runtime 再发消息。
+    await until(() => evaluate(session, 'location.protocol === "chrome-extension:" && document.readyState === "complete" && !!(window.chrome && chrome.runtime && chrome.runtime.sendMessage)'), 10000);
+    return await evaluate(session, 'new Promise((resolve) => chrome.runtime.sendMessage({ type: "cache:clear" }, resolve))');
+  } finally {
+    await send('Target.closeTarget', { targetId }).catch(() => {});
   }
-  return evaluate(trustedPageSession, 'new Promise((resolve) => chrome.runtime.sendMessage({ type: "cache:clear" }, resolve))');
 }
 
 async function openTab(url, before) {
