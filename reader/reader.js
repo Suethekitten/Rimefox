@@ -1145,13 +1145,21 @@ async function openPdfBook(record, seq) {
   }
   $('tocList').textContent = '';
   const tocWrap = document.createElement('div');
-  let toc = { source: 'pages', entries: [] };
-  try { toc = await doc.toc(); } catch (err) { toc = { source: 'pages', entries: [] }; }
-  if (seq !== openSeq) {
-    if (state.pdf === doc) state.pdf = null;
-    try { doc.destroy(); } catch (err) { /* ignore */ }
-    return;
-  }
+  setReaderHeader({ title: 'PDF · ' + doc.numPages + ' 页' });
+  // 不用 IntersectionObserver：后台标签页里它不回调，PDF 会一直空白。
+  // 改成按 getBoundingClientRect 判断可视范围，滚动 / 窗口尺寸变化时补渲染。
+  state.pdfObserver = null;
+  const target = Number(String((record.progress && record.progress.sectionId) || '').replace('page:', '')) || 1;
+  if (target > 1) state.pdfAnchor = { page: target, text: '' };
+  renderVisiblePdfPages();
+  requestAnimationFrame(() => renderVisiblePdfPages());
+  const viewPromise = applyPdfViewMode();
+  // 先让第一页进入渲染队列，再开始目录扫描；目录晚一点出现没关系。
+  const tocPromise = doc.toc().catch(() => ({ source: 'pages', entries: [] }));
+  await viewPromise;
+  if (seq !== openSeq) return;
+  const toc = await tocPromise;
+  if (seq !== openSeq) return;
   if (toc.entries.length) {
     const hint = document.createElement('div');
     hint.className = 'toc-hint';
@@ -1184,16 +1192,6 @@ async function openPdfBook(record, seq) {
     }
   }
   $('tocList').appendChild(tocWrap);
-  setReaderHeader({ title: 'PDF · ' + doc.numPages + ' 页' });
-  // 不用 IntersectionObserver：后台标签页里它不回调，PDF 会一直空白。
-  // 改成按 getBoundingClientRect 判断可视范围，滚动 / 窗口尺寸变化时补渲染。
-  state.pdfObserver = null;
-  const target = Number(String((record.progress && record.progress.sectionId) || '').replace('page:', '')) || 1;
-  if (target > 1) state.pdfAnchor = { page: target, text: '' };
-  renderVisiblePdfPages();
-  requestAnimationFrame(() => renderVisiblePdfPages());
-  await applyPdfViewMode();
-  if (seq !== openSeq) return;
   record.lastOpenedAt = Date.now();
   await saveBook(record);
 }

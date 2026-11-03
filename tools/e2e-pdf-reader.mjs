@@ -169,7 +169,7 @@ await setInputFile(page, PDF, true);
 const pages = await until(() => pageEval(page, "return document.querySelectorAll('.pdf-page').length"), 30000);
 check('PDF 导入后进入阅读页（页容器）', !!pages, pages ? pages + ' 页' : '没有页容器');
 check('页标题/页数正确', !!(await pageEval(page, "const s=document.getElementById('readerSubtitle'); return s && s.textContent.indexOf('PDF') >= 0;")));
-const tocCount = await pageEval(page, "return document.querySelectorAll('#tocList a').length");
+const tocCount = await until(() => pageEval(page, "return document.querySelectorAll('#tocList a').length"), 15000);
 check('目录面板有可跳转条目', tocCount > 0, tocCount + ' 条');
 
 if (process.env.RIMEFOX_PDF_RENDER !== '0') {

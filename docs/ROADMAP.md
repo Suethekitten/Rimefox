@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-02；当前版本为 0.16.1，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.1 修复 PDF 搜索 / 并发打开 / 重导入与阅读器稳定性问题；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-03；当前版本为 0.16.2，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.2 优化大 PDF 打开、PDF 配置身份缓存与网页点击补扫；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -86,6 +86,7 @@
 | 0.15.0 | 会话密钥与翻译暂停：Key 默认仅本次会话、可选设备记忆、旧用户迁移、鉴权失败全局暂停与恢复；含 0.14.2 的 PDF 缓存与生命周期修复 |
 | 0.16.0 | PDF 文本质量与稳定性：多栏顺序、目录条目、公式占位、脚注剥离、表格单元格；版式切换与滚动渲染稳定；阅读器存储拆分；配置导入清 Key 与明文 HTTP 警告 |
 | 0.16.1 | 阅读器与稳定性修复：PDF 搜索 / 并发打开 / 重导入、失败页重试与流式滚动、切换目标语言保持版式、EPUB 语言缓存、字幕预算与站点规则开销 |
+| 0.16.2 | 大 PDF 打开优化：首屏先渲染、目录延后并行、页眉扫描与本页取字并行；PDF 配置身份缓存；网页点击补扫按控件和媒体区域收敛 |
 
 ---
 
@@ -154,15 +155,19 @@ P2-1 的会话 Key、可选设备记忆、旧用户迁移选择、鉴权失败�
 
 P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB v4 文件拆分、版式切换与滚动渲染稳定性、页面与译文缓存上限，以及配置导入清 Key 与明文 HTTP 警告均已完成。三处版本号与 CHANGELOG 已统一为 0.16.0；推送与发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.0) 和 [Actions](https://github.com/Suethekitten/Rimefox/actions/workflows/release.yml) 为准。
 
-实现契约见 [HANDOFF §14](../HANDOFF.md#14-本版技术记录0161) 与 [PDF-HANDOFF](PDF-HANDOFF.md)；完成范围与未测边界见 [0.16 归档](archive/2026-11-02-pdf-quality-0.16.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
+实现契约见 [HANDOFF §14](../HANDOFF.md#14-本版技术记录0162) 与 [PDF-HANDOFF](PDF-HANDOFF.md)；完成范围与未测边界见 [0.16 归档](archive/2026-11-02-pdf-quality-0.16.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
 
 ### 0.16.1（补丁）
 
 修复 0.16.0 审计中第一批高风险项：PDF 搜索切换书籍串台 / 关书报错、并发打开覆盖、重新导入被书库上限误拦、IndexedDB 升级 blocked、PDF 失败页重试与显式重译清退避、流式滚动全页扫描与快速滑过排队、切换目标语言保持流式版式并自动重译、EPUB 切语言清缓存、字幕预算写队列清理、站点规则 O(n²)、字幕关闭空转查询。旧库迁移 / 删书 / 重复导入 / 目标语言自动重译已补 E2E；版本与 CHANGELOG 已统一为 0.16.1，发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.1) 为准。
 
+### 0.16.2（补丁）
+
+完成审计剩余三项：#7 大 PDF 首屏先渲染、目录扫描延后并行、页眉扫描与本页取字并行；#11 PDF 缓存身份按配置修订号记忆；#13 点击补扫只处理可能切换内容的控件并合并连续点击。版本与 CHANGELOG 已统一为 0.16.2，发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.2) 为准。
+
 ### 下一步
 
-1. 本地试用 0.16.1，重点检查 PDF 搜索、连续打开两本书、重复导入和流式滚动；核实 Actions / Release 的实际结果。
+1. 本地试用 0.16.2，重点打开 600+ 页 PDF 看首屏和目录，并测试地图 / 视频页点击不卡。
 2. 跨页段落合并（PDF-HANDOFF §4 第 1 条）与真实 API 延迟仍待排期；真实延迟要用服务商配置实测，不能用假接口结果代替。
 3. P2-11 继续做 OCR 基线探针；真实 API 延迟与质量实测单列任务，不能用假接口结果代替。
 

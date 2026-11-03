@@ -11,6 +11,8 @@
   var observer = null;
   var chromeObserver = null;
   var debounceTimer = 0;
+  var clickScanTimer = 0;
+  var clickScanShadowTimer = 0;
   var lastUrl = location.href;
   var urlTimer = 0;
   var running = false;
@@ -1670,8 +1672,21 @@
       function (event) {
         if (!DT.state.enabled) return;
         var target = event.target;
-        if (target && target.closest && target.closest('[data-dt-ui]')) return;
-        setTimeout(function () {
+        if (!target || !target.closest) return;
+        if (target.closest('[data-dt-ui]')) return;
+        // 地图、视频、画布、滑块上的点击不会露出正文；以前每次都会整页重扫。
+        if (target.closest('video, canvas, iframe, [role="slider"], input[type="range"], select, textarea, ' +
+          '[class*="video-player"], [class*="leaflet"], [class*="gm-style"], [class*="mapboxgl"], [class*="maplibre"]')) return;
+        // 只处理可能切换内容的控件，普通空白或正文点击交给 MutationObserver。
+        if (!target.closest(
+          'button, a, [role="button"], [role="menuitem"], [role="tab"], [role="option"], ' +
+          'summary, details, label, [aria-expanded], [aria-controls], ' +
+          '[class*="menu"], [class~="tab"], [class*="tabs"], [class*="tab-"], [class*="-tab"], ' +
+          '[class*="toggle"], [class*="dropdown"]'
+        )) return;
+        // 连续点击（表头排序、快速切 Tab）只保留最后一次，不叠加多次全页扫描。
+        clearTimeout(clickScanTimer);
+        clickScanTimer = setTimeout(function () {
           if (!DT.state.enabled) return;
           if (running) {
             dirty = true;
@@ -1682,7 +1697,8 @@
         // B 站楼中楼回复通常在点击后异步加载；300ms 时可能还没进 DOM。
         // 只在启用 Shadow DOM 的站点补一次 1.2s 后的增量扫描，不为每个 thread 建 Observer。
         if (DT.shadow && DT.shadow.active && DT.shadow.active()) {
-          setTimeout(function () {
+          clearTimeout(clickScanShadowTimer);
+          clickScanShadowTimer = setTimeout(function () {
             if (!DT.state.enabled) return;
             if (running) {
               dirty = true;
