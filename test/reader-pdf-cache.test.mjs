@@ -129,3 +129,25 @@ test('formula-only blocks are not sent to the translation API', async () => {
   assert.deepEqual(f.calls[0].texts, ['Body text follows the formula.']);
   assert.deepEqual(out, ['', '中文译文。']);
 });
+
+test('a failed second batch keeps and caches the paid first batch; retry only sends the rest (QA G4)', async () => {
+  let call = 0;
+  const f = fixture((message) => {
+    call += 1;
+    if (call === 2) return { ok: false, error: '第二批失败' };
+    return { ok: true, results: message.texts.map((t) => '译:' + t.slice(0, 12)) };
+  });
+  const blocks = Array.from({ length: 30 }, (_, i) => ({ text: 'Block number ' + i + ' has a sentence of plain body text in it.' }));
+  const bigPage = { pageNo: 3, blocks };
+  const err = await f.translator.translatePage({ ...args, page: bigPage }).catch((e) => e);
+  assert.match(err.message, /第二批失败/);
+  const first = f.calls[0].texts.length;
+  assert.ok(first > 0 && first < blocks.length);
+  assert.equal(err.partial.filter(Boolean).length, first);
+  assert.equal(f.rows.size, first);
+  const sentBefore = f.calls.length;
+  const out = await f.translator.translatePage({ ...args, page: bigPage });
+  assert.ok(out.every(Boolean));
+  const resent = f.calls.slice(sentBefore).flatMap((m) => m.texts);
+  assert.equal(resent.length, blocks.length - first);
+});

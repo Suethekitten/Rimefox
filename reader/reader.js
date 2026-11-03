@@ -778,12 +778,34 @@ function endPdfProgressIfIdle() {
   }, 600);
 }
 
+function pdfRetryDelay(count) {
+  return Math.min(5 * 60 * 1000, 15000 * Math.pow(2, Math.max(0, (count || 1) - 1)));
+}
+
+function showPdfPageTranslations(index, texts) {
+  if (!state.pdfTrans) state.pdfTrans = new Map();
+  if (state.pdfTrans.has(index)) state.pdfTrans.delete(index);
+  state.pdfTrans.set(index, texts);
+  if (state.pdfTrans.size > PDF_TRANS_MAX) {
+    // 淘汰最久未用、且不在当前可视窗口里的页：否则补译上一页时会把正在看的这页译文清掉。
+    const keep = new Set(state.pdfView === 'flow' ? visibleFlowPageIndexes() : visiblePdfPageIndexes());
+    keep.add(index);
+    for (const old of Array.from(state.pdfTrans.keys())) {
+      if (state.pdfTrans.size <= PDF_TRANS_MAX) break;
+      if (keep.has(old)) continue;
+      state.pdfTrans.delete(old);
+      applyPdfTranslations(old);
+    }
+  }
+  applyPdfTranslations(index);
+}
+
 async function translatePdfPage(index) {
   if (!state.pdf || !state.config || !state.config.hasKey || state.config.authPaused || state.pdfStopped) return;
   if (state.pdfTranslating.has(index)) return;
-  // 失败后短时间内不重复请求；滚动回来只重试过了退避期的页。
-  const failedAt = state.pdfTransFails.get(index);
-  if (failedAt && Date.now() - failedAt < 15000) return;
+  // 失败后按次数指数退避（15 s 起，最长 5 分钟）；滚动回来只重试过了退避期的页（QA G11）。
+  const failed = state.pdfTransFails.get(index);
+  if (failed && Date.now() - failed.at < pdfRetryDelay(failed.count)) return;
   const token = {};
   const jobs = state.pdfTranslating;
   jobs.set(index, token);
@@ -809,17 +831,16 @@ async function translatePdfPage(index) {
     });
     if (!current() || !texts) return;
     state.pdfTransFails.delete(index);
-    if (!state.pdfTrans) state.pdfTrans = new Map();
-    if (state.pdfTrans.has(index)) state.pdfTrans.delete(index);
-    state.pdfTrans.set(index, texts);
-    while (state.pdfTrans.size > PDF_TRANS_MAX) {
-      const oldest = state.pdfTrans.keys().next().value;
-      state.pdfTrans.delete(oldest);
-      applyPdfTranslations(oldest);
-    }
-    applyPdfTranslations(index);
+    showPdfPageTranslations(index, texts);
   } catch (err) {
-    if (current()) state.pdfTransFails.set(index, Date.now());
+    if (current()) {
+      // 部分批次成功：先显示已完成的块（它们已进缓存，重试时不再计费）。
+      if (Array.isArray(err && err.partial) && err.partial.some(Boolean)) showPdfPageTranslations(index, err.partial);
+      if (!(err && err.code === 'config_changed')) {
+        const previous = state.pdfTransFails.get(index);
+        state.pdfTransFails.set(index, { at: Date.now(), count: ((previous && previous.count) || 0) + 1 });
+      }
+    }
     throw err;
   } finally {
     if (jobs.get(index) === token) jobs.delete(index);
@@ -846,7 +867,14 @@ function pdfPageVisible(index) {
   // 等它真正加载出文本块后再允许排队翻译。
   if (state.pdfView === 'flow' && el.dataset.loaded !== '1') return false;
   const rect = el.getBoundingClientRect();
-  return rect.bottom >= -800 && rect.top <= window.innerHeight + 800;
+  if (!(rect.bottom >= -800 && rect.top <= window.innerHeight + 800)) return false;
+  // 像素窗口之外再按页数限制：仅译文等模式下页面很矮，±800 px 可能覆盖十几页（QA G3）。
+  // 只给屏幕上真正可见的页、前 1 页和后 2 页送翻。
+  const onScreen = pdfPageWindow(0, state.pdfView === 'flow' ? '#pdfFlow' : '.pdf-pages', state.pdfView === 'flow' ? '.pdf-flow-page' : '.pdf-page');
+  if (!onScreen.length) return true;
+  const first = Number(onScreen[0].dataset.page);
+  const last = Number(onScreen[onScreen.length - 1].dataset.page);
+  return index >= first - 1 && index <= last + 2;
 }
 
 function schedulePdfPageTranslation(index) {
@@ -1208,12 +1236,13 @@ async function openPdfBook(record, seq) {
 }
 
 let pdfRenderQueue = Promise.resolve();
-function pdfPageWindow(margin) {
-  const root = document.querySelector('.pdf-pages');
+function pdfPageWindow(margin, rootSelector, pageSelector) {
+  const root = document.querySelector(rootSelector || '.pdf-pages');
   if (!root || root.hidden) return [];
-  const pages = Array.from(root.querySelectorAll('.pdf-page'));
+  const pages = Array.from(root.querySelectorAll(pageSelector || '.pdf-page'));
   if (!pages.length) return [];
-  const topLimit = -(margin || 800);
+  const pad = margin === undefined ? 800 : margin;
+  const topLimit = -pad;
   // 页面按顺序堆叠，先二分找到第一个仍在上边距内的页，再从它往后扫；
   // 不再为每一页读一次 getBoundingClientRect（500 页时每次滚动省下大量布局计算）。
   let lo = 0;
@@ -1229,7 +1258,7 @@ function pdfPageWindow(margin) {
       lo = mid + 1;
     }
   }
-  const bottomLimit = window.innerHeight + (margin || 800);
+  const bottomLimit = window.innerHeight + pad;
   const out = [];
   for (let i = first; i < pages.length; i += 1) {
     if (pages[i].getBoundingClientRect().top > bottomLimit) break;

@@ -189,7 +189,10 @@ button { cursor: pointer; }
 .pdf-src { display: block; }
 .pdf-trans { margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--reader-accent); color: var(--reader-muted); font-size: calc(var(--reader-font-size, 18px) * 0.78); line-height: 1.55; }
 #bookContent[data-pdf-mode="original"] .pdf-trans { display: none; }
-#bookContent[data-pdf-mode="translation"] .pdf-src { display: none; }
+/* 仅译文：只隐藏已有译文的块的原文。未翻译的块保留原文（淡色）占位，页面保持真实高度；
+   否则整页收起成一行标签，可见范围会一次覆盖几十页并全部送翻（QA G3）。 */
+#bookContent[data-pdf-mode="translation"] .pdf-block:has(> .pdf-trans) > .pdf-src { display: none; }
+#bookContent[data-pdf-mode="translation"] .pdf-block:not(:has(> .pdf-trans)) > .pdf-src { color: var(--reader-muted); }
 
 .pdf-progress { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin: 0 0 10px; background: var(--reader-paper); border: 1px solid var(--reader-line); border-radius: 8px; font-size: 12px; color: var(--reader-muted); }
 .pdf-progress-track { flex: 1; height: 4px; background: var(--reader-line); border-radius: 999px; overflow: hidden; }
