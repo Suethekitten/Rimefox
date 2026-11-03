@@ -822,6 +822,17 @@ await swEval(
 );
 
 // 新开一个标签页，等内容脚本起来（它会在 <html> 上写 data-dt）
+// cache:clear 只接受扩展页面（内容脚本不能清空共享缓存）：从一个隐藏的设置页发。
+let trustedPageSession = null;
+async function clearCache() {
+  if (!trustedPageSession) {
+    const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html', background: true });
+    trustedPageSession = await attach(targetId);
+    await until(() => evaluate(trustedPageSession, 'document.readyState === "complete"'), 10000);
+  }
+  return evaluate(trustedPageSession, 'new Promise((resolve) => chrome.runtime.sendMessage({ type: "cache:clear" }, resolve))');
+}
+
 async function openTab(url, before) {
   const { targetId } = await send('Target.createTarget', { url: before ? 'about:blank' : url });
   const s = await attach(targetId);
@@ -1387,7 +1398,7 @@ async function modelReplayChecks() {
   ];
   for (const fixture of fixtures) {
     const tab = await openTab(ORIGIN + fixture.url);
-    const clear = () => contentEval(tab, "window.__DT.send({ type: 'cache:clear' })");
+    const clear = () => clearCache();
     const state = () => tabMsg(tab.tabId, { type: 'dt:status' });
     const targetState = () => pageEval(tab, "const p=document.querySelector(" + JSON.stringify(fixture.root) + ");return {text:p?p.textContent:'',targets:p?p.querySelectorAll('[data-dt-target]').length:0,replaced:p?p.hasAttribute('data-dt-replaced'):false,links:p?p.querySelectorAll('a[href]').length:0,sups:p?p.querySelectorAll('sup').length:0};");
     stats.arabicFixture = fixture.label === '阿拉伯语';
@@ -2720,7 +2731,7 @@ async function languageChecks() {
   check('悬停开启：英文译文上仍能高亮对应原句', !!hover && !!hover.src && !!hover.tgt, JSON.stringify(hover));
 
   // 关掉悬停对照：先清缓存再重翻（缓存键不含 align，不清会直接命中上面那次的结果，普通提示词根本不会被调用）
-  await contentEval(tab, 'window.__DT.send({ type: "cache:clear" })');
+  await clearCache();
   await patchConfig({ hoverCompare: false });
   await tabMsg(tab.tabId, { type: 'dt:toggle' });
   await until(() => pageEval(tab, "return document.querySelectorAll('#mt [data-dt-target]').length === 0"), 10000);
@@ -2931,7 +2942,7 @@ async function inlineReplayChecks() {
   console.log('\n[行内协议重放：缺部分标记 / 全缺标记 / 切片拼接损坏]');
   await patchConfig({ targetLang: 'zh-CN', mode: 'translation', lazy: false, hoverCompare: false, aiContextEnabled: false, privacyEnabled: false, customLanguages: [], professionalProfile: 'general', medicalMode: false });
   const tab = await openTab(ORIGIN + '/replay-inline.html');
-  const clear = () => contentEval(tab, "window.__DT.send({ type: 'cache:clear' })");
+  const clear = () => clearCache();
   const state = () => tabMsg(tab.tabId, { type: 'dt:status' });
   const dom = (selector) => pageEval(tab, "return (() => { const p=document.querySelector(" + JSON.stringify(selector) + "); return {text:p?p.textContent:'',targets:p?p.querySelectorAll('[data-dt-target]').length:0,replaced:p?p.hasAttribute('data-dt-replaced'):false,link:p&&p.querySelector('a')?p.querySelector('a').textContent:''}; })()");
   stats.outputMode = 'partial-f';

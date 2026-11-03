@@ -41,11 +41,12 @@ function makeEpub() {
   const files = {};
   files['mimetype'] = [enc('application/epub+zip'), { level: 0 }];
   files['META-INF/container.xml'] = enc('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
-  files['OEBPS/content.opf'] = enc('<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Reader Smoke</dc:title><dc:creator>QA Author</dc:creator><dc:language>en</dc:language><dc:identifier id="id">urn:reader-smoke</dc:identifier></metadata><manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="pic" href="pic.png" media-type="image/png"/></manifest><spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/></spine></package>');
-  files['OEBPS/toc.ncx'] = enc('<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap><navPoint id="n1"><navLabel><text>First Chapter</text></navLabel><content src="ch1.xhtml"/><navPoint id="n2"><navLabel><text>Second Chapter</text></navLabel><content src="ch2.xhtml"/></navPoint></navPoint></navMap></ncx>');
-  files['OEBPS/ch1.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><h1 id="top">First Chapter</h1><p id="para">Hello <b>bold</b> and <a href="ch2.xhtml#note">second chapter</a>.</p><p>Note <a epub:type="noteref" href="#note1">[1]</a>.</p><aside id="note1"><p>Footnote text.</p></aside><p><img src="pic.png" alt="dot"/></p><script>alert(1)<\/script><p>Safe tail.</p></body></html>');
-  files['OEBPS/ch2.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="note">Second Chapter</h1><p>Second body text.</p></body></html>');
-  files['OEBPS/pic.png'] = png;
+  files['OEBPS/content.opf'] = enc('<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Reader Smoke</dc:title><dc:creator>QA Author</dc:creator><dc:language>en</dc:language><dc:identifier id="id">urn:reader-smoke</dc:identifier></metadata><manifest><item id="c1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="Text/ch2.xhtml" media-type="application/xhtml+xml"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="pic" href="Images/pic.png" media-type="image/png"/></manifest><spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/></spine></package>');
+  files['OEBPS/toc.ncx'] = enc('<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap><navPoint id="n1"><navLabel><text>First Chapter</text></navLabel><content src="Text/ch1.xhtml"/><navPoint id="n2"><navLabel><text>Second Chapter</text></navLabel><content src="Text/ch2.xhtml"/></navPoint></navPoint></navMap></ncx>');
+  // Sigil 常见结构：章节在 Text/、图片在 Images/，书内链接以 ../ 开头（QA E1）
+  files['OEBPS/Text/ch1.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><h1 id="top">First Chapter</h1><p id="para">Hello <b>bold</b> and <a href="../Text/ch2.xhtml#note">second chapter</a>.</p><p>Note <a epub:type="noteref" href="#note1">[1]</a>.</p><aside id="note1"><p>Footnote text.</p></aside><p><img src="../Images/pic.png" alt="dot"/></p><script>alert(1)<\/script><p>Safe tail.</p></body></html>');
+  files['OEBPS/Text/ch2.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="note">Second Chapter</h1><p>Second body text.</p></body></html>');
+  files['OEBPS/Images/pic.png'] = png;
   return Buffer.from(zipSync(files));
 }
 
@@ -184,6 +185,7 @@ await pageEval("document.querySelector('#tocList a').click(); return true;");
 await until(() => pageEval("return !!document.querySelector('#bookContent [data-dt-target]')"), 15000);
 await sleep(800);
 check('目录跳转', await pageEval("return document.getElementById('bookContent').textContent.includes('First Chapter');"));
+check('Text/ + Images/ 结构的 ../ 图片与跨章链接能渲染', await pageEval("const img=document.querySelector('#bookContent img'); return !!img && img.src.startsWith('blob:') && document.getElementById('bookContent').textContent.includes('second chapter');"));
 
 const firstRequests = hits.requests;
 await pageEval("document.getElementById('backToLibrary').click(); return true;");

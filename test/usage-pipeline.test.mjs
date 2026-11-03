@@ -23,6 +23,8 @@ let listener = null;
 globalThis.chrome = {
   storage: { local: localArea, session: sessionArea, onChanged: { addListener() {} } },
   runtime: {
+    id: 'test-extension-id',
+    getURL: (path = '') => 'chrome-extension://test-extension-id/' + path,
     onMessage: { addListener(fn) { listener = fn; } },
     onStartup: { addListener() {} },
     onInstalled: { addListener() {} },
@@ -72,11 +74,13 @@ const baseConfig = {
 async function setConfig(patch) {
   await localArea.set({ config: { ...baseConfig, ...patch } });
 }
-function send(msg) {
+function send(msg, sender = { url: 'https://example.com/' }) {
   return new Promise((resolve) => {
-    listener(msg, { url: 'https://example.com/' }, resolve);
+    listener(msg, sender, resolve);
   });
 }
+// 重置统计只接受扩展自己的页面（QA F11）
+const OPTIONS_PAGE = { id: 'test-extension-id', url: 'chrome-extension://test-extension-id/options/index.html' };
 async function translate(texts) {
   return send({ type: 'translate', texts: texts, target: 'ja', style: 'plain' });
 }
@@ -86,7 +90,7 @@ async function stats() {
   return out.stats;
 }
 async function resetStats() {
-  const out = await send({ type: 'usage:reset' });
+  const out = await send({ type: 'usage:reset' }, OPTIONS_PAGE);
   assert.equal(out.ok, true, out.error);
 }
 
@@ -170,6 +174,14 @@ t('服务商不返回 usage：标记 unknown，不编造 token', () => {
   assert.equal(s.usageResponses, 0);
   assert.equal(s.unknownUsageResponses, 1);
   assert.equal(s.inputTokens, 0);
+});
+
+const pageReset = await send({ type: 'usage:reset' });
+const pageClear = await send({ type: 'cache:clear' });
+t('网页里的内容脚本不能重置统计或清空共享缓存', () => {
+  assert.equal(pageReset.ok, false);
+  assert.equal(pageClear.ok, false);
+  assert.match(pageClear.error, /仅限扩展页面/);
 });
 
 await setConfig({ debug: false });

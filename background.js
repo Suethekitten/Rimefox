@@ -226,12 +226,21 @@ async function translateBatchWithRetry(texts, target, cfg, style, glossary, priv
   throw lastErr || new ApiError('翻译失败', 0, '');
 }
 
+// 服务商错误原文会转给内容脚本并显示在网页可读的 toast 里：先抹掉看起来像密钥的串，
+// 回显 Key 的 401 不能把 Key 放进页面（QA F6）。
+function redactSecrets(text) {
+  return String(text || '')
+    .replace(/\b(?:sk|pk|rk|ak)-[A-Za-z0-9_\-]{8,}/g, '[密钥已隐藏]')
+    .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/=\-]{8,}/gi, '[密钥已隐藏]')
+    .replace(/\b(api[_-]?key|key|token|secret|authorization)(["'\s:=]+)[A-Za-z0-9._~+\/=\-]{12,}/gi, '$1$2[已隐藏]')
+    .replace(/[A-Za-z0-9_\-]{32,}/g, '[已隐藏]');
+}
 function describeError(err) {
   if (!err) return '未知错误';
   if (err instanceof ApiError) {
-    return err.detail ? err.message + '（' + err.detail.replace(/\s+/g, ' ').slice(0, 120) + '）' : err.message;
+    return redactSecrets(err.detail ? err.message + '（' + redactSecrets(err.detail.replace(/\s+/g, ' ')).slice(0, 120) + '）' : err.message);
   }
-  return err.message || String(err);
+  return redactSecrets(err.message || String(err));
 }
 
 // ---------------- 主流程 ----------------
@@ -1189,10 +1198,18 @@ const ROUTES = {
   }
 };
 
+// 只给扩展自己的页面（设置页 / 弹窗）用的路由：内容脚本跑在网页进程里，
+// 不能清空所有站点共用的缓存、重置统计或往任意标签页注入（QA F11）。
+const TRUSTED_ONLY = new Set(['cache:clear', 'cache:stats', 'usage:reset', 'ensure']);
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const route = msg && msg.type ? ROUTES[msg.type] : null;
   if (!route) {
     sendResponse({ ok: false, error: '未知指令：' + (msg && msg.type) });
+    return false;
+  }
+  if (TRUSTED_ONLY.has(msg.type) && !trustedPage(sender)) {
+    sendResponse({ ok: false, error: '此操作仅限扩展页面' });
     return false;
   }
   Promise.resolve()
