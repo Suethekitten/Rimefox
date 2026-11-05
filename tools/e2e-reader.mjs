@@ -138,7 +138,14 @@ const { targetId } = await send('Target.createTarget', { url: 'chrome-extension:
 console.log('reader target', targetId);
 const page = await attach(targetId);
 const pageEval = (code) => evalIn(page, '(() => {' + code + '})()');
-await until(() => pageEval("return !!document.getElementById('bookGrid')"), 15000);
+// #bookGrid is static HTML. boot() binds the import controls only after settings, font,
+// config and translator load, then renderLibrary() fills the grid; wait for that on a new document.
+async function readerBooted(previousDocument = null) {
+  const ready = await until(() => pageEval('return performance.timeOrigin !== ' + JSON.stringify(previousDocument) + ' && !!document.querySelector("#bookGrid .empty-library, #bookGrid .book-card")'), 20000);
+  if (!ready) throw new Error('Reader did not finish booting');
+  return pageEval('return performance.timeOrigin');
+}
+let readerDocument = await readerBooted();
 const cfg = {
   _v: 6,
   currentProvider: '__custom__',
@@ -148,8 +155,7 @@ const cfg = {
 };
 await pageEval('return chrome.storage.local.set({ config: ' + JSON.stringify(cfg) + ' }).then(() => true)');
 await send('Page.reload', {}, page);
-await sleep(1200);
-await until(() => pageEval("return !!document.getElementById('bookGrid')"), 15000);
+readerDocument = await readerBooted(readerDocument);
 check('阅读器页面加载', await pageEval("return document.title.indexOf('凛狐') >= 0;"), await pageEval('return document.title'));
 
 const bomb = path.join(WORK, 'qa-size-spoof.epub');
@@ -275,7 +281,7 @@ return new Promise((resolve) => {
 })`);
 check('旧版 v3 书库已写入', seeded === true, String(seeded));
 await send('Page.navigate', { url: 'chrome-extension://' + extId + '/reader/index.html' }, page);
-await until(() => pageEval("return !!document.getElementById('bookGrid')"), 15000);
+readerDocument = await readerBooted(readerDocument);
 const legacyCard = await until(() => pageEval("return Array.from(document.querySelectorAll('.book-card')).some((c) => c.textContent.includes('Legacy Book'))"), 15000);
 check('v3 → v4 升级后旧书仍在书库', !!legacyCard);
 const migrated = await pageEval(`
