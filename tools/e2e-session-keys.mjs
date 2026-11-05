@@ -21,6 +21,13 @@ function check(name, ok, detail = '') {
   results.push({ name, ok: !!ok, detail });
   console.log((ok ? '  PASS ' : '  FAIL ') + name + (detail ? ' — ' + detail : ''));
 }
+// 重载后必须等新文档加载完再读 DOM：旧页面在重载生效前仍满足等待条件（例如旧页已显示同一个 Key），
+// 慢的浏览器（CI 上 macOS Edge）会在新文档还没解析时就去读元素，拿到 null。
+async function reloadPage(target) {
+  await evaluate(target, 'window.__rimefoxBeforeReload = true; return true;');
+  await send('Page.reload', {}, target);
+  await until(() => evaluate(target, 'return !window.__rimefoxBeforeReload && document.readyState === "complete"').catch(() => false));
+}
 async function until(fn, timeout = 15000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) { try { const value = await fn(); if (value) return value; } catch {} await sleep(100); }
@@ -323,13 +330,13 @@ try {
 
   const legacy = { _v: 8, currentProvider: 'deepseek', providerConfig: { deepseek: { engine: 'openai', baseUrl: ORIGIN + '/v1', model: 'fake', apiKey: 'mock-legacy' } } };
   await evaluate(options, 'return chrome.storage.local.set({config:' + JSON.stringify(legacy) + ',config_backup_v3:' + JSON.stringify(legacy) + '})');
-  await send('Page.reload', {}, options);
+  await reloadPage(options);
   await until(() => evaluate(options, 'return document.getElementById("keyMigration") && !document.getElementById("keyMigration").hidden'));
   check('旧版本 Key 保持设备记忆并显示一次迁移选择', (await cfg()).providerConfig.deepseek.apiKey === 'mock-legacy' && (await cfg()).keyMigrationPending);
   await evaluate(options, 'document.getElementById("migrateSession").click();return true;');
   await until(async () => !(await cfg()).keyMigrationPending);
   check('确认迁移后当前配置与旧备份都不留 Key', (await cfg()).providerConfig.deepseek.keyStorage === 'session' && !(await evaluate(options, 'return chrome.storage.local.get(null).then(v=>JSON.stringify(v))')).includes('mock-legacy'));
-  await send('Page.reload', {}, options);
+  await reloadPage(options);
   await until(() => evaluate(options, 'return document.getElementById("apiKey")?.value === "mock-legacy"'));
   check('迁移选择不重复出现，Key 在本次会话可用', !(await cfg()).keyMigrationPending && await evaluate(options, 'return document.getElementById("keyMigration").hidden'));
   await save({ targetLang: 'fr' });
