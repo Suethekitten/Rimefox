@@ -338,9 +338,17 @@ try {
   const passed = report.checks.filter((item) => item.ok).length;
   console.log(passed + '/' + report.checks.length + ' checks; evidence: ' + output);
   try { ws?.close(); } catch {}
+  // 先等浏览器进程真正退出再删用户目录：SIGKILL 之后 Chrome 子进程可能还在写文件，
+  // 立即删除会报 ENOTEMPTY 并让已经全部通过的检查以失败退出（CI Ubuntu 上出现过）。
+  const exited = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve() : new Promise((resolve) => chrome.once('exit', resolve));
   chrome.kill('SIGKILL');
   server.close();
+  await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
   // Keep the evidence directory when it is inside the temporary work directory.
-  fs.rmSync(profile, { recursive: true, force: true });
+  try {
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (err) {
+    console.log('NOTE temporary profile not fully removed (' + err.code + '): ' + profile);
+  }
   process.exitCode = passed === report.checks.length && report.checks.length ? 0 : 1;
 }

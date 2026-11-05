@@ -3658,10 +3658,16 @@ try {
 } catch (err) {
   /* 已经关了 */
 }
+// 等浏览器进程真正退出再删用户目录，并允许重试；清理失败只提示，不把已通过的检查判成失败。
+const browserExited = browser.exitCode !== null || browser.signalCode !== null ? Promise.resolve() : new Promise((resolve) => browser.once('exit', resolve));
 browser.kill();
 server.close();
 if (!flag('--keep')) {
-  await sleep(500);
-  fs.rmSync(profile, { recursive: true, force: true });
+  await Promise.race([browserExited, sleep(5000)]);
+  try {
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (err) {
+    console.log('NOTE temporary profile not fully removed (' + err.code + '): ' + profile);
+  }
 }
 process.exit(failed.length || crashed ? 1 : 0);
