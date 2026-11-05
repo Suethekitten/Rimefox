@@ -187,8 +187,8 @@
 1. `renderPdfPage` 遇到零文本页 → `handlePdfOcrPage`。以原始文字层是否含文字判断，不以过滤后的正文块数量判断；只有页眉 / 页码的文字页也不触发 OCR。只处理进入渲染范围的页，不以零文本为由识别整本书。
 2. 按文档缓存一次 `ocr:status`；未就绪时页内显示 `ocrNotice` 文案和「前往设置」/「重试」，不弹窗、不自动下载。
 3. 就绪时显示「正在本机识别本页文字…」，`ensurePdfOcr` 先查 IndexedDB 缓存，未命中再用独立倍率（`OCR_RENDER_SCALE = 3`，受单页 4 Mi 像素预算约束，与显示缩放无关）渲染一张不挂到页面的画布，经 `recognizeCanvas` 识别后立即释放画布。同页并发请求合并为一个任务。
-4. 缓存键：`ocrCacheKey({ bookId, page, backend, engine: 握手时的 name/version/model, params: { languages, scale } })`，不含翻译目标语言等配置；记录存 `translations` 存储（见 [READER-ARCHITECTURE](READER-ARCHITECTURE.md)）。
-5. `linesToBlocks` 把行合成文本块后，与文字层走同一套：原版视图文本块面板（页标签标注「OCR 识别文字，可能有误」）、流式视图、全文搜索、`PdfTranslator` 送翻。取块统一经 `pdfPageData`。识别结果为空时只提示「本页没有识别到文字」，不送翻。
+4. 缓存键：`ocrCacheKey({ bookId, page, backend, engine: 握手时的 name/version/model, params: { languages, scale } })`，不含翻译目标语言等配置；记录存 `translations` 存储（见 [READER-ARCHITECTURE](READER-ARCHITECTURE.md)）。`OCR_CACHE_VERSION` 为 `ocr-v2`：文本块带版式预览用的 `layoutLines`，旧 `ocr-v1` 记录没有位置，升级后各页重新识别一次。
+5. `linesToBlocks` 把行合成文本块（并保留每行识别框 `boxes`），`ocrLayoutLines` 按识别画布宽 / 视口宽把框换算成文字层同格式的 `layoutLines`，缓存只存换算结果。之后与文字层走同一套：原版视图文本块面板（页标签标注「OCR 识别文字，可能有误」）、流式视图、全文搜索、`PdfTranslator` 送翻。取块统一经 `pdfPageData`。识别结果为空时只提示「本页没有识别到文字」，不送翻。
 6. 关闭 / 换书时 `cancelPdfOcr` 对在途任务发 `ocr:cancel`；晚归结果因文档已变被丢弃。缩放打断识别用的渲染（AbortError）时不报错，页面重画时再识别。
 7. 状态类错误（缺组件 / 缺模型等）作废阅读器的状态缓存，页内显示对应提示；其他错误显示「重试」。配置变化时也重新检测。
 

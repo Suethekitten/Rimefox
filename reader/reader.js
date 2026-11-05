@@ -19,7 +19,7 @@ import { OCR_UI_ENABLED } from '../lib/ocr/feature.js';
 import { ocrNotice } from '../lib/ocr/status.js';
 import { getOcrStatus, openOcrSettings, recognizeCanvas, cancelOcr } from '../lib/ocr/page.js';
 import { ocrCacheKey } from '../lib/ocr/cache-key.js';
-import { linesToBlocks } from '../lib/ocr/layout.js';
+import { linesToBlocks, ocrLayoutLines } from '../lib/ocr/layout.js';
 
 const PDF_TRANS_MAX = 24;
 let pdfViewEpoch = 0;
@@ -657,6 +657,16 @@ function updatePdfZoomUi() {
   const fitColumn = document.getElementById('pdfFitColumn');
   if (fitWidth) fitWidth.hidden = !pdf;
   if (fitColumn) fitColumn.hidden = !pdf;
+  // 双列版式：右栏在译文页与原页之间切换，只隐藏译文层，不重画、不重新翻译。
+  const original = document.getElementById('pdfLayoutOriginal');
+  if (original) {
+    const layout = pdf && state.book?.pdfMode === 'pdf-layout';
+    if (!layout) state.pdfLayoutOriginal = false;
+    original.hidden = !layout;
+    original.textContent = state.pdfLayoutOriginal ? '显示译文' : '显示原文';
+    original.setAttribute('aria-pressed', state.pdfLayoutOriginal ? 'true' : 'false');
+    $('bookContent').dataset.pdfLayoutOriginal = state.pdfLayoutOriginal ? '1' : '';
+  }
 }
 
 function setPdfZoom(value) {
@@ -826,7 +836,13 @@ function ensurePdfOcr(doc, index, snap) {
       await doc.render(index, canvas, OCR_RENDER_SCALE);
       if (doc !== state.pdf) throw new DOMException('Aborted', 'AbortError');
       const res = await recognizeCanvas(canvas, { jobId, languages: params.languages });
-      const blocks = linesToBlocks(res.lines);
+      // 行框换算到页面视口，供双列版式在扫描页上定位译文；缓存只存换算结果，不存原始像素框。
+      const { viewport } = await doc.page(index);
+      const scale = canvas.width / viewport.width;
+      const blocks = linesToBlocks(res.lines).map(({ boxes, ...block }) => {
+        const layoutLines = ocrLayoutLines(boxes, scale, viewport.height);
+        return layoutLines ? { ...block, layoutLines } : block;
+      });
       if (doc === state.pdf && bookId) {
         putOcrResult({ key, bookId, page: index, backend: res.backend, engine: res.engine, blocks,
           lineCount: res.lines.length, createdAt: Date.now() }).catch(() => {});
@@ -911,6 +927,13 @@ async function handlePdfOcrPage(el, index, doc, refresh) {
   }
   if (empty) empty.remove();
   appendPdfBlocks(el, index, result.blocks, doc, { ocr: true });
+  // 版式预览改用识别出的文本块；页面画布仍是这一轮渲染的那张（缩放重画时会重新走到这里）。
+  const layout = pdfLayoutPages.get(el);
+  if (layout) {
+    const next = { ...layout, blocks: result.blocks };
+    pdfLayoutPages.set(el, next);
+    if (state.book?.pdfMode === 'pdf-layout' && state.pdfView === 'pdf') updatePdfLayout(el, next, (state.pdfTrans && state.pdfTrans.get(index)) || [], doc);
+  }
 }
 
 function applyPdfTranslationsTo(root, texts) {
@@ -1404,6 +1427,7 @@ async function openPdfBook(record, seq, signal) {
   if (searchResults) searchResults.textContent = '';
   state.pdfTrans = new Map();
   state.pdfZoom = 1;
+  state.pdfLayoutOriginal = false;
   if (state.pdfTranslator) state.pdfTranslator.stop();
   state.pdfTranslator = null;
   updatePdfZoomUi();
@@ -1773,6 +1797,7 @@ async function loadSection(sectionId, fragment, offsetRatio) {
   content.classList.remove('pdf-flow-mode');
   delete content.dataset.pdfMode;
   delete content.dataset.pdfLayout;
+  delete content.dataset.pdfLayoutOriginal;
   content.textContent = '';
   const raw = sec.load();
   const sanitized = sanitizeXhtml(raw.html, {
@@ -1955,6 +1980,10 @@ function bindEvents() {
   $('pdfZoomIn').addEventListener('click', () => applyPdfZoom(0.25));
   $('pdfFitWidth').addEventListener('click', () => setPdfZoom(1));
   $('pdfFitColumn').addEventListener('click', () => setPdfZoom(1.9));
+  $('pdfLayoutOriginal').addEventListener('click', () => {
+    state.pdfLayoutOriginal = !state.pdfLayoutOriginal;
+    updatePdfZoomUi();
+  });
   $('pdfFlowBack').addEventListener('click', () => changeMode('pdf-original'));
   $('pdfJumpGo').addEventListener('click', () => {
     if (!state.pdf) return;

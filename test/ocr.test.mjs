@@ -317,7 +317,7 @@ test('服务：引擎状态变化后作废检测缓存', async () => {
 test('缓存键：不含翻译配置，参数顺序无关，引擎版本参与', () => {
   const base = { bookId: 'b1', page: 3, backend: 'paddle', engine: { name: 'PaddleOCR', version: '3.0', model: 'v5' }, params: { languages: ['zh-Hant', 'en'], scale: 2 } };
   const k = ocrCacheKey(base);
-  assert.match(k, /^ocr-v1\|b1\|page:3\|paddle\|PaddleOCR@3\.0\|v5\|[0-9a-f]{8}$/);
+  assert.match(k, /^ocr-v2\|b1\|page:3\|paddle\|PaddleOCR@3\.0\|v5\|[0-9a-f]{8}$/);
   assert.equal(ocrCacheKey({ ...base, params: { scale: 2, languages: ['en', 'zh-Hant'] } }), k);
   assert.notEqual(ocrCacheKey({ ...base, engine: { ...base.engine, version: '3.1' } }), k);
   assert.notEqual(ocrParamsFingerprint({ scale: 2 }), ocrParamsFingerprint({ scale: 3 }));
@@ -467,6 +467,29 @@ test('版面：句末标点 + 右缘短于段宽时分段', async () => {
     { text: 'continues here.', box: [80, 420, 300, 50] }
   ]);
   assert.deepEqual(out.map((b) => b.text), ['这是第一段的第一行文字比较长第一段到这里结束。', '第二段从这里开始，同样的行距Rimefox sample page continues here.']);
+});
+
+test('版面：文本块保留行框，换算成版式预览坐标后贴合原框', async () => {
+  const { linesToBlocks, ocrLayoutLines } = await import('../lib/ocr/layout.js');
+  const { layoutRect } = await import('../lib/reader/pdf-layout.js');
+  const blocks = linesToBlocks([
+    { text: '第一段第一行', box: [90, 300, 1200, 60] },
+    { text: '第一段第二行', box: [90, 370, 1100, 60] },
+    { text: '没有识别框的一行' }
+  ]);
+  assert.deepEqual(blocks[0].boxes, [[90, 300, 1200, 60], [90, 370, 1100, 60]]);
+  assert.equal(blocks[1].boxes, null);
+  // 识别图像按 3 倍渲染：视口 595 × 842 对应 1785 × 2526 像素。
+  const viewport = { width: 595, height: 842 };
+  const lines = ocrLayoutLines(blocks[0].boxes, 3, viewport.height);
+  const rect = layoutRect({ text: blocks[0].text, layoutLines: lines }, viewport);
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  assert.ok(near(rect.x, 30 - 1.5) && near(rect.y, 100 - 1.5), JSON.stringify(rect));
+  assert.ok(near(rect.width, 400 + 3) && near(rect.height, (430 - 300) / 3 + 3), JSON.stringify(rect));
+  assert.ok(near(rect.fontSize, 20 / 1.25));
+  assert.equal(ocrLayoutLines(null, 3, 842), null);
+  assert.equal(ocrLayoutLines([[0, 0, 0, 10]], 3, 842), null);
+  assert.equal(ocrLayoutLines([[0, 0, 10, 10]], 0, 842), null);
 });
 
 // ---------------- 回归：2026-11-05 修复的两个问题 ----------------

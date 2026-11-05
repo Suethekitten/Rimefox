@@ -194,6 +194,7 @@ button { cursor: pointer; }
 #bookContent[data-pdf-layout="parallel"] .pdf-trans { border: 0; padding: 0; margin: 0; color: var(--reader-ink); font-size: var(--reader-font-size); }
 .pdf-layout-view { grid-column: 2; grid-row: 2; position: relative; width: 100%; min-width: 0; background: white; color-scheme: light; }
 .pdf-page .pdf-layout-view canvas { width: 100%; height: auto; }
+#bookContent[data-pdf-layout-original="1"] .pdf-layout-translation { visibility: hidden; }
 .pdf-layout-translation { position: absolute; overflow: hidden; box-sizing: border-box; font-family: Arial, 'Microsoft YaHei', sans-serif; line-height: 1.12; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pdf-layout-notice { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.6; color: var(--reader-muted); }
 .pdf-layout-text { grid-column: 1 / -1; min-width: 0; font-size: 13px; }

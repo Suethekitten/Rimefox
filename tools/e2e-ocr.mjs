@@ -497,7 +497,17 @@ fs.writeFileSync(modeFile, 'ready');
   check('OCR 文字送翻并显示译文', /^译:OCR/.test(trans || ''), trans);
   check('送翻内容是识别出的文字', api.texts.some((t) => /模拟识别第一行/.test(t)), api.texts.slice(0, 2).join(' | '));
   check('流式视图没有重复识别', hostMessages('recognize').length - recognizedBefore === 2);
+
+  // 双列版式：识别出的文本块进入版式预览。参考宿主的框不贴合样本文字，实际覆盖与「显示原文」由阶段 C 的真实识别验证
+  const layoutNotice = "return (document.querySelector('.pdf-page[data-page=\"1\"] .pdf-layout-notice')||{}).textContent||''";
+  await pageEval(reader, "window.scrollTo(0, 0); const m=document.getElementById('modeSelect'); m.value='pdf-layout'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  const located = await until(async () => { const t = await pageEval(reader, layoutNotice); return /已替换/.test(t) ? t : ''; }, 20000);
+  check('双列版式改用扫描页的 OCR 文本块', !!located, located || await pageEval(reader, layoutNotice));
+  check('双列版式不重复识别', hostMessages('recognize').length - recognizedBefore === 2);
+  check('双列版式显示「显示原文」切换', await pageEval(reader, "return !document.getElementById('pdfLayoutOriginal').hidden"));
   await pageEval(reader, "const m=document.getElementById('modeSelect'); m.value='pdf-original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  check('离开双列版式后隐藏原文切换', !!await until(() => pageEval(reader, "return document.getElementById('pdfLayoutOriginal').hidden && !document.querySelector('.pdf-layout-view')"), 5000),
+    JSON.stringify(await pageEval(reader, "return { hidden: document.getElementById('pdfLayoutOriginal').hidden, views: document.querySelectorAll('.pdf-layout-view').length, mode: document.getElementById('modeSelect').value }")));
   await sleep(800);
 
   // 重新打开：OCR 结果从本地缓存读取，不再调用宿主
@@ -509,6 +519,12 @@ fs.writeFileSync(modeFile, 'ready');
   check('重开书后显示缓存的 OCR 文字', /模拟识别第一行/.test(cachedText || ''));
   await sleep(800);
   check('重开书不重复识别', hostMessages('recognize').length === beforeReopen, (hostMessages('recognize').length - beforeReopen) + ' 次');
+  // 重开后切到双列版式：读缓存的文本块，不调用宿主
+  await pageEval(reader, "window.scrollTo(0, 0); const m=document.getElementById('modeSelect'); m.value='pdf-layout'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  check('缓存的 OCR 结果仍用于双列版式', !!await until(async () => /已替换/.test(await pageEval(reader, layoutNotice)), 20000), await pageEval(reader, layoutNotice));
+  check('双列版式读取缓存不重复识别', hostMessages('recognize').length === beforeReopen);
+  await pageEval(reader, "const m=document.getElementById('modeSelect'); m.value='pdf-original'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  await sleep(500);
 
   // 文字型 PDF 不触发 OCR
   const beforeText = hostMessages('recognize').length;
@@ -632,6 +648,8 @@ if ((process.platform === 'darwin' || IS_WIN) && fs.existsSync(REAL_HOST)) {
   check('设置页显示真实组件版本', ready && /已连接本地组件 \d+\.\d+/.test(ready.i), ready && ready.i);
   await send('Target.closeTarget', { targetId: opt.targetId });
   const reader = await openReader(idB);
+  // 版式覆盖取决于阅读宽度：按常见桌面窗口检查（默认无头窗口过窄，测试用的长译文在标题框里放不下）
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, reader.sessionId);
   const scanCopy3 = path.join(work, 'scan-copy-3.pdf');
   fs.writeFileSync(scanCopy3, Buffer.concat([fs.readFileSync(SCAN_PDF), Buffer.from('\n%copy3\n')]));
   await importFile(reader, scanCopy3);
@@ -642,6 +660,17 @@ if ((process.platform === 'darwin' || IS_WIN) && fs.existsSync(REAL_HOST)) {
   console.log('    块：' + JSON.stringify(blocks));
   check('真实识别：标题单独成块', blocks[0] === '凛狐扫描页识别测试', blocks[0]);
   check('真实识别：中英文段落不混在一起', blocks.length >= 3 && !blocks.some((b) => /测试/.test(b) && /Rimefox/.test(b)), blocks.length + ' 块');
+  // 双列版式：真实识别框贴合文字，译文按框放回扫描页；「显示原文」只隐藏译文层，再点恢复
+  await pageEval(reader, "window.scrollTo(0, 0); const m=document.getElementById('modeSelect'); m.value='pdf-layout'; m.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  const placed = await until(() => pageEval(reader, "const l=document.querySelectorAll('.pdf-page[data-page=\"1\"] .pdf-layout-translation'); return l.length && Array.from(l).every((t) => /^译:/.test(t.textContent)) ? l.length : 0"), 30000);
+  check('真实识别：双列版式把译文放回扫描页', placed >= 1, placed + ' 处 · ' + await pageEval(reader, "return (document.querySelector('.pdf-page[data-page=\"1\"] .pdf-layout-notice')||{}).textContent||''"));
+  if (!placed) console.log('    诊断：' + JSON.stringify(await pageEval(reader, "const p=document.querySelector('.pdf-page[data-page=\"1\"]'); return { trans: Array.from(p.querySelectorAll('.pdf-trans')).map((t) => t.textContent.slice(0, 30)), blocks: p.querySelectorAll('.pdf-block').length, view: !!p.querySelector('.pdf-layout-view canvas'), skips: (p.querySelector('.pdf-layout-view')||{dataset:{}}).dataset.layoutSkips, mode: document.getElementById('modeSelect').value, api: " + api.requests + " };")));
+  const fits = await pageEval(reader, "return Array.from(document.querySelectorAll('.pdf-layout-translation')).every((t) => t.scrollWidth <= t.clientWidth + 1 && t.scrollHeight <= t.clientHeight + 1)");
+  check('真实识别：版式译文不溢出识别框', placed >= 1 && fits);
+  const shown = await pageEval(reader, "const b=document.getElementById('pdfLayoutOriginal'); if (b.hidden) return null; b.click(); return { label: b.textContent, pressed: b.getAttribute('aria-pressed'), hidden: Array.from(document.querySelectorAll('.pdf-layout-translation')).every((t) => getComputedStyle(t).visibility === 'hidden') };");
+  check('「显示原文」把右栏切回原页', shown && shown.hidden && shown.label === '显示译文' && shown.pressed === 'true', JSON.stringify(shown));
+  const back = await pageEval(reader, "const b=document.getElementById('pdfLayoutOriginal'); b.click(); return { label: b.textContent, visible: Array.from(document.querySelectorAll('.pdf-layout-translation')).every((t) => getComputedStyle(t).visibility === 'visible') };");
+  check('再次点击恢复译文页', back.visible && back.label === '显示原文', JSON.stringify(back));
   await send('Target.closeTarget', { targetId: reader.targetId });
 } else {
   console.log('\n[C] 跳过：未找到 ' + REAL_HOST + '（macOS 运行 native/ocr-host/macos/build.sh；Windows 见 WINDOWS-HANDOFF）');

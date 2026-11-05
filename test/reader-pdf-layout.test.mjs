@@ -29,3 +29,26 @@ test('layout masking accepts solid light/dark backgrounds, declines gradients an
   for (let y = 10; y < 40; y++) for (let x = 10; x < 90; x++) white.data.set([0, 40, 100, 255], (y * 100 + x) * 4);
   assert.equal(flatBackground(white, rect), null);
 });
+
+test('layout masking accepts dense thin-stroke text but still declines filled boxes of the same coverage', () => {
+  const bg = [54, 59, 64], ink = [220, 220, 220];
+  const make = () => ({ width: 120, height: 60, data: new Uint8ClampedArray(Array.from({ length: 7200 }, () => [...bg, 255]).flat()) });
+  const rect = { x: 1, y: 1, width: 117, height: 57 };
+  // Dense CJK-like strokes: 2 px lines every 4 px inside each "glyph" row, about 36% non-background.
+  const text = make();
+  for (let y = 2; y < 58; y++) for (let x = 2; x < 118; x++) if ((x % 4 < 2) && (y % 10 < 8)) text.data.set([...ink, 255], (y * 120 + x) * 4);
+  let covered = 0;
+  for (let i = 0; i < 7200; i++) if (text.data[i * 4] === ink[0]) covered += 1;
+  assert.ok(covered / 7200 > 0.3, 'fixture is denser than the old 72% background rule allowed');
+  assert.deepEqual(flatBackground(text, rect), bg);
+  // Same light colour as one solid block covering a similar share: not text, keep the original page.
+  const box = make();
+  for (let y = 12; y < 48; y++) for (let x = 20; x < 100; x++) box.data.set([...ink, 255], (y * 120 + x) * 4);
+  assert.equal(flatBackground(box, rect), null);
+  // Large bold glyphs: 12 px strokes every 30 px. Their centres are 6 px from background, so they
+  // pass only with a stroke reach scaled to the font size (the layout passes 15% of the pixel size).
+  const bold = make();
+  for (let y = 4; y < 56; y++) for (let x = 4; x < 116; x++) if (x % 30 < 12) bold.data.set([...ink, 255], (y * 120 + x) * 4);
+  assert.equal(flatBackground(bold, rect), null);
+  assert.deepEqual(flatBackground(bold, rect, { stroke: 7 }), bg);
+});
