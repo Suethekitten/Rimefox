@@ -1048,12 +1048,16 @@ function trustedPage(sender) {
 }
 async function trustedConfig(msg, sender) {
   if (!trustedPage(sender)) return { ok: false, error: '此操作仅限扩展设置页' };
+  if (msg.type === 'config:recoveryInfo') return { ok: true, recovery: await configStore().recoveryInfo() };
+  if (msg.type === 'config:restoreMigration') return { ok: true, config: await configStore().restoreMigration() };
   return { ok: true, config: msg.type === 'config:save' ? await saveConfig(msg.patch) : await getConfig() };
 }
 
 const ROUTES = {
   'config:trustedGet': trustedConfig,
   'config:save': trustedConfig,
+  'config:recoveryInfo': trustedConfig,
+  'config:restoreMigration': trustedConfig,
   translate: handleTranslate,
   'subtitle:fetch': handleSubtitleFetch,
   test: handleTest,
@@ -1252,7 +1256,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
-// API Key 按保存策略放在 session / local，两种区域都限制为可信扩展上下文。
+// 会话 Key 在 session；设备 Key 在扩展源 IndexedDB。local 仅保留非秘密配置和迁移标记。
 // 收紧成只有扩展自己的页面 / service worker 可读。浏览器不支持对 local 设置时静默跳过：
 // 我们自己的代码本来也不再把 Key 发给内容脚本（见 config:get）。
 function restrictStorage() {

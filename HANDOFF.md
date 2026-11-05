@@ -279,9 +279,9 @@ lib/
 ### 4.7 配置、会话凭据与鉴权暂停（0.15.0）
 
 - **单一写入者**：`config.js` 的扩展页面客户端通过 `config:trustedGet` / `config:save` 交给后台；后台 `config-storage.js` 用同一条串行队列处理读取、迁移、保存、暂停与恢复。两个可信路由校验发送方扩展 ID 和扩展页 URL，网页内容脚本不能拿 Key 或写任意设置。
-- **布局**：`storage.local.config` 只存非敏感设置与每个服务商的 `keyStorage`（session / local）；显式设备记忆的凭据在 `rimefox.secrets.local`；会话凭据和暂停在 `storage.session` 的 `rimefox.secrets.session`。两种区域均限制为 `TRUSTED_CONTEXTS`，但 `setAccessLevel` 不跨浏览器重启保存：浏览器刚启动、后台还没跑 `restrictStorage()` 的十几毫秒内，内容脚本上下文能读到 `rimefox.secrets.local`（需渲染进程被攻破才能利用，0.16.1 QA F1，未修）；`getConfig()` 为可信页面和后台合成完整视图，`publicConfig()` 剥 Key 后才给内容脚本。
+- **布局（0.16.4）**：`storage.local.config` 只存非敏感设置和 `keyStorage` 策略。设备凭据在扩展源 IndexedDB `rimefox-credentials` / `vault` 的 `device` 记录；内容脚本使用网页源，不能读扩展源数据库。会话凭据与暂停仍在受限 `storage.session.rimefox.secrets.session`。首次升级将旧 local / config Key 迁入凭据库，local 的旧秘密映射置空；迁移完成后的启动不依赖 `setAccessLevel` 才能保护设备 Key。迁移前旧安装仍有历史访问边界，不能抹去此前暴露或物理磁盘残留。`getConfig()` 仅为可信页面和后台合成 Key，`publicConfig()` 剥除后才交给内容脚本。
 - **旧用户选择**：旧 config 中的 Key 先转为设备记忆，显示一次迁移选择，不擅自改成会话。迁移范围记在 `keyMigrationProviders`：只含旧版本写在配置里的服务商，升级后用户亲自改过 Key 或保存方式的服务商会移出名单；0.16.2 及更早没有名单时只把当时在设备上的 Key 当作旧 Key（0.16.3）。选择 session 后清理设备凭据与 `config_backup_v3` 等旧配置副本；新填 Key 默认 session。删除服务商会删除两处凭据，恢复默认保留接口；导入的新 Key 沿用已有保存选择或默认 session，导出只有显式勾选才包含 Key。
-- **写失败 / 回收恢复**：先写并读回校验 session 的 pending 日志（按键排序后比较：`chrome.storage` 读回时会重排对象键） → local 一次提交设置、设备凭据、去 Key 备份与 `_storageRevision` → 完成 session。worker 中断后按 local 提交标记选择恢复 next 或保留旧状态；未确认目标写入前不删除旧 Key。完整关闭浏览器或扩展重载会清 session，单独回收 worker 不会。
+- **写失败 / 回收恢复**：后台串行队列，session pending 日志只含会话 Key；设备库 `{active,pending:{id,keys}}` 只含设备 Key。两处准备完成后，以 local.config._storageRevision 为提交事实；下一次读取将匹配候选提交，不匹配则放弃并保留原 active。凭据库不可用时失败关闭，不退回 local。配置 schema 10，每次结构升级保留无 Key 的 `config_migration_backup`；恢复入口与程序回退边界见 [UPGRADING](docs/UPGRADING.md)。完整关闭浏览器或扩展重载清 session，单独回收 worker 不会。
 - **并发编辑**：设置页通过 `configFormPatch()`（`configPatchSince()` + 改 Key 时带上本窗口的保存方式）只提交相对已保存表单的字段变化，独立窗口的独立修改可合并；同一字段仍按最后保存。处理外部更新前同步计算脏状态，保护刚输入、尚未到定时器的草稿；暂停提示可独立更新，不覆盖草稿。
 - **暂停边界**：`auth-state.js` 在每次实际模型 HTTP 发送前检查当前凭据修订号和 session 暂停状态，包含排队、重试、思考回退和严格复核。401，或明确标识无效 Key 的 400 / 403，记录暂停；普通权限 403、限流、断网不按 Key 失效处理。已发出的请求无法撤回，但后续发送会被拦住。
 - **恢复与晚归**：凭据修订号是随机版本加非敏感接口身份，不是 Key 散列。更正 Key / 切换可用接口使旧暂停不再适用；只有可信扩展页可调用测试连接绕过暂停，成功后解除匹配版本的暂停。旧 Key 的晚归失败不能暂停新 Key，网页不能借 `test` 或自报继续标记解除后台暂停。
@@ -880,7 +880,11 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.16.3）
+## 14. 本版技术记录（0.16.4）
+
+设备凭据迁出 local；模型列表拒绝旧 Key 跟随未保存的新地址；EPUB 分块校验实际解压量并在可终止 Worker 中执行；PDF 单页 4 Mi 像素、总计 16 Mi 像素和最大边长 8192，缩放/关闭取消 RenderTask。配置新增无 Key 的升级快照恢复，独立 Checks 覆盖提交/PR。测试证据、未完成的真实环境验收见 [本次归档](docs/archive/2026-11-04-hardening-0.16.4.md)。
+
+### 0.16.3 记录
 
 0.16.3 修复 0.16.1 独立 QA（0 P0 / 17 P1）中的全部 P1（H13、H23 除外）及一批 P2 / P3；编号与未修项见 [0.16.3 归档](docs/archive/2026-11-03-qa-fixes-0.16.3.md)。
 

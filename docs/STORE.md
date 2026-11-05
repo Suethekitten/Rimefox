@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-10-27，对应 `main`（Rimefox 0.12.5）；Chrome 商店线上 0.12.5，Edge 线上 0.9.7。
+最后更新：2026-11-04；本地待发布 0.16.4，最新已发布 GitHub 版本 0.16.3。今日读取两家公开商店页面，Chrome / Edge 均为 **0.12.5**（页面更新日期均为 2026-10-27）。
 
 > 本文只写**通用材料 + Chrome**；Edge 的差异与专属填写内容见 [STORE-EDGE.md](STORE-EDGE.md)。
 > 历史审计（0.8.5 的「差哪 5 项」）已归档到 [archive/STORE-READINESS.md](archive/STORE-READINESS.md)，不再是现状。
@@ -11,15 +11,13 @@
 |---|---|
 | 仓库 | 已公开：<https://github.com/Suethekitten/Rimefox>（最新 Release 见 Releases 页） |
 | 商店包 | `node tools/package-store.mjs` 产出 `dist/Rimefox-v<版本>-store.zip`，manifest.json 在 ZIP 根目录 |
-| 提交状态（Edge） | **0.9.7 已上线**（2026-10-27 核实）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh> |
-| 提交状态（Chrome） | **0.12.5 已上线**（2026-10-27 核实；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
+| 提交状态（Edge） | **0.12.5 已上线**（2026-11-04 公开页核实）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh> |
+| 提交状态（Chrome） | **0.12.5 已上线**（2026-11-04 公开页核实；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
 | Chrome 更新负责人 | 协助者（商店提供方 APXS 的账号）；出包与商店文案交给他上传 |
 
-两个商店都已走通上架；**Chrome 已跟上最新 Release，Edge 仍落后**：
+两个商店都落后于 GitHub Release。下一次更新应使用完成验收后的同一版本商店包、说明、截图与中英文隐私政策；Chrome / Edge 版本号都必须大于 0.12.5。当前材料对应本地 0.16.4，尚未上传或提交审核，不能把材料更新当成已上线。
 
-- Chrome 线上是 **0.12.5**，与 `main` / GitHub Release 一致；
-- Edge 线上是 **0.9.7**，落后于 0.12.5；
-- 下一次更新：两边都用最新已发布版本出的商店包，版本号必须大于各自线上版本（Chrome 需 > 0.12.5，Edge 需 > 0.9.7）；Chrome 由协助者上传，Edge 按 Partner Center 流程提交。
+1.0 支持范围以 [SUPPORT](SUPPORT.md) 为准：PDF 标注 Beta，直播字幕标注实验，医学模式不宣传已证明的质量提升。OCR 尚未实现，不写入功能卖点。最新中英文截图及生成依据见 [screenshots/README](screenshots/README.md)。
 
 ## Chrome 商店标识
 
@@ -28,7 +26,7 @@
 | 商店页 | <https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
 | 扩展 ID | `gbaoafaogljdolpkppocfaeldejampeo` |
 | 提供方 | APXS |
-| 线上版本 | 0.12.5（2026-10-27 核实） |
+| 线上版本 | 0.12.5（2026-11-04 公开页核实） |
 
 > GitHub Release 的 zip 从 0.8.6 起与商店包用同一份白名单，但多一层 `Rimefox/` 文件夹、manifest.json 不在根目录，**不能**当商店包上传。
 
@@ -81,7 +79,7 @@ node test/package-store.test.mjs
 
 本扩展采用 BYOK：你需要自行配置 API 地址、API Key 和模型，服务商可能收取费用。支持 DeepSeek 等 OpenAI 兼容接口以及 Anthropic、Gemini 协议，没有内置免费翻译额度。作者不运营翻译服务器，不使用分析或遥测。待翻文本、自定义提示词及命中术语直接发给你配置的接口；Key 用于该接口认证。本机保存设置与缓存，第三方处理以其隐私政策为准。
 
-视频字幕翻译默认关闭，仅支持站点可用的官方字幕轨（YouTube CC / B 站人工或 AI 字幕），不支持画面硬字幕。此功能非官方，与 Google、YouTube 或哔哩哔哩无关联，平台更新可能导致失效。EPUB 阅读器支持用户本地导入的无 DRM、可重排 EPUB 2/3；PDF、固定版式、漫画和图片 OCR 暂不支持。
+视频字幕翻译默认关闭，仅支持站点可用的官方字幕轨（YouTube CC / B 站人工或 AI 字幕），不支持画面硬字幕。此功能非官方，与 Google、YouTube 或哔哩哔哩无关联，平台更新可能导致失效。EPUB 阅读器支持用户本地导入的无 DRM、可重排 EPUB 2/3；PDF 阅读与文本翻译为 Beta；固定版式 EPUB、漫画和图片 OCR 暂不支持。直播字幕为实验功能。
 
 源码与支持：<https://github.com/Suethekitten/Rimefox> 。隐私政策：<https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> 。
 
@@ -91,7 +89,7 @@ Read webpages with original text and translation together, hover a translated se
 
 Bring your own API key: configure an endpoint, key and model from your chosen provider. Provider charges may apply; no free translation quota is bundled. Rimefox supports OpenAI-compatible endpoints such as DeepSeek, plus Anthropic and Gemini protocols. The author operates no translation server and uses no analytics or telemetry. Text to translate, custom prompts and matching glossary terms go directly to your configured endpoint, with your key used for authentication. Settings and caches are stored locally; providers process requests under their own policies.
 
-Video caption translation is disabled by default and requires an official subtitle track exposed by the site (YouTube CC, or Bilibili manual/AI subtitles). It cannot translate captions burned into video. This unofficial feature is not affiliated with Google, YouTube or Bilibili and may stop working after platform changes. The EPUB reader supports locally imported, DRM-free, reflowable EPUB 2/3; PDF, fixed-layout, comics and image OCR are not supported.
+Video caption translation is disabled by default and requires an official subtitle track exposed by the site (YouTube CC, or Bilibili manual/AI subtitles). It cannot translate captions burned into video. This unofficial feature is not affiliated with Google, YouTube or Bilibili and may stop working after platform changes. The EPUB reader supports locally imported, DRM-free, reflowable EPUB 2/3; PDF reading and text translation are in Beta. Fixed-layout EPUB, comics and image OCR are not supported. Live captions remain experimental.
 
 Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: <https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> .
 
@@ -177,8 +175,8 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 事项 | 说明 |
 |---|---|
 | 开发者账号 | 已完成（Chrome）；后续保持 2FA |
-| 商店包上传 | Chrome 已更新至 0.12.5；下一次更新重新出最新已发布版本的商店包，不要上传 GitHub Release 整仓包 |
-| 截图 / 宣传图 | 5 张已生成；下次更新时按当时界面确认或重拍 |
+| 商店包上传 | 当前两店均为 0.12.5；0.16.4 材料已更新，待最终验收后出同版商店包，尚未上传 |
+| 截图 / 宣传图 | 中英文各 5 张已更新为 0.16.4；真实扩展 + 本地假接口，上传前再次核对版本 |
 | 审核专用 API Key | 首次审核已通过；后续更新沿用同一个限额、可撤销的 Key |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
 | 支持入口 | 已可用：GitHub Issues 公开 |
@@ -193,7 +191,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | BYOK 无法直接测试 | 最高优先级：准备审核专用、限额、可撤销 Key，通过控制台私密说明交付 |
 | YouTube 非官方接口 | 明示非官方、默认关闭、仅 CC；验证当前可用性，避免品牌背书与「保证全部字幕可用」的承诺 |
 | 隐私政策与实际行为不一致 | 本次已按 0.8.5 代码核对；悬停对照开关、字幕稳定性、仅调试可见的用量统计都没有新增请求接收方或权限，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
-| 版本与仓库差异 | Chrome 线上 0.12.5、Edge 线上 0.9.7；GitHub Release 已到 0.12.5。以商店后台实际版本为准，下一次更新统一用最新已发布版本的商店包 |
+| 版本与仓库差异 | Chrome / Edge 公开页均为 0.12.5（2026-11-04）；GitHub Release 0.16.3；本地 0.16.4 待验收发布 |
 
 ## 官方依据（2026-10-18 查询）
 

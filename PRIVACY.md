@@ -1,6 +1,6 @@
 # 隐私说明
 
-最后更新：2026-11-01。
+最后更新：2026-11-04。
 
 > **English summary**: Rimefox has no author-operated server or telemetry. See the [full English privacy policy](docs/privacy.en.md). Page text you choose to translate is sent only to the API endpoint **you** configure (DeepSeek, OpenAI-compatible, Anthropic, Gemini…), under that provider's privacy policy. An optional, off-by-default local masking feature replaces reliably detectable sensitive values with placeholders before sending and restores them locally; the mapping never leaves the request. Your API key, settings and translation cache are stored locally; the key is also sent to your configured provider for authentication. No analytics, no telemetry, no third-party SDKs.
 
@@ -69,7 +69,7 @@ YouTube 与哔哩哔哩页面脚本会在本地观察播放器加载的字幕元
 |---|---|---|
 | 界面语言、主题、术语表、自定义提示词、自定义目标语言 | `chrome.storage.local` | 界面语言与主题仅本机使用；自定义语言的名称 / 代码 / 说明会在作为目标语言翻译时随请求发送；主题还在扩展页面 localStorage 缓存以避免闪白 |
 | 外观、站点规则、夜间模式网站名单、译文自定义 CSS | `chrome.storage.local` | 仅本机使用，不随翻译请求发送；强调色等外观也在扩展页面 localStorage 缓存以避免闪白 |
-| API Key | 默认 `chrome.storage.session`；选择「在此设备上记住密钥」后为 `chrome.storage.local` | 默认在关闭浏览器或重载扩展后失效；旧用户升级时保留设备记忆，选择迁移后清理旧配置与备份中的 Key；两种存储均限制为仅可信扩展页面和后台可读，内容脚本只知道 hasKey 与暂停状态；例外是浏览器刚启动、扩展后台尚未施加限制的极短时间（毫秒级），只有网页渲染进程已被攻破时才可能被利用 |
+| API Key | 默认 `chrome.storage.session`；选择「在此设备上记住密钥」后为扩展源的 IndexedDB 凭据库 | 默认在关闭浏览器或重载扩展后失效；设备凭据不再写入 `chrome.storage.local`，网页内容脚本不能访问扩展源的数据库。旧用户首次升级时，原有 local / 配置中的 Key 经可恢复日志迁入凭据库并清理旧副本；迁移执行之前仍适用旧版本的访问边界，不能撤回此前已泄露的副本，也不承诺擦除存储引擎的磁盘残留。会话区仍限制为可信扩展页面和后台可读；内容脚本只知道 hasKey 与暂停状态 |
 | 鉴权暂停与凭据修订号 | 暂停在 `chrome.storage.session`，随机修订号随对应 Key 保存 | 后台回收后仍保留；配置广播不包含 Key 或 Key 的散列 |
 | 翻译缓存（会话） | `chrome.storage.session` | 翻过的原文和译文，关闭浏览器即清空；视频字幕译文按视频 / 分 P / 字幕轨隔离，只放在这一层 |
 | 翻译缓存（磁盘） | `chrome.storage.local` | 只存短文本（原文 + 译文 ≤ 160 字符），上限 512 KB；按网站域名和模型分开存；不存视频字幕，也不含视频标识 |
@@ -77,7 +77,7 @@ YouTube 与哔哩哔哩页面脚本会在本地观察播放器加载的字幕元
 | 用户上传的阅读字体 | 扩展页 IndexedDB (`rimefox-reader` 的 `fonts`) | 只在本机，不上传；可在阅读设置里移除，移除即删除 Blob |
 | 标签页「正在翻译」状态 | `chrome.storage.session` | 刷新后自动接着翻用，关闭标签页即删除 |
 
-设置页「缓存与迁移」可以随时清空翻译缓存；设置、设备记忆 Key、术语表和提示词保留到你修改、删除或卸载扩展，会话 Key 的保留期见上表。配置导出默认不带 Key，主动勾选包含 Key 时会将当前会话或设备密钥写入导出文件，该文件和剪贴板副本需自行清除。请检查各服务商保存的 Key；在服务商控制台撤销 Key 才能使已泄露的副本失效。磁盘缓存按容量淘汰，不承诺固定天数；卸载扩展会删除扩展的本地存储。第三方已收到的数据按其保留政策处理，清空本机不会删除第三方副本。
+设置页「缓存与迁移」可以随时清空翻译缓存；设置、设备记忆 Key、术语表和提示词保留到你修改、删除或卸载扩展，会话 Key 的保留期见上表。升级前配置快照不含 Key，可从设置页恢复；恢复到不同接口地址时会清空对应 Key，避免发送到旧地址。配置导出默认不带 Key，主动勾选包含 Key 时会将当前会话或设备密钥写入导出文件，该文件和剪贴板副本需自行清除。请检查各服务商保存的 Key；在服务商控制台撤销 Key 才能使已泄露的副本失效。磁盘缓存按容量淘汰，不承诺固定天数；卸载扩展会删除扩展的本地存储。第三方已收到的数据按其保留政策处理，清空本机不会删除第三方副本。
 
 ## 不会做的事
 

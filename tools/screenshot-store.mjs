@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 生成 Edge 商店截图（1280×800，真实扩展 + 本地假接口，不需要 API Key）：
-//   node tools/screenshot-en.mjs            英文商店：英文界面 + 日文文章→英文译文，输出 docs/screenshots/en/
-//   node tools/screenshot-en.mjs --lang zh  中文商店：中文界面 + 英文文章→中文译文，输出 docs/screenshots/
+//   node tools/screenshot-store.mjs            英文商店：英文界面 + 日文文章→英文译文，输出 docs/screenshots/en/
+//   node tools/screenshot-store.mjs --lang zh  中文商店：中文界面 + 英文文章→中文译文，输出 docs/screenshots/
 //   --browser <msedge.exe>  --out <目录>  --keep（保留临时用户目录）
 // 脚本用独立的临时用户配置，启动时自己写好界面语言 / 目标语言，不需要手动改设置页。
 import http from 'node:http';
@@ -254,7 +254,7 @@ await until(() => evaluate(ext, "!!document.getElementById('provider')"), 20000)
 const extEval = (code) => evaluate(ext, '(async () => {' + code + '})()');
 
 await extEval(
-  'await chrome.storage.local.set({ config: ' +
+  'await import("/lib/config.js").then(m=>m.saveConfig(' +
     JSON.stringify({
       _v: 6,
       currentProvider: '__custom__',
@@ -270,7 +270,7 @@ await extEval(
         ? [{ source: 'Battle Pass', target: '战斗通行证' }, { source: 'Demon Lord', target: '魔王' }]
         : [{ source: '魔王', target: 'Demon Lord' }, { source: '北風', target: 'north wind' }]
     }) +
-    ' }); return true;'
+    ')); return true;'
 );
 
 // 配置写完后重载设置页，让它按 uiLang 重新渲染
@@ -360,7 +360,7 @@ for (const [route, name] of [['/demo-light.html', NAME.light], ['/demo-dark.html
   const scrollTo = (selector, offset) =>
     evaluate(
       ext,
-      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return -1; const y = el.getBoundingClientRect().top + window.scrollY - ${offset}; window.scrollTo(0, Math.max(0, y)); return window.scrollY; })()`
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return -1; const y = el.getBoundingClientRect().top + window.scrollY - ${offset}; window.scrollTo({top:Math.max(0,y),behavior:'instant'}); return window.scrollY; })()`
     );
   const clickNav = (href) =>
     evaluate(ext, `(() => { const a = document.querySelector('a.nav-item[href="${href}"]'); if (!a) return false; a.click(); return true; })()`);
@@ -371,13 +371,16 @@ for (const [route, name] of [['/demo-light.html', NAME.light], ['/demo-dark.html
   await sleep(500);
   await evaluate(ext, "(() => { const b = document.getElementById('save'); if (b) b.click(); return true; })()");
   await sleep(1400);
+  await send('Page.bringToFront', {}, ext);
+  await scrollTo('#sec-privacy', 24);
+  if (!await until(() => evaluate(ext, 'Math.abs(document.getElementById("sec-privacy").getBoundingClientRect().top-24)<5'), 5000)) throw new Error('Privacy screenshot not in view');
   await capture({ s: ext }, path.join(OUT, NAME.privacy));
   await clickNav('#sec-translate');
   await sleep(900);
   // 滚到术语表整张卡片：标题 / 说明 / 列表都在画面里
   await evaluate(
     ext,
-    "(() => { const el = document.getElementById('glossaryList'); if (!el) return -1; const card = el.closest('.card') || el; const y = card.getBoundingClientRect().top + window.scrollY - 24; window.scrollTo(0, Math.max(0, y)); return window.scrollY; })()"
+    "(() => { const el = document.getElementById('glossaryList'); if (!el) return -1; const card = el.closest('.card') || el; const y = card.getBoundingClientRect().top + window.scrollY - 24; window.scrollTo({top:Math.max(0,y),behavior:'instant'}); return window.scrollY; })()"
   );
   await sleep(600);
   await capture({ s: ext }, path.join(OUT, NAME.glossary));

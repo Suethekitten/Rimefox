@@ -27,7 +27,7 @@ function buildPdf(pages) {
     const stream = page.content;
     const contentId = add('<< /Length ' + Buffer.byteLength(stream, 'latin1') + ' >>\nstream\n' + stream + '\nendstream');
     const pageId = add('<< /Type /Page /Parent ' + pagesId + ' 0 R /MediaBox [0 0 ' + (page.w || 595) + ' ' + (page.h || 842) + ']' +
-      ' /Resources << /Font << /F1 ' + fontId + ' 0 R >> >> /Contents ' + contentId + ' 0 R >>');
+      (page.rotation ? ' /Rotate ' + page.rotation : '') + ' /Resources << /Font << /F1 ' + fontId + ' 0 R >> >> /Contents ' + contentId + ' 0 R >>');
     pageIds.push(pageId);
   }
   objects[catalogId - 1] = '<< /Type /Catalog /Pages ' + pagesId + ' 0 R >>';
@@ -113,6 +113,7 @@ function buildCjkPdf() {
 }
 const cjk = buildCjkPdf();
 const reader = buildPdf(Array.from({ length: 8 }, (_, i) => ({
+  rotation: i === 0 ? 90 : 0,
   content: textBlock([
     ...prose.map((line) => 'Page ' + (i + 1) + ': ' + line),
     'Ethical principles are discussed in the middle of page ' + (i + 1) + '.',
@@ -120,7 +121,8 @@ const reader = buildPdf(Array.from({ length: 8 }, (_, i) => ({
   ], 60, 780, 16)
 })));
 
-for (const [name, buf] of [['single.pdf', single], ['columns.pdf', columns], ['scan.pdf', scan], ['cjk.pdf', cjk], ['reader.pdf', reader]]) {
+const huge = buildPdf(Array.from({ length: 12 }, (_, i) => ({ w: 15000, h: 15000, content: textBlock(['Huge page ' + (i + 1)], 60, 780, 16) })));
+for (const [name, buf] of [['single.pdf', single], ['columns.pdf', columns], ['scan.pdf', scan], ['cjk.pdf', cjk], ['reader.pdf', reader], ['huge.pdf', huge]]) {
   fs.writeFileSync(path.join(outDir, name), buf);
   console.log(name, buf.length, 'bytes');
 }

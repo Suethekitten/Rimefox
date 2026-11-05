@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { makeArea } from './_fake-storage.mjs';
 import { createConfigStore, LOCAL_SECRETS, SESSION_SECRETS } from '../lib/config-storage.js';
+import { credentialVault, memoryCredentialVault } from '../lib/credential-vault.js';
 import { activeConfig, publicConfig, configPatchSince, configFormPatch } from '../lib/config.js';
 import { configFingerprint, createConfigBroadcaster } from '../lib/config-broadcast.js';
 
@@ -14,6 +15,67 @@ function env() {
   return { local, session, store: createConfigStore({ local, session }) };
 }
 
+test('vault failure cannot commit new settings or remove the previous credentials', async () => {
+  const local = makeArea({ clone: true }), session = makeArea({ clone: true }), vault = memoryCredentialVault();
+  const store = createConfigStore({ local, session, vault });
+  await store.save({ currentProvider: 'deepseek', providerConfig: { deepseek: { ...slot, keyStorage: 'local' } } });
+  const before = await local.get(null);
+  const stage = vault.stage;
+  vault.stage = async () => { throw new Error('vault unavailable'); };
+  await assert.rejects(store.save({ providerConfig: { deepseek: { apiKey: 'replacement' } } }), /vault unavailable/);
+  assert.deepEqual(await local.get(null), before);
+  vault.stage = stage;
+  assert.equal(activeConfig(await createConfigStore({ local, session, vault }).get()).apiKey, key);
+});
+
+test('re-upgrade imports device keys edited during an old-version rollback', async () => {
+  const e = env();
+  await e.store.save({ currentProvider: 'deepseek', providerConfig: { deepseek: { ...slot, keyStorage: 'local' } } });
+  const prior = (await e.local.get('config')).config;
+  await e.local.set({ config: { ...prior, _v: 9 }, [LOCAL_SECRETS]: { deepseek: { key: 'edited-on-old-version', version: 'old-version-edit' } } });
+  const updated = await createConfigStore(e).get();
+  assert.equal(activeConfig(updated).apiKey, 'edited-on-old-version');
+  assert.ok(!JSON.stringify(await e.local.get(null)).includes('edited-on-old-version'));
+});
+
+test('pre-list custom provider slots survive upgrade snapshot restoration', async () => {
+  const e = env();
+  await e.local.set({ config: { _v: 8, currentProvider: '__custom__', providerConfig: { __custom__: slot } } });
+  await e.store.get();
+  await e.store.save({ targetLang: 'fr' });
+  const restored = await e.store.restoreMigration();
+  assert.equal(restored.currentProvider, '__custom__');
+  assert.equal(restored.providerConfig.__custom__.baseUrl, slot.baseUrl);
+  assert.equal(restored.providerConfig.__custom__.apiKey, key);
+});
+
+test('an interrupted vault commit resolves only against the local config commit marker', async () => {
+  const vault = memoryCredentialVault();
+  await vault.stage('old', { a: { key: 'old-key' } }); await vault.read('old');
+  await vault.stage('new', { a: { key: 'new-key' } });
+  assert.equal((await vault.read('old')).a.key, 'old-key');
+  await vault.stage('new', { a: { key: 'new-key' } });
+  assert.equal((await vault.read('new')).a.key, 'new-key');
+});
+
+test('schema 1–9 upgrade snapshots are sanitized and settings can be restored without leaking a Key to an old endpoint', async () => {
+  for (let version = 1; version <= 9; version++) {
+    const e = env();
+    await e.local.set({ config: { ...config, _v: version, targetLang: 'fr' } });
+    await e.store.get();
+    assert.equal((await e.store.recoveryInfo()).available, true);
+    const disk = await e.local.get(null);
+    assert.equal(disk.config_migration_backup.fromVersion, version);
+    assert.ok(!JSON.stringify(disk).includes(key));
+    await e.store.save({ targetLang: 'ja', providerConfig: { deepseek: { baseUrl: 'https://replacement.invalid/v1', apiKey: 'replacement' } } });
+    const restored = await e.store.restoreMigration();
+    assert.equal(restored.targetLang, 'fr');
+    assert.equal(restored.providerConfig.deepseek.baseUrl, slot.baseUrl);
+    assert.equal(restored.providerConfig.deepseek.apiKey, '');
+    assert.equal((await e.local.get(null)).config_migration_backup.createdAt, disk.config_migration_backup.createdAt);
+  }
+});
+
 test('legacy initialization is serialized, keeps device policy and scrubs backups', async () => {
   const e = env();
   await e.local.set({ config, config_backup_v3: config });
@@ -23,7 +85,8 @@ test('legacy initialization is serialized, keeps device policy and scrubs backup
   assert.equal(activeConfig(values[0]).apiKey, key);
   assert.equal(activeConfig(values[0]).keyStorage, 'local');
   const disk = await e.local.get(null);
-  assert.equal(disk[LOCAL_SECRETS].deepseek.key, key);
+  assert.deepEqual(disk[LOCAL_SECRETS], {});
+  assert.equal((await credentialVault(e.local).read(disk.config._storageRevision)).deepseek.key, key);
   assert.ok(!JSON.stringify(disk.config).includes(key));
   assert.ok(!JSON.stringify(disk.config_backup_v3).includes(key));
   const before = JSON.stringify(await e.local.get(null));
@@ -223,9 +286,12 @@ test('the one-time legacy choice only moves legacy keys, not keys chosen after t
     assert.equal(migrated.providerConfig.siliconflow.keyStorage, 'local');
     assert.equal(migrated.providerConfig.zhipu.keyStorage, 'session');
     const disk = JSON.stringify(await e.local.get(null));
-    assert.ok(disk.includes('mock-new-remembered'));
+    assert.ok(!disk.includes('mock-new-remembered'));
+    const device = await credentialVault(e.local).read((await e.local.get('config')).config._storageRevision);
+    assert.equal(device.siliconflow.key, 'mock-new-remembered');
     assert.ok(!disk.includes('mock-new-session'));
-    assert.equal(disk.includes(key), policy === 'local');
+    assert.ok(!disk.includes(key));
+    assert.equal(!!device.deepseek, policy === 'local');
   }
 });
 

@@ -33,8 +33,8 @@ assert.ok(read('reader/index.html').includes('id="userFontInput"') && read('read
 for (const token of ['BookDocument', 'PdfDocument', 'noCache: true', 'rimefox-reader', 'drm_protected']) {
   assert.ok(doc.includes(token), 'architecture doc missing ' + token);
 }
-const source = read('lib/reader/epub.js');
-for (const token of ['unzipSync', 'maxCompressionRatio', 'drm_protected', 'unsupported_layout', 'safeName']) {
+const source = read('lib/reader/epub.js') + read('lib/reader/epub-zip.js');
+for (const token of ['unpackEpub', 'maxCompressionRatio', 'drm_protected', 'unsupported_layout', 'safeName']) {
   assert.ok(source.includes(token), 'epub parser missing ' + token);
 }
 console.log('Reader contract: OK');

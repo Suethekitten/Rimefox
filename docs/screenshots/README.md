@@ -1,6 +1,6 @@
-# 商店截图（0.9.6）
+# 商店截图（0.16.4）
 
-两组截图，2026-10-20 用 `tools/screenshot-store.mjs` 生成，全部 1280×800，**真实扩展界面 + 本地假接口返回的人工示例译文**，没有使用真实 API Key，也没有向任何真实服务商发请求。
+两组截图，2026-11-04 用 `tools/screenshot-store.mjs` 生成，全部 1280×800，**真实扩展界面 + 本地假接口返回的人工示例译文**，没有使用真实 API Key，也没有向任何真实服务商发请求。
 
 ## 中文商店（根目录）
 
@@ -31,7 +31,7 @@ node tools/screenshot-store.mjs            # 英文那 5 张 → docs/screenshot
 node tools/screenshot-store.mjs --lang zh  # 中文那 5 张 → docs/screenshots/
 ```
 
-脚本做这些事：启动 Edge（headless）→ CDP 加载工作树里的扩展 → 用扩展设置页当控制台写好界面语言 / 目标语言 / 假服务商 / 示例术语表 → 打开本地演示页触发翻译 → 等「已翻译 N 段」提示消失 → 按 1280×800 截图 → 切到设置页截隐私与术语表。
+脚本做这些事：启动隔离的 Chrome 156（headless，本机未安装 Edge）→ CDP 加载工作树里的扩展 → 用扩展设置页当控制台写好界面语言 / 目标语言 / 假服务商 / 示例术语表 → 打开本地演示页触发翻译 → 等「已翻译 N 段」提示消失 → 按 1280×800 截图 → 切到设置页截隐私与术语表。
 
 - 用独立的临时用户配置，**不会**动你正在用的浏览器设置
 - 演示页在脚本里内联（英文站点外壳 + 日文/英文正文），不访问外网
@@ -46,15 +46,15 @@ node tools/screenshot-store.mjs --lang zh  # 中文那 5 张 → docs/screenshot
 
 ## 校验（sha256）
 
-```
-be65f3addaca74e711029d7c68ca853f873176ab962c503851fe34b51d806aab  store-01-fullpage-light.png
-36b6cd12dd3516a45109326d9b48bf0b0c48ca7894f7297cc21447b9333503cc  store-02-fullpage-dark.png
-a6624a9cbdfc2e0738d755cb4092f09f5dc02415e5a49b0453692228606d24fd  store-03-options-privacy.png
-3d846a5e923646b8a982e2c3645bbf392d4131bd35c9f94595566caf31a47b65  store-04-options-glossary.png
-8fcebc5b88ec5f24232cac4dbd5e789b1e86101a8aa42ba63b6f62c3b42d8072  store-05-selection.png
-40d238271226883bf776b03d81c5e1f90e40f5c3f345cc73d113097d119c9bba  en/en-01-fullpage-light.png
-4f5b4d44085320e59f950ddf2df0222aa3d0ae069e104618a6aa14d043e0ef96  en/en-02-fullpage-dark.png
-8fcb8ff800b483f19fdb2635befbbe8d8b7463a4350075d4e7d45b52389676c3  en/en-03-selection.png
-55a320cc11bf5c08736c12e958ee0db759ff4d209385527aaaa23715efc374c7  en/en-04-options-privacy.png
-cb68d649b292a25373db4ddfed9de1810e04aeee86b532ff9fb85b7db5f21110  en/en-05-options-glossary.png
+```text
+d7d2f677b3a1c1239cb9df842d3a3c523939b3e94237c53d1d1f7976d96f4a18  en/en-01-fullpage-light.png
+2cb015813924c334a34fecca096830e29a0104dd729647da876b42f762ae418c  en/en-02-fullpage-dark.png
+76af256e6cbdfb9560171804da0d62236a4dc8e7459d3cd4fb3b0873e8566683  en/en-03-selection.png
+8b9007de02e4ba3c28711a8fef7ddfca0e251edd10acb6da4329fea8a8547dbe  en/en-04-options-privacy.png
+a71285445ec8bcd0ef4f277cb124c5785cdde84dbce77c3ac0f2c4a0bb184c25  en/en-05-options-glossary.png
+aa9863c6e5a33058ff53e2a24e2d185497fca499f8a7bd1a63d91eab2c94b916  store-01-fullpage-light.png
+3b38b4194fdc1c455d06a5c424a1a3ab84fd964a349213ee41902c17c0893a72  store-02-fullpage-dark.png
+4ca460ef2b88ccb458062cff59f18bc09338baf2a4dcbef5f26508394c2a382c  store-03-options-privacy.png
+8226c709903e6ae20d6a4bf020dc520b07eca30bdccdc0a28d24d7a2e7fba15b  store-04-options-glossary.png
+f27a9f68627f4db0aae543a21b763b7936b214a95e7b3970616876026e2c9cfb  store-05-selection.png
 ```

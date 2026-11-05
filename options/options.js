@@ -1,3 +1,4 @@
+import { canFetchModels } from '../lib/provider-endpoint.js';
 import {
   DEFAULTS,
   getConfig,
@@ -777,6 +778,7 @@ let modelTimer = 0;
 
 function scheduleModelFetch() {
   clearTimeout(modelTimer);
+  modelSeq += 1;
   modelTimer = setTimeout(fetchModels, 800);
 }
 
@@ -786,6 +788,12 @@ async function fetchModels(manual) {
   const apiKey = fields.apiKey.value.trim();
   if (!baseUrl || !apiKey) {
     if (manual === true) setResult(modelHint, '先填好 API 地址和 Key。', 'bad');
+    return;
+  }
+  if (!canFetchModels(savedCfg?.providerConfig?.[currentProvider], { baseUrl, apiKey })) {
+    modelSeq += 1;
+    picker.setItems([]);
+    setResult(modelHint, '接口地址已更改。请确认并保存新地址，或填写对应的 Key 后再获取模型列表。', 'bad');
     return;
   }
   const seq = ++modelSeq;
@@ -1363,6 +1371,18 @@ $('clearCache').addEventListener('click', async () => {
 });
 
 // ---------------- 配置导出 / 导入 ----------------
+$('restoreMigration').addEventListener('click', async () => {
+  try {
+    const info = await chrome.runtime.sendMessage({ type: 'config:recoveryInfo' });
+    if (!info.ok) throw new Error(info.error);
+    if (!info.recovery.available) { setResult($('cfgResult'), '没有可恢复的升级前配置。'); return; }
+    if (!confirm(t('恢复最近一次升级前的设置？建议先导出当前配置。书库不受影响；备份不含密钥，接口地址不同的服务商需要重新填写 Key。'))) return;
+    const result = await chrome.runtime.sendMessage({ type: 'config:restoreMigration' });
+    if (!result.ok) throw new Error(result.error);
+    applyConfig(result.config);
+    setResult($('cfgResult'), '已恢复升级前设置，请检查接口配置并测试连接。', 'ok');
+  } catch (err) { setResult($('cfgResult'), '恢复失败：' + err.message, 'bad'); }
+});
 // 用途：换电脑、或换扩展 ID（品牌改名、目录改名）时，把配置整份搬过去，
 // 不用重新填 Key 和各项设置。
 // 解析与校验在 lib/config.js 的 pickImportedConfig 里（纯函数，可被 node 直接测试）。

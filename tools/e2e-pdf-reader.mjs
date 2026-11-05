@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const EXTENSION = process.env.RIMEFOX_EXTENSION || ROOT;
 const CHROME = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
   ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
   : process.platform === 'win32' ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : 'google-chrome');
@@ -134,7 +135,7 @@ async function setInputFile(session, file, dispatch) {
   }
 }
 
-const { id: extId } = await send('Extensions.loadUnpacked', { path: ROOT });
+const { id: extId } = await send('Extensions.loadUnpacked', { path: EXTENSION });
 console.log('Loaded extension ' + extId + ' from ' + ROOT);
 const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/reader/index.html' });
 const page = await attach(targetId);
@@ -179,6 +180,7 @@ if (process.env.RIMEFOX_PDF_RENDER !== '0') {
   check('首页文本块提取', !!blocks, blocks ? blocks + ' 块' : '没有文本块');
   const firstText = await pageEval(page, "const b=document.querySelector('.pdf-block'); return b ? b.textContent.slice(0,60) : ''");
   check('首块不是页眉', !!firstText && !/PLOS One|doi\.org|eLife 2025/i.test(firstText), firstText);
+  if (!process.argv[2]) check('/Rotate 90 首屏横向渲染并保留正文', await pageEval(page, 'const p=document.querySelector(".pdf-page");const c=p.querySelector("canvas");return c.width>c.height && p.textContent.includes("Ethical principles")'));
   await pageEval(page, "window.scrollTo(0, document.documentElement.scrollHeight); return true;");
   await sleep(1500);
   const canvases2 = await pageEval(page, "return document.querySelectorAll('.pdf-page canvas').length");
@@ -438,6 +440,27 @@ check('并发晚归：新译文、缓存与进度不受旧任务影响', !!fresh
   && JSON.stringify(finalRows) === JSON.stringify(freshRows)
   && hits.requests === before && finalHidden,
   JSON.stringify({ freshText: freshText.slice(0, 30), finalText: finalText.slice(0, 30), sameRows: JSON.stringify(finalRows) === JSON.stringify(freshRows), requests: hits.requests - before, hidden: finalHidden, rows: finalRows.length, freshRows: freshRows.length }));
+
+// QA E3: actual reader imports a 15000 x 15000 page book and rasterizes it safely.
+await pageEval(page, 'document.getElementById("backToLibrary").click();return true;');
+const hugeDoc = await send('DOM.getDocument', { depth: 0, pierce: true }, page);
+const hugeInput = await send('DOM.querySelector', { nodeId: hugeDoc.root.nodeId, selector: '#fileInput' }, page);
+await send('DOM.setFileInputFiles', { nodeId: hugeInput.nodeId, files: [path.join(ROOT, 'reader/pdf-samples/huge.pdf')] }, page);
+await pageEval(page, 'document.getElementById("fileInput").dispatchEvent(new Event("change",{bubbles:true}));return true;');
+await until(() => pageEval(page, 'return !document.getElementById("readerView").hidden && document.querySelectorAll(".pdf-page").length===12 && !!document.querySelector("canvas")'));
+let maxRaster = 0;
+let hugeRendered = 0;
+for (let n = 1; n <= 12; n++) {
+  await pageEval(page, `const p=document.querySelector('.pdf-page[data-page="${n}"]');p.scrollIntoView();window.dispatchEvent(new Event("scroll"));return true;`);
+  if (await until(() => pageEval(page, `const c=document.querySelector('.pdf-page[data-page="${n}"] canvas');return !!c && c.width>0`), 10000)) hugeRendered++;
+  const pixels = await pageEval(page, 'return Array.from(document.querySelectorAll("canvas"),c=>({pixels:c.width*c.height,dimension:Math.max(c.width,c.height)}))');
+  maxRaster = Math.max(maxRaster, pixels.reduce((sum,c)=>sum+c.pixels,0));
+  if (pixels.some(c=>c.pixels>4194304 || c.dimension>8192)) maxRaster=Infinity;
+}
+check('QA E3：超大 PDF 单页、全部画布和最大边长均受限', hugeRendered===12 && maxRaster>0 && maxRaster<=16777216, JSON.stringify({maxRaster, hugeRendered}));
+check('超大页提示降低预览分辨率', await pageEval(page, 'return document.querySelector(".pdf-page").textContent.includes("降低预览分辨率")'));
+await pageEval(page, 'window.__releasedCanvases=Array.from(document.querySelectorAll("canvas"));document.getElementById("backToLibrary").click();return true;');
+check('关闭 PDF 后释放全部画布像素', await pageEval(page, 'return window.__releasedCanvases.every(c=>c.width===0 && c.height===0)'));
 
 // 损坏 PDF：放在最后，导入失败会回到书库
 const badPdf = path.join(os.tmpdir(), 'rimefox-corrupt-' + Date.now() + '.pdf');

@@ -1,7 +1,8 @@
 // 阅读器页面入口：书库、章节渲染、阅读进度、设置。
 // EPUB 结构由 lib/reader/epub.js；清洗由 lib/reader/sanitize.js；
 // 翻译复用 content/dom.js 的 collect/inject，缓存由 reader 自己管理。
-import { parseEpub, EpubError } from '../lib/reader/epub.js';
+import { EpubError } from '../lib/reader/epub.js';
+import { loadEpub } from '../lib/reader/epub-loader.js';
 import { sanitizeXhtml } from '../lib/reader/sanitize.js';
 import { listBooks, getBook, saveBook, createBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
@@ -107,7 +108,7 @@ function errorText(err) {
     not_epub: '这不是可读取的 EPUB 文件。',
     drm_protected: '这本 EPUB 有 DRM / 加密保护，凛狐不会绕过。',
     unsupported_layout: '暂不支持固定版式 EPUB（0.13.0 只支持可重排文字书）。',
-    too_large: '文件太大：单本最多 100 MB，书库最多 500 MB。',
+    too_large: '文件或解压后的内容超过安全上限，请缩小文件后重试。',
     corrupt_epub: 'EPUB 结构损坏或缺少必要文件。',
     unsafe_archive: 'EPUB 压缩包异常，已拒绝导入。',
     missing_content: 'EPUB 缺少章节内容。',
@@ -440,22 +441,33 @@ async function renderLibrary() {
   $('libraryUsage').textContent = est.quota ? '本地书库 ' + formatBytes(est.usage || 0) + ' / 约 ' + formatBytes(est.quota) : '';
 }
 
+let importController = null;
+let epubOpenController = null;
+function checkImport(controller) { controller.signal.throwIfAborted(); }
 async function importFile(file) {
   if (!file) return;
+  importController?.abort();
+  const controller = new AbortController();
+  importController = controller;
+  $('cancelImport').hidden = false;
   const maxBookBytes = (state.settings && Number(state.settings.maxBookBytes)) || READER_LIMITS.maxBookBytes;
   // 单本上限只拦新书：已在书库里的书（之后调低了上限）重新导入时仍直接打开（QA G7）。
   // 超过设置页最大可选值的文件不读进内存，直接拒绝。
   const tooBig = file.size > maxBookBytes;
   if (tooBig && file.size > READER_LIMITS.maxSelectableBookBytes) {
     setStatus('libraryStatus', '文件超过 ' + Math.round(maxBookBytes / 1048576) + ' MB 上限，可在设置里调高。', 'error');
+    $('cancelImport').hidden = true;
     return;
   }
   setStatus('libraryStatus', '正在解析…');
   try {
     const buffer = await file.arrayBuffer();
+    checkImport(controller);
     const hash = await sha256(buffer);
     const existing = await getBook(hash);
+    checkImport(controller);
     if (existing) {
+      $('cancelImport').hidden = true;
       // 书记录还在但文件丢了（例如另一个标签页删书时本页把记录写回）：用这次选的文件补上。
       if (!(await getBookFile(hash))) await saveBookFile(hash, file);
       setStatus('libraryStatus', '这本书已导入，直接打开。', 'ok');
@@ -467,15 +479,18 @@ async function importFile(file) {
       return;
     }
     const est = await estimateUsage();
+    checkImport(controller);
     if (est.usage && est.quota && est.usage + file.size > READER_LIMITS.maxLibraryBytes) {
       setStatus('libraryStatus', '书库接近 500 MB，请先删除一本书。', 'error');
       return;
     }
     if (/\.pdf$/i.test(file.name) || looksLikePdf(new Uint8Array(buffer))) {
+      $('cancelImport').hidden = true;
       await importPdf(file, buffer, hash);
       return;
     }
-    const doc = parseEpub(buffer);
+    const doc = await loadEpub(buffer, { signal: controller.signal });
+    checkImport(controller);
     const coverBlob = doc.cover ? new Blob([doc.cover.bytes], { type: doc.cover.mediaType || 'image/jpeg' }) : null;
     const first = doc.sections[0];
     const record = {
@@ -493,6 +508,8 @@ async function importFile(file) {
       mode: 'original',
       progress: { sectionId: first ? first.id : '', offsetRatio: 0 }
     };
+    // Cancellation ends before the short database commit; a cancelled parse never saves a book.
+    $('cancelImport').hidden = true;
     await saveBookFile(record.id, file);
     await createBook(record);
     requestPersistence().catch(() => {});
@@ -500,7 +517,9 @@ async function importFile(file) {
     await renderLibrary();
     await openBook(record);
   } catch (err) {
-    setStatus('libraryStatus', errorText(err), 'error');
+    if (importController === controller) setStatus('libraryStatus', err.name === 'AbortError' ? '已取消导入。' : errorText(err), err.name === 'AbortError' ? '' : 'error');
+  } finally {
+    if (importController === controller) { importController = null; $('cancelImport').hidden = true; }
   }
 }
 
@@ -531,9 +550,10 @@ async function importPdf(file, buffer, hash) {
   await openBook(record);
 }
 
-function loadPdfDocument(buffer) {
+function loadPdfDocument(buffer, signal) {
   return openPdfDocument({
     data: buffer,
+    signal,
     loadPdfjs: () => import(chrome.runtime.getURL('reader/vendor/pdfjs/pdf.min.mjs')),
     workerSrc: chrome.runtime.getURL('reader/vendor/pdfjs/pdf.worker.min.mjs'),
     cMapUrl: chrome.runtime.getURL('reader/vendor/pdfjs/cmaps/')
@@ -616,6 +636,9 @@ function updatePdfZoomUi() {
 
 function setPdfZoom(value) {
   if (!state.pdf) return;
+  pdfRasterEpoch += 1;
+  state.pdf.cancelRendering();
+  pdfRenderQueue = Promise.resolve();
   state.pdfZoom = Math.max(0.5, Math.min(3, Math.round(Number(value) * 20) / 20));
   updatePdfZoomUi();
   for (const el of document.querySelectorAll('.pdf-page')) {
@@ -624,6 +647,7 @@ function setPdfZoom(value) {
     const blocks = el.querySelector('.pdf-blocks');
     if (blocks) blocks.remove();
     delete el.dataset.rendered;
+    el.style.minHeight = '';
   }
   renderVisiblePdfPages();
 }
@@ -633,13 +657,13 @@ function applyPdfZoom(delta) {
   setPdfZoom(state.pdfZoom + delta);
 }
 
-async function renderPdfPage(el, index) {
+async function renderPdfPage(el, index, epoch) {
   const doc = state.pdf;
-  if (!doc) return;
+  if (!doc || epoch !== pdfRasterEpoch || !el.isConnected) return;
   const loaded = await doc.page(index);
-  if (doc !== state.pdf || !el.isConnected) return;
+  if (doc !== state.pdf || epoch !== pdfRasterEpoch || !el.isConnected) return;
   // 失败重试 / 缩放后重画时先清掉上一轮的画布、文本块和错误提示，避免叠加。
-  for (const old of el.querySelectorAll('canvas, .pdf-blocks, .pdf-render-failed')) old.remove();
+  for (const old of el.querySelectorAll('canvas, .pdf-blocks, .pdf-render-failed')) { if (old.tagName === 'CANVAS') doc.releaseCanvas(old); old.remove(); }
   const content = document.getElementById('bookContent');
   const baseWidth = Math.max(320, (content ? content.clientWidth : 720) - 56);
   const cssWidth = Math.round(baseWidth * state.pdfZoom);
@@ -650,8 +674,19 @@ async function renderPdfPage(el, index) {
   canvas.style.width = cssWidth + 'px';
   canvas.style.height = 'auto';
   el.appendChild(canvas);
-  await doc.render(index, canvas, renderScale);
-  if (doc !== state.pdf || !el.isConnected) return;
+  el.dataset.rendered = '1';
+  const result = await doc.render(index, canvas, renderScale, { onEvict() {
+    // Keep the layout stable while an offscreen bitmap is released.
+    el.style.minHeight = el.offsetHeight + 'px';
+    canvas.remove();
+    delete el.dataset.rendered;
+  } });
+  if (doc !== state.pdf || epoch !== pdfRasterEpoch || !el.isConnected) return;
+  el.style.minHeight = '';
+  if (result.limited) {
+    const label = el.querySelector('.pdf-page-label');
+    if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 页面较大，已降低预览分辨率';
+  }
   if (loaded.blocks.length) {
     const panel = document.createElement('div');
     panel.className = 'pdf-blocks';
@@ -1100,7 +1135,9 @@ async function applyPdfViewMode(epoch) {
   updatePdfAnchor();
 }
 
-async function openPdfBook(record, seq) {
+async function openPdfBook(record, seq, signal) {
+  pdfRasterEpoch += 1;
+  pdfRenderQueue = Promise.resolve();
   if (seq !== openSeq) return;
   cancelPdfTranslations(true);
   pdfViewEpoch += 1;
@@ -1113,7 +1150,7 @@ async function openPdfBook(record, seq) {
   if (!file) throw new Error('书文件丢失，请重新导入。');
   const buffer = await file.arrayBuffer();
   if (seq !== openSeq) return;
-  const doc = await loadPdfDocument(buffer);
+  const doc = await loadPdfDocument(buffer, signal);
   if (seq !== openSeq) { try { doc.destroy(); } catch (err) { /* ignore */ } return; }
   state.pdf = doc;
   state.pdfIdentity = await pdfCacheIdentity(readerConfig(), state.readerTarget, 'plain');
@@ -1236,6 +1273,7 @@ async function openPdfBook(record, seq) {
 }
 
 let pdfRenderQueue = Promise.resolve();
+let pdfRasterEpoch = 0;
 function pdfPageWindow(margin, rootSelector, pageSelector) {
   const root = document.querySelector(rootSelector || '.pdf-pages');
   if (!root || root.hidden) return [];
@@ -1274,14 +1312,16 @@ function visiblePdfPageIndexes() {
 function renderVisiblePdfPages() {
   if (!state.pdf) return;
   const pages = pdfPageWindow(800);
+  for (const el of pages) { const canvas = el.querySelector('canvas'); if (canvas) state.pdf.touchCanvas(canvas); }
   for (const el of pages) {
     if (el.dataset.rendered === '1') continue;
     // 一页一页排队：pdf.js 的 render task 并发容易互相拖慢
     el.dataset.rendered = '1';
+    const epoch = pdfRasterEpoch;
     pdfRenderQueue = pdfRenderQueue
-      .then(() => renderPdfPage(el, Number(el.dataset.page)))
+      .then(() => renderPdfPage(el, Number(el.dataset.page), epoch))
       .catch((err) => {
-        if (!el.isConnected) return;
+        if (!el.isConnected || epoch !== pdfRasterEpoch || err.name === 'AbortError' || err.name === 'RenderingCancelledException') return;
         delete el.dataset.rendered;
         let note = el.querySelector('.pdf-render-failed');
         if (!note) {
@@ -1309,6 +1349,9 @@ function renderVisiblePdfPages() {
 }
 
 function closeReader() {
+  pdfRasterEpoch += 1;
+  pdfRenderQueue = Promise.resolve();
+  epubOpenController?.abort();
   openSeq += 1;
   searchSeq += 1;
   cancelPdfTranslations(true);
@@ -1427,12 +1470,15 @@ function scrollToFragment(fragment) {
 }
 
 async function openBook(record) {
+  epubOpenController?.abort();
+  const controller = new AbortController();
+  epubOpenController = controller;
   const seq = ++openSeq;
   await loadConfig();
   if (seq !== openSeq) return;
   // 没有配置也能读原文；只有翻译相关入口不可用
   if (record.format === 'pdf') {
-    try { await openPdfBook(record, seq); } catch (err) {
+    try { await openPdfBook(record, seq, controller.signal); } catch (err) {
       if (seq !== openSeq) return;
       setStatus('libraryStatus', errorText(err), 'error');
       closeReader();
@@ -1449,7 +1495,7 @@ async function openBook(record) {
     if (!file) throw new Error('书文件丢失，请重新导入。');
     const buffer = await file.arrayBuffer();
     if (seq !== openSeq) return;
-    const doc = parseEpub(buffer);
+    const doc = await loadEpub(buffer, { signal: controller.signal });
     if (seq !== openSeq) return;
     state.book = record;
     state.doc = doc;
@@ -1625,6 +1671,7 @@ async function changeMode(mode) {
 }
 
 function bindEvents() {
+  $('cancelImport').addEventListener('click', () => importController?.abort());
   $('fileInput').addEventListener('change', (event) => {
     const file = event.target.files && event.target.files[0];
     event.target.value = '';

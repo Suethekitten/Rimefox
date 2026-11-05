@@ -8,8 +8,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { zipSync, strToU8 } from '../lib/vendor/fflate.browser.mjs';
+import { spoofedEpubZip } from '../test/fixtures/qa-archives.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const EXTENSION = process.env.RIMEFOX_EXTENSION || ROOT;
 const BROWSER = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
   ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
   : process.platform === 'win32'
@@ -84,6 +86,7 @@ await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
 const profile = path.join(WORK, 'profile');
 const browser = spawn(BROWSER, [
   '--headless=new', '--no-sandbox', '--enable-unsafe-extension-debugging', '--remote-debugging-port=' + DEBUG,
+  '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
   '--remote-allow-origins=*', '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check', 'about:blank'
 ], { stdio: 'ignore' });
 let version = null;
@@ -130,7 +133,7 @@ async function attach(targetId) {
   return sessionId;
 }
 
-const { id: extId } = await send('Extensions.loadUnpacked', { path: ROOT });
+const { id: extId } = await send('Extensions.loadUnpacked', { path: EXTENSION });
 const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/reader/index.html' });
 console.log('reader target', targetId);
 const page = await attach(targetId);
@@ -148,6 +151,21 @@ await send('Page.reload', {}, page);
 await sleep(1200);
 await until(() => pageEval("return !!document.getElementById('bookGrid')"), 15000);
 check('阅读器页面加载', await pageEval("return document.title.indexOf('凛狐') >= 0;"), await pageEval('return document.title'));
+
+const bomb = path.join(WORK, 'qa-size-spoof.epub');
+fs.writeFileSync(bomb, spoofedEpubZip());
+const bombDoc = await send('DOM.getDocument', { depth: -1, pierce: true }, page);
+const bombInput = await send('DOM.querySelector', { nodeId: bombDoc.root.nodeId, selector: '#fileInput' }, page);
+await send('DOM.setFileInputFiles', { nodeId: bombInput.nodeId, files: [bomb] }, page);
+await pageEval('window.__heartbeat=0;window.__pulse=setInterval(()=>window.__heartbeat++,5);document.getElementById("fileInput").dispatchEvent(new Event("change",{bubbles:true}));return true;');
+const rejected = await until(() => pageEval('return document.getElementById("cancelImport").hidden && /大|安全|EPUB/.test(document.getElementById("libraryStatus").textContent)'), 5000);
+const bombState = await pageEval('clearInterval(window.__pulse);return {heartbeat:window.__heartbeat,cards:document.querySelectorAll(".book-card").length,status:document.getElementById("libraryStatus").textContent};');
+check('QA E2：尺寸伪造 EPUB 被拒绝且主线程仍响应、不写入书库', !!rejected && bombState.heartbeat>0 && bombState.cards===0, JSON.stringify(bombState));
+const workerChecks = await pageEval('return import("/lib/reader/epub-loader.js").then(async({loadEpub})=>{const bytes=new Uint8Array(' + JSON.stringify(Array.from(zipSync({ a: strToU8('hello') }))) + ');const c=new AbortController();const p=loadEpub(bytes.slice().buffer,{signal:c.signal}).catch(e=>e.name);c.abort();const cancelled=await p;const timed=await loadEpub(bytes.slice().buffer,{timeout:0}).catch(e=>e.code);return {cancelled,timed};})');
+check('EPUB Worker 可立即取消且超时后被终止', workerChecks.cancelled === 'AbortError' && workerChecks.timed === 'timeout', JSON.stringify(workerChecks));
+await send('DOM.setFileInputFiles', { nodeId: bombInput.nodeId, files: [bomb] }, page);
+await pageEval('document.getElementById("fileInput").dispatchEvent(new Event("change",{bubbles:true}));document.getElementById("cancelImport").click();return true;');
+check('取消导入按钮阻止保存异常书籍', !!await until(() => pageEval('return document.getElementById("libraryStatus").textContent.includes("已取消") && !document.querySelector(".book-card")'), 5000));
 
 const epubPath = path.join(WORK, 'reader-smoke.epub');
 fs.writeFileSync(epubPath, makeEpub());

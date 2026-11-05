@@ -72,7 +72,7 @@ t('旧结构字段被清掉', () => {
   assert.equal(next.engineConfig, undefined);
   assert.equal(next.engine, undefined);
   assert.equal(next._v, CONFIG_VERSION);
-  assert.equal(CONFIG_VERSION, 9);
+  assert.equal(CONFIG_VERSION, 10);
 });
 
 t('行为项原样保留', () => {

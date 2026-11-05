@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { zipSync, strToU8 } from '../lib/vendor/fflate.browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const EXTENSION = process.env.RIMEFOX_EXTENSION || ROOT;
 const BROWSER = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : process.platform === 'win32' ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : 'google-chrome');
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-session-e2e-'));
 const profile = path.join(WORK, 'profile');
@@ -53,6 +54,10 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const ORIGIN = 'http://127.0.0.1:' + server.address().port;
+let untrustedRequests = 0;
+const untrustedServer = http.createServer((req, res) => { untrustedRequests++; res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"data":[{"id":"fake"}]}'); });
+await new Promise((resolve) => untrustedServer.listen(0, '127.0.0.1', resolve));
+const UNTRUSTED = 'http://127.0.0.1:' + untrustedServer.address().port;
 let browser;
 let ws;
 let seq = 0;
@@ -105,12 +110,15 @@ async function start() {
     }
     if (message.method === 'ServiceWorker.workerVersionUpdated') for (const item of message.params.versions) versions.set(item.versionId, item);
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
+    if (message.method === 'Page.javascriptDialogOpening') send('Page.handleJavaScriptDialog', { accept: true }, message.sessionId).catch(() => {});
   };
-  const loaded = await send('Extensions.loadUnpacked', { path: ROOT });
+  const loaded = await send('Extensions.loadUnpacked', { path: EXTENSION });
   extId = loaded.id;
-  console.log(version.Browser + ' · ' + extId + ' · ' + ROOT);
+  console.log(version.Browser + ' · ' + extId + ' · ' + EXTENSION);
   options = (await open('chrome-extension://' + extId + '/options/index.html')).session;
   if (!await until(() => evaluate(options, 'return !!document.querySelector("#provider option") && !!document.getElementById("rememberKey") && document.getElementById("saveState").textContent.includes("所有更改已保存")'))) throw new Error('Options did not load');
+  const debug = await evaluate(options, 'return chrome.runtime.sendMessage({type:"config:trustedGet"}).then(v=>({ok:v.ok,error:v.error}))');
+  if (!debug.ok) throw new Error('Config initialization: ' + debug.error);
   await sleep(300);
 }
 async function close() {
@@ -148,6 +156,10 @@ try {
     await keyForm('mock-reload');
   } else {
   await keyForm('mock-session');
+  await evaluate(options, 'const e=document.getElementById("baseUrl");e.value=' + JSON.stringify(UNTRUSTED + '/v1') + ';e.dispatchEvent(new Event("input",{bubbles:true}));document.getElementById("refreshModels").click();return true;');
+  await sleep(1200);
+  check('QA F9：新地址未保存时自动和手动模型刷新均不发送旧 Key', untrustedRequests === 0 && await evaluate(options, 'return document.getElementById("modelHint").textContent.includes("接口地址已更改")'));
+  await evaluate(options, 'const e=document.getElementById("baseUrl");e.value=' + JSON.stringify(ORIGIN + '/v1') + ';e.dispatchEvent(new Event("input",{bubbles:true}));return true;');
   let c = await cfg();
   check('新 Key 默认 session，设备记忆开关默认关闭', c.providerConfig[c.currentProvider].keyStorage === 'session' && !(await evaluate(options, 'return document.getElementById("rememberKey").checked')));
   check('浏览器 local 数据不含会话 Key', !(await evaluate(options, 'return chrome.storage.local.get(null).then(v=>JSON.stringify(v))')).includes('mock-session'));
@@ -275,6 +287,14 @@ try {
   await close(); await start();
   c = await cfg();
   check('设备记忆 Key 在完整浏览器重启后保留', c.providerConfig.deepseek.apiKey === 'mock-device' && await evaluate(options, 'return document.getElementById("rememberKey").checked'));
+  check('设备 Key 只在扩展源凭据库中、local 中不存在', !(await evaluate(options, 'return chrome.storage.local.get(null).then(v=>JSON.stringify(v))')).includes('mock-device') && await evaluate(options, 'return new Promise((resolve,reject)=>{const r=indexedDB.open("rimefox-credentials",1);r.onsuccess=()=>{const db=r.result;const q=db.transaction("vault").objectStore("vault").get("device");q.onsuccess=()=>{db.close();resolve(JSON.stringify(q.result).includes("mock-device"))};q.onerror=()=>reject(q.error)};r.onerror=()=>reject(r.error)})'));
+  const exposurePage = await open(ORIGIN + '/article?startup-window');
+  const exposureWorld = await world(exposurePage.session);
+  // Deliberately simulate the pre-restriction window in an isolated disposable profile.
+  await evaluate(options, 'return chrome.storage.local.setAccessLevel({accessLevel:"TRUSTED_AND_UNTRUSTED_CONTEXTS"})');
+  const exposure = await evaluate(exposurePage.session, 'return Promise.all([chrome.storage.local.get(null),indexedDB.databases()]).then(([local,dbs])=>({leaked:JSON.stringify(local).includes("mock-device"),vault:dbs.some(d=>d.name==="rimefox-credentials")}))', exposureWorld);
+  await evaluate(options, 'return chrome.storage.local.setAccessLevel({accessLevel:"TRUSTED_CONTEXTS"})');
+  check('QA F1：即使模拟启动前 local 可读，网页也拿不到设备 Key 或扩展源数据库', !exposure.leaked && !exposure.vault);
   await keyForm('mock-device', false);
   check('取消设备记忆后 local 中清除 Key', !(await evaluate(options, 'return chrome.storage.local.get(null).then(v=>JSON.stringify(v))')).includes('mock-device'));
   await close(); await start();
@@ -291,7 +311,15 @@ try {
   await send('Page.reload', {}, options);
   await until(() => evaluate(options, 'return document.getElementById("apiKey")?.value === "mock-legacy"'));
   check('迁移选择不重复出现，Key 在本次会话可用', !(await cfg()).keyMigrationPending && await evaluate(options, 'return document.getElementById("keyMigration").hidden'));
+  await save({ targetLang: 'fr' });
+  await evaluate(options, 'document.getElementById("restoreMigration").click();return true;');
+  const recovered = await until(async () => { const c=await cfg(); return c.targetLang === 'zh-CN' && c.providerConfig.deepseek.apiKey === 'mock-legacy'; });
+  check('设置页实际恢复升级前设置，同一接口保留当前 Key', !!recovered);
   }
+  if (process.env.RIMEFOX_TEST_BROWSER === 'edge') {
+    // Edge's manager UI differs; exercise the same runtime lifecycle without Chrome selectors.
+    await evaluate(options, 'setTimeout(()=>chrome.runtime.reload(),0);return true;');
+  } else {
   // 使用扩展管理页真实的开发者模式 / 重载控件；CDP 临时加载不等于已启用开发者模式。
   const manager = await open('chrome://extensions/');
   const allElements = 'function all(root){const out=[];for(const e of root.querySelectorAll("*")){out.push(e);if(e.shadowRoot)out.push(...all(e.shadowRoot));}return out;}';
@@ -302,6 +330,7 @@ try {
   await sleep(200);
   const clicked = await evaluate(manager.session, allElements + 'const card=all(document).find(e=>e.localName==="extensions-item" && e.id===' + JSON.stringify(extId) + ');const button=card && all(card.shadowRoot).find(e=>/reload/i.test(e.id) && /button/.test(e.localName));if(!button || !button.getBoundingClientRect().width)return false;button.click();return true;');
   if (!clicked) throw new Error('Visible extension reload control unavailable');
+  }
   await sleep(600);
   options = (await open('chrome-extension://' + extId + '/options/index.html')).session;
   if (!await until(() => evaluate(options, 'return !!chrome.runtime?.id && document.getElementById("saveState")?.textContent.includes("所有更改已保存")'), 5000)) {
@@ -313,6 +342,7 @@ try {
 } finally {
   try { await close(); } catch {}
   server.close();
+  untrustedServer.close();
   fs.writeFileSync(path.join(WORK, 'result.json'), JSON.stringify({ results, errors }, null, 2));
 }
 const failed = results.filter((item) => !item.ok).length;

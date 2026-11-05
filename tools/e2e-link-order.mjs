@@ -158,6 +158,10 @@ try {
     return targetInfos.find((target) => target.type === 'service_worker' && target.url.startsWith('chrome-extension://' + extId));
   }, 'extension service worker');
   sw = await attach(swTarget.targetId);
+  await until(() => evaluate(sw, 'typeof chrome !== "undefined" && !!chrome.runtime?.id'), 'extension worker initialization');
+  const settingsTarget = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/options/index.html' });
+  const settings = await attach(settingsTarget.targetId);
+  await until(() => evaluate(settings, 'typeof chrome !== "undefined" && !!document.getElementById("save")'), 'settings initialization');
   for (const scenario of [
     { name: 'en-control', page: 'wiki-ai-p1-events.html', reply: 'order-control.json', mode: 'translation' },
     { name: 'en-control-dual', page: 'wiki-ai-p1-events.html', reply: 'order-control.json', mode: 'dual' },
@@ -175,7 +179,7 @@ try {
     replies = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'replies', scenario.reply), 'utf8')).exact;
     const record = { ...scenario, replies, startRequest: requests.length };
     const cfg = { _v: 8, currentProvider: '__custom__', customProviders: [{ id: '__custom__', name: 'Local recorded QA' }], providerConfig: { __custom__: { engine: 'openai', baseUrl: origin + '/v1', apiKey: 'sk-local-fake', model: 'recorded-' + scenario.name } }, targetLang: 'zh-CN', mode: scenario.mode, lazy: false, thinkingMode: 'off', hoverCompare: true, batchSize: 8, maxCharsPerBatch: 2000, concurrency: 1 };
-    await swEval('await chrome.storage.local.set({config:' + JSON.stringify(cfg) + '});return true;');
+    await evaluate(settings, 'import("/lib/config.js").then(m=>m.saveConfig(' + JSON.stringify(cfg) + ')).then(()=>true)');
     const url = origin + '/pages/' + scenario.page + '?case=' + scenario.name;
     const { targetId } = await send('Target.createTarget', { url });
     const session = await attach(targetId);

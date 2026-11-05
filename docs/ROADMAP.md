@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-04；当前版本为 0.16.3，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.3 修复 0.16.1 独立 QA 的阅读器、PDF 文本层、会话密钥与字幕费用问题；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-04；本地待发布版本为 0.16.4，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.3 修复 0.16.1 独立 QA 的阅读器、PDF 文本层、会话密钥与字幕费用问题；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -146,6 +146,8 @@
 
 ## 4. 近期安排
 
+0.16.4 已落地密钥启动窗口、新地址模型请求、异常 EPUB、PDF 画布与取消修复，以及升级快照恢复和独立 CI。继续执行 [SUPPORT](SUPPORT.md) 的验收矩阵；缺真实环境证据的项目保持待验收。PDF Beta、直播字幕和医学质量提升不作为已兑现的 1.0 承诺。OCR 保持此前规划，不进入本次修复。
+
 ### 0.15.0（实现与验证）
 
 P2-1 的会话 Key、可选设备记忆、旧用户迁移选择、鉴权失败全局暂停与配置广播合并已完成；同时纳入此前拟作 0.14.2 的 P0-4 PDF 缓存与任务生命周期修复。三处版本号及 CHANGELOG 已统一为 0.15.0，用户已明确授权推送；实际发布结果以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.15.0) 和 [Actions](https://github.com/Suethekitten/Rimefox/actions/workflows/release.yml) 为准。
@@ -168,9 +170,10 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 
 ### 下一步
 
-1. 本地试用 0.16.2，重点打开 600+ 页 PDF 看首屏和目录，并测试地图 / 视频页点击不卡。
-2. 跨页段落合并（PDF-HANDOFF §4 第 1 条）与真实 API 延迟仍待排期；真实延迟要用服务商配置实测，不能用假接口结果代替。
-3. P2-11 先验证可选本地 OCR 组件与能力检测，再接设置页 / PDF 阅读器的配置、下载和未配置提示，最后接逐页识别与回归；契约只在 [PDF-HANDOFF §5](PDF-HANDOFF.md#5-ocr方案已确定尚未实现) 维护。真实 API 延迟与质量实测单列任务。
+1. 完成 0.16.4 的当前 Chrome/Edge 与 Windows/macOS/Linux 实机矩阵；独立 CI 尚未推送，不计为已通过。
+2. 复验真实 YouTube/B站的字幕轨、登录态、切视频和原生字幕恢复；直播继续标实验。
+3. 使用已配置接口，在用户授权的 ¥10 总预算内记录三协议译文、格式、句子对齐、恢复与请求数；没有可用配置的协议列待验收。医学质量结论需成对盲评。
+4. 最终包验收后再决定推送、发布与商店提交。OCR 维持 P2-11 的既定设计，当前不实施。
 
 | 版本 | 内容 |
 |---|---|

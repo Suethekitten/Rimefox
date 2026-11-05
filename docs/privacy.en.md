@@ -1,6 +1,6 @@
 # Rimefox Privacy Policy
 
-Last updated: 2026-11-01. Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
+Last updated: 2026-11-04. Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
 
 ## Information sent for translation
 
@@ -42,7 +42,7 @@ Subtitle translation is off by default. A packaged MAIN-world script nevertheles
 
 | Information | Storage and retention |
 |---|---|
-| API keys | New keys default to chrome.storage.session and expire when the browser closes or the extension is reloaded. Selecting “Remember the key on this device” stores that provider's key in chrome.storage.local. Existing device keys remain remembered until the user chooses session-only migration; migration removes keys from old configuration backups. Keys are sent only for authentication to the configured provider. |
+| API keys | New keys default to chrome.storage.session and expire when the browser closes or the extension is reloaded. Device-remembered keys are stored in an extension-origin IndexedDB vault, inaccessible to webpage content scripts, rather than chrome.storage.local. On first upgrade, a recoverable journal migrates legacy local/configuration keys and removes old logical copies. The old access boundary still applies before that migration runs; previously leaked copies cannot be recalled and physical storage remnants are not securely erased. Session storage remains restricted to trusted extension contexts. Keys are sent only for authentication to the configured provider. |
 | Provider configuration, glossary and custom prompts | Non-secret settings in chrome.storage.local, retained until edited, removed or the extension is uninstalled. These fields may be transmitted as described above. |
 | Authentication pause and credential revisions | Pauses are in chrome.storage.session and survive service-worker restarts. Random credential revisions are stored with the corresponding keys. Configuration notifications contain no key or hash of a key. |
 | Interface language and theme | Local settings only; the theme is also cached in the extension page's localStorage to prevent flashing. |
@@ -52,7 +52,7 @@ Subtitle translation is off by default. A packaged MAIN-world script nevertheles
 | User-uploaded reading font | Extension-page IndexedDB `rimefox-reader` (`fonts`), local only and never uploaded. Removing the font deletes the stored blob. |
 | Per-tab translation resume state | chrome.storage.session; removed on tab close. |
 
-Both local and session extension storage are restricted to trusted extension contexts, except for a few milliseconds right after browser start-up before the extension's background worker applies the restriction; exploiting that window requires an already-compromised web page renderer. Content scripts receive configuration without API keys. Configuration exports omit keys by default; explicitly including keys writes current session or remembered keys into the export file without encryption. Remove exported files and clipboard copies yourself; extension storage is not a password vault.
+Session storage is restricted to trusted extension contexts. After legacy migration, device keys live in extension-origin IndexedDB and are absent from local storage even before the worker sets storage access levels at startup. Legacy installations remain subject to their previous startup exposure until migration completes. Content scripts receive configuration without API keys. Configuration exports omit keys by default; explicitly including keys writes current session or remembered keys into the export file without encryption. Remove exported files and clipboard copies yourself; extension storage is not a password vault.
 
 ## Your controls
 
@@ -67,3 +67,5 @@ Rimefox does not access browser history or browse unopened sites in the backgrou
 ## Contact
 
 Use the public GitHub Issues page at https://github.com/Suethekitten/Rimefox/issues for privacy questions. Never post API keys, private page text or unredacted diagnostic output. Use the repository's private vulnerability-reporting channel for security reports, as described in SECURITY.md. The repository and its Issues page are public and require no login to read.
+
+Upgrade configuration snapshots contain no API keys. Restoring a snapshot clears credentials for providers whose endpoint or protocol differs from the current configuration. Original book files and reading progress are not included in configuration snapshots.

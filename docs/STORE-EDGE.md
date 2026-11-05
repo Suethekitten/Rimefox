@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Microsoft Edge 加载项商店上架材料
 
-最后更新：2026-10-27，对应 `main`（Rimefox 0.12.5）；商店线上 0.9.7；下一次商店更新用最新已发布版本（Edge 需 > 0.9.7）。
+最后更新：2026-11-04，本地待发布 0.16.4。Edge 公开商店页今日核实为 0.12.5（页面更新日期 2026-10-27），下一次版本号需 > 0.12.5；提交状态统一见 STORE.md。
 
 > **分工**：提交状态、差哪几项、待办清单在 [STORE.md](STORE.md)（唯一主人）。
 > 本文只写 **Edge 与 Chrome 的差异**、Partner Center 的提交流程，以及只给 Edge 控制台用的粘贴文案（≥250 字符描述、search terms、notes for certification）。
@@ -9,7 +9,7 @@
 ## 结论
 
 - **代码不需要为 Edge 改**：MV3、无 `update_url`、无远程代码、无混淆，`lib/config.js` 已经区分 `edge://` 与 `chrome://`，`world: "MAIN"` 和 `minimum_chrome_version` 都是 Edge 支持的字段。
-- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线；0.9.7 已上线（2026-10-27 核实）。
+- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线；0.12.5 已上线（2026-11-04 公开页核实），页面仍使用旧版功能说明，更新文案应采用当前支持范围。
 - Edge 注册**免费**（Chrome 收一次性 $5）；后续更新用 **Packages → 上传新包**，版本号必须比线上大。
 
 ## 商店标识
@@ -182,7 +182,7 @@ Translate web pages, selected text, text in a webpage text box, popup text and Y
 
 本扩展采用 BYOK：你需要自行配置 API 地址、API Key 和模型，服务商可能收取费用。支持 DeepSeek 等 OpenAI 兼容接口以及 Anthropic、Gemini 协议，没有内置免费翻译额度。作者不运营翻译服务器，不使用分析或遥测；待翻文本、自定义提示词及命中术语直接发给你配置的接口。设置与缓存保存在本机。
 
-EPUB 阅读器支持本地无 DRM、可重排的 EPUB 2/3；PDF 和图片 OCR 暂不支持。源码、问题反馈与隐私政策见 https://github.com/Suethekitten/Rimefox 。
+EPUB 阅读器支持本地无 DRM、可重排的 EPUB 2/3；PDF 阅读与文本翻译为 Beta，图片 OCR 暂不支持，直播字幕为实验功能。源码、问题反馈与隐私政策见 https://github.com/Suethekitten/Rimefox 。
 ```
 
 ### Store listing：English Description
@@ -194,7 +194,7 @@ Use a glossary to pin down terminology and custom prompts to shape the wording. 
 
 Bring your own key: configure an endpoint, key and model from your chosen provider. Provider charges may apply and no free quota is bundled. Rimefox supports OpenAI-compatible endpoints such as DeepSeek, plus Anthropic and Gemini protocols. The author operates no translation server and uses no analytics or telemetry; text to translate, custom prompts and matching glossary terms go directly to the endpoint you configure. Settings and caches stay on your device.
 
-PDF and image OCR are not supported. A local EPUB reader supports DRM-free, reflowable EPUB 2/3 files you import yourself. Source, support and privacy policy: https://github.com/Suethekitten/Rimefox
+PDF reading and text translation are in Beta; image OCR is not supported and live captions remain experimental. A local EPUB reader supports DRM-free, reflowable EPUB 2/3 files you import yourself. Source, support and privacy policy: https://github.com/Suethekitten/Rimefox
 ```
 
 ### Search terms（≤7 个词/短语，每个 ≤30 字符）

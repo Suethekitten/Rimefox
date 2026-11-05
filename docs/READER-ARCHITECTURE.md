@@ -13,7 +13,7 @@ reader/index.html
   ├─ TranslationQueue   当前视口 + 后 2 屏；手动本章；切章取消
   └─ BookDocument       格式无关的只读文档接口
        ├─ EpubDocument  EPUB 2/3 → sanitized XHTML sections
-       └─ PdfDocument   （未来）PDF 页面/文本层 → 独立 renderer
+       └─ PdfDocument   PDF 页面/文本层 → 独立 renderer（Beta）
 ```
 
 共享：书库、元数据、目录、进度、翻译队列、翻译缓存、设置、删除、错误模型。
@@ -189,3 +189,7 @@ PdfDocument = {
 ## 9. 权限
 
 不新增浏览器权限。读取本地文件使用 reader 页的 `<input type=file>` / 拖拽；不申请 `file://`、`unlimitedStorage`、`downloads`。不读 Cookie，不上传原书。
+
+## 异常 EPUB 的资源边界（0.16.4）
+
+阅读器通过 `epub-loader.js` 在 module Worker 中执行 `epub-zip.js`，每次只输入 4 KiB 压缩字节，并校验实际输出量。单条目 24 MiB、总量 320 MiB、压缩比 180、最多 10000 条目；拒绝重复路径、越界和截断。不能仅信任 ZIP 声明的 originalSize。20 秒后主线程直接终止 Worker；取消导入、换书或返回书库也会终止对应解压。只在成功解析且未取消后才开始保存书库；短暂提交阶段隐藏取消按钮，避免承诺能取消已提交的数据。同步 `parseEpub` 仅供纯解析调用，和 Worker 共用相同输出限制，实际 reader 不在主线程同步解压。
