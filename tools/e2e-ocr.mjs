@@ -47,14 +47,41 @@ function check(name, ok, detail) {
   results.push({ name, ok: !!ok });
   console.log((ok ? '  PASS ' : '  FAIL ') + name + (detail ? ' — ' + detail : ''));
 }
-async function until(fn, ms = 30000, step = 200) {
+// trace（可选）记录每次轮询的耗时、异常和最后的值；失败时用来区分「页面没渲染」和「求值本身被阻塞 / 抛错」。
+async function until(fn, ms = 30000, step = 200, trace) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    try { const value = await fn(); if (value) return value; } catch (err) { /* wait */ }
+    const started = Date.now();
+    try {
+      const value = await fn();
+      if (trace) trace.add(started, null, value);
+      if (value) return value;
+    } catch (err) {
+      if (trace) trace.add(started, err, undefined);
+    }
     await sleep(step);
   }
   return null;
 }
+function pollTrace() {
+  const errors = new Map();
+  const t = { polls: 0, failures: 0, slowest: 0, firstAt: 0, lastAt: 0, last: undefined };
+  t.add = (started, err, value) => {
+    const took = Date.now() - started;
+    t.polls += 1;
+    t.firstAt = t.firstAt || started;
+    t.lastAt = started;
+    t.slowest = Math.max(t.slowest, took);
+    if (err) {
+      t.failures += 1;
+      const text = String((err && err.message) || err).slice(0, 240);
+      errors.set(text, (errors.get(text) || 0) + 1);
+    } else t.last = value;
+  };
+  t.summary = () => ({ polls: t.polls, failures: t.failures, slowestMs: t.slowest, spanMs: t.lastAt - t.firstAt, last: t.last, errors: Array.from(errors, ([text, n]) => n + '× ' + text) });
+  return t;
+}
+const withTimeout = (promise, ms, label) => Promise.race([promise, sleep(ms).then(() => { throw new Error(label + ' timed out after ' + ms + 'ms'); })]);
 function hostMessages(type) {
   try {
     return fs.readFileSync(hostLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((m) => !type || m.type === type);
@@ -205,6 +232,7 @@ await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = rejec
 let seq = 0;
 const pending = new Map();
 const exceptions = [];
+const consoleLog = [];
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
   if (message.id && pending.has(message.id)) {
@@ -218,6 +246,12 @@ ws.onmessage = (event) => {
     const d = message.params.exceptionDetails;
     exceptions.push((d.exception && d.exception.description) || d.text);
   }
+  // 只留给失败诊断：页面 console.error / warn（例如被 catch 住的初始化错误），不计入异常断言。
+  if (message.method === 'Runtime.consoleAPICalled' && /^(error|warning|assert)$/.test(message.params.type)) {
+    const text = message.params.args.map((a) => a.value !== undefined ? String(a.value) : a.description || a.type).join(' ');
+    consoleLog.push({ session: message.sessionId, at: Date.now(), type: message.params.type, text: text.slice(0, 400) });
+    if (consoleLog.length > 200) consoleLog.shift();
+  }
 };
 function send(method, params = {}, sessionId) {
   const id = ++seq;
@@ -229,6 +263,7 @@ async function open(url) {
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
   await send('Runtime.enable', {}, sessionId);
   await send('Page.enable', {}, sessionId);
+  await send('Performance.enable', {}, sessionId).catch(() => {});
   await send('Page.bringToFront', {}, sessionId);
   return { sessionId, targetId };
 }
@@ -236,6 +271,60 @@ async function pageEval(tab, code) {
   const out = await send('Runtime.evaluate', { expression: '(async () => {' + code + '})()', awaitPromise: true, returnByValue: true }, tab.sessionId);
   if (out.exceptionDetails) throw new Error((out.exceptionDetails.exception && out.exceptionDetails.exception.description) || out.exceptionDetails.text);
   return out.result.value;
+}
+// 设置页 OCR 状态没出现时的诊断：每一项各自限时，诊断本身卡住也要把其余结果打印出来。
+async function diagnoseOptions(tab, trace) {
+  const out = { poll: trace ? trace.summary() : null };
+  const grab = async (key, fn, ms = 5000) => {
+    const started = Date.now();
+    try { out[key] = await withTimeout(fn(), ms, key); } catch (err) { out[key] = { error: String((err && err.message) || err).slice(0, 300) }; }
+    if (key === 'page' || key === 'roundTrip') out[key + 'EvalMs'] = Date.now() - started;
+  };
+  await grab('page', () => pageEval(tab, `
+    const b = document.getElementById('ocrStatus'), html = document.documentElement;
+    return {
+      readyState: document.readyState, visibility: document.visibilityState, focused: document.hasFocus(),
+      uptimeMs: Math.round(performance.now()),
+      init: { stage: html.dataset.optionsInit || null, error: html.dataset.optionsInitError || null },
+      appVersion: (document.getElementById('appVersion') || {}).textContent || null,
+      banner: b ? { hidden: b.hidden, dataset: Object.assign({}, b.dataset), title: document.getElementById('ocrStatusTitle').textContent, detail: document.getElementById('ocrStatusDetail').textContent } : null,
+      section: { sectionHidden: document.getElementById('sec-ocr').hidden, navHidden: document.getElementById('navOcr').hidden },
+      componentInfo: document.getElementById('ocrComponentInfo').textContent,
+      saveResult: (document.getElementById('saveResult') || {}).textContent || '',
+      engine: document.getElementById('ocrEngine').value,
+      longTasks: await new Promise((resolve) => {
+        // 缓冲的长任务 / 长动画帧：主线程是否曾被长时间占用，以及占用它的脚本。
+        const found = [];
+        const done = () => resolve(found.sort((a, b) => b.ms - a.ms).slice(0, 8));
+        for (const type of ['longtask', 'long-animation-frame']) {
+          try {
+            new PerformanceObserver((list) => {
+              for (const e of list.getEntries()) found.push({ type, at: Math.round(e.startTime), ms: Math.round(e.duration), scripts: (e.scripts || []).slice(0, 3).map((x) => (x.sourceURL || '').split('/').slice(-2).join('/') + ':' + (x.sourceFunctionName || x.invoker || '') + ' ' + Math.round(x.duration) + 'ms') });
+            }).observe({ type, buffered: true });
+          } catch (err) { /* 不支持的类型 */ }
+        }
+        setTimeout(done, 300);
+      })
+    };`));
+  // 页面直接走一遍后台路由，分别计时：区分后台 / 配置读取慢与页面模块未调用。
+  await grab('roundTrip', () => pageEval(tab, `
+    const time = async (message) => {
+      const t0 = performance.now();
+      try { const r = await chrome.runtime.sendMessage(message); return { ms: Math.round(performance.now() - t0), ok: !!(r && r.ok), status: r && r.ocr ? r.ocr.status : undefined, reason: r && r.ocr ? r.ocr.reason : undefined, sources: r && r.ocr ? r.ocr.sources : undefined, error: r && r.error }; }
+      catch (err) { return { ms: Math.round(performance.now() - t0), threw: String(err && err.message || err) }; }
+    };
+    return { config: await time({ type: 'config:trustedGet' }), ocr: await time({ type: 'ocr:status' }), ocrRefresh: await time({ type: 'ocr:status', refresh: true }) };`), 20000);
+  await grab('metrics', async () => {
+    const { metrics } = await send('Performance.getMetrics', {}, tab.sessionId);
+    const pick = ['TaskDuration', 'ScriptDuration', 'LayoutDuration', 'RecalcStyleDuration', 'Nodes', 'JSHeapUsedSize'];
+    return Object.fromEntries(metrics.filter((m) => pick.includes(m.name)).map((m) => [m.name, Math.round(m.value * 1000) / 1000]));
+  });
+  await grab('targets', async () => (await send('Target.getTargets')).targetInfos
+    .filter((t) => /^chrome-extension:/.test(t.url) || t.type !== 'page')
+    .map((t) => t.type + ' ' + t.url.replace(/^chrome-extension:\/\/[a-p]{32}/, (m) => m.slice(19, 23) + '…') + (t.attached ? ' (attached)' : '')));
+  out.console = consoleLog.filter((c) => c.session === tab.sessionId).slice(-10).map((c) => c.type + ': ' + c.text);
+  out.exceptions = exceptions.slice(-5);
+  return out;
 }
 async function importFile(tab, file) {
   const doc = await send('DOM.getDocument', { depth: 0, pierce: true }, tab.sessionId);
@@ -274,10 +363,17 @@ console.log('A=' + idA + ' B=' + idB + ' work=' + work);
 // ================= 阶段 A：未授权 =================
 console.log('\n[A] 可选权限未授予');
 {
+  const openedAt = Date.now();
   const opt = await open('chrome-extension://' + idA + '/options/index.html');
-  const banner = await until(() => pageEval(opt, "const b=document.getElementById('ocrStatus'); return b && !b.hidden && b.dataset.ocrStatus ? { s: b.dataset.ocrStatus, t: document.getElementById('ocrStatusTitle').textContent, d: document.getElementById('ocrStatusDetail').textContent } : null"), 15000);
+  const bannerTrace = pollTrace();
+  const banner = await until(() => pageEval(opt, "const b=document.getElementById('ocrStatus'); return b && !b.hidden && b.dataset.ocrStatus ? { s: b.dataset.ocrStatus, t: document.getElementById('ocrStatusTitle').textContent, d: document.getElementById('ocrStatusDetail').textContent } : null"), 15000, 200, bannerTrace);
+  const bannerMs = Date.now() - openedAt;
+  const bannerOk = banner && banner.s === 'permission_needed' && /需要授权/.test(banner.t);
+  // 失败时先于其他交互收集诊断，记录的是超时当下的页面状态。
+  const bannerDiag = bannerOk ? null : await diagnoseOptions(opt, bannerTrace);
   check('设置页显示 OCR 区块与导航', await pageEval(opt, "return !document.getElementById('sec-ocr').hidden && !document.getElementById('navOcr').hidden"));
-  check('系统 OCR 预览版：未授权状态', banner && banner.s === 'permission_needed' && /需要授权/.test(banner.t), JSON.stringify(banner));
+  check('系统 OCR 预览版：未授权状态', bannerOk, JSON.stringify(banner) + ' · ' + bannerMs + 'ms, ' + bannerTrace.polls + ' polls, slowest ' + bannerTrace.slowest + 'ms');
+  if (bannerDiag) console.log('    诊断：' + JSON.stringify(bannerDiag, null, 2).replace(/\n/g, '\n    '));
   check('仅提供系统 OCR / 关闭，不展示尚不可用的后端', await pageEval(opt, 'return Array.from(document.getElementById("ocrEngine").options).map(o=>o.value).join(",")==="system,off"'));
   check('显示实际扩展 ID', await pageEval(opt, 'return document.getElementById("ocrExtensionId").value === chrome.runtime.id'));
   await pageEval(opt, 'window.__ocrPermissionCalls=0;chrome.permissions.request=async()=>{window.__ocrPermissionCalls++;return false;};return true;');

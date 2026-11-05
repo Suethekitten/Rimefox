@@ -1108,7 +1108,10 @@ function hideSelftestIfMissing() {
     });
 }
 
+// 初始化阶段写在 <html data-options-init>，失败时记 data-options-init-error：只供诊断读取，不影响界面。
+const initStage = (stage) => { document.documentElement.dataset.optionsInit = stage; };
 async function init() {
+  initStage('start');
   try {
     $('appVersion').textContent = 'v' + chrome.runtime.getManifest().version;
   } catch (err) {
@@ -1126,8 +1129,10 @@ async function init() {
   fillSelect(fields.theme, THEMES);
   hotkeyRecorder.render();
   inputHotkeyRecorder.render();
+  initStage('config');
   const cfg = await getConfig();
   currentCfg = cfg;
+  initStage('apply');
   applyConfig(cfg);
   rememberSaved(cfg);
   markSaved(cfg);
@@ -1141,6 +1146,7 @@ async function init() {
   if (ocrSettings.enabled) ocrSettings.refresh(false);
   runWhenIdle(() => fetchModels()); // 已经保存过地址和 Key 时，打开设置页就把列表准备好
   watchConfig(onConfigElsewhere);
+  initStage('ready');
 }
 
 // 别的页面（弹窗切深色、另一个设置页）改了配置：没有未保存的改动就整页刷新成新值；
@@ -1540,4 +1546,8 @@ fields.funIntensity.addEventListener('click', (event) => {
   scheduleDirty();
 });
 
-init();
+init().catch((err) => {
+  // 仍然抛出：未捕获异常计数照常能发现初始化失败
+  document.documentElement.dataset.optionsInitError = String((err && err.message) || err).slice(0, 200);
+  throw err;
+});
