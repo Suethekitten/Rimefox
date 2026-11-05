@@ -1,9 +1,9 @@
 name: System OCR preview checks
 on:
   pull_request:
-    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/ocr.js', 'options/index.html', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml', '.github/workflows/release.yml', 'selftest/**', 'test/**']
+    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/**', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml', '.github/workflows/release.yml', 'selftest/**', 'test/**']
   push:
-    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/ocr.js', 'options/index.html', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml', '.github/workflows/release.yml', 'selftest/**', 'test/**']
+    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/**', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml', '.github/workflows/release.yml', 'selftest/**', 'test/**']
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,6 +1,6 @@
 # 自动发布 Release
 #
-# 触发：推送到 main 且改动了 manifest.json（通常就是改了版本号），或在 Actions 页面手动运行。
+# 触发：main 的版本、组件、发布或检查输入变化，或在 Actions 页面手动运行。
 # 同一个版本只发一次：v<版本号> 已经有 Release 就直接跳过，所以普通推送不会重复发版。
 #
 # 流程：校验版本号 → 发版说明格式 → 全部 Node 单测 → 离线自检 → 打包（与商店包同一份白名单）→ 检查安装包清单
@@ -12,6 +12,9 @@ on:
     branches: [main]
     paths:
       - manifest.json
+      - native/ocr-host/**
+      - lib/ocr/**
+      - tools/*ocr*
       - .github/workflows/release.yml
       # 测试 / 自检改动也要重新校验：0.9.4 的教训是自检用例只在 CI 上失败
       - selftest/**
