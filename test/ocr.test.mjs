@@ -350,9 +350,11 @@ function processPort(mode) {
   const discL = [];
   child.stdout.on('data', createFrameReader((m) => { for (const fn of msgL) fn(m); }));
   child.on('exit', () => { for (const fn of discL) fn(); });
+  const sent = [];
   return {
     child,
-    postMessage: (m) => child.stdin.write(encodeFrame(m)),
+    sent,
+    postMessage: (m) => { sent.push(m.type); child.stdin.write(encodeFrame(m)); },
     onMessage: { addListener: (fn) => msgL.push(fn) },
     onDisconnect: { addListener: (fn) => discL.push(fn) },
     disconnect: () => child.kill()
@@ -390,7 +392,9 @@ test('参考宿主：慢识别可取消，协议 2 判为不兼容', async () =>
   const svc = createOcrService({ sources: [src], getChoice: async () => 'paddle' });
   try {
     const job = svc.recognize({ image: PNG, jobId: 'page-1' });
-    await new Promise((r) => setTimeout(r, 50));
+    // 等识别请求真正发给宿主再取消：Windows 上启动子进程 + 握手可能远超几十毫秒（CI 上曾因此失败）
+    for (let i = 0; i < 200 && !(port && port.sent.includes('recognize')); i += 1) await new Promise((r) => setTimeout(r, 25));
+    assert.ok(port && port.sent.includes('recognize'), '识别请求应已发出');
     assert.equal(svc.cancel('page-1'), true);
     await assert.rejects(job, (e) => e.code === 'cancelled');
   } finally {
