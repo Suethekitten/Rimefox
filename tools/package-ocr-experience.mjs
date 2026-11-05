@@ -43,6 +43,7 @@ const instructions = fs.readFileSync(path.join(root, 'native/ocr-host/INSTALL.md
   .replace('材料：OCR ZIP [绝对路径]', '材料（与本说明同目录）：OCR ZIP ' + componentName)
   .replace('ZIP SHA-256 文件 [绝对路径]', 'ZIP SHA-256 文件 ' + componentName + '.sha256')
   .replace('凛狐扩展安装包或可信安装入口 [路径或链接]', '凛狐扩展安装包 ' + extensionName);
+if (/\]\((?!https?:\/\/|#)[^)]+\)/.test(instructions)) throw new Error('Standalone installation instructions contain an unresolved relative document link');
 const readme = `# 凛狐 ${version} Windows x64 系统 OCR 体验包\n\n` +
   `文件清单：\n\n- 扩展安装 ZIP：${extensionName}\n- 完整 OCR 组件 ZIP：${componentName}\n- 组件 ZIP 校验：${componentName}.sha256\n\n` +
   '请先按下文安装扩展，再读取自己浏览器中的实际扩展 ID 安装组件；Chrome / Edge ID 可能不同。提示词中的相对文件名均以本说明所在目录为基准。\n\n---\n\n' + instructions;

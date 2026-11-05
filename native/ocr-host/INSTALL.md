@@ -14,9 +14,9 @@
 | ZIP 对应的 `.sha256` 文件 | 由维护者通过可信交接渠道提供；文件名与 ZIP 对应，不能以包内 `SHA256SUMS` 代替 ZIP 来源校验 |
 | 凛狐扩展安装包或可信安装入口 | 应包含系统 OCR 预览入口；扩展与本地组件分别安装、分别版本管理，版本号不必相同 |
 
-本地构建的组件 ZIP 和外附校验文件在 `dist/ocr-preview/`，生成方式见 [README 的本地打包一节](README.md#本地打包)。这些被忽略的构建产物不会随着源码克隆自动出现在接手机器上，必须另行交付或由具备环境的开发者在目标平台重新构建。Windows 包不能用于 macOS；Mac 构建与验收状态见 [README](README.md#当前交付层级)。
+本地构建的组件 ZIP 和外附校验文件在 `dist/ocr-preview/`，生成方式见 [README 的本地打包一节](https://github.com/Suethekitten/Rimefox/blob/main/native/ocr-host/README.md#本地打包)。这些被忽略的构建产物不会随着源码克隆自动出现在接手机器上，必须另行交付或由具备环境的开发者在目标平台重新构建。Windows 包不能用于 macOS；Mac 构建与验收状态见 [README](https://github.com/Suethekitten/Rimefox/blob/main/native/ocr-host/README.md#当前交付层级)。
 
-安装包可通过可信渠道直接交接，不必等扩展内的下载按钮开放。要让使用者点击下载，维护者还需发布真实资产并配置下载地址，见同一 [打包说明](README.md#本地打包)。每次修改安装说明或脚本后，需要重新打包并交付新的 ZIP 与对应校验值；已生成的旧 ZIP 不会自动更新。
+安装包可通过可信渠道直接交接，不必等扩展内的下载按钮开放。要让使用者点击下载，维护者还需发布真实资产并配置下载地址，见同一 [打包说明](https://github.com/Suethekitten/Rimefox/blob/main/native/ocr-host/README.md#本地打包)。每次修改安装说明或脚本后，需要重新打包并交付新的 ZIP 与对应校验值；已生成的旧 ZIP 不会自动更新。
 
 **可以让对方的 Agent 配置。** 在使用者明确要求安装、Agent 能访问上述文件并具备本机执行权限时，它可以核对校验值、解压、调用安装器、注册宿主并执行诊断。应使用下文的安装器，不要另写注册表 / 宿主清单逻辑。Windows 可传实际 ID 和 `-NoPrompt` 非交互安装；macOS 可传 `--extension-id`。多个浏览器使用的全部 ID 应一次传入；重复安装会更新 ID 列表。
 
@@ -61,7 +61,7 @@ Windows 按 INSTALL.md 的命令加 -NoPrompt；macOS 使用 --extension-id。
 
 ## Windows
 
-要求：Windows 10 2004+ 或 Windows 11；选择与系统对应的 x64 / ARM64 包。普通用户不需要安装 .NET SDK 或运行库。当前验证范围和未打包 API 限制见 README；Windows S 模式、企业应用控制环境可能不能使用。
+要求：Windows 10 2004+ 或 Windows 11；本次体验包仅提供 x64，ARM64 尚未验收且没有对应发布包。普通用户不需要安装 .NET SDK 或运行库。当前验证范围和未打包 API 限制见上面的在线 README；Windows S 模式、企业应用控制环境可能不能使用。
 
 Windows 自包含包包含 .NET / C#/WinRT 依赖，其条款见包内 `THIRD-PARTY-NOTICES.md` 和 `licenses/`，不全部适用凛狐自身的 MIT 许可。安装后许可保留在当前版本目录的 `licenses/` 下。
 

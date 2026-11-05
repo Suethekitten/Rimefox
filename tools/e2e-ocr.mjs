@@ -442,9 +442,12 @@ fs.writeFileSync(modeFile, 'ready');
   // 组件状态变了（这里是模拟模型被删）：设置页「重新检测」刷新后台的检测缓存
   {
     const opt = await open('chrome-extension://' + idB + '/options/index.html');
-    await until(() => pageEval(opt, "return !!document.getElementById('ocrRecheck')"), 10000);
+    // The static button exists before its module binds click listeners. Wait for
+    // the initial status render, then exercise a real forced recheck.
+    await until(() => pageEval(opt, "return !!document.getElementById('ocrStatus')?.dataset.ocrStatus"), 15000);
     await pageEval(opt, "document.getElementById('ocrRecheck').click(); return true;");
-    check('缺识别语言时不回退到 PaddleOCR', !!await until(() => pageEval(opt, "return document.getElementById('ocrStatus').dataset.ocrStatus === 'language_unavailable'"), 8000));
+    const missingEngine = !!await until(() => pageEval(opt, "return document.getElementById('ocrStatus').dataset.ocrStatus === 'language_unavailable'"), 8000);
+    check('缺识别语言时不回退到 PaddleOCR', missingEngine, missingEngine ? '' : JSON.stringify({ banner: await pageEval(opt, "return document.getElementById('ocrStatus').textContent"), hello: hostMessages('hello').slice(-4) }));
     await send('Target.closeTarget', { targetId: opt.targetId });
   }
   await send('Page.reload', {}, reader.sessionId);
@@ -460,7 +463,7 @@ fs.writeFileSync(modeFile, 'ready');
   await send('Target.closeTarget', { targetId: reader.targetId });
 
   const states = await open('chrome-extension://' + idB + '/options/index.html');
-  await until(() => pageEval(states, 'return !!document.getElementById("ocrRecheck")'));
+  await until(() => pageEval(states, 'return !!document.getElementById("ocrStatus")?.dataset.ocrStatus'));
   fs.writeFileSync(modeFile, 'protocol2');
   await pageEval(states, 'document.getElementById("ocrRecheck").click();return true;');
   check('协议不兼容时清楚显示更新提示', !!await until(() => pageEval(states, 'return document.getElementById("ocrStatus").dataset.ocrStatus==="incompatible"'), 10000));
@@ -493,7 +496,7 @@ if ((process.platform === 'darwin' || IS_WIN) && fs.existsSync(REAL_HOST)) {
   // 让 mock 宿主收到下一条消息就退出：连接断开后，下一次检测经启动脚本连到真实连接器
   fs.writeFileSync(modeFile, 'exit');
   const opt = await open('chrome-extension://' + idB + '/options/index.html');
-  await until(() => pageEval(opt, "return !!document.getElementById('ocrRecheck')"), 10000);
+  await until(() => pageEval(opt, "return !!document.getElementById('ocrStatus')?.dataset.ocrStatus"), 15000);
   // 第一次检测让 mock 宿主退出（报检测失败），之后再点「重新检测」才连到真实连接器
   const ready = await until(async () => {
     const got = await pageEval(opt, "const b=document.getElementById('ocrStatus'); return b && b.dataset.ocrStatus === 'ready' && !/0\\.0\\.0-mock/.test(document.getElementById('ocrComponentInfo').textContent) ? { t: document.getElementById('ocrStatusTitle').textContent, d: document.getElementById('ocrStatusDetail').textContent, i: document.getElementById('ocrComponentInfo').textContent } : null");
