@@ -1,6 +1,6 @@
 # 隐私说明
 
-最后更新：2026-11-04。
+最后更新：2026-11-05。
 
 > **English summary**: Rimefox has no author-operated server or telemetry. See the [full English privacy policy](docs/privacy.en.md). Page text you choose to translate is sent only to the API endpoint **you** configure (DeepSeek, OpenAI-compatible, Anthropic, Gemini…), under that provider's privacy policy. An optional, off-by-default local masking feature replaces reliably detectable sensitive values with placeholders before sending and restores them locally; the mapping never leaves the request. Your API key, settings and translation cache are stored locally; the key is also sent to your configured provider for authentication. No analytics, no telemetry, no third-party SDKs.
 
@@ -17,9 +17,13 @@
 | 随手翻译（弹窗） | 你在弹窗输入框里填的文字 |
 | 输入框翻译（快捷键 / 右键菜单） | 你在网页输入框或可编辑区域里选中的文字，或整个框里的文字；密码框与支付类字段不会翻译 |
 | 视频字幕双语（YouTube / 哔哩哔哩，默认关闭） | 当前视频的字幕文字（只发播放位置往后约 90 秒） |
-| EPUB / PDF 阅读翻译（用户主动打开） | 当前视口附近和主动翻译的章节 / 页面的正文；不含原书文件、图片、目录、脚注元数据或阅读进度 |
+| EPUB / PDF / TXT / Markdown / LOG 阅读翻译（用户主动打开） | 当前视口附近和主动翻译的章节 / 页面的正文；不含原文件、图片、目录、脚注元数据或阅读进度 |
 | AI 精翻（默认关闭） | 在整页翻译请求中额外带上：当前文章标题、章节标题、本文明确给出的缩写定义、同一文章容器内相邻的有限正文片段（有长度和数量上限）。不发送整页全文、导航、评论、广告、隐藏内容或编辑器草稿 |
 | 测试连接 | 两句固定的英文测试句 |
+
+扫描 PDF 的系统 OCR 是可选预览：用户授权 `nativeMessaging` 后，扫描页图像仅传给本机安装的连接器，由 Windows OCR / Apple Vision 识别，不发给作者或翻译服务商。识别文字进入阅读翻译时，会发送给**用户配置的翻译服务商**，并适用上表的正文发送规则；不能把“本机识别”理解为“文字送翻也离线”。连接器安装、安全限制和卸载见 [组件说明](native/ocr-host/INSTALL.md)。
+
+连接器没有凛狐遥测；操作系统 / 运行库自身的诊断和崩溃报告适用系统设置及各自政策，例如 Windows .NET 运行库使用 Windows Error Reporting，见 [微软说明](https://github.com/dotnet/core/blob/main/license-information-windows.md)。
 
 需要保留原文格式的段落会按行内格式协议发送：文本里夹少量纯文本标记（如 `<f1>`、`</f1>`、`<k1></k1>`）。`<fN>` 标记格式位置，`<kN>` 只标记「不翻译的内容」所在的位置，其中原文不随请求发送。
 
@@ -73,7 +77,7 @@ YouTube 与哔哩哔哩页面脚本会在本地观察播放器加载的字幕元
 | 鉴权暂停与凭据修订号 | 暂停在 `chrome.storage.session`，随机修订号随对应 Key 保存 | 后台回收后仍保留；配置广播不包含 Key 或 Key 的散列 |
 | 翻译缓存（会话） | `chrome.storage.session` | 翻过的原文和译文，关闭浏览器即清空；视频字幕译文按视频 / 分 P / 字幕轨隔离，只放在这一层 |
 | 翻译缓存（磁盘） | `chrome.storage.local` | 只存短文本（原文 + 译文 ≤ 160 字符），上限 512 KB；按网站域名和模型分开存；不存视频字幕，也不含视频标识 |
-| EPUB / PDF 原书、封面、进度和该书译文 | 扩展页 IndexedDB (`rimefox-reader`) | 只在本机；原书最大约 100 MB/本、书库约 500 MB；删除书会删除原书、进度和该书译文；不进入全局翻译缓存 |
+| EPUB / PDF / TXT / Markdown / LOG 原文件、封面、进度、OCR 识别结果和译文 | 扩展页 IndexedDB (`rimefox-reader`) | 只在本机；容量与用户控制见 [阅读器存储约定](docs/READER-ARCHITECTURE.md#6-indexeddb-schema)；删除文档一并删除，清除译文保留 OCR 结果；不进入全局翻译缓存 |
 | 用户上传的阅读字体 | 扩展页 IndexedDB (`rimefox-reader` 的 `fonts`) | 只在本机，不上传；可在阅读设置里移除，移除即删除 Blob |
 | 标签页「正在翻译」状态 | `chrome.storage.session` | 刷新后自动接着翻用，关闭标签页即删除 |
 
@@ -91,6 +95,7 @@ YouTube 与哔哩哔哩页面脚本会在本地观察播放器加载的字幕元
 | 权限 | 用途 |
 |---|---|
 | `storage` | 保存设置、API Key 和翻译缓存 |
+| `nativeMessaging`（可选） | 用户点击授权后，与自己安装的本机 OCR 连接器通信；未授权时不启动宿主 |
 | `activeTab`、`scripting` | 在当前标签页注入翻译脚本（页面在安装扩展前就打开时补注入） |
 | `contextMenus` | 划词翻译的右键菜单 |
 | `<all_urls>`（网站访问权限） | 在任意网页上翻译；向你填写的接口地址发请求 |

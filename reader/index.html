@@ -37,14 +37,14 @@
   <section class="library-hero">
     <div>
       <p class="eyebrow">LOCAL READING</p>
-      <h1>把一本 EPUB / PDF 放进凛狐</h1>
+      <h1>把文档放进凛狐</h1>
       <p class="library-copy">原书只保存在本机。导入后可阅读、翻译、记住进度；不上传原书，不读取账号信息。</p>
     </div>
     <div class="library-import">
       <label class="drop-zone" id="dropZone">
-        <input id="fileInput" type="file" accept=".epub,application/epub+zip,.pdf,application/pdf" hidden>
-        <span class="drop-title">选择 EPUB / PDF 或拖到这里</span>
-        <span class="drop-note" id="dropNote">支持无 DRM 的 EPUB 2/3 与文本型 PDF，单本最大 100 MB（设置里可调）</span>
+        <input id="fileInput" type="file" accept=".epub,application/epub+zip,.pdf,application/pdf,.txt,.text,.log,text/plain,.md,.markdown,text/markdown" hidden>
+        <span class="drop-title">选择 EPUB / PDF / TXT / Markdown 或拖到这里</span>
+        <span class="drop-note" id="dropNote">支持 EPUB、PDF、TXT、Markdown；文本文档最大 16 MB，其他格式上限可在设置里调整</span>
       </label>
       <p id="libraryStatus" class="reader-status" role="status"></p>
       <button id="cancelImport" class="reader-button" type="button" hidden>取消导入</button>
@@ -77,7 +77,10 @@
       <span id="pdfProgressText" class="pdf-progress-text"></span>
       <button id="pdfTranslateStop" class="reader-button" type="button" hidden>停止</button>
     </div>
-    <article id="bookContent" class="reader-content"></article>
+    <div id="documentColumns" class="document-columns">
+      <article id="sourceContent" class="reader-content source-content" data-dt-ui aria-label="原文" hidden></article>
+      <article id="bookContent" class="reader-content"></article>
+    </div>
   </section>
 </main>
 
@@ -98,6 +101,11 @@
       <input id="maxBookMb" type="number" class="reader-control" min="50" max="500" step="10" value="100">
       <span>MB（超过不导入）</span>
     </label>
+    <label class="setting-row">书库容量上限
+      <input id="maxLibraryGb" type="number" class="reader-control" min="0.1" max="1024" step="0.1" value="1">
+      <span>GB</span>
+    </label>
+    <p class="setting-note">默认 1 GB，可自行调整。只限制新导入，不会删除已有文档；不预分配磁盘空间，浏览器实际可用空间可能更少。</p>
     <label class="setting-row">主题
       <select id="themeSelect" class="reader-control">
         <option value="auto">跟随扩展</option>

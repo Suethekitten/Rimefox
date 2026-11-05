@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { READER_LIMITS } from '../lib/reader/store.js';
+import { READER_LIMITS, normalizeLibraryLimit } from '../lib/reader/store.js';
 import { READER_ALLOWED_TAGS, READER_DROP_TAGS } from '../lib/reader/sanitize.js';
 import { EPUB_LIMITS, EpubError } from '../lib/reader/epub.js';
 
@@ -14,6 +14,9 @@ const manifest = JSON.parse(read('manifest.json'));
 
 assert.ok(READER_LIMITS.maxBookBytes > 0 && READER_LIMITS.maxBookBytes <= 100 * 1024 * 1024);
 assert.ok(READER_LIMITS.maxLibraryBytes >= READER_LIMITS.maxBookBytes);
+assert.equal(normalizeLibraryLimit(undefined), 1073741824);
+assert.equal(normalizeLibraryLimit(2 * 1073741824), 2 * 1073741824);
+assert.equal(normalizeLibraryLimit(-1), 1073741824);
 assert.ok(EPUB_LIMITS.maxEntryBytes > 0 && EPUB_LIMITS.maxCompressionRatio > 1);
 assert.ok(READER_ALLOWED_TAGS.includes('p') && READER_ALLOWED_TAGS.includes('b') && READER_ALLOWED_TAGS.includes('a'));
 assert.ok(READER_DROP_TAGS.includes('script') && READER_DROP_TAGS.includes('iframe') && READER_DROP_TAGS.includes('form'));
@@ -21,7 +24,7 @@ assert.equal(new EpubError('drm_protected', 'x').code, 'drm_protected');
 
 assert.deepEqual(manifest.permissions, ['storage', 'activeTab', 'scripting', 'contextMenus']);
 assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
-assert.equal(manifest.optional_permissions, undefined);
+assert.deepEqual(manifest.optional_permissions, ['nativeMessaging']);
 for (const file of ['reader/index.html', 'reader/reader.css', 'reader/reader.js', 'lib/reader/epub.js', 'lib/reader/sanitize.js', 'lib/reader/store.js', 'lib/reader/translate.js', 'lib/vendor/fflate.browser.mjs', 'docs/READER-ARCHITECTURE.md']) {
   assert.ok(fs.existsSync(path.join(ROOT, file)), 'missing ' + file);
 }

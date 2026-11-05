@@ -13,7 +13,7 @@ CLT_SWIFT_INCLUDE=/Library/Developer/CommandLineTools/usr/include/swift
 EXTRA=""
 
 compile() {
-  swiftc -O $EXTRA -target "$1-apple-macos$MIN" Sources/main.swift -o "build/rimefox-ocr-host-$1"
+  swiftc -swift-version 5 -O $EXTRA -target "$1-apple-macos$MIN" Sources/main.swift -o "build/rimefox-ocr-host-$1"
 }
 
 if ! compile arm64 2> build/swiftc.log; then
@@ -33,5 +33,10 @@ YAML
 fi
 compile x86_64
 lipo -create build/rimefox-ocr-host-arm64 build/rimefox-ocr-host-x86_64 -output build/rimefox-ocr-host
+lipo -verify_arch arm64 x86_64 build/rimefox-ocr-host
+# Ad-hoc integrity signature required by Apple Silicon; this is not Developer ID signing or notarization.
+codesign --force --sign "${RIMEFOX_CODESIGN_IDENTITY:--}" build/rimefox-ocr-host
+codesign --verify --strict build/rimefox-ocr-host
 rm -f build/rimefox-ocr-host-arm64 build/rimefox-ocr-host-x86_64 build/swiftc.log
 build/rimefox-ocr-host --version
+build/rimefox-ocr-host --diagnose

@@ -6,13 +6,14 @@
 //
 // 阶段 A：可选权限未授予 → 设置页「未配置OCR」、阅读器页内提示与「前往设置」。
 // 阶段 B：参考宿主（tools/ocr-mock-host）→ 设置页状态、逐页识别、译文、缓存复用、流式 / 搜索、取消与错误提示。
-// 阶段 C：macOS 且已构建 native/ocr-host/macos/build/rimefox-ocr-host 时，切到真实 Vision 连接器识别样本 PDF。
+// 阶段 C：已构建当前平台连接器时，切到真实系统 OCR 识别样本 PDF。
 import { spawn, execFileSync } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
@@ -75,7 +76,7 @@ function makeCopy(name, manifestPatch) {
   return dir;
 }
 const extA = makeCopy('ext-optional', (m) => { m.optional_permissions = ['nativeMessaging']; });
-const extB = makeCopy('ext-granted', (m) => { m.permissions = m.permissions.concat('nativeMessaging'); });
+const extB = makeCopy('ext-granted', (m) => { delete m.optional_permissions; m.permissions = m.permissions.concat('nativeMessaging'); });
 
 // ---------- 宿主启动脚本（mock / 真实连接器二选一）----------
 // Chrome 启动的宿主不能直接指向仓库：仓库常放在 ~/Documents 下，macOS 会对「浏览器拉起的程序读取文稿目录」
@@ -88,13 +89,13 @@ const realHostCopy = path.join(hostDir, IS_WIN ? 'rimefox-ocr-host.exe' : 'rimef
 if (fs.existsSync(REAL_HOST)) { fs.copyFileSync(REAL_HOST, realHostCopy); if (!IS_WIN) fs.chmodSync(realHostCopy, 0o755); }
 const launcher = path.join(work, IS_WIN ? 'host.bat' : 'host.sh');
 if (IS_WIN) {
-  // Windows：Chrome 用 cmd 启动 .bat，stdin / stdout 原样转给子进程。（未在 Windows 上实测，见 WINDOWS-HANDOFF）
+  // Windows：Chrome / Edge 用 cmd 启动 .bat，stdin / stdout 原样转给子进程。
   fs.writeFileSync(launcher, [
     '@echo off',
     'cd /d "' + hostDir + '"',
     'if exist "' + useReal + '" (',
     '  "' + realHostCopy + '" %*',
-    '  exit /b %errorlevel%',
+    '  exit /b',
     ')',
     'set "OCR_MOCK_LOG=' + hostLog + '"',
     'set "OCR_MOCK_MODE_FILE=' + modeFile + '"',
@@ -116,8 +117,11 @@ if (IS_WIN) {
 
 // 宿主注册：macOS / Linux 的 Chrome 读 <用户目录>/NativeMessagingHosts；Windows 只读注册表（按用户全局，
 // 不随 --user-data-dir 变化），所以先记下原值，测试结束后恢复，避免覆盖开发者自己装的组件。
-const REG_KEY = 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.rimefox.ocr';
+const REG_KEY = /msedge\.exe$/i.test(CHROME)
+  ? 'HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.rimefox.ocr'
+  : 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.rimefox.ocr';
 let regBackup;
+let installedCleanup = null;
 function restoreRegistry() {
   if (!IS_WIN || regBackup === undefined) return;
   try {
@@ -178,9 +182,13 @@ const browser = spawn(CHROME, [
   '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check', 'about:blank'
 ], { stdio: 'ignore' });
 const cleanup = () => {
-  restoreRegistry();
   try { browser.kill('SIGKILL'); } catch (err) { /* ignore */ }
-  try { fs.rmSync(work, { recursive: true, force: true }); } catch (err) { /* ignore */ }
+  let keepWork = false;
+  if (installedCleanup) {
+    try { installedCleanup(); } catch (err) { keepWork = true; console.error('Installed test component cleanup needs retry; files retained at ' + work); }
+  }
+  restoreRegistry();
+  if (!keepWork) try { fs.rmSync(work, { recursive: true, force: true }); } catch (err) { /* ignore */ }
 };
 process.on('exit', cleanup);
 process.on('SIGTERM', () => process.exit(143));
@@ -267,24 +275,29 @@ console.log('\n[A] 可选权限未授予');
   const opt = await open('chrome-extension://' + idA + '/options/index.html');
   const banner = await until(() => pageEval(opt, "const b=document.getElementById('ocrStatus'); return b && !b.hidden && b.dataset.ocrStatus ? { s: b.dataset.ocrStatus, t: document.getElementById('ocrStatusTitle').textContent, d: document.getElementById('ocrStatusDetail').textContent } : null"), 15000);
   check('设置页显示 OCR 区块与导航', await pageEval(opt, "return !document.getElementById('sec-ocr').hidden && !document.getElementById('navOcr').hidden"));
-  check('自动选择 + 未授权 → 未配置OCR', banner && banner.s === 'not_configured' && banner.t === '未配置OCR', JSON.stringify(banner));
-  check('详情说明需要授权', banner && /需要授权/.test(banner.d));
+  check('系统 OCR 预览版：未授权状态', banner && banner.s === 'permission_needed' && /需要授权/.test(banner.t), JSON.stringify(banner));
+  check('仅提供系统 OCR / 关闭，不展示尚不可用的后端', await pageEval(opt, 'return Array.from(document.getElementById("ocrEngine").options).map(o=>o.value).join(",")==="system,off"'));
+  check('显示实际扩展 ID', await pageEval(opt, 'return document.getElementById("ocrExtensionId").value === chrome.runtime.id'));
+  await pageEval(opt, 'window.__ocrPermissionCalls=0;chrome.permissions.request=async()=>{window.__ocrPermissionCalls++;return false;};return true;');
+  check('页面加载不请求权限', await pageEval(opt, 'return window.__ocrPermissionCalls===0'));
+  await pageEval(opt, 'document.getElementById("ocrGrant").click();return true;');
+  check('用户点击才请求权限，拒绝后仍显示未授权', await pageEval(opt, 'return window.__ocrPermissionCalls===1 && document.getElementById("ocrStatus").dataset.ocrStatus==="permission_needed"'));
   check('显示「授权连接」按钮', await pageEval(opt, "return !document.getElementById('ocrGrant').hidden"));
-  check('不显示「安装说明」（缺的是授权，不是组件）', await pageEval(opt, "return document.getElementById('ocrInstall').hidden"));
+  check('授权前也可查看预览安装说明', await pageEval(opt, "return !document.getElementById('ocrInstall').hidden"));
   await pageEval(opt, "const s=document.getElementById('ocrEngine'); s.value='off'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
   check('切到关闭：显示 OCR 已关闭', await until(() => pageEval(opt, "return document.getElementById('ocrStatus').dataset.ocrStatus === 'disabled' && document.getElementById('ocrStatusTitle').textContent === 'OCR 已关闭'"), 3000));
   check('关闭时不显示授权按钮', await pageEval(opt, "return document.getElementById('ocrGrant').hidden"));
-  await pageEval(opt, "const s=document.getElementById('ocrEngine'); s.value='auto'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  await pageEval(opt, "const s=document.getElementById('ocrEngine'); s.value='system'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
   await pageEval(opt, "document.getElementById('uiLang').value='en'; document.getElementById('uiLang').dispatchEvent(new Event('change',{bubbles:true})); return true;");
   const en = await until(() => pageEval(opt, "return document.getElementById('ocrStatusTitle').textContent"), 3000);
-  check('英文界面状态文案', en === 'No OCR configured', en);
+  check('英文界面状态文案', /permission/i.test(en || ''), en);
   await send('Target.closeTarget', { targetId: opt.targetId });
 
   await seedConfig(idA, fakeApi);
   const reader = await openReader(idA);
   await importFile(reader, SCAN_PDF);
   const notice = await until(() => pageNotice(reader, 1), 30000);
-  check('阅读器扫描页显示用户指定提示', notice && notice.status === 'not_configured' && notice.text.startsWith('未配置OCR，请前往设置配置'), JSON.stringify(notice));
+  check('阅读器扫描页显示授权提示', notice && notice.status === 'permission_needed' && notice.text.includes('需要授权'), JSON.stringify(notice));
   const before = (await send('Target.getTargets')).targetInfos.filter((t) => t.url.includes(idA + '/options/index.html#sec-ocr')).length;
   await pageEval(reader, 'document.querySelector(\'.pdf-page[data-page="1"] .pdf-ocr-action\').click(); return true;');
   const opened = await until(async () => (await send('Target.getTargets')).targetInfos.filter((t) => t.url.includes(idA + '/options/index.html#sec-ocr')).length > before, 8000);
@@ -298,32 +311,35 @@ console.log('\n[A] 可选权限未授予');
 console.log('\n[B] 参考宿主');
 fs.writeFileSync(modeFile, 'ready');
 {
+  const manifestPath = IS_WIN ? path.join(work, 'com.rimefox.ocr.json') : path.join(profile, 'NativeMessagingHosts/com.rimefox.ocr.json');
+  fs.renameSync(manifestPath, manifestPath + '.disabled');
   const opt = await open('chrome-extension://' + idB + '/options/index.html');
+  check('已授权但组件缺失：显示安装入口', !!await until(() => pageEval(opt, 'return document.getElementById("ocrStatus").dataset.ocrStatus==="component_missing" && !document.getElementById("ocrInstall").hidden'), 15000));
+  fs.renameSync(manifestPath + '.disabled', manifestPath);
+  await pageEval(opt, 'document.getElementById("ocrRecheck").click();return true;');
   const ready = await until(() => pageEval(opt, "const b=document.getElementById('ocrStatus'); return b && b.dataset.ocrStatus === 'ready' ? document.getElementById('ocrStatusTitle').textContent : ''"), 20000);
-  check('设置页：自动选择就绪并说明使用的后端', /^自动选择：系统 OCR.*已就绪$/.test(ready || ''), ready);
+  check('设置页：系统 OCR 就绪并说明使用的后端', /^系统 OCR.*已就绪$/.test(ready || ''), ready);
   const info = await pageEval(opt, "return document.getElementById('ocrComponentInfo').textContent");
   check('设置页显示组件版本', /0\.0\.0-mock/.test(info), info);
-  check('就绪时不显示授权 / 安装按钮', await pageEval(opt, "return document.getElementById('ocrGrant').hidden && document.getElementById('ocrInstall').hidden"));
+  check('就绪时不再要求授权', await pageEval(opt, "return document.getElementById('ocrGrant').hidden"));
   fs.writeFileSync(modeFile, 'system-only');
   await pageEval(opt, "document.getElementById('ocrRecheck').click(); return true;");
   await sleep(600);
-  await pageEval(opt, "const s=document.getElementById('ocrEngine'); s.value='paddle'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
-  const paddle = await until(() => pageEval(opt, "const b=document.getElementById('ocrStatus'); return b.dataset.ocrStatus === 'engine_missing' ? document.getElementById('ocrStatusTitle').textContent : ''"), 8000);
-  check('选 PaddleOCR 且引擎包未装 → 所选引擎尚未安装', paddle === '所选引擎尚未安装', paddle);
-  check('缺引擎包时显示「安装说明」', await pageEval(opt, "return !document.getElementById('ocrInstall').hidden"));
+  check('PaddleOCR 未装不影响系统 OCR 就绪', await pageEval(opt, 'return document.getElementById("ocrStatus").dataset.ocrStatus==="ready"'));
   await pageEval(opt, "document.getElementById('ocrInstall').click(); return true;");
   const dialog = await until(() => pageEval(opt, "const d=document.getElementById('ocrInstallDialog'); return d.open ? { title: document.getElementById('ocrInstallTitle').textContent, platform: document.getElementById('ocrInstallPlatform').textContent, note: document.getElementById('ocrInstallNote').textContent, disabled: document.getElementById('ocrInstallDownload').disabled } : null"), 3000);
-  check('安装说明弹窗：PaddleOCR、当前平台、未发布时禁用下载', dialog && dialog.title === '安装本地 PaddleOCR' && !!dialog.platform && dialog.disabled && /尚未发布/.test(dialog.note), JSON.stringify(dialog));
+  check('系统预览安装说明：当前平台、未发布时禁用下载', dialog && dialog.title === '安装系统 OCR 预览组件' && !!dialog.platform && dialog.disabled && /尚未发布/.test(dialog.note), JSON.stringify(dialog));
   await pageEval(opt, "document.getElementById('ocrInstallDialog').close('cancel'); return true;");
   // 保存选择，验证随设置页「保存」写入配置
+  await pageEval(opt, "const s=document.getElementById('ocrEngine');s.value='off';s.dispatchEvent(new Event('change',{bubbles:true}));return true;");
   await until(() => pageEval(opt, "return !document.getElementById('save').disabled"), 5000);
   await pageEval(opt, "document.getElementById('save').click(); return true;");
-  const saved = await until(() => pageEval(opt, 'return chrome.storage.local.get("config").then((r) => r.config && r.config.ocrEngine === "paddle")'), 5000);
+  const saved = await until(() => pageEval(opt, 'return chrome.storage.local.get("config").then((r) => r.config && r.config.ocrEngine === "off")'), 5000);
   check('OCR 选择随「保存」写入配置', !!saved);
-  await pageEval(opt, "const s=document.getElementById('ocrEngine'); s.value='auto'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  await pageEval(opt, "const s=document.getElementById('ocrEngine'); s.value='system'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
   await until(() => pageEval(opt, "return !document.getElementById('save').disabled"), 5000);
   await pageEval(opt, "document.getElementById('save').click(); return true;");
-  check('切回自动选择并保存', !!(await until(() => pageEval(opt, 'return chrome.storage.local.get("config").then((r) => r.config && r.config.ocrEngine === "auto")'), 5000)));
+  check('切回系统 OCR 并保存', !!(await until(() => pageEval(opt, 'return chrome.storage.local.get("config").then((r) => r.config && r.config.ocrEngine === "system")'), 5000)));
   await send('Target.closeTarget', { targetId: opt.targetId });
   fs.writeFileSync(modeFile, 'ready');
 
@@ -382,6 +398,13 @@ fs.writeFileSync(modeFile, 'ready');
   await sleep(800);
   check('文字型 PDF 不调用 OCR', hostMessages('recognize').length === beforeText);
 
+  await pageEval(reader, 'document.getElementById("backToLibrary").click();return true;');
+  await importFile(reader, path.join(ROOT, 'reader/pdf-samples/text-margin.pdf'));
+  check('只有页眉 / 页码的文字 PDF 不被误当扫描件', !!await until(() => pageEval(reader, 'return document.querySelector(".pdf-empty-text")?.textContent.includes("有文字层")')));
+  await pageEval(reader, 'const m=document.getElementById("modeSelect");m.value="flow-original";m.dispatchEvent(new Event("change",{bubbles:true}));return true;');
+  await sleep(800);
+  check('正文被过滤后，原版 / 流式仍不触发 OCR', hostMessages('recognize').length === beforeText);
+
   // 取消：识别进行中关闭书，宿主收到 cancel，结果不写回
   fs.writeFileSync(modeFile, 'slow');
   await pageEval(reader, "document.getElementById('backToLibrary').click(); return true;");
@@ -400,16 +423,26 @@ fs.writeFileSync(modeFile, 'ready');
   await sleep(4500);
   check('取消后没有异常', exceptions.length === 0, exceptions.slice(0, 2).join(' | '));
 
-  // 识别错误：引擎缺模型 → 页内提示，不送翻
+  const switchScan = path.join(work, 'scan-switch.pdf');
+  fs.writeFileSync(switchScan, Buffer.concat([fs.readFileSync(SCAN_PDF), Buffer.from('\n%switch-book\n')]));
+  const beforeSwitchJobs = hostMessages('recognize').length, beforeSwitchCancels = hostMessages('cancel').length;
+  await importFile(reader, switchScan);
+  await until(() => hostMessages('recognize').length > beforeSwitchJobs, 15000);
+  await importFile(reader, TEXT_PDF);
+  check('直接换书时取消旧 OCR 任务', !!await until(() => hostMessages('cancel').length > beforeSwitchCancels, 5000));
+  await sleep(4500);
+  check('换书后的文字型 PDF 不被旧 OCR 结果覆盖', await pageEval(reader, 'return document.querySelectorAll(".pdf-blocks[data-ocr]").length===0 && !document.getElementById("bookContent").textContent.includes("模拟识别第一行")'));
+
+  // 系统识别语言缺失：Paddle 就绪也不能让预览版偷偷选择它。
   fs.writeFileSync(modeFile, 'ready');
-  await seedConfig(idB, { ocrEngine: 'paddle' });
-  fs.writeFileSync(modeFile, 'paddle-model-missing');
+  await seedConfig(idB, { ocrEngine: 'system' });
+  fs.writeFileSync(modeFile, 'system-language-missing');
   // 组件状态变了（这里是模拟模型被删）：设置页「重新检测」刷新后台的检测缓存
   {
     const opt = await open('chrome-extension://' + idB + '/options/index.html');
     await until(() => pageEval(opt, "return !!document.getElementById('ocrRecheck')"), 10000);
     await pageEval(opt, "document.getElementById('ocrRecheck').click(); return true;");
-    await until(() => pageEval(opt, "return document.getElementById('ocrStatus').dataset.ocrStatus === 'model_missing'"), 8000);
+    check('缺识别语言时不回退到 PaddleOCR', !!await until(() => pageEval(opt, "return document.getElementById('ocrStatus').dataset.ocrStatus === 'language_unavailable'"), 8000));
     await send('Target.closeTarget', { targetId: opt.targetId });
   }
   await send('Page.reload', {}, reader.sessionId);
@@ -420,14 +453,38 @@ fs.writeFileSync(modeFile, 'ready');
   await importFile(reader, scanCopy2);
   // 服务缓存 30 秒内的检测结果：等过期或靠配置变化触发的重新检测
   const missing = await until(() => pageNotice(reader, 1), 40000);
-  check('引擎缺模型：页内提示缺模型并引导去设置', missing && missing.status === 'model_missing' && /缺少模型/.test(missing.text), JSON.stringify(missing));
-  check('缺模型时不送翻', api.requests === apiBefore);
+  check('识别语言缺失：页内提示并引导去设置', missing && missing.status === 'language_unavailable' && /识别语言/.test(missing.text), JSON.stringify(missing));
+  check('语言缺失时不送翻', api.requests === apiBefore);
   await send('Target.closeTarget', { targetId: reader.targetId });
+
+  const states = await open('chrome-extension://' + idB + '/options/index.html');
+  await until(() => pageEval(states, 'return !!document.getElementById("ocrRecheck")'));
+  fs.writeFileSync(modeFile, 'protocol2');
+  await pageEval(states, 'document.getElementById("ocrRecheck").click();return true;');
+  check('协议不兼容时清楚显示更新提示', !!await until(() => pageEval(states, 'return document.getElementById("ocrStatus").dataset.ocrStatus==="incompatible"'), 10000));
+  fs.writeFileSync(modeFile, 'system-no-chinese');
+  await pageEval(states, 'document.getElementById("ocrRecheck").click();return true;');
+  check('实际识别语言按组件报告更新', !!await until(() => pageEval(states, 'return document.getElementById("ocrStatus").dataset.ocrStatus==="ready" && document.getElementById("ocrLanguageTags").textContent==="en-US"'), 10000));
+  if (IS_WIN) check('Windows 缺中文时显示语言包操作指引', await pageEval(states, 'return !document.getElementById("ocrLanguageHelp").hidden && document.getElementById("ocrLanguageHelp").textContent.includes("时间和语言")'));
+  fs.writeFileSync(modeFile, 'system-error');
+  await pageEval(states, 'document.getElementById("ocrRecheck").click();return true;');
+  await until(() => pageEval(states, 'return document.getElementById("ocrStatus").dataset.ocrStatus==="ready" && document.getElementById("ocrLanguageTags").textContent.includes("zh-Hans")'));
+  const retryReader = await openReader(idB);
+  const retryScan = path.join(work, 'scan-retry.pdf');
+  fs.writeFileSync(retryScan, Buffer.concat([fs.readFileSync(SCAN_PDF), Buffer.from('\n%retry\n')]));
+  await importFile(retryReader, retryScan);
+  const failedRecognition = await until(() => pageNotice(retryReader, 1));
+  check('识别失败可重试', failedRecognition && failedRecognition.status === 'error' && failedRecognition.text.includes('重试'), failedRecognition && failedRecognition.text);
+  fs.writeFileSync(modeFile, 'ready');
+  await pageEval(retryReader, 'document.querySelector(".pdf-ocr-action").click();return true;');
+  check('用户重试后成功恢复识别', /模拟识别第一行/.test(await until(() => pageOcrText(retryReader, 1)) || ''));
+  await send('Target.closeTarget', { targetId: retryReader.targetId });
+  await send('Target.closeTarget', { targetId: states.targetId });
   fs.writeFileSync(modeFile, 'ready');
   await seedConfig(idB, { ocrEngine: 'auto' });
 }
 
-// ================= 阶段 C：真实 macOS 连接器 =================
+// ================= 阶段 C：真实系统 OCR 连接器 =================
 if ((process.platform === 'darwin' || IS_WIN) && fs.existsSync(REAL_HOST)) {
   console.log('\n[C] 真实本机连接器（' + REAL_LABEL + '）');
   fs.writeFileSync(useReal, '1');
@@ -466,6 +523,59 @@ if ((process.platform === 'darwin' || IS_WIN) && fs.existsSync(REAL_HOST)) {
   console.log('\n[C] 跳过：未找到 ' + REAL_HOST + '（macOS 运行 native/ocr-host/macos/build.sh；Windows 见 WINDOWS-HANDOFF）');
 }
 
+if ((IS_WIN || process.platform === 'darwin') && fs.existsSync(REAL_HOST)) {
+  console.log('\n[D] 由真实安装脚本安装后联调');
+  const pkg = path.join(work, 'Preview package with spaces'); fs.mkdirSync(pkg);
+  const name = IS_WIN ? 'rimefox-ocr-host.exe' : 'rimefox-ocr-host';
+  const platform = IS_WIN ? 'windows' : 'macos';
+  fs.copyFileSync(REAL_HOST, path.join(pkg, name));
+  if (IS_WIN) fs.cpSync(path.join(path.dirname(REAL_HOST), 'licenses'), path.join(pkg, 'licenses'), { recursive: true });
+  fs.chmodSync(path.join(pkg, name), 0o755);
+  const scripts = IS_WIN ? ['install.ps1', 'uninstall.ps1', 'install-common.ps1'] : ['install.sh', 'uninstall.sh'];
+  for (const file of scripts) fs.copyFileSync(path.join(ROOT, 'native/ocr-host', platform, file), path.join(pkg, file));
+  fs.writeFileSync(path.join(pkg, 'SHA256SUMS'), createHash('sha256').update(fs.readFileSync(REAL_HOST)).digest('hex') + '  ' + name + '\n');
+  const destination = path.join(work, 'Installed OCR with spaces');
+  const home = path.join(work, 'Mac test home with spaces'); fs.mkdirSync(home);
+  const env = { ...process.env, RIMEFOX_OCR_TEST_HOME: home };
+  const uninstall = () => IS_WIN
+    ? execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(pkg, 'uninstall.ps1'), '-InstallDirectory', destination], { stdio: 'pipe', windowsHide: true })
+    : execFileSync('/bin/sh', [path.join(pkg, 'uninstall.sh')], { env, stdio: 'pipe' });
+  installedCleanup = uninstall;
+  if (IS_WIN) execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(pkg, 'install.ps1'),
+    '-InstallDirectory', destination, '-ExtensionIds', idB, '-ReplaceExisting', '-NoPrompt'], { stdio: 'pipe', windowsHide: true });
+  else {
+    execFileSync('/bin/sh', [path.join(pkg, 'install.sh'), '--extension-id', idB], { env, stdio: 'pipe' });
+    const installedManifest = path.join(home, 'Library/Application Support/Google/Chrome/NativeMessagingHosts/com.rimefox.ocr.json');
+    // The isolated browser profile reads NativeMessagingHosts from its own user-data-dir.
+    fs.copyFileSync(installedManifest, path.join(profile, 'NativeMessagingHosts/com.rimefox.ocr.json'));
+  }
+  const reload = await open('chrome-extension://' + idB + '/options/index.html');
+  await until(() => pageEval(reload, 'return !!document.getElementById("ocrRecheck")'));
+  // CDP-loaded unpacked extensions can be unloaded by runtime.reload(). Stop only the worker
+  // so its existing native port closes; the next message must start the installed executable.
+  await send('ServiceWorker.enable', {}, reload.sessionId);
+  await send('ServiceWorker.stopAllWorkers', {}, reload.sessionId);
+  await sleep(500);
+  const installedSettings = await open('chrome-extension://' + idB + '/options/index.html');
+  const installedReady = await until(async () => {
+    const status = await pageEval(installedSettings, 'return document.getElementById("ocrStatus")?.dataset.ocrStatus');
+    if (status === 'ready') return true;
+    await pageEval(installedSettings, 'document.getElementById("ocrRecheck")?.click();return true;');
+    return false;
+  }, 40000, 1500);
+  check('安装脚本生成的清单可被浏览器连接', !!installedReady);
+  if (!installedReady) throw new Error('Installed host diagnostic: ' + JSON.stringify(await pageEval(installedSettings, 'return {url:location.href,body:document.body?.innerText.slice(-1600),status:await chrome.runtime.sendMessage({type:"ocr:status",refresh:true})}')));
+  const installedReader = await openReader(idB);
+  const installedScan = path.join(work, 'installed-scan.pdf');
+  fs.writeFileSync(installedScan, Buffer.concat([fs.readFileSync(SCAN_PDF), Buffer.from('\n%installed-host\n')]));
+  await importFile(installedReader, installedScan);
+  const installedText = await until(() => pageOcrText(installedReader, 1), 60000);
+  check('安装后的连接器识别扫描 PDF', /凛狐扫描页识别测试/.test(installedText || ''), (installedText || '').slice(0, 60));
+  await send('Browser.close');
+  await sleep(1200);
+  uninstall(); installedCleanup = null;
+  check('安装后联调完成并卸载临时组件', IS_WIN ? !fs.existsSync(path.join(destination, 'installation.json')) : !fs.existsSync(path.join(home, 'Library/Application Support/Rimefox/OCR/.rimefox-ocr-owner')));
+}
 check('全程无未捕获异常', exceptions.length === 0, exceptions.slice(0, 3).join(' | '));
 const passed = results.filter((r) => r.ok).length;
 console.log('\n' + passed + ' / ' + results.length + ' 通过');

@@ -32,3 +32,8 @@ tools/ocr-mock-host/.local/
 
 # macOS OCR 连接器构建产物
 native/ocr-host/macos/build/
+
+# Windows OCR 连接器构建产物
+native/ocr-host/windows/build/
+native/ocr-host/windows/bin/
+native/ocr-host/windows/obj/

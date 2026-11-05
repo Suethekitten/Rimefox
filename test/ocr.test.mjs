@@ -12,7 +12,7 @@ import { OCR_STATUS, resolveOcr, backendStatesFromSources, ocrNotice, normalizeO
 import { createNativeOcrSource, mapNativeError } from '../lib/ocr/native-source.js';
 import { createOcrService } from '../lib/ocr/service.js';
 import { ocrCacheKey, ocrParamsFingerprint } from '../lib/ocr/cache-key.js';
-import { OCR_UI_ENABLED } from '../lib/ocr/feature.js';
+import { OCR_UI_ENABLED, systemOcrPreviewChoice, verifiedOcrRelease } from '../lib/ocr/feature.js';
 import { encodeFrame, createFrameReader, HOST_NAME } from '../tools/ocr-mock-host/host.mjs';
 import { OCR_NATIVE_HOST } from '../lib/ocr/protocol.js';
 
@@ -324,8 +324,12 @@ test('缓存键：不含翻译配置，参数顺序无关，引擎版本参与',
   assert.throws(() => ocrCacheKey({ ...base, page: 0 }), TypeError);
 });
 
-test('界面开关：原型通过前保持关闭', () => {
-  assert.equal(OCR_UI_ENABLED, false);
+test('预览策略：开放系统 OCR，不选择未来后端，不显示不可核实的下载', () => {
+  assert.equal(OCR_UI_ENABLED, true);
+  for (const value of ['auto', 'paddle', 'system', 'unknown']) assert.equal(systemOcrPreviewChoice(value), 'system');
+  assert.equal(systemOcrPreviewChoice('off'), 'off');
+  assert.equal(verifiedOcrRelease({ connector: 'https://example.com/fake.exe', sha256: 'a'.repeat(64) }), null);
+  assert.equal(verifiedOcrRelease({ connector: 'https://github.com/Suethekitten/Rimefox/releases/download/test/file.zip' }), null);
 });
 
 // ---------------- 配置 ----------------
@@ -348,6 +352,12 @@ function processPort(mode) {
   const child = spawn(process.execPath, [file], { env: { ...process.env, OCR_MOCK_MODE: mode, OCR_MOCK_DELAY_MS: '200' }, stdio: ['pipe', 'pipe', 'ignore'] });
   const msgL = [];
   const discL = [];
+  // Cancellation can leave a final frame buffered when dispose() deliberately kills
+  // the child. Chrome Port has no asynchronous EPIPE event; model that closed pipe.
+  child.stdin.on('error', (error) => {
+    if (child.killed && ['EPIPE', 'ERR_STREAM_DESTROYED'].includes(error.code)) return;
+    throw error;
+  });
   child.stdout.on('data', createFrameReader((m) => { for (const fn of msgL) fn(m); }));
   child.on('exit', () => { for (const fn of discL) fn(); });
   const sent = [];

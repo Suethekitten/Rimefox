@@ -1,10 +1,10 @@
 # Rimefox Privacy Policy
 
-Last updated: 2026-11-04. Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
+Last updated: 2026-11-05. Rimefox is a bring-your-own-key browser translation extension. The author operates no translation server, receives no translation requests, and uses no analytics, telemetry or third-party tracking SDKs. Rimefox does not sell data or use it for advertising or creditworthiness decisions. This does not mean that translation data never leaves your device.
 
 ## Information sent for translation
 
-Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, text you translate in a webpage text box with the shortcut or context menu, YouTube or Bilibili caption text when subtitle translation is enabled, and EPUB / PDF body text near the current viewport or in chapters / pages you explicitly choose to translate. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page. Content scripts also run in subframes, so text in embedded frames is transmitted under the same rules when translated. Original EPUB / PDF files, images, covers, table of contents, footnote metadata and reading progress are not uploaded.
+Translation requests go directly to the API endpoint you configure. They may include webpage text selected for full-page translation, text you select, text you type or paste into the popup, text you translate in a webpage text box with the shortcut or context menu, YouTube or Bilibili caption text when subtitle translation is enabled, and EPUB / PDF / TXT / Markdown / LOG body text near the current viewport or in chapters / pages you explicitly choose to translate. Full-page translation normally processes text near the viewport; disabling lazy translation can process the whole page. If you enable automatic translation, eligible text can be sent without a separate click on each page. Content scripts also run in subframes, so text in embedded frames is transmitted under the same rules when translated. Original document files, images, covers, table of contents, footnote metadata and reading progress are not uploaded.
 
 When the optional local masking feature is enabled, reliably detectable values (email addresses, phone numbers, ID card numbers and bank card numbers, optionally Chinese names in explicit contexts) are replaced with `__PII_<TYPE>_<n>__` placeholders before the request is sent; only the placeholder text is transmitted. See “Optional local masking” below.
 
@@ -17,6 +17,12 @@ AI-enhanced translation (“AI 精翻”) is off by default. When enabled, full-
 The only recipient is the endpoint you configure (for example DeepSeek, an OpenAI-compatible service, Anthropic, Gemini, Ollama, or your own gateway); the author and other third parties do not receive this data. If you enter an `http://` endpoint, data is transmitted in clear text; use HTTPS unless the endpoint is on your own machine.
 
 DeepSeek, OpenAI or OpenAI-compatible services, Anthropic, Gemini and custom gateways handle requests under their own privacy policies and retention practices. A compatible gateway is not necessarily operated by the named model vendor. Review the policy of the actual endpoint operator, including training, logging, retention and deletion terms.
+
+## Optional local system OCR
+
+System OCR is an optional preview. After a user clicks to grant the optional `nativeMessaging` permission, scanned page images are sent only to the installed local connector for Windows OCR / Apple Vision recognition. Images are not uploaded to the author or the translation provider. Recognized text submitted for translation **is sent to the provider configured by the user**, under the body-text rules above. Local recognition does not make translation offline. Installation, unsigned-program restrictions and removal are described in [the component instructions](../native/ocr-host/INSTALL.md).
+
+The connector adds no Rimefox telemetry. Operating-system and runtime diagnostics or crash reporting follow system settings and their own policies; for example, Microsoft's [Windows .NET licensing information](https://github.com/dotnet/core/blob/main/license-information-windows.md) describes Windows Error Reporting integration.
 
 ## Optional local masking
 
@@ -48,7 +54,7 @@ Subtitle translation is off by default. A packaged MAIN-world script nevertheles
 | Interface language and theme | Local settings only; the theme is also cached in the extension page's localStorage to prevent flashing. |
 | Appearance, site rules, night-mode site list and custom translation CSS | chrome.storage.local, local settings only and not sent with translation requests; appearance choices are also cached in the extension page's localStorage to prevent flashing. |
 | Translation cache containing source and translated text | In-memory cache and chrome.storage.session; session storage is cleared when the browser session ends. A bounded short-text cache persists in chrome.storage.local (512 KB budget; source plus translation at most 160 characters per entry). Capacity eviction applies, with no fixed retention period. Cache keys include site scope, not a browsing-history log. Video caption translations are keyed per video, part and track and are kept only in memory and chrome.storage.session; they are never written to chrome.storage.local. |
-| EPUB / PDF book files, covers, reading progress and per-book translations | Extension-page IndexedDB database `rimefox-reader`, local only. About 100 MB per book and 500 MB per library; deleting a book removes its file, progress and translations. Reader body text is not written to the global translation cache. |
+| EPUB / PDF / TXT / Markdown / LOG files, covers, reading progress, recognized OCR text and per-document translations | Extension-page IndexedDB database `rimefox-reader`, local only. User-controlled limits are described in [the reader storage contract](READER-ARCHITECTURE.md#6-indexeddb-schema). Deleting a document removes its file, progress, OCR and translations; clearing translations retains OCR results. Reader body text is not written to the global translation cache. |
 | User-uploaded reading font | Extension-page IndexedDB `rimefox-reader` (`fonts`), local only and never uploaded. Removing the font deletes the stored blob. |
 | Per-tab translation resume state | chrome.storage.session; removed on tab close. |
 

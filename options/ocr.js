@@ -1,7 +1,7 @@
 // 设置页「OCR」区块：选择引擎、显示本地组件的实际检测结果、申请 nativeMessaging 可选权限、安装说明与重新检测。
 // 选择随设置页「保存」一起写入配置（ocrEngine）；状态显示按当前下拉框的值和最近一次检测结果实时计算。
 // 判定口径与阅读器共用 lib/ocr/status.js；接口说明见 docs/OCR-INTERFACE.md §6.1。
-import { OCR_UI_ENABLED, OCR_COMPONENT_RELEASES } from '../lib/ocr/feature.js';
+import { OCR_UI_ENABLED, OCR_COMPONENT_RELEASES, systemOcrPreviewChoice, verifiedOcrRelease } from '../lib/ocr/feature.js';
 import { OCR_STATUS, resolveOcr, normalizeOcrChoice } from '../lib/ocr/status.js';
 import { getOcrStatus, requestOcrPermission } from '../lib/ocr/page.js';
 import { t } from '../lib/i18n.js';
@@ -68,10 +68,8 @@ const TITLES = {
   disabled: 'OCR 已关闭'
 };
 
-const NEEDS_INSTALL = new Set([OCR_STATUS.COMPONENT_MISSING, OCR_STATUS.ENGINE_MISSING, OCR_STATUS.MODEL_MISSING]);
-
 export function createOcrSettings({ uiLang } = {}) {
-  let saved = 'auto';
+  let saved = 'system';
   let snapshot = null;
   let checking = null;
   const select = $('ocrEngine');
@@ -88,19 +86,17 @@ export function createOcrSettings({ uiLang } = {}) {
 
   $('navOcr').hidden = false;
   $('sec-ocr').hidden = false;
+  $('ocrExtensionId').value = chrome.runtime.id;
   const lang = () => (typeof uiLang === 'function' ? uiLang() : 'zh');
 
   function resolved() {
-    return snapshot ? resolveOcr(select.value, snapshot.backends) : null;
+    return snapshot ? resolveOcr(systemOcrPreviewChoice(select.value), snapshot.backends) : null;
   }
 
   function installTarget(r) {
     if (!r) return null;
     const status = r.status === OCR_STATUS.NOT_CONFIGURED ? r.reason : r.status;
-    if (!NEEDS_INSTALL.has(status)) return null;
-    // 连接器都没装时先装连接器；连接器在、只缺引擎包时装 PaddleOCR。
-    if (status === OCR_STATUS.COMPONENT_MISSING) return 'connector';
-    return select.value === 'system' ? 'connector' : 'paddle';
+    return status === OCR_STATUS.DISABLED ? null : 'connector';
   }
 
   function render() {
@@ -126,7 +122,7 @@ export function createOcrSettings({ uiLang } = {}) {
     let detail = '';
     if (r.status === OCR_STATUS.READY) {
       const b = snapshot.backends.find((one) => one.id === r.backend) || {};
-      title = (select.value === 'auto' ? t('自动选择：') : '') + backendLabel(r.backend) + ' · ' + title;
+      title = backendLabel(r.backend) + ' · ' + title;
       const parts = [];
       const names = languageNames(b.languages, ui);
       if (names) parts.push(t('可识别：') + names);
@@ -141,6 +137,13 @@ export function createOcrSettings({ uiLang } = {}) {
     $('ocrStatusTitle').textContent = title;
     $('ocrStatusDetail').textContent = detail;
     $('ocrStatusDetail').hidden = !detail;
+    const system = snapshot.backends.find((one) => one.id === 'system');
+    $('ocrLanguageList').hidden = !(system && system.languages && system.languages.length);
+    $('ocrLanguageTags').textContent = system && system.languages ? system.languages.join(' · ') : '';
+    const noChinese = platformId() === 'windows' && system &&
+      (system.status === OCR_STATUS.LANGUAGE_UNAVAILABLE || (system.status === OCR_STATUS.READY && !(system.languages || []).some(tag => /^zh(?:-|$)/i.test(tag))));
+    $('ocrLanguageHelp').hidden = !noChinese;
+    $('ocrLanguageHelp').textContent = noChinese ? t('尚未检测到中文 OCR 语言包。请打开 Windows 设置 → 时间和语言 → 语言和区域，添加简体或繁体中文及其 OCR 可选功能，再点击「重新检测」。可能需要管理员协助，凛狐不会代为安装。') : '';
 
     const native = (snapshot.sources || []).find((s) => s.id === 'native');
     if (native && native.component) {
@@ -158,7 +161,7 @@ export function createOcrSettings({ uiLang } = {}) {
 
   async function refresh(force) {
     const run = getOcrStatus({ refresh: force !== false }).then((snap) => { snapshot = snap; }, () => {
-      snapshot = { backends: [], sources: [], status: OCR_STATUS.ERROR };
+      snapshot = { backends: [{ id: 'system', status: OCR_STATUS.ERROR }], sources: [], status: OCR_STATUS.ERROR };
     });
     checking = run;
     render();
@@ -177,16 +180,24 @@ export function createOcrSettings({ uiLang } = {}) {
   }
 
   function openInstall() {
-    const target = installTarget(resolved()) || 'connector';
     const platform = platformId();
-    const urls = OCR_COMPONENT_RELEASES[platform] || {};
-    const url = urls[target] || '';
-    const backend = target === 'paddle' && snapshot ? snapshot.backends.find((b) => b.id === 'paddle') : null;
-    $('ocrInstallTitle').textContent = target === 'paddle' ? t('安装本地 PaddleOCR') : t('安装本地 OCR 组件');
+    const release = verifiedOcrRelease(OCR_COMPONENT_RELEASES[platform]);
+    const url = release ? release.connector : '';
+    $('ocrInstallTitle').textContent = t('安装系统 OCR 预览组件');
     $('ocrInstallPlatform').textContent = PLATFORM_LABEL[platform] || t('未知平台');
-    $('ocrInstallSize').textContent = formatBytes(backend && backend.downloadBytes) || t('以发布页为准');
-    $('ocrInstallDisk').textContent = formatBytes(backend && backend.diskBytes) || t('以发布页为准');
-    $('ocrInstallNote').textContent = url ? '' : t('当前平台的安装包尚未发布。开发者可按仓库 native/ocr-host 的说明自行构建。');
+    $('ocrInstallSize').textContent = formatBytes(release && release.downloadBytes) || t('尚未发布');
+    $('ocrInstallDisk').textContent = formatBytes(release && release.diskBytes) || t('以预览包说明为准');
+    $('ocrInstallNote').textContent = url ? t('下载后先按预览包说明核对 SHA-256，再安装。') : t('当前平台的预览组件尚未发布。请仅使用维护者提供的完整预览包及校验值；没有预览包时请保持 OCR 关闭。');
+    const steps = $('ocrInstallSteps'); steps.textContent = '';
+    const instructions = platform === 'windows' ? [
+      '解压完整 Windows 预览包，核对校验值后运行 install.ps1，填写上方的扩展 ID。无需管理员权限。',
+      'Windows 可能拦截未签名组件；请阅读预览包说明和系统提示，凛狐不会自动绕过安全保护。'
+    ] : platform === 'macos' ? [
+      '解压完整 macOS 预览包，核对校验值后按包内说明运行 install.sh，填写上方的扩展 ID。组件安装到用户 Library。',
+      'macOS 可能拦截未公证组件；仅在确认来源和校验值后，按系统「隐私与安全性」中的单个程序提示处理。不要关闭 Gatekeeper。'
+    ] : ['当前平台没有系统 OCR 预览组件，请保持 OCR 关闭。'];
+    instructions.push('安装后回到此页，授权连接本地组件并点击「重新检测」。');
+    for (const instruction of instructions) { const li = document.createElement('li'); li.textContent = t(instruction); steps.appendChild(li); }
     const download = $('ocrInstallDownload');
     download.disabled = !url;
     download.onclick = () => {
@@ -202,7 +213,7 @@ export function createOcrSettings({ uiLang } = {}) {
     const r = resolved();
     const needsGrant = r && (r.status === OCR_STATUS.PERMISSION_NEEDED ||
       (r.status === OCR_STATUS.NOT_CONFIGURED && r.reason === OCR_STATUS.PERMISSION_NEEDED));
-    if (needsGrant && (select.value === 'system' || select.value === 'paddle')) grant();
+    if (needsGrant && select.value === 'system') grant();
     else render();
   });
   $('ocrGrant').addEventListener('click', () => { grant(); });
@@ -212,9 +223,9 @@ export function createOcrSettings({ uiLang } = {}) {
 
   return {
     enabled: true,
-    value: () => normalizeOcrChoice(select.value),
+    value: () => systemOcrPreviewChoice(select.value),
     fill(cfg) {
-      saved = normalizeOcrChoice(cfg && cfg.ocrEngine);
+      saved = systemOcrPreviewChoice(cfg && cfg.ocrEngine);
       select.value = saved;
       render();
     },

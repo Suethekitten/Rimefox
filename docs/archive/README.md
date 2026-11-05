@@ -6,6 +6,7 @@
 
 | 文件 | 是什么 | 版本 / 状态 |
 |---|---|---|
+| [2026-11-05-system-ocr-preview.md](2026-11-05-system-ocr-preview.md) | Windows / macOS 系统 OCR 预览实现、安装流程、本机验证、真实扫描质量及未测项；文档双列 / 版式预览回归 | 本地审核，未推送或发布 |
 | [2026-11-04-ci-matrix-0.16.4.md](2026-11-04-ci-matrix-0.16.4.md) | 0.16.4 发布后 Checks 矩阵 7 项失败的根因与只改测试 / CI 的修复验证 | 0.16.4，不改运行时、不重新发版 |
 | [2026-11-04-hardening-0.16.4.md](2026-11-04-hardening-0.16.4.md) | 密钥、异常 EPUB、PDF 资源、升级恢复及验收边界 | 本地 0.16.4 验证，未推送发布 |
 | [2026-11-04-real-model-acceptance.json](2026-11-04-real-model-acceptance.json) | 已配置 DeepSeek/Gemini 的真实译文、格式、对齐回退、400 恢复与 HTTP/Token 统计 | 0.16.4；缺少 Anthropic；不含 Key |

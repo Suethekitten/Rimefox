@@ -1,4 +1,4 @@
-# EPUB 阅读器架构（0.13.0，存储更新至 0.16.0）
+# 文档阅读器架构
 
 > 状态：0.13.0 实现契约；0.16.0 起 IndexedDB v4 把原书文件拆到 `files` 存储。EPUB 是第一个文档适配器；PDF 已在 0.14.0 接入，契约见 [PDF-HANDOFF](PDF-HANDOFF.md)。
 > 阅读器入口：`reader/index.html`（扩展页，不是 content script）。
@@ -13,6 +13,7 @@ reader/index.html
   ├─ TranslationQueue   当前视口 + 后 2 屏；手动本章；切章取消
   └─ BookDocument       格式无关的只读文档接口
        ├─ EpubDocument  EPUB 2/3 → sanitized XHTML sections
+       ├─ TextDocument  TXT / Markdown / LOG → escaped XHTML sections
        └─ PdfDocument   PDF 页面/文本层 → 独立 renderer（Beta）
 ```
 
@@ -58,7 +59,7 @@ reader/index.html
 /**
  * @typedef {Object} BookDocument
  * @property {string} id          // reader 用 SHA-256(original file) 赋值
- * @property {'epub'|'pdf'} format
+ * @property {'epub'|'pdf'|'txt'|'markdown'} format
  * @property {BookMetadata} metadata
  * @property {{bytes:Uint8Array,mediaType:string,href:string}|null} cover
  * @property {BookTocItem[]} toc
@@ -69,6 +70,15 @@ reader/index.html
 ```
 
 `EpubDocument` 由 `lib/reader/epub.js` 构造。未来 `PdfDocument` 必须实现同一接口；`section.load()` 返回页面/文本块，不返回 EPUB XHTML。EPUB 的 `load()` 返回原始 XHTML，清洗由 `sanitizeXhtml()` 完成，避免解析器依赖 DOM。
+
+### TXT / Markdown
+
+`lib/reader/text.js` 的 `parseTextDocument` 实现相同接口；支持 `.txt` / `.text` / `.log` / `.md` / `.markdown`。纯文本按空行分段，保留段内换行；Markdown 支持 ATX 标题、强调、列表、引用、围栏代码、简单表格和链接，是常用语法子集，不承诺完整 CommonMark / GFM。标题生成目录，长 TXT 按有界段落分章。
+
+- 识别 UTF-8、带 BOM 的 UTF-16 LE/BE；UTF-8 解码失败后尝试 GB18030（覆盖常见 GBK）。没有自动编码判定界面，其他编码请先转成 UTF-8。
+- 上限以 `TEXT_LIMITS` 为准；同时限制文件字节、解码字符、行数和段落数。二进制、空文件和超限文件导入失败，不改已有书库。
+- 所有文字先转义，再交给现有 XHTML 清洗器；原始 HTML 显示为文本，不执行。仅允许 HTTP(S)、邮件和书内锚点链接；单文件 Markdown 不加载远程 / 相对图片，也不自动读取相邻文件。图片语法保留说明文字。
+- 围栏代码不送翻；行内代码作为不可变片段保留。原始文件与进度仍用原有 IndexedDB 存储，不升级 schema；译文前缀为 `text-v1`，其余身份与 EPUB 相同。
 
 ## 3. SanitizedSection
 
@@ -95,6 +105,8 @@ reader/index.html
 - 自动翻译：当前视口 + 后 2 屏；接近章末时预取下一章开头（最多 12 个单元 / 8 条一批），不自动翻整章。
 - 手动“翻译本章”：只翻当前 section，不扩散到后续章节；超过 400 段或 5 万字先弹确认，避免误触发大量请求。
 - 打开时按书记住模式：`original | bilingual | translation`；恢复 `bilingual` 时只自动翻当前视口。
+- 新增 `parallel` 双列对照，按书保存：`reader/parallel.js` 在翻译前复制清洗后的正文到左列，右列仍是 `#bookContent`，按仅译文模式调用同一翻译器。左列标记 `data-dt-ui`，不会被采集或重复送翻；移除克隆的 id，书内链接统一委托导航。两列随页面滚动，不承诺逐行对齐；小屏保留双列并允许横向滚动。未翻译 / 失败段落右侧暂显原文。切模式复用相同缓存；双列切换目标语言保持版式并自动重译当前视口。
+- PDF 模式、默认双列、版式译文预览及其限制统一见 [PDF-HANDOFF](PDF-HANDOFF.md#2-数据流排查顺序)。OCR 的可用范围仍受独立开关与能力检测约束。
 - 阅读器顶部提供目标语言下拉；切换会写回全局 `targetLang`，重建翻译队列和缓存 key，不沿用旧语言译文。
 - 翻译单元：段落、列表项、引用、图注、简单表格单元格；跳过目录/导航、页眉页脚、页码、`pre/code`、图片 alt。
 - 行内格式 wire：`<fN>…</fN>` 表示可翻译的格式范围，`<kN>…</kN>` 表示不可变的链接/原子。复用 `lib/inline-protocol.js` 的 `INLINE_VERSION / inspect`。
@@ -151,7 +163,7 @@ settings     keyPath: id
   { id:'reader', fontFamily, fontSize, lineHeight, measure, theme }
 ```
 
-上限：约 100 MB/本、500 MB/书库；不申请 `unlimitedStorage`。超限拒绝并给出明确错误。
+默认约 100 MB/本、1 GiB/书库。用户可在阅读设置中调整书库上限（0.1–1024 GiB，以界面 GB 显示），存于 `settings.maxLibraryBytes`，旧配置缺失或无效时回默认值。不预占磁盘，不申请 `unlimitedStorage`，浏览器配额 / 实际磁盘可能更小。导入前用 `navigator.storage.estimate().usage + 文件大小` 与用户上限比较；这是含阅读缓存等扩展源数据的近似占用，不是原文件大小的精确合计。重复导入已有书先打开，不被容量误拦。调低上限不删除已有书，达到上限时只阻止继续导入。
 
 ## 7. 错误码
 

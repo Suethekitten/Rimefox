@@ -3,6 +3,9 @@
 // 翻译复用 content/dom.js 的 collect/inject，缓存由 reader 自己管理。
 import { EpubError } from '../lib/reader/epub.js';
 import { loadEpub } from '../lib/reader/epub-loader.js';
+import { parseTextDocument, textFormat, TEXT_LIMITS } from '../lib/reader/text.js';
+import { setParallelView } from './parallel.js';
+import { clearPdfLayout, updatePdfLayout } from './pdf-layout.js';
 import { sanitizeXhtml } from '../lib/reader/sanitize.js';
 import { getOcrResult, putOcrResult, listBooks, getBook, saveBook, createBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
@@ -24,9 +27,13 @@ let pdfModeTimer = 0;
 let pdfFlowScrollRaf = 0;
 let openSeq = 0;
 let searchSeq = 0;
+let pdfLayoutResizeTimer = 0;
 const pdfPageTimers = new Map();
+const pdfLayoutPages = new WeakMap();
 const PDF_MODE_OPTIONS = [
   { value: 'pdf-original', text: '原版版面', view: 'pdf', lang: 'original' },
+  { value: 'pdf-parallel', text: '双列对照', view: 'pdf', lang: 'translation' },
+  { value: 'pdf-layout', text: '双列版式（预览）', view: 'pdf', lang: 'translation' },
   { value: 'flow-original', text: '流式原版', view: 'flow', lang: 'original' },
   { value: 'flow-bilingual', text: '流式双语', view: 'flow', lang: 'bilingual' },
   { value: 'flow-translation', text: '流式仅译文', view: 'flow', lang: 'translation' }
@@ -34,6 +41,7 @@ const PDF_MODE_OPTIONS = [
 const EPUB_MODE_OPTIONS = [
   { value: 'original', text: '原文' },
   { value: 'bilingual', text: '双语' },
+  { value: 'parallel', text: '双列对照' },
   { value: 'translation', text: '仅译文' }
 ];
 function setModeOptions(kind) {
@@ -247,6 +255,7 @@ async function changeTarget() {
       return;
     }
     const cfg = readerConfig();
+    const keepParallel = state.mode === 'parallel';
     if (translator) await translator.configure(cfg);
     if (translator) translator.stop();
     translator = new ReaderTranslator({ onStatus: onTranslateStatus });
@@ -254,16 +263,16 @@ async function changeTarget() {
     translator.setDocument(state.doc);
     try { window.__DT && window.__DT.restore && window.__DT.restore(); } catch (err) { /* ignore */ }
     for (const node of Array.from(document.querySelectorAll('#bookContent [data-dt-target]'))) node.remove();
-    state.mode = 'original';
-    $('modeSelect').value = 'original';
-    state.book.mode = 'original';
+    state.mode = keepParallel ? 'parallel' : 'original';
+    $('modeSelect').value = state.mode;
+    state.book.mode = state.mode;
     try { await saveBook(state.book); } catch (err) { /* ignore */ }
     if (state.section) {
       const max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
       const ratio = Math.max(0, Math.min(1, window.scrollY / max));
       await loadSection(state.section.id, '', ratio);
     }
-    setStatus('readerStatus', '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译。');
+    setStatus('readerStatus', keepParallel ? '目标语言已切换，正在保持双列版式重新翻译。' : '目标语言已切换（只影响阅读器）；点「双语」或「翻译本章」按新语言翻译。');
   } catch (err) {
     setStatus('readerStatus', '切换目标语言失败：' + ((err && err.message) || '未知错误'), 'error');
     renderTargetSelect();
@@ -287,8 +296,9 @@ function applySettings() {
   $('paragraphSpacing').value = String(Number(s.paragraphSpacing) || 1.05);
   const maxBookMb = Math.round((Number(s.maxBookBytes) || READER_LIMITS.maxBookBytes) / 1048576);
   $('maxBookMb').value = String(maxBookMb);
+  $('maxLibraryGb').value = String(((Number(s.maxLibraryBytes) || READER_LIMITS.maxLibraryBytes) / 1073741824).toFixed(1)).replace(/\.0$/, '');
   const dropNote = $('dropNote');
-  if (dropNote) dropNote.textContent = '支持无 DRM 的 EPUB 2/3 与文本型 PDF，单本最大 ' + maxBookMb + ' MB（设置里可调）';
+  if (dropNote) dropNote.textContent = '支持 EPUB / PDF（最大 ' + maxBookMb + ' MB）、TXT / Markdown / LOG（最大 16 MB）。文档只保存在本机。';
   $('themeSelect').value = s.theme || 'auto';
   const hasUserFont = !!state.userFontFace;
   const family = s.fontFamily === 'user' && !hasUserFont ? 'serif' : (s.fontFamily || 'serif');
@@ -443,7 +453,7 @@ async function renderLibrary() {
     grid.appendChild(card);
   }
   const est = await estimateUsage();
-  $('libraryUsage').textContent = est.quota ? '本地书库 ' + formatBytes(est.usage || 0) + ' / 约 ' + formatBytes(est.quota) : '';
+  $('libraryUsage').textContent = '本地已用约 ' + formatBytes(est.usage || 0) + ' / 书库上限 ' + formatBytes((state.settings && state.settings.maxLibraryBytes) || READER_LIMITS.maxLibraryBytes);
 }
 
 let importController = null;
@@ -452,6 +462,13 @@ function checkImport(controller) { controller.signal.throwIfAborted(); }
 async function importFile(file) {
   if (!file) return;
   importController?.abort();
+  const format = textFormat(file.name);
+  if (format && file.size > TEXT_LIMITS.bytes) {
+    importController = null;
+    $('cancelImport').hidden = true;
+    setStatus('libraryStatus', '纯文本文档最大支持 16 MB。', 'error');
+    return;
+  }
   const controller = new AbortController();
   importController = controller;
   $('cancelImport').hidden = false;
@@ -485,8 +502,9 @@ async function importFile(file) {
     }
     const est = await estimateUsage();
     checkImport(controller);
-    if (est.usage && est.quota && est.usage + file.size > READER_LIMITS.maxLibraryBytes) {
-      setStatus('libraryStatus', '书库接近 500 MB，请先删除一本书。', 'error');
+    const libraryLimit = (state.settings && Number(state.settings.maxLibraryBytes)) || READER_LIMITS.maxLibraryBytes;
+    if ((Number(est.usage) || 0) + file.size > libraryLimit) {
+      setStatus('libraryStatus', '已达到书库容量上限 ' + formatBytes(libraryLimit) + '，请在阅读设置中调高上限，或删除不需要的文档。', 'error');
       return;
     }
     if (/\.pdf$/i.test(file.name) || looksLikePdf(new Uint8Array(buffer))) {
@@ -494,14 +512,14 @@ async function importFile(file) {
       await importPdf(file, buffer, hash);
       return;
     }
-    const doc = await loadEpub(buffer, { signal: controller.signal });
+    const doc = format ? parseTextDocument(buffer, { name: file.name, format }) : await loadEpub(buffer, { signal: controller.signal });
     checkImport(controller);
     const coverBlob = doc.cover ? new Blob([doc.cover.bytes], { type: doc.cover.mediaType || 'image/jpeg' }) : null;
     const first = doc.sections[0];
     const record = {
       id: hash,
       hash,
-      format: 'epub',
+      format: doc.format,
       title: doc.metadata.title,
       authors: doc.metadata.authors,
       language: doc.metadata.language,
@@ -536,6 +554,7 @@ async function importPdf(file, buffer, hash) {
     id: hash,
     hash,
     format: 'pdf',
+    pdfMode: 'pdf-parallel',
     title: file.name.replace(/\.pdf$/i, '') || '未命名 PDF',
     authors: [],
     language: '',
@@ -633,6 +652,7 @@ function updatePdfZoomUi() {
   zoomIn.hidden = !pdf;
   label.hidden = !pdf;
   label.textContent = Math.round(state.pdfZoom * 100) + '%';
+  $('bookContent').style.setProperty('--pdf-zoom', String(state.pdfZoom));
   const fitWidth = document.getElementById('pdfFitWidth');
   const fitColumn = document.getElementById('pdfFitColumn');
   if (fitWidth) fitWidth.hidden = !pdf;
@@ -647,8 +667,8 @@ function setPdfZoom(value) {
   state.pdfZoom = Math.max(0.5, Math.min(3, Math.round(Number(value) * 20) / 20));
   updatePdfZoomUi();
   for (const el of document.querySelectorAll('.pdf-page')) {
-    const canvas = el.querySelector('canvas');
-    if (canvas) canvas.remove();
+    clearPdfLayout(el, state.pdf);
+    for (const canvas of el.querySelectorAll('canvas')) { state.pdf.releaseCanvas(canvas); canvas.remove(); }
     const blocks = el.querySelector('.pdf-blocks');
     if (blocks) blocks.remove();
     delete el.dataset.rendered;
@@ -668,27 +688,39 @@ async function renderPdfPage(el, index, epoch) {
   const loaded = await doc.page(index);
   if (doc !== state.pdf || epoch !== pdfRasterEpoch || !el.isConnected) return;
   // 失败重试 / 缩放后重画时先清掉上一轮的画布、文本块和错误提示，避免叠加。
+  clearPdfLayout(el, doc);
   for (const old of el.querySelectorAll('canvas, .pdf-blocks, .pdf-render-failed, .pdf-empty-text, .pdf-ocr-notice, .pdf-ocr-progress')) { if (old.tagName === 'CANVAS') doc.releaseCanvas(old); old.remove(); }
   const content = document.getElementById('bookContent');
   const baseWidth = Math.max(320, (content ? content.clientWidth : 720) - 56);
   const cssWidth = Math.round(baseWidth * state.pdfZoom);
   const dpr = window.devicePixelRatio || 1;
   // 按屏幕像素比和缩放渲染，避免 CSS 拉伸导致的模糊
-  const renderScale = Math.min(3, Math.max(1.5, dpr) * state.pdfZoom);
+  let renderScale = Math.min(3, Math.max(1.5, dpr) * state.pdfZoom);
+  const requestedScale = renderScale;
   const canvas = document.createElement('canvas');
   canvas.style.width = cssWidth + 'px';
   canvas.style.height = 'auto';
   el.appendChild(canvas);
+  if (state.book.pdfMode === 'pdf-layout') {
+    // Two bitmaps per page: leave room for every visible page, even for enormous PDFs.
+    const displayWidth = Math.max(1, canvas.getBoundingClientRect().width);
+    const visiblePairs = Math.max(2, Math.ceil(window.innerHeight / Math.max(1, displayWidth * loaded.viewport.height / loaded.viewport.width)) + 2);
+    const pagePixels = Math.min(4 * 1024 * 1024, 16 * 1024 * 1024 / (2 * visiblePairs));
+    renderScale = Math.min(renderScale, Math.sqrt(pagePixels / loaded.viewport.width / loaded.viewport.height));
+  }
   el.dataset.rendered = '1';
   const result = await doc.render(index, canvas, renderScale, { onEvict() {
     // Keep the layout stable while an offscreen bitmap is released.
     el.style.minHeight = el.offsetHeight + 'px';
+    clearPdfLayout(el, doc);
+    pdfLayoutPages.delete(el);
     canvas.remove();
     delete el.dataset.rendered;
   } });
   if (doc !== state.pdf || epoch !== pdfRasterEpoch || !el.isConnected) return;
+  pdfLayoutPages.set(el, { viewport: loaded.viewport, blocks: loaded.blocks, layoutSupported: loaded.layoutSupported });
   el.style.minHeight = '';
-  if (result.limited) {
+  if (result.limited || renderScale < requestedScale) {
     const label = el.querySelector('.pdf-page-label');
     if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 页面较大，已降低预览分辨率';
   }
@@ -697,9 +729,10 @@ async function renderPdfPage(el, index, epoch) {
   } else {
     const note = document.createElement('p');
     note.className = 'pdf-empty-text';
-    note.textContent = '本页没有可提取的文字（可能是扫描页）。';
+    note.textContent = loaded.hasTextLayer ? '本页有文字层，但没有可翻译的正文。' : '本页没有可提取的文字（可能是扫描页）。';
     el.appendChild(note);
-    if (OCR_UI_ENABLED) handlePdfOcrPage(el, index, doc).catch(() => {});
+    if (OCR_UI_ENABLED && !loaded.hasTextLayer) handlePdfOcrPage(el, index, doc).catch(() => {});
+    if (state.book.pdfMode === 'pdf-layout') updatePdfLayout(el, loaded, [], doc);
   }
 }
 
@@ -770,7 +803,7 @@ function pdfOcrResult(doc, index) {
 // 文字层为空时用已有的 OCR 结果代替；翻译、流式视图与搜索都经这里取块。
 async function pdfPageData(doc, index) {
   const loaded = await doc.page(index);
-  if (loaded.blocks.length) return loaded;
+  if (loaded.hasTextLayer || loaded.blocks.length) return loaded;
   const ocr = pdfOcrResult(doc, index);
   return ocr ? { pageNo: loaded.pageNo, page: loaded.page, viewport: loaded.viewport, blocks: ocr.blocks, ocr: true } : loaded;
 }
@@ -901,8 +934,10 @@ function applyPdfTranslationsTo(root, texts) {
 
 function applyPdfTranslations(index) {
   const texts = (state.pdfTrans && state.pdfTrans.get(index)) || [];
-  applyPdfTranslationsTo(document.querySelector('.pdf-page[data-page="' + index + '"]'), texts);
+  const el = document.querySelector('.pdf-page[data-page="' + index + '"]');
+  applyPdfTranslationsTo(el, texts);
   applyPdfTranslationsTo(document.querySelector('#pdfFlow .pdf-flow-page[data-page="' + index + '"]'), texts);
+  if (el && state.book?.pdfMode === 'pdf-layout' && pdfLayoutPages.has(el)) updatePdfLayout(el, pdfLayoutPages.get(el), texts, state.pdf);
 }
 
 function visibleFlowPageIndexes() {
@@ -954,6 +989,7 @@ function cancelPdfTranslations(clear) {
   if (clear) {
     state.pdfTrans = new Map();
     document.querySelectorAll('.pdf-trans').forEach((node) => node.remove());
+    if (state.pdf) for (const el of document.querySelectorAll('.pdf-page')) clearPdfLayout(el, state.pdf);
   }
 }
 
@@ -1135,7 +1171,7 @@ async function ensurePdfFlowPage(section) {
     let loaded = await pdfPageData(doc, pageNo);
     if (doc !== state.pdf || !section.isConnected) return;
     // 流式视图里的零文本页：OCR 就绪时识别后再显示；未就绪不提示（原版视图负责提示）。
-    if (!loaded.blocks.length && OCR_UI_ENABLED) {
+    if (!loaded.hasTextLayer && !loaded.blocks.length && OCR_UI_ENABLED) {
       const snap = await pdfOcrStatusFor(doc).catch(() => null);
       if (snap && snap.status === 'ready') {
         await ensurePdfOcr(doc, pageNo, snap).catch(() => null);
@@ -1273,9 +1309,17 @@ async function applyPdfViewMode(epoch) {
   if (!state.pdf) return;
   if (epoch != null && epoch !== pdfViewEpoch) return;
   const content = $('bookContent');
+  const hadFacsimile = content.dataset.pdfFacsimile === '1';
   const pages = content.querySelector('.pdf-pages');
   const flow = state.pdfView === 'flow' ? buildPdfFlow() : document.getElementById('pdfFlow');
   content.dataset.pdfMode = state.pdfLang;
+  content.dataset.pdfLayout = ['pdf-parallel', 'pdf-layout'].includes(state.book.pdfMode) ? 'parallel' : '';
+  content.dataset.pdfFacsimile = state.book.pdfMode === 'pdf-layout' ? '1' : '';
+  if (hadFacsimile !== (state.book.pdfMode === 'pdf-layout')) setPdfZoom(state.pdfZoom);
+  for (const el of content.querySelectorAll('.pdf-page')) {
+    if (state.book.pdfMode === 'pdf-layout' && state.pdfView === 'pdf' && pdfLayoutPages.has(el)) updatePdfLayout(el, pdfLayoutPages.get(el), state.pdfTrans.get(Number(el.dataset.page)) || [], state.pdf);
+    else clearPdfLayout(el, state.pdf);
+  }
   content.classList.toggle('pdf-flow-mode', state.pdfView === 'flow');
   if (pages) pages.hidden = state.pdfView === 'flow';
   if (flow) flow.hidden = state.pdfView !== 'flow';
@@ -1309,6 +1353,7 @@ async function applyPdfViewMode(epoch) {
 }
 
 async function openPdfBook(record, seq, signal) {
+  setParallelView(false);
   pdfRasterEpoch += 1;
   pdfRenderQueue = Promise.resolve();
   if (seq !== openSeq) return;
@@ -1346,8 +1391,8 @@ async function openPdfBook(record, seq, signal) {
   }
   state.doc = null;
   state.section = null;
-  const savedMode = record.pdfMode || 'pdf-original';
-  const savedOption = PDF_MODE_OPTIONS.find((option) => option.value === savedMode) || PDF_MODE_OPTIONS[0];
+  const savedOption = PDF_MODE_OPTIONS.find((option) => option.value === record.pdfMode) || PDF_MODE_OPTIONS.find((option) => option.value === 'pdf-parallel');
+  const savedMode = savedOption.value;
   state.mode = savedOption.lang;
   state.pdfView = savedOption.view;
   state.pdfLang = savedOption.lang;
@@ -1370,8 +1415,11 @@ async function openPdfBook(record, seq, signal) {
   $('tocToggle').disabled = false;
   $('translateChapter').disabled = !(state.config && state.config.hasKey && !state.config.authPaused);
   const content = $('bookContent');
+  content.classList.remove('pdf-flow-mode');
   content.textContent = '';
   content.dataset.pdfMode = state.pdfLang;
+  content.dataset.pdfLayout = ['pdf-parallel', 'pdf-layout'].includes(savedMode) ? 'parallel' : '';
+  content.dataset.pdfFacsimile = savedMode === 'pdf-layout' ? '1' : '';
   const wrap = document.createElement('div');
   wrap.className = 'pdf-pages';
   content.appendChild(wrap);
@@ -1485,8 +1533,8 @@ function visiblePdfPageIndexes() {
 
 function renderVisiblePdfPages() {
   if (!state.pdf) return;
-  const pages = pdfPageWindow(800);
-  for (const el of pages) { const canvas = el.querySelector('canvas'); if (canvas) state.pdf.touchCanvas(canvas); }
+  const pages = pdfPageWindow(state.book?.pdfMode === 'pdf-layout' ? 0 : 800);
+  for (const el of pages) for (const canvas of el.querySelectorAll('canvas')) state.pdf.touchCanvas(canvas);
   for (const el of pages) {
     if (el.dataset.rendered === '1') continue;
     // 一页一页排队：pdf.js 的 render task 并发容易互相拖慢
@@ -1523,6 +1571,7 @@ function renderVisiblePdfPages() {
 }
 
 function closeReader() {
+  setParallelView(false);
   pdfRasterEpoch += 1;
   pdfRenderQueue = Promise.resolve();
   epubOpenController?.abort();
@@ -1671,7 +1720,9 @@ async function openBook(record) {
     if (!file) throw new Error('书文件丢失，请重新导入。');
     const buffer = await file.arrayBuffer();
     if (seq !== openSeq) return;
-    const doc = await loadEpub(buffer, { signal: controller.signal });
+    const doc = ['txt', 'markdown'].includes(record.format)
+      ? parseTextDocument(buffer, { name: record.title + (record.format === 'markdown' ? '.md' : '.txt'), format: record.format })
+      : await loadEpub(buffer, { signal: controller.signal });
     if (seq !== openSeq) return;
     state.book = record;
     state.doc = doc;
@@ -1719,6 +1770,9 @@ async function loadSection(sectionId, fragment, offsetRatio) {
   state.noteAssets = [];
   const content = $('bookContent');
   $('footnotePanel').hidden = true;
+  content.classList.remove('pdf-flow-mode');
+  delete content.dataset.pdfMode;
+  delete content.dataset.pdfLayout;
   content.textContent = '';
   const raw = sec.load();
   const sanitized = sanitizeXhtml(raw.html, {
@@ -1729,6 +1783,7 @@ async function loadSection(sectionId, fragment, offsetRatio) {
   });
   for (const url of sanitized.assets.values()) state.assets.push(url);
   content.appendChild(sanitized.fragment);
+  setParallelView(state.mode === 'parallel');
   state.section = sec;
   translator && translator.setDocument(state.doc);
   setReaderHeader(sec);
@@ -1835,6 +1890,7 @@ async function changeMode(mode) {
   $('translateChapter').disabled = !(state.config && state.config.hasKey && !state.config.authPaused);
   translator && translator.stop();
   try { window.__DT && window.__DT.restore && window.__DT.restore(); } catch (err) { /* ignore */ }
+  setParallelView(mode === 'parallel');
   if (mode === 'original') {
     setStatus('readerStatus', '原文模式。');
     return;
@@ -1941,6 +1997,11 @@ function bindEvents() {
     $('maxBookMb').value = String(mb);
     saveSettings({ maxBookBytes: mb * 1024 * 1024 });
   });
+  $('maxLibraryGb').addEventListener('change', async () => {
+    const gb = Math.max(0.1, Math.min(1024, Number($('maxLibraryGb').value) || 1));
+    await saveSettings({ maxLibraryBytes: Math.round(gb * 1073741824) });
+    await renderLibrary();
+  });
   $('themeSelect').addEventListener('change', () => saveSettings({ theme: $('themeSelect').value }));
   $('fontSelect').addEventListener('change', () => saveSettings({ fontFamily: $('fontSelect').value }));
   $('userFontUploadBtn').addEventListener('click', () => $('userFontInput').click());
@@ -1963,6 +2024,11 @@ function bindEvents() {
     if (!state.pdf) return;
     if (state.pdfView === 'flow') ensureVisiblePdfFlowPages();
     else renderVisiblePdfPages();
+    clearTimeout(pdfLayoutResizeTimer);
+    if (state.book?.pdfMode === 'pdf-layout') pdfLayoutResizeTimer = setTimeout(() => {
+      if (!state.pdf || state.book?.pdfMode !== 'pdf-layout') return;
+      for (const el of document.querySelectorAll('.pdf-page')) if (pdfLayoutPages.has(el)) updatePdfLayout(el, pdfLayoutPages.get(el), state.pdfTrans.get(Number(el.dataset.page)) || [], state.pdf);
+    }, 150);
   }, { passive: true });
   // pdf.js 的 render 靠 rAF 推进；标签页切到后台会暂停，回来时必须补渲染
   document.addEventListener('visibilitychange', () => {
@@ -1971,6 +2037,7 @@ function bindEvents() {
   document.addEventListener('keydown', (event) => {
     if ($('readerView').hidden) return;
     if (event.target && /INPUT|SELECT|TEXTAREA/.test(event.target.tagName)) return;
+    if (!state.doc) return;
     if (event.key === 'ArrowLeft') {
       const i = state.doc.sections.findIndex((s) => s.id === (state.section && state.section.id));
       if (i > 0) { event.preventDefault(); loadSection(state.doc.sections[i - 1].id, ''); }
@@ -1979,7 +2046,7 @@ function bindEvents() {
       if (i >= 0 && i < state.doc.sections.length - 1) { event.preventDefault(); loadSection(state.doc.sections[i + 1].id, ''); }
     }
   });
-  $('bookContent').addEventListener('click', (event) => {
+  $('documentColumns').addEventListener('click', (event) => {
     const note = event.target.closest && event.target.closest('a[data-reader-note]');
     if (note) {
       event.preventDefault();

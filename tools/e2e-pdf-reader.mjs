@@ -52,7 +52,7 @@ const server = http.createServer((req, res) => {
         hits.targets.push(french ? 'fr' : 'zh-CN');
         hits.sent.push(...texts.map((text) => JSON.stringify([french ? 'fr' : 'zh-CN', body.model, body.messages[0].content, text])));
         const number = hits.requests;
-        const content = JSON.stringify(texts.map((text, i) => french
+        const content = JSON.stringify(texts.map((text, i) => /Layout caption|Text stays inside/.test(text) ? (french ? 'Traduction' : '版式译文') : french
           ? 'Traduction française de contrôle ' + number + '-' + i + '. ' + 'Ce texte vérifie la lecture et la mémoire. '.repeat(Math.ceil(String(text).length / 48))
           : '译:这是阅读器回归测试的中文译文，第' + number + '次请求第' + i + '段。' + '用于验证缓存身份的中文译文。'.repeat(Math.ceil(String(text).length / 24))));
         const reply = () => {
@@ -169,6 +169,7 @@ if (fs.existsSync(obpPath)) {
 await setInputFile(page, PDF, true);
 const pages = await until(() => pageEval(page, "return document.querySelectorAll('.pdf-page').length"), 30000);
 check('PDF 导入后进入阅读页（页容器）', !!pages, pages ? pages + ' 页' : '没有页容器');
+check('新 PDF 默认双列对照', await pageEval(page, 'return document.getElementById("modeSelect").value==="pdf-parallel" && document.getElementById("bookContent").dataset.pdfLayout==="parallel"'));
 check('页标题/页数正确', !!(await pageEval(page, "const s=document.getElementById('readerSubtitle'); return s && s.textContent.indexOf('PDF') >= 0;")));
 const tocCount = await until(() => pageEval(page, "return document.querySelectorAll('#tocList a').length"), 15000);
 check('目录面板有可跳转条目', tocCount > 0, tocCount + ' 条');
@@ -193,9 +194,11 @@ if (process.env.RIMEFOX_PDF_RENDER !== '0') {
 await pageEval(page, "window.scrollTo(0,0); return true;");
 await sleep(1200);
 const canvasBefore = await pageEval(page, "const c=document.querySelector('.pdf-page canvas'); return c ? c.width : 0");
+const cssBefore = await pageEval(page, 'return document.querySelector(".pdf-page > canvas").getBoundingClientRect().width');
 await pageEval(page, "document.getElementById('pdfZoomIn').click(); return true;");
 const zoomed = await until(() => pageEval(page, "const c=document.querySelector('.pdf-page canvas'); return c && c.width > " + canvasBefore + " ? c.width : 0"), 40000);
 check('PDF 放大后重新渲染更高分辨率', !!zoomed, canvasBefore + ' → ' + (zoomed || 0));
+check('双列缩放会实际放大页面尺寸', await pageEval(page, 'return document.querySelector(".pdf-page > canvas").getBoundingClientRect().width > ' + cssBefore + '*1.1'));
 const zoomLabel = await pageEval(page, "return document.getElementById('pdfZoomLabel').textContent");
 check('缩放比例显示', zoomLabel === '125%', zoomLabel);
 await pageEval(page, "document.getElementById('pdfZoomOut').click(); return true;");
@@ -274,6 +277,8 @@ check('流式内切换译文模式锚点不变', flowPageAfter === flowPageBefor
 const chooseMode = async (value) => {
   await pageEval(page, "const s=document.getElementById('modeSelect'); s.value=" + JSON.stringify(value) + "; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
   await until(() => pageEval(page, 'return document.getElementById("modeSelect").value === ' + JSON.stringify(value)), 5000);
+  await until(() => pageEval(page, 'const c=document.getElementById("bookContent");return (c.dataset.pdfFacsimile==="1")===' + (value === 'pdf-layout') + ' && c.classList.contains("pdf-flow-mode")===' + value.startsWith('flow-')), 5000);
+  await sleep(500); // includes the product's 120 ms mode debounce and 400 ms page dwell
 };
 const chooseTarget = async (value, expectedMode = 'flow-original') => {
   await pageEval(page, "const s=document.getElementById('targetSelect'); s.value=" + JSON.stringify(value) + "; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
@@ -283,7 +288,8 @@ const chooseTarget = async (value, expectedMode = 'flow-original') => {
 const firstTranslation = () => pageEval(page, 'return document.querySelector("#pdfFlow .pdf-flow-page")?.querySelector(".pdf-trans")?.textContent || ""');
 const idle = async () => {
   await until(() => pageEval(page, 'return document.getElementById("pdfProgress").hidden'), 10000);
-  await sleep(300);
+  await sleep(700);
+  await until(() => pageEval(page, 'return document.getElementById("pdfProgress").hidden'), 10000);
 };
 const clearPdfCache = () => pageEval(page, 'return import("/lib/reader/store.js").then(async s => { const books=await s.listBooks(); await s.deleteBookTranslations(books[0].id); return true; })');
 const pdfCacheRows = () => pageEval(page, 'return new Promise((resolve,reject)=>{ const r=indexedDB.open("rimefox-reader"); r.onsuccess=()=>{const db=r.result;const q=db.transaction("translations").objectStore("translations").getAll();q.onsuccess=()=>{db.close();resolve(q.result)};q.onerror=()=>reject(q.error)};r.onerror=()=>reject(r.error)})');
@@ -312,10 +318,36 @@ await idle();
 check('切回中文复用已有文本缓存，不重复送翻', !hits.sent.slice(sentBeforeChinese).some((text) => cachedChinese.has(text)) && (await firstTranslation()) === chineseText,
   JSON.stringify({ newRequests: hits.requests - before, textMatches: (await firstTranslation()) === chineseText }));
 before = hits.requests;
+const paidBeforeModes = new Set(hits.sent);
+const sentBeforeModes = hits.sent.length;
 await chooseMode('flow-translation');
 await chooseMode('flow-bilingual');
 await idle();
-check('仅译文 / 双语切换不重复付费', hits.requests === before);
+check('仅译文 / 双语切换不重复付费', !hits.sent.slice(sentBeforeModes).some(text => paidBeforeModes.has(text)), JSON.stringify({newRequests:hits.requests-before,duplicateTexts:hits.sent.slice(sentBeforeModes).filter(text=>paidBeforeModes.has(text)).length}));
+
+await chooseMode('pdf-original');
+await idle();
+await pageEval(page, 'document.getElementById("pdfJumpInput").value="1";document.getElementById("pdfJumpGo").click();return true;');
+await idle();
+before = hits.requests;
+await chooseMode('pdf-parallel');
+check('PDF 双列：左侧原页面、右侧译文', !!await until(() => pageEval(page, 'const p=document.querySelector(".pdf-page"),c=p?.querySelector("canvas"),t=p?.querySelector(".pdf-blocks");return c && t && t.querySelector(".pdf-trans") && c.getBoundingClientRect().right<=t.getBoundingClientRect().left && document.getElementById("bookContent").dataset.pdfLayout==="parallel"')));
+await idle();
+before = hits.requests;
+await chooseMode('pdf-original');
+await chooseMode('pdf-parallel');
+await idle();
+check('PDF 双列切换复用已翻译页面缓存', hits.requests === before, before + ' → ' + hits.requests);
+await send('Page.bringToFront', {}, page);
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, page);
+const tocWasHidden = await pageEval(page, 'const p=document.getElementById("tocPanel");const hidden=p.hidden;p.hidden=true;window.scrollTo(0,0);return hidden;');
+await sleep(500);
+const parallelScreenshot = await send('Page.captureScreenshot', { format: 'png' }, page);
+fs.writeFileSync(path.join(profile, 'pdf-parallel.png'), Buffer.from(parallelScreenshot.data, 'base64'));
+console.log('    双列截图：' + path.join(profile, 'pdf-parallel.png'));
+await pageEval(page, 'document.getElementById("tocPanel").hidden=' + JSON.stringify(tocWasHidden) + ';return true;');
+await send('Emulation.clearDeviceMetricsOverride', {}, page);
+await chooseMode('flow-bilingual');
 
 // 快速连点版式：最后一次应生效，且不能被未渲染占位页把锚点带到很远。
 await pageEval(page, "const s=document.getElementById('modeSelect'); ['pdf-original','flow-original','flow-bilingual','flow-translation','flow-original','pdf-original','flow-bilingual'].forEach((v) => { s.value=v; s.dispatchEvent(new Event('change',{bubbles:true})); }); return true;");
@@ -326,6 +358,7 @@ const rapidTop = rapidState && rapidState.top;
 check('快速切换版式后仍停留在第一页', rapidTop != null && rapidTop >= -120 && rapidTop <= 400, String(rapidTop));
 await idle();
 
+before = hits.requests;
 await send('Page.reload', {}, page);
 await until(() => pageEval(page, 'return !!document.querySelector(".book-card .reader-button")'));
 await pageEval(page, 'document.querySelector(".book-card .reader-button").click(); return true;');
@@ -441,6 +474,46 @@ check('并发晚归：新译文、缓存与进度不受旧任务影响', !!fresh
   && hits.requests === before && finalHidden,
   JSON.stringify({ freshText: freshText.slice(0, 30), finalText: finalText.slice(0, 30), sameRows: JSON.stringify(finalRows) === JSON.stringify(freshRows), requests: hits.requests - before, hidden: finalHidden, rows: finalRows.length, freshRows: freshRows.length }));
 
+// Raster-backed facsimile preview must preserve illustration pixels and cache identity.
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, page);
+await pageEval(page, 'document.getElementById("backToLibrary").click();return true;');
+const layoutDoc = await send('DOM.getDocument', { depth: 0 }, page);
+const layoutInput = await send('DOM.querySelector', { nodeId: layoutDoc.root.nodeId, selector: '#fileInput' }, page);
+await send('DOM.setFileInputFiles', { nodeId: layoutInput.nodeId, files: [path.join(ROOT, 'reader/pdf-samples/layout.pdf')] }, page);
+await pageEval(page, 'document.getElementById("fileInput").dispatchEvent(new Event("change",{bubbles:true}));return true;');
+await until(() => pageEval(page, 'return document.querySelector(".pdf-blocks")?.textContent.includes("版式译文")'));
+before = hits.requests;
+await chooseMode('pdf-layout');
+const layoutPlaced = await until(() => pageEval(page, 'return document.querySelectorAll(".pdf-layout-translation").length===2'));
+check('双列版式预览把短译文放回文字框', !!layoutPlaced, await pageEval(page, 'return document.querySelector(".pdf-layout-notice")?.textContent'));
+const preserved = await pageEval(page, 'const a=document.querySelector(".pdf-page > canvas"),b=document.querySelector(".pdf-layout-view canvas");if(!a||!b)return null;const sample=c=>Array.from(c.getContext("2d").getImageData(Math.floor(c.width*.15),Math.floor(c.height*.5),1,1).data);return {left:sample(a),right:sample(b),bounds:Array.from(document.querySelectorAll(".pdf-layout-translation")).every(t=>t.scrollWidth<=t.clientWidth+1&&t.scrollHeight<=t.clientHeight+1)}');
+check('原页插图区域逐像素保留，译文没有溢出文字框', preserved && JSON.stringify(preserved.left)===JSON.stringify(preserved.right) && preserved.bounds, JSON.stringify(preserved));
+check('版式与文字双列共用翻译缓存', hits.requests===before);
+check('完整译文可展开查看，预览限制明确显示', await pageEval(page, 'return !!document.querySelector(".pdf-layout-text summary") && document.querySelector(".pdf-layout-notice").textContent.includes("复杂背景")'));
+const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }, page);
+fs.writeFileSync(path.join(profile, 'pdf-layout.png'), Buffer.from(shot.data, 'base64'));
+console.log('    版式预览截图：' + path.join(profile, 'pdf-layout.png'));
+holdRequests = true;
+await chooseTarget('fr', 'pdf-layout');
+await until(() => held.length > 0, 10000);
+check('版式切语言保留双列并立即移除旧语言覆盖层', await pageEval(page, 'return document.getElementById("modeSelect").value==="pdf-layout" && !document.querySelector(".pdf-layout-translation")'));
+holdRequests = false; for (const reply of held.splice(0)) reply();
+check('版式预览按新目标语言重新翻译', !!await until(() => pageEval(page, 'return document.querySelectorAll(".pdf-layout-translation").length===2 && document.querySelector(".pdf-layout-translation").textContent==="Traduction"')));
+before = hits.requests;
+await chooseTarget('zh-CN', 'pdf-layout');
+await until(() => pageEval(page, 'return document.querySelector(".pdf-layout-translation")?.textContent==="版式译文"'));
+await idle();
+check('版式切回原语言复用缓存', hits.requests === before);
+await send('Emulation.setDeviceMetricsOverride', { width: 900, height: 900, deviceScaleFactor: 1, mobile: false }, page);
+await sleep(500);
+check('窗口变窄后版式文字重新适配、不溢出', await pageEval(page, 'return document.querySelectorAll(".pdf-layout-translation").length===2 && Array.from(document.querySelectorAll(".pdf-layout-translation")).every(t=>t.scrollWidth<=t.clientWidth+1&&t.scrollHeight<=t.clientHeight+1)'));
+await chooseMode('pdf-parallel');
+check('可切回文字双列且没有残留版式画布', await pageEval(page, 'return !document.querySelector(".pdf-layout-view,.pdf-layout-text") && !!document.querySelector(".pdf-page > .pdf-blocks")'));
+await chooseMode('pdf-layout');
+await until(() => pageEval(page, 'return document.querySelectorAll(".pdf-layout-translation").length===2'));
+await pageEval(page, 'window.__layoutCanvases=Array.from(document.querySelectorAll("canvas"));document.getElementById("backToLibrary").click();return true;');
+check('关书释放原页和译文页画布', await pageEval(page, 'return window.__layoutCanvases.length===2 && window.__layoutCanvases.every(c=>c.width===0)'));
+
 // QA E3: actual reader imports a 15000 x 15000 page book and rasterizes it safely.
 await pageEval(page, 'document.getElementById("backToLibrary").click();return true;');
 const hugeDoc = await send('DOM.getDocument', { depth: 0, pierce: true }, page);
@@ -448,11 +521,14 @@ const hugeInput = await send('DOM.querySelector', { nodeId: hugeDoc.root.nodeId,
 await send('DOM.setFileInputFiles', { nodeId: hugeInput.nodeId, files: [path.join(ROOT, 'reader/pdf-samples/huge.pdf')] }, page);
 await pageEval(page, 'document.getElementById("fileInput").dispatchEvent(new Event("change",{bubbles:true}));return true;');
 await until(() => pageEval(page, 'return !document.getElementById("readerView").hidden && document.querySelectorAll(".pdf-page").length===12 && !!document.querySelector("canvas")'));
+await chooseMode('pdf-layout');
 let maxRaster = 0;
 let hugeRendered = 0;
 for (let n = 1; n <= 12; n++) {
   await pageEval(page, `const p=document.querySelector('.pdf-page[data-page="${n}"]');p.scrollIntoView();window.dispatchEvent(new Event("scroll"));return true;`);
   if (await until(() => pageEval(page, `const c=document.querySelector('.pdf-page[data-page="${n}"] canvas');return !!c && c.width>0`), 10000)) hugeRendered++;
+  await sleep(300);
+  if (!await pageEval(page, `const p=document.querySelector('.pdf-page[data-page="${n}"]');return !!p.querySelector(':scope > canvas')?.width && !!p.querySelector('.pdf-layout-view canvas')?.width`)) maxRaster=Infinity;
   const pixels = await pageEval(page, 'return Array.from(document.querySelectorAll("canvas"),c=>({pixels:c.width*c.height,dimension:Math.max(c.width,c.height)}))');
   maxRaster = Math.max(maxRaster, pixels.reduce((sum,c)=>sum+c.pixels,0));
   if (pixels.some(c=>c.pixels>4194304 || c.dimension>8192)) maxRaster=Infinity;

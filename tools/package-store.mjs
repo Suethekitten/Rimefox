@@ -84,7 +84,7 @@ for (const ref of refs) if (!entries.some(e => e.name === ref)) throw Error(`Mis
 for (const name of ['welcome/index.html', 'welcome/welcome.css', 'welcome/welcome.js']) {
   if (!entries.some((e) => e.name === name)) throw Error(`Missing welcome asset: ${name}`);
 }
-for (const name of ['reader/index.html', 'reader/reader.css', 'reader/reader.js', 'lib/reader/epub.js', 'lib/reader/sanitize.js', 'lib/reader/store.js', 'lib/reader/translate.js', 'lib/vendor/fflate.browser.mjs']) {
+for (const name of ['reader/index.html', 'reader/reader.css', 'reader/reader.js', 'reader/parallel.js', 'lib/reader/text.js', 'lib/reader/epub.js', 'lib/reader/sanitize.js', 'lib/reader/store.js', 'lib/reader/translate.js', 'lib/vendor/fflate.browser.mjs']) {
   if (!entries.some((e) => e.name === name)) throw Error(`Missing reader asset: ${name}`);
 }
 // MIT 等许可证要求版权与许可声明随副本分发：商店 ZIP 也是一次分发，缺一个就拒绝出包。

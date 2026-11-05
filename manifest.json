@@ -15,6 +15,7 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "optional_permissions": ["nativeMessaging"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

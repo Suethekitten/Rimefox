@@ -1,225 +1,229 @@
-// 凛狐 OCR 连接器（macOS）：Native Messaging 宿主，实现 docs/OCR-INTERFACE.md §3 的协议 v1。
-// 系统 OCR 后端使用 Apple Vision（VNRecognizeTextRequest）；PaddleOCR 引擎包尚未提供，如实报告 engine_missing。
-// stdout 只写协议帧；调试信息写 stderr。
+// System OCR preview: Native Messaging protocol v1, Apple Vision, macOS 12+.
 import Foundation
+import CoreFoundation
 import Vision
 import ImageIO
 import CoreGraphics
+import Darwin
 
-let componentVersion = "0.1.0"
+let componentVersion = "0.2.0-preview.1"
 let protocolVersion = 1
-let maxHostMessageBytes = 1024 * 1024
 let maxImageSide = 8192
-
-// MARK: - 帧读写
-
+let jobsLock = NSLock()
 let writeLock = NSLock()
-
-func send(_ object: [String: Any]) {
-    guard var data = try? JSONSerialization.data(withJSONObject: object, options: []) else { return }
-    if data.count > maxHostMessageBytes {
-        let id = object["id"] as? String ?? "r0"
-        let fallback: [String: Any] = ["v": protocolVersion, "id": id, "type": "result", "ok": false,
-                                       "error": ["code": "too_large", "message": "result exceeds 1 MB"]]
-        data = (try? JSONSerialization.data(withJSONObject: fallback, options: [])) ?? Data()
+let workQueue = DispatchQueue(label: "rimefox.ocr.serial")
+func validID(_ id: String) -> Bool { id.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil }
+func integer(_ value: Any?) -> Int? {
+    guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+          number.doubleValue.isFinite, number.doubleValue.rounded(.towardZero) == number.doubleValue,
+          abs(number.doubleValue) <= Double(Int32.max) else { return nil }
+    return number.intValue
+}
+func errorResult(_ id: String, _ code: String, _ message: String) -> [String: Any] {
+    ["v": 1, "id": id, "type": "result", "ok": false, "error": ["code": code, "message": message]]
+}
+func send(_ message: [String: Any]) {
+    guard var data = try? JSONSerialization.data(withJSONObject: message) else { return }
+    if data.count >= 1024 * 1024 {
+        data = (try? JSONSerialization.data(withJSONObject: errorResult(message["id"] as? String ?? "r0", "too_large", "result exceeds 1 MB"))) ?? Data()
     }
-    var length = UInt32(data.count).littleEndian // macOS 上的 Chrome / Edge 都是小端
-    writeLock.lock()
-    defer { writeLock.unlock() }
-    let header = Data(bytes: &length, count: 4)
-    FileHandle.standardOutput.write(header)
+    var length = UInt32(data.count).littleEndian
+    writeLock.lock(); defer { writeLock.unlock() }
+    FileHandle.standardOutput.write(Data(bytes: &length, count: 4))
     FileHandle.standardOutput.write(data)
 }
-
-func log(_ text: String) {
-    FileHandle.standardError.write(("[rimefox-ocr] " + text + "\n").data(using: .utf8)!)
-}
-
 func readExactly(_ count: Int) -> Data? {
-    var buffer = Data()
-    while buffer.count < count {
-        let chunk = FileHandle.standardInput.readData(ofLength: count - buffer.count)
-        if chunk.isEmpty { return nil } // EOF：浏览器关闭了端口
-        buffer.append(chunk)
+    var data = Data()
+    while data.count < count {
+        let part = FileHandle.standardInput.readData(ofLength: count - data.count)
+        if part.isEmpty { return nil }
+        data.append(part)
     }
-    return buffer
+    return data
 }
-
-func readMessage() -> [String: Any]? {
-    guard let header = readExactly(4) else { return nil }
-    let length = header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.littleEndian
-    if length == 0 || length > 64 * 1024 * 1024 { return nil }
-    guard let body = readExactly(Int(length)) else { return nil }
-    return (try? JSONSerialization.jsonObject(with: body, options: [])) as? [String: Any]
-}
-
-func errorResult(_ id: String, _ code: String, _ message: String) -> [String: Any] {
-    return ["v": protocolVersion, "id": id, "type": "result", "ok": false, "error": ["code": code, "message": message]]
-}
-
-// MARK: - Vision
-
-func supportedLanguages() -> [String] {
-    let request = VNRecognizeTextRequest()
-    request.recognitionLevel = .accurate
-    return (try? request.supportedRecognitionLanguages()) ?? [] // 最低 macOS 12，见 build.sh
-}
-
-// 扩展传 BCP 47（zh-Hans / zh-Hant / en …）；Vision 用 en-US、ja-JP 等。按前缀匹配到 Vision 支持的标签。
-func visionLanguages(for requested: [String], supported: [String]) -> [String] {
-    var out: [String] = []
-    for tag in requested {
-        let lower = tag.lowercased()
-        if let exact = supported.first(where: { $0.lowercased() == lower }) {
-            if !out.contains(exact) { out.append(exact) }
-            continue
-        }
-        let base = lower.split(separator: "-").first.map(String.init) ?? lower
-        if let hit = supported.first(where: { $0.lowercased().hasPrefix(base + "-") || $0.lowercased() == base }) {
-            if !out.contains(hit) { out.append(hit) }
-        }
-    }
-    return out
-}
-
 func osVersionString() -> String {
     let v = ProcessInfo.processInfo.operatingSystemVersion
-    return "\(v.majorVersion).\(v.minorVersion)"
+    return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
 }
-
+func supportedLanguages() -> [String] {
+    let request = VNRecognizeTextRequest(); request.recognitionLevel = .accurate
+    return (try? request.supportedRecognitionLanguages()) ?? []
+}
+func canonical(_ tag: String) -> String {
+    let tag = tag.lowercased()
+    if ["zh-cn", "zh-sg"].contains(tag) { return "zh-hans" }
+    if ["zh-tw", "zh-hk", "zh-mo"].contains(tag) { return "zh-hant" }
+    return tag
+}
+func visionLanguages(for requested: [String], supported: [String]) -> [String] {
+    var result: [String] = []
+    for tag in requested {
+        let wanted = canonical(tag)
+        let hit = supported.first { canonical($0) == wanted }
+            ?? supported.first { canonical($0).hasPrefix(wanted + "-") }
+        if let hit = hit, !result.contains(hit) { result.append(hit) }
+    }
+    return result
+}
 func helloResponse(_ id: String) -> [String: Any] {
-    let langs = supportedLanguages()
-    var system: [String: Any] = ["id": "system", "name": "Apple Vision", "version": osVersionString(), "languages": langs]
-    system["status"] = langs.isEmpty ? "unsupported" : "ready"
-    let paddle: [String: Any] = ["id": "paddle", "status": "engine_missing", "name": "PaddleOCR",
-                                 "message": "PaddleOCR engine pack is not installed"]
-    return [
-        "v": protocolVersion, "id": id, "type": "hello",
-        "component": ["version": componentVersion, "platform": "darwin", "protocols": [protocolVersion]],
-        "backends": [system, paddle]
-    ]
+    let languages = supportedLanguages()
+    return ["v": 1, "id": id, "type": "hello",
+        "component": ["version": componentVersion, "platform": "darwin", "protocols": [1]],
+        "backends": [
+            ["id": "system", "name": "Apple Vision", "version": osVersionString(),
+             "model": "VNRecognizeTextRequest-accurate:" + componentVersion,
+             "status": languages.isEmpty ? "language_unavailable" : "ready", "languages": languages],
+            ["id": "paddle", "name": "PaddleOCR", "status": "engine_missing"]
+        ]]
 }
-
 final class Job {
     let id: String
-    var request: VNRecognizeTextRequest?
     var cancelled = false
-    init(id: String) { self.id = id }
+    var replied = false
+    var request: VNRecognizeTextRequest?
+    init(_ id: String) { self.id = id }
 }
-
-let jobsLock = NSLock()
 var jobs: [String: Job] = [:]
-let workQueue = DispatchQueue(label: "rimefox.ocr.work") // 串行：一次只识别一张图
-
-func recognize(_ message: [String: Any]) {
-    let id = message["id"] as? String ?? "r0"
-    guard (message["backend"] as? String) == "system" else {
-        send(errorResult(id, "engine_missing", "PaddleOCR engine pack is not installed"))
-        return
-    }
-    guard let image = message["image"] as? [String: Any],
-          let base64 = image["data"] as? String,
-          let width = image["width"] as? Int, let height = image["height"] as? Int,
-          width > 0, height > 0, width <= maxImageSide, height <= maxImageSide,
-          let data = Data(base64Encoded: base64),
-          let source = CGImageSourceCreateWithData(data as CFData, nil),
-          let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-        send(errorResult(id, "bad_request", "invalid image"))
-        return
-    }
-    let supported = supportedLanguages()
-    let requested = (message["languages"] as? [String]) ?? []
-    var languages = visionLanguages(for: requested, supported: supported)
-    if !requested.isEmpty && languages.isEmpty {
-        send(errorResult(id, "language_unavailable", "none of the requested languages is supported"))
-        return
-    }
-    if languages.isEmpty {
-        // 未指定语言：中文优先，同时识别英文。Vision 中文模型本身也能识别拉丁字母。
-        languages = visionLanguages(for: ["zh-Hans", "zh-Hant", "en"], supported: supported)
-    }
-
-    let job = Job(id: id)
-    jobsLock.lock(); jobs[id] = job; jobsLock.unlock()
-
-    workQueue.async {
-        defer { jobsLock.lock(); jobs[id] = nil; jobsLock.unlock() }
-        if job.cancelled { return }
-        let started = Date()
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
-        request.recognitionLanguages = languages
-        job.request = request
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        do {
-            try handler.perform([request])
-        } catch {
-            if job.cancelled { return }
-            send(errorResult(id, "internal", error.localizedDescription))
-            return
-        }
-        if job.cancelled { return }
-        let w = Double(cgImage.width)
-        let h = Double(cgImage.height)
-        var lines: [[String: Any]] = []
-        for observation in request.results ?? [] {
-            guard let top = observation.topCandidates(1).first else { continue }
-            let box = observation.boundingBox // 归一化，原点左下
-            let x = Double(box.minX) * w
-            let y = (1.0 - Double(box.maxY)) * h
-            lines.append([
-                "text": top.string,
-                "confidence": Double(top.confidence),
-                "box": [x, y, Double(box.width) * w, Double(box.height) * h].map { ($0 * 100).rounded() / 100 }
-            ])
-        }
-        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
-        send([
-            "v": protocolVersion, "id": id, "type": "result", "ok": true, "backend": "system",
-            "engine": ["name": "Apple Vision", "version": osVersionString(), "model": "VNRecognizeTextRequest-accurate", "device": ""],
-            "durationMs": elapsed,
-            "lines": lines
-        ])
-    }
+func isCancelled(_ job: Job) -> Bool {
+    jobsLock.lock(); defer { jobsLock.unlock() }; return job.cancelled
 }
-
-func cancel(_ message: [String: Any]) {
-    guard let target = message["target"] as? String else { return }
+func finish(_ job: Job, _ message: [String: Any]) {
     jobsLock.lock()
-    let job = jobs[target]
+    let reply = !job.replied && !job.cancelled
+    job.replied = true
     jobsLock.unlock()
-    guard let job = job else { return }
-    job.cancelled = true
-    job.request?.cancel()
-    send(errorResult(target, "cancelled", "cancelled"))
+    if reply { send(message) }
 }
-
-// MARK: - 主循环
-
-if CommandLine.arguments.contains("--version") {
-    print("rimefox-ocr-host \(componentVersion) (protocol \(protocolVersion))")
-    exit(0)
-}
-if CommandLine.arguments.contains("--languages") {
-    print(supportedLanguages().joined(separator: "\n"))
-    exit(0)
-}
-
-log("started \(componentVersion)")
-while let message = readMessage() {
-    let id = message["id"] as? String ?? "r0"
-    guard (message["v"] as? Int) == protocolVersion else {
-        send(errorResult(id, "unsupported_protocol", "expected protocol \(protocolVersion)"))
-        continue
+func fail(_ job: Job, _ code: String, _ message: String) { finish(job, errorResult(job.id, code, message)) }
+func recognize(_ message: [String: Any], _ job: Job) {
+    defer { jobsLock.lock(); jobs[job.id] = nil; jobsLock.unlock() }
+    if isCancelled(job) { return }
+    let backend = message["backend"] as? String ?? ""
+    if backend == "paddle" { fail(job, "engine_missing", "PaddleOCR is not part of this preview"); return }
+    guard backend == "system", let image = message["image"] as? [String: Any],
+          let mime = image["mime"] as? String, ["image/png", "image/jpeg"].contains(mime),
+          let base64 = image["data"] as? String,
+          let width = integer(image["width"]), let height = integer(image["height"]),
+          width > 0, height > 0, width <= maxImageSide, height <= maxImageSide else {
+        fail(job, "bad_request", "invalid image fields"); return
     }
+    guard base64.count <= 32 * 1024 * 1024 else { fail(job, "too_large", "image exceeds base64 limit"); return }
+    guard !base64.isEmpty, base64.count % 4 == 0, let bytes = Data(base64Encoded: base64),
+          let source = CGImageSourceCreateWithData(bytes as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+          let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let actualWidth = props[kCGImagePropertyPixelWidth] as? Int,
+          let actualHeight = props[kCGImagePropertyPixelHeight] as? Int,
+          actualWidth == width, actualHeight == height,
+          let type = CGImageSourceGetType(source) as String?,
+          type == (mime == "image/png" ? "public.png" : "public.jpeg"),
+          let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        fail(job, "bad_request", "decoded image differs from its dimensions or MIME type"); return
+    }
+    if isCancelled(job) { return }
+    let supported = supportedLanguages()
+    var requested: [String] = []
+    if let raw = message["languages"] {
+        guard let list = raw as? [String], list.count <= 8,
+              list.allSatisfy({ $0.range(of: "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$", options: .regularExpression) != nil }) else {
+            fail(job, "bad_request", "invalid recognition languages"); return
+        }
+        requested = list
+    }
+    let preferences = requested.isEmpty ? ["zh-Hans", "zh-Hant", "en"] : requested
+    let languages = visionLanguages(for: preferences, supported: supported)
+    guard !languages.isEmpty else { fail(job, "language_unavailable", "no matching recognition language"); return }
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .accurate
+    request.usesLanguageCorrection = true
+    request.recognitionLanguages = languages
+    jobsLock.lock()
+    job.request = request
+    let cancelled = job.cancelled
+    jobsLock.unlock()
+    if cancelled { return }
+    let started = Date()
+    do { try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request]) }
+    catch { if !isCancelled(job) { fail(job, "internal", "Apple Vision failed: " + error.localizedDescription) }; return }
+    if isCancelled(job) { return }
+    var lines: [[String: Any]] = []
+    var total = 0
+    for observation in request.results ?? [] {
+        guard let top = observation.topCandidates(1).first else { continue }
+        total += top.string.utf16.count
+        guard lines.count < 5000, top.string.utf16.count <= 4000, total <= 300000 else {
+            fail(job, "too_large", "recognized text exceeds protocol limits"); return
+        }
+        let b = observation.boundingBox, w = Double(width), h = Double(height)
+        lines.append(["text": top.string, "confidence": Double(top.confidence),
+            "box": [Double(b.minX) * w, (1 - Double(b.maxY)) * h, Double(b.width) * w, Double(b.height) * h].map { ($0 * 100).rounded() / 100 }])
+    }
+    finish(job, ["v": 1, "id": job.id, "type": "result", "ok": true, "backend": "system",
+        "engine": ["name": "Apple Vision", "version": osVersionString(), "model": "VNRecognizeTextRequest-accurate:" + componentVersion],
+        "durationMs": Int(Date().timeIntervalSince(started) * 1000), "lines": lines])
+}
+func enqueue(_ message: [String: Any], _ id: String) {
+    jobsLock.lock()
+    if jobs[id] != nil { jobsLock.unlock(); send(errorResult(id, "bad_request", "duplicate request id")); return }
+    if jobs.count >= 8 { jobsLock.unlock(); send(errorResult(id, "busy", "recognition queue is full")); return }
+    let job = Job(id); jobs[id] = job
+    jobsLock.unlock()
+    workQueue.async { recognize(message, job) }
+}
+func cancel(_ target: String) {
+    jobsLock.lock()
+    guard let job = jobs[target] else { jobsLock.unlock(); return }
+    let reply = !job.replied
+    job.cancelled = true; job.replied = true
+    let request = job.request
+    jobsLock.unlock()
+    request?.cancel()
+    if reply { send(errorResult(target, "cancelled", "cancelled")) }
+}
+func printJSON(_ object: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+          let text = String(data: data, encoding: .utf8) else { exit(1) }
+    print(text)
+}
+let args = CommandLine.arguments
+if args.contains("--version") { print("rimefox-ocr-host \(componentVersion) (protocol 1)"); exit(0) }
+if args.contains("--languages") { print(supportedLanguages().joined(separator: "\n")); exit(0) }
+if args.contains("--diagnose") {
+    let languages = supportedLanguages()
+    #if arch(arm64)
+    let architecture = "arm64"
+    #else
+    let architecture = "x86_64"
+    #endif
+    printJSON(["version": componentVersion, "protocol": 1, "platform": "darwin", "architecture": architecture,
+        "osVersion": osVersionString(), "languages": languages, "apiStatus": languages.isEmpty ? "language_unavailable" : "ready"])
+    exit(0)
+}
+if let index = args.firstIndex(of: "--host-manifest") {
+    guard args.count > index + 2 else { exit(2) }
+    let path = args[index + 1], ids = Array(Set(args.dropFirst(index + 2))).sorted()
+    guard path.hasPrefix("/"), !ids.isEmpty,
+          ids.allSatisfy({ $0.range(of: "^[a-p]{32}$", options: .regularExpression) != nil }) else { exit(2) }
+    printJSON(["name": "com.rimefox.ocr", "description": "Rimefox system OCR preview", "path": path,
+        "type": "stdio", "allowed_origins": ids.map { "chrome-extension://\($0)/" }])
+    exit(0)
+}
+signal(SIGPIPE, SIG_IGN)
+while let header = readExactly(4) {
+    let length = header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.littleEndian
+    if length == 0 || length > 64 * 1024 * 1024 { break }
+    guard let body = readExactly(Int(length)) else { break }
+    guard let message = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
+        send(errorResult("r0", "bad_request", "invalid JSON")); continue
+    }
+    let id = message["id"] as? String ?? "r0"
+    guard validID(id) else { send(errorResult("r0", "bad_request", "invalid request id")); continue }
+    guard integer(message["v"]) == 1 else { send(errorResult(id, "unsupported_protocol", "expected protocol 1")); continue }
     switch message["type"] as? String {
     case "hello": send(helloResponse(id))
-    case "recognize": recognize(message)
-    case "cancel": cancel(message)
+    case "recognize": enqueue(message, id)
+    case "cancel": cancel(message["target"] as? String ?? "")
     default: send(errorResult(id, "bad_request", "unknown message type"))
     }
 }
-// stdin 关闭：等在途识别写完再退出（浏览器已断开时写失败也无妨）
-workQueue.sync {}
+// Browser disconnect ends the process, including any outstanding Vision request.
 exit(0)

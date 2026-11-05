@@ -95,8 +95,13 @@
                 <span class="row-desc" id="apiKeyHint">DeepSeek / 智谱 / 硅基流动 / 通义 等都可以，填对应平台的 Key。</span>
               </span>
               <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." autocomplete="off" />
-              <label class="row-text"><input id="rememberKey" type="checkbox" /> <span>在此设备上记住密钥</span></label>
-              <span class="row-desc">默认保留在当前会话中，关闭浏览器或重载扩展后需重新填写；勾选后保存到本机。</span>
+              <label class="row">
+                <span class="row-text">
+                  <span class="row-title">在此设备上记住密钥</span>
+                  <span class="row-desc">默认保留在当前会话中，关闭浏览器或重载扩展后需重新填写；勾选后保存到本机。</span>
+                </span>
+                <input id="rememberKey" type="checkbox" class="switch" />
+              </label>
               <div id="keyMigration" hidden>
                 <p>旧版本曾在本机保存密钥，要改为仅本次会话吗？</p>
                 <button type="button" id="migrateSession" class="btn">改为仅本次会话</button>
@@ -602,7 +607,7 @@
         <!-- ================= 隐私保护 ================= -->
         <section class="section" id="sec-ocr" hidden>
           <header class="section-head">
-            <h2>OCR</h2>
+            <h2>系统 OCR <span class="risk">预览版</span></h2>
             <p>识别 PDF 扫描页里的文字。需要安装凛狐本地 OCR 组件；扩展不会自动下载或安装任何程序。</p>
           </header>
 
@@ -612,15 +617,20 @@
             <div class="row">
               <span class="row-text">
                 <span class="row-title">OCR 引擎</span>
-                <span class="row-desc">识别在本机完成，无需 API Key；识别出的文字送翻时仍会发给你配置的翻译服务商。自动选择会优先使用系统 OCR。</span>
+                <span class="row-desc">预览版仅提供系统 OCR。扫描图像只发给本机组件；识别文字送翻时会发给你配置的翻译服务商。</span>
               </span>
               <select id="ocrEngine" class="control">
-                <option value="auto">自动选择</option>
                 <option value="system">系统 OCR</option>
-                <option value="paddle">本地 PaddleOCR</option>
                 <option value="off">关闭 OCR</option>
               </select>
             </div>
+            <p class="card-desc">本地组件为未签名 / 未公证预览版，系统安全设置或组织策略可能阻止安装或启动。没有预览包时请保持 OCR 关闭。</p>
+            <label class="row stack">
+              <span class="row-text"><span class="row-title">当前浏览器扩展 ID</span><span class="row-desc">安装组件时填写此 ID；Chrome 和 Edge 的 ID 不同时需一并填写。</span></span>
+              <input id="ocrExtensionId" type="text" readonly spellcheck="false" aria-label="当前浏览器扩展 ID" />
+            </label>
+            <p id="ocrLanguageHelp" class="card-desc" hidden></p>
+            <details id="ocrLanguageList" hidden><summary>全部识别语言</summary><p id="ocrLanguageTags" class="card-desc"></p></details>
 
             <div id="ocrStatus" class="test-banner" role="status" aria-live="polite" hidden>
               <div class="tb-head"><span class="tb-title" id="ocrStatusTitle"></span></div>
@@ -649,10 +659,7 @@
                 <dt>所需空间</dt><dd id="ocrInstallDisk"></dd>
               </dl>
               <p>识别在本机完成，无需 API Key；识别出的文字送翻时仍会发给你配置的翻译服务商。</p>
-              <ol class="ocr-steps">
-                <li>点击「下载」获取安装包，并按系统提示完成安装。</li>
-                <li>回到此页，点击「重新检测」。</li>
-              </ol>
+              <ol class="ocr-steps" id="ocrInstallSteps"></ol>
               <p class="row-desc" id="ocrInstallNote"></p>
               <div class="ocr-dialog-actions">
                 <button type="submit" value="cancel" class="btn soft">取消</button>

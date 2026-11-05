@@ -169,6 +169,41 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 
 /* ---- PDF 阅读 ---- */
+.document-columns.parallel-view {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  max-width: calc(var(--reader-measure) * 2); margin: 0 auto; align-items: start;
+}
+.parallel-view > .reader-content { width: 100%; max-width: none; min-width: 0; margin: 0; padding-top: 28px; }
+.parallel-view > .source-content { border-right: 1px solid var(--reader-line); }
+.parallel-view > .reader-content::before {
+  content: attr(aria-label); display: block; color: var(--reader-muted); font-family: var(--reader-sans);
+  font-size: 12px; font-weight: 600; letter-spacing: .08em; margin-bottom: 26px;
+}
+.source-content { user-select: text; }
+#bookContent[data-pdf-layout="parallel"] { max-width: calc(var(--reader-measure) * 2); }
+#bookContent[data-pdf-layout="parallel"] .pdf-page {
+  width: calc(100% * var(--pdf-zoom, 1)); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 24px; align-items: start;
+}
+#bookContent[data-pdf-layout="parallel"] .pdf-page-label { grid-column: 1 / -1; }
+#bookContent[data-pdf-layout="parallel"] .pdf-page > canvas { grid-column: 1; grid-row: 2; max-width: 100%; }
+#bookContent[data-pdf-layout="parallel"] .pdf-blocks {
+  grid-column: 2; grid-row: 2; min-width: 0; margin: 0; padding: 0 0 0 18px;
+  border-top: 0; border-left: 1px solid var(--reader-line);
+}
+#bookContent[data-pdf-layout="parallel"] .pdf-blocks::before { content: '译文'; display: block; color: var(--reader-muted); font-size: 12px; margin-bottom: 16px; }
+#bookContent[data-pdf-layout="parallel"] .pdf-trans { border: 0; padding: 0; margin: 0; color: var(--reader-ink); font-size: var(--reader-font-size); }
+.pdf-layout-view { grid-column: 2; grid-row: 2; position: relative; width: 100%; min-width: 0; background: white; color-scheme: light; }
+.pdf-page .pdf-layout-view canvas { width: 100%; height: auto; }
+.pdf-layout-translation { position: absolute; overflow: hidden; box-sizing: border-box; font-family: Arial, 'Microsoft YaHei', sans-serif; line-height: 1.12; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pdf-layout-notice { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.6; color: var(--reader-muted); }
+.pdf-layout-text { grid-column: 1 / -1; min-width: 0; font-size: 13px; }
+.pdf-layout-text summary { cursor: pointer; }
+#bookContent[data-pdf-facsimile="1"] .pdf-layout-text .pdf-blocks { margin: 10px 0; padding: 0; border: 0; }
+@media (max-width: 760px) {
+  .document-columns.parallel-view { min-width: 600px; }
+  #bookContent[data-pdf-layout="parallel"] { min-width: 660px; }
+}
+
 .pdf-pages { display: flex; flex-direction: column; gap: 20px; padding: 8px 0 48px; }
 .pdf-page { position: relative; background: var(--reader-paper); border: 1px solid var(--reader-line); border-radius: 6px; padding: 10px; width: fit-content; max-width: none; }
 .pdf-page:not([data-rendered="1"]) { aspect-ratio: 1 / var(--pdf-ratio, 1.414); }

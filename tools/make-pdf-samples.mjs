@@ -85,6 +85,13 @@ const columns = buildPdf([{
 const scan = buildPdf([{
   content: '0.92 g\n50 120 495 680 re f\n0.4 g\n120 400 355 120 re f\n'
 }]);
+fs.writeFileSync(path.join(outDir, 'text-margin.pdf'), buildPdf([{ content: textBlock(['1'], 60, 820, 16) + textBlock(['1'], 290, 20, 16) }]));
+
+fs.writeFileSync(path.join(outDir, 'layout.pdf'), buildPdf([{ content:
+  '1 0.78 0.2 rg 0 0 595 842 re f\n0.1 0.4 0.5 rg 35 100 220 570 re f\n1 1 1 rg 290 400 275 200 re f\n0 0 0 rg\n' +
+  'BT /F1 18 Tf 1 0 0 1 310 560 Tm (Layout caption) Tj ET\n' +
+  'BT /F1 12 Tf 1 0 0 1 310 510 Tm (Text stays inside this white panel.) Tj ET\n'
+}]));
 
 // 中文 CID 字体：Type0 + GBK-EUC-H + Adobe-GB1，故意不带 ToUnicode。
 // 没有 cmaps 时 pdf.js 取不到正确 Unicode（这正是 cmaps 要验证的场景）。

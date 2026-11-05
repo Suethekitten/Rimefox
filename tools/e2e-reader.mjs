@@ -15,7 +15,7 @@ const EXTENSION = process.env.RIMEFOX_EXTENSION || ROOT;
 const BROWSER = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
   ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
   : process.platform === 'win32'
-    ? 'C:\\Program Files\\Google Chrome\\Application\\chrome.exe'
+    ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
     : 'google-chrome');
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-reader-e2e-'));
 const PORT = 18800 + Math.floor(Math.random() * 300);
@@ -65,10 +65,12 @@ const server = http.createServer((req, res) => {
         hits.texts += texts.length;
         hits.sent.push(...texts);
         const sys = String((body.messages && body.messages[0] && body.messages[0].content) || '');
-        const prefix = /zh-TW|繁體中文/.test(sys) ? '繁:' : '译:';
+        const traditional = /唯一目标语言：[^\n]*\(zh-TW\)/.test(sys);
+        const prefix = traditional ? '繁:' : '译:';
         const content = JSON.stringify(texts.map((t) => {
           const s = String(t);
-          return prefix + s + prefix + '汉汉汉。';
+          return s.split('\n').map(line => prefix + line + prefix +
+            (traditional ? '文檔閱讀翻譯測試內容。' : '文档阅读翻译测试内容。').repeat(Math.max(1, Math.ceil(line.length / 12)))).join('\n');
         }));
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }));
@@ -220,6 +222,10 @@ await until(() => pageEval("return !!document.querySelector('#bookContent [data-
 await sleep(500);
 check('重新打开记住双语模式', await pageEval("return document.getElementById('modeSelect').value === 'bilingual';"));
 check('重新打开命中 reader 缓存，不新增请求', hits.requests === firstRequests, JSON.stringify({ before: firstRequests, after: hits.requests }));
+await documentMode('parallel');
+check('EPUB 双列保留左侧原文、图片和书内链接', !!await until(() => pageEval("const s=document.getElementById('sourceContent');return !s.hidden && !!s.querySelector('img[src^=\"blob:\"]') && !!s.querySelector('a[data-reader-target]') && !s.textContent.includes('译:') && document.getElementById('bookContent').textContent.includes('译:')")));
+check('EPUB 双列复用已有译文缓存', hits.requests === firstRequests);
+await documentMode('bilingual');
 check('章末预取下一章开头', hits.sent.some((text) => String(text).includes('Second Chapter')), hits.sent.slice(-3).join(' | '));
 const afterPrefetch = hits.requests;
 await pageEval("document.querySelectorAll('#tocList a')[1].click(); return true;");
@@ -329,6 +335,76 @@ await until(() => pageEval("return !document.getElementById('readerView').hidden
 const dupStatus = await pageEval("return document.getElementById('libraryStatus').textContent");
 const dupCards = await pageEval("return document.querySelectorAll('.book-card').length");
 check('书库接近上限时重复导入已有书不被误拦', /已导入/.test(dupStatus) && dupCards === 1, dupStatus);
+
+// Documents and split view: use the same extension, API and persistent reader store.
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, page);
+async function importDocument(name, text) {
+  await pageEval("document.getElementById('backToLibrary').click(); return true;");
+  await until(() => pageEval("return !document.getElementById('libraryView').hidden"));
+  const file = path.join(WORK, name); fs.writeFileSync(file, text);
+  const document = await send('DOM.getDocument', { depth: 0 }, page);
+  const node = await send('DOM.querySelector', { nodeId: document.root.nodeId, selector: '#fileInput' }, page);
+  await send('DOM.setFileInputFiles', { nodeId: node.nodeId, files: [file] }, page);
+  await pageEval("document.getElementById('fileInput').dispatchEvent(new Event('change',{bubbles:true})); return true;");
+  return until(() => pageEval("return !document.getElementById('readerView').hidden && !!document.getElementById('bookContent').textContent.trim()"));
+}
+async function documentMode(mode) {
+  await pageEval("const m=document.getElementById('modeSelect');m.value=" + JSON.stringify(mode) + ";m.dispatchEvent(new Event('change',{bubbles:true}));return true;");
+  await sleep(1000);
+}
+check('TXT 导入并按段落 / 换行阅读', !!await importDocument('Plain Document.txt', 'The original first paragraph.\nA second line.\n\nAnother paragraph for local document translation.'));
+const txtSource = await pageEval("return document.getElementById('bookContent').textContent");
+check('TXT 保留段落和换行', await pageEval("return document.querySelectorAll('#bookContent p').length===2 && !!document.querySelector('#bookContent br')"));
+await pageEval("const s=document.getElementById('targetSelect');s.value='zh-CN';s.dispatchEvent(new Event('change',{bubbles:true}));return true;");
+await until(() => pageEval("return !document.getElementById('targetSelect').disabled"));
+await documentMode('parallel');
+check('TXT 双列：左边原文，右边译文', !!await until(() => pageEval("return document.getElementById('sourceContent').textContent === " + JSON.stringify(txtSource) + " && document.getElementById('bookContent').textContent.includes('译:')")));
+check('双列真正并排且左侧没有被翻译', await pageEval("const a=document.getElementById('sourceContent'),b=document.getElementById('bookContent');return a.getBoundingClientRect().right<=b.getBoundingClientRect().left+1 && !a.querySelector('[data-dt-target]') && !a.textContent.includes('译:')"));
+await sleep(700);
+const beforeColumns = hits.requests;
+await documentMode('bilingual');
+await documentMode('parallel');
+check('TXT 双语 / 双列切换复用缓存，不重复请求', hits.requests === beforeColumns, beforeColumns + ' → ' + hits.requests);
+await pageEval("document.getElementById('backToLibrary').click();return true;");
+await until(() => pageEval("return !document.getElementById('libraryView').hidden"));
+await pageEval("const c=Array.from(document.querySelectorAll('.book-card')).find(c=>c.textContent.includes('Plain Document'));c.querySelector('button').click();return true;");
+await until(() => pageEval("return !document.getElementById('readerView').hidden && document.getElementById('bookContent').textContent.includes('译:')"));
+await sleep(700);
+check('TXT 重开恢复双列并命中缓存', hits.requests === beforeColumns && await pageEval("return document.getElementById('modeSelect').value==='parallel' && !document.getElementById('sourceContent').hidden"));
+await pageEval("const s=document.getElementById('targetSelect');s.value='zh-TW';s.dispatchEvent(new Event('change',{bubbles:true}));return true;");
+check('双列切换语言保留版式，译文按新语言更新', !!await until(() => pageEval("return document.getElementById('modeSelect').value==='parallel' && document.getElementById('bookContent').textContent.includes('繁:') && !document.getElementById('bookContent').textContent.includes('译:')")));
+await documentMode('original');
+check('TXT 切回原文恢复内容并收起左列', await pageEval("return document.getElementById('sourceContent').hidden && document.getElementById('bookContent').textContent===" + JSON.stringify(txtSource)));
+
+check('Markdown 导入', !!await importDocument('formatted.md', '# Markdown Document\n\nA **bold** paragraph with `keep_code` and [safe link](https://example.com).\n\n- First list item\n- Second list item\n\n> A quoted paragraph.\n\n```js\nconst keep_code = "unchanged";\n```\n\n| Name | Value |\n| --- | --- |\n| Item | Example |\n\n<script>window.__markdownExecuted=true</script>\n\n![blocked](https://example.com/remote.png)\n\n[Next section](#next-section)\n\n## Next Section\n\nAnother chapter body.'));
+check('Markdown 标题、列表、引用、代码块保留', await pageEval("return !!document.querySelector('#bookContent h1') && !!document.querySelector('#bookContent strong') && document.querySelectorAll('#bookContent li').length===2 && !!document.querySelector('#bookContent blockquote') && !!document.querySelector('#bookContent pre code')"));
+check('Markdown HTML 不执行、不加载远程图片', await pageEval("return !window.__markdownExecuted && !document.querySelector('#bookContent script, #bookContent img') && document.getElementById('bookContent').textContent.includes('<script>')"));
+check('Markdown 表格保留行列结构', await pageEval("return document.querySelectorAll('#bookContent th').length===2 && document.querySelectorAll('#bookContent td').length===2"));
+await documentMode('parallel');
+check('Markdown 双列翻译，代码不变', !!await until(() => pageEval("return document.getElementById('bookContent').textContent.includes('繁:') && document.querySelector('#bookContent pre code').textContent.includes('const keep_code') && document.querySelector('#bookContent p code')?.textContent==='keep_code' && !document.getElementById('sourceContent').textContent.includes('繁:')")));
+await send('Page.bringToFront', {}, page);
+const docShot = await send('Page.captureScreenshot', { format: 'png' }, page);
+fs.writeFileSync(path.join(WORK, 'markdown-parallel.png'), Buffer.from(docShot.data, 'base64'));
+await pageEval("document.querySelector('#sourceContent a[data-reader-fragment=\"next-section\"]').click();return true;");
+check('左列 Markdown 内链可跨章节导航', !!await until(() => pageEval("return document.getElementById('sourceContent').textContent.includes('Another chapter body') && !document.getElementById('sourceContent').textContent.includes('const keep_code')")));
+
+// User-configurable library limit is distinct from the browser's much larger quota.
+await pageEval('document.getElementById("backToLibrary").click();document.getElementById("settingsToggle").click();return true;');
+check('书库默认上限为 1 GB', await pageEval('return document.getElementById("maxLibraryGb").value === "1"'));
+await pageEval('navigator.storage.estimate=async()=>({usage:1.5*1073741824,quota:10*1073741824});document.getElementById("settingsDialog").close();return true;');
+const beforeQuotaCards = await pageEval('return document.querySelectorAll(".book-card").length');
+const quotaFile = path.join(WORK, 'quota-test.txt'); fs.writeFileSync(quotaFile, 'A document used to verify the configured library import limit.');
+const quotaDoc = await send('DOM.getDocument', { depth: 0 }, page);
+const quotaInput = await send('DOM.querySelector', { nodeId: quotaDoc.root.nodeId, selector: '#fileInput' }, page);
+await send('DOM.setFileInputFiles', { nodeId: quotaInput.nodeId, files: [quotaFile] }, page);
+await pageEval('document.getElementById("fileInput").dispatchEvent(new Event("change",{bubbles:true}));return true;');
+check('浏览器仍有 10 GB 配额时也遵守用户的 1 GB 书库上限', !!await until(() => pageEval('return document.getElementById("libraryStatus").textContent.includes("书库容量上限 1.0 GB") && document.querySelectorAll(".book-card").length===' + beforeQuotaCards)));
+await pageEval('document.getElementById("settingsToggle").click();const n=document.getElementById("maxLibraryGb");n.value="2";n.dispatchEvent(new Event("change",{bubbles:true}));document.getElementById("settingsDialog").close();return true;');
+check('可自行调高书库容量，界面显示所设上限', !!await until(() => pageEval('return document.getElementById("libraryUsage").textContent.includes("书库上限 2.0 GB")')));
+check('调高到 2 GB 后可继续导入', !!await importDocument('quota-test.txt', 'A document used to verify the configured library import limit.'));
+await send('Page.reload', {}, page); await readerBooted();
+check('重开后保留用户容量设置，不误显示浏览器的 10 GB 配额', await pageEval('return document.getElementById("maxLibraryGb").value==="2" && document.getElementById("libraryUsage").textContent.includes("2.0 GB") && !document.getElementById("libraryUsage").textContent.includes("10 GB")'));
+
 check('阅读器无未捕获异常', exceptions.length === 0, exceptions.join(' | '));
 console.log('\n[阅读器 E2E]');
 console.log(hits.requests + ' 请求 / ' + hits.texts + ' 条；异常 ' + exceptions.length);

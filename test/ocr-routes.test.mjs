@@ -39,14 +39,15 @@ test('网页内容脚本不能调用 OCR 路由', async () => {
   }
 });
 
-test('未授权：自动选择报未配置，指定引擎报需要授权，且不连接本机程序', async () => {
+test('预览版：旧自动 / Paddle 偏好均只解析系统 OCR，未授权时不连接', async () => {
   const auto = await send({ type: 'ocr:status' }, trusted);
   assert.equal(auto.ok, true);
-  assert.equal(auto.ocr.choice, 'auto');
-  assert.equal(auto.ocr.status, 'not_configured');
+  assert.equal(auto.ocr.choice, 'system');
+  assert.equal(auto.ocr.status, 'permission_needed');
   assert.equal(auto.ocr.reason, 'permission_needed');
   await saveConfig({ ocrEngine: 'paddle' });
   const explicit = await send({ type: 'ocr:status' }, trusted);
+  assert.equal(explicit.ocr.choice, 'system');
   assert.equal(explicit.ocr.status, 'permission_needed');
   const rec = await send({ type: 'ocr:recognize', image: { mime: 'image/png', data: 'iVBORw0KGgo=', width: 1, height: 1 } }, trusted);
   assert.deepEqual([rec.ok, rec.errorCode], [false, 'permission_needed']);

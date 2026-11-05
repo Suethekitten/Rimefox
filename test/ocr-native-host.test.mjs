@@ -7,6 +7,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { deflateSync, crc32 } from 'node:zlib';
 
 import { createNativeOcrSource } from '../lib/ocr/native-source.js';
 import { createOcrService } from '../lib/ocr/service.js';
@@ -17,7 +18,8 @@ const BINARIES = {
   darwin: '../native/ocr-host/macos/build/rimefox-ocr-host',
   win32: '../native/ocr-host/windows/build/rimefox-ocr-host.exe'
 };
-const BIN = BINARIES[process.platform] ? fileURLToPath(new URL(BINARIES[process.platform], import.meta.url)) : '';
+const BIN = process.env.RIMEFOX_OCR_HOST || (BINARIES[process.platform] ? fileURLToPath(new URL(BINARIES[process.platform], import.meta.url)) : '');
+if (process.env.RIMEFOX_REQUIRE_NATIVE === '1' && (!BIN || !fs.existsSync(BIN))) throw new Error('Required native OCR connector was not built');
 const FIXTURE = fileURLToPath(new URL('./fixtures/ocr-sample.png', import.meta.url));
 const skip = !BIN ? '当前平台没有连接器' : !fs.existsSync(BIN) ? '未构建：' + BIN : false;
 
@@ -59,9 +61,11 @@ test('本机连接器：握手报告系统 OCR 就绪、PaddleOCR 未安装，�
 
     const res = await svc.recognize({ image: pngImage(FIXTURE), jobId: 'fixture' });
     const text = res.lines.map((l) => l.text).join('\n');
+    assert.equal(res.engine.device, '', '系统 API 没有提供实际硬件证据，不应冒报 CPU / GPU');
     assert.match(text, /凛狐扫描页识别测试/);
     assert.match(text, /Rimefox OCR sample page 2026/);
     assert.match(text, /扫描图像只在本机识别/);
+    if (process.platform === 'win32') assert.doesNotMatch(text, /[\u3400-\u9fff][ \t]+[\u3400-\u9fff]/, '中文字符之间不应残留空格');
     assert.ok(res.lines.every((l) => Array.isArray(l.box)), '每行都应有坐标');
     // 第一行在最上方
     assert.ok(res.lines[0].box[1] < res.lines[res.lines.length - 1].box[1]);
@@ -72,6 +76,97 @@ test('本机连接器：握手报告系统 OCR 就绪、PaddleOCR 未安装，�
     svc.dispose();
     if (port) port.child.kill();
   }
+});
+
+// Windows-specific regressions exercise the actual executable, not a reimplementation.
+const windowsSkip = skip || (process.platform !== 'win32' && 'Windows connector only');
+function reply(port, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Host reply timed out: ' + message.id)), 15000);
+    port.onMessage.addListener((m) => {
+      if (m.id === message.id) { clearTimeout(timer); resolve(m); }
+    });
+    port.postMessage(message);
+  });
+}
+function blankPng(width, height) {
+  function chunk(type, data) {
+    const name = Buffer.from(type);
+    const size = Buffer.alloc(4); size.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([name, data])));
+    return Buffer.concat([size, name, data, crc]);
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 2;
+  const pixels = Buffer.alloc((width * 3 + 1) * height, 255);
+  for (let row = 0; row < height; row++) pixels[row * (width * 3 + 1)] = 0;
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header),
+    chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]).toString('base64');
+}
+
+test('本机连接器：拒绝伪造尺寸、错误 MIME、坏字段与不可用语言，拒绝后仍可继续握手', { skip }, async () => {
+  const port = hostPort();
+  const base = { v: 1, type: 'recognize', backend: 'system', image: pngImage(FIXTURE) };
+  try {
+    const cases = [
+      [{ ...base, image: { ...base.image, width: base.image.width + 1 } }, 'bad_request'],
+      [{ ...base, image: { ...base.image, mime: 'image/jpeg' } }, 'bad_request'],
+      [{ ...base, image: { ...base.image, width: '100' } }, 'bad_request'],
+      [{ ...base, image: { ...base.image, width: true } }, 'bad_request'],
+      [{ ...base, languages: ['zzz'] }, 'language_unavailable'],
+      [{ ...base, languages: 'en' }, 'bad_request'],
+      [{ ...base, v: '1' }, 'unsupported_protocol'],
+      [{ ...base, v: true }, 'unsupported_protocol']
+    ];
+    for (let i = 0; i < cases.length; i++) {
+      const [request, expected] = cases[i];
+      const result = await reply(port, { ...request, id: 'invalid_' + i });
+      assert.equal(result.error?.code, expected, JSON.stringify(result));
+    }
+    const hello = await reply(port, { v: 1, id: 'recovered', type: 'hello' });
+    assert.equal(hello.type, 'hello');
+    const installed = hello.backends.find((b) => b.id === 'system').languages;
+    if (!installed.some((l) => /hant|zh-(tw|hk|mo)/i.test(l))) {
+      const result = await reply(port, { ...base, id: 'hant', languages: ['zh-Hant'] });
+      assert.equal(result.error?.code, 'language_unavailable', '不可把繁体请求误配到简体模型');
+    }
+    const hans = await reply(port, { ...base, id: 'hans', languages: ['zh-Hans'] });
+    assert.equal(hans.ok, true);
+    if (process.platform === 'win32') assert.match(hans.engine.model, /zh/i);
+    else assert.equal(hans.engine.name, 'Apple Vision');
+  } finally { port.child.kill(); }
+});
+
+test('Windows：超过系统 OCR 单边上限的图像自动缩小，不崩溃', { skip: windowsSkip }, async () => {
+  const port = hostPort();
+  try {
+    const result = await reply(port, { v: 1, id: 'large', type: 'recognize', backend: 'system',
+      image: { mime: 'image/png', width: 8192, height: 128, data: blankPng(8192, 128) } });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(result.lines, []);
+  } finally { port.child.kill(); }
+});
+
+test('本机连接器：分片帧与排队任务取消，取消后可继续识别', { skip }, async () => {
+  const port = hostPort();
+  const got = [];
+  port.onMessage.addListener((m) => got.push(m));
+  const request = { v: 1, type: 'recognize', backend: 'system', image: pngImage(FIXTURE) };
+  try {
+    const batch = Buffer.concat([
+      encodeFrame({ ...request, id: 'first' }),
+      encodeFrame({ ...request, id: 'queued' }),
+      encodeFrame({ v: 1, id: 'cancel', type: 'cancel', target: 'queued' })
+    ]);
+    port.child.stdin.write(batch.subarray(0, 2));
+    await new Promise((r) => setTimeout(r, 20));
+    port.child.stdin.write(batch.subarray(2));
+    for (let i = 0; i < 200 && got.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(got.find((m) => m.id === 'queued')?.error?.code, 'cancelled');
+    assert.equal(got.find((m) => m.id === 'first')?.ok, true);
+    const next = await reply(port, { ...request, id: 'next' });
+    assert.equal(next.ok, true);
+  } finally { port.child.kill(); }
 });
 
 test('本机连接器：协议版本不对时回 unsupported_protocol，未装的 PaddleOCR 回 engine_missing', { skip, timeout: 60000 }, async () => {

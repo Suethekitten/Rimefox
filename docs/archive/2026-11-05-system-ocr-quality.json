@@ -1,0 +1,156 @@
+{
+  "date": "2026-11-05",
+  "environment": "Windows developer machine; not clean-machine or downloaded-package acceptance",
+  "binarySHA256": "6f17ea5c2264884bdc4ebf5a0a078971d1a648765b6ea7b24e7c79bf66db900b",
+  "detection": {
+    "id": "native",
+    "provides": [
+      "system",
+      "paddle"
+    ],
+    "component": {
+      "version": "0.2.0-preview.1",
+      "platform": "win32",
+      "protocols": [
+        1
+      ]
+    },
+    "backends": [
+      {
+        "id": "system",
+        "status": "ready",
+        "name": "Windows OCR",
+        "version": "10.0.22631.0",
+        "model": "Windows.Media.Ocr:0.2.0-preview.1:zh-Hans-CN",
+        "devices": [],
+        "languages": [
+          "en-US",
+          "ja",
+          "zh-Hans-CN"
+        ],
+        "downloadBytes": null,
+        "diskBytes": null,
+        "message": ""
+      },
+      {
+        "id": "paddle",
+        "status": "engine_missing",
+        "name": "PaddleOCR",
+        "version": "",
+        "model": "",
+        "devices": [],
+        "languages": [],
+        "downloadBytes": null,
+        "diskBytes": null,
+        "message": ""
+      }
+    ],
+    "message": "",
+    "status": "ok"
+  },
+  "method": "Single sequential run. Wall time includes pipe/base64 overhead. Excerpt CER: NFKC, lowercase, letters/numbers only; minimum edit distance against a contiguous output substring. Not whole-page CER.",
+  "cases": [
+    {
+      "id": "english-scan",
+      "input": {
+        "file": "alice.png",
+        "width": 1920,
+        "height": 2484,
+        "sha256": "5227894a2f410bbd11b4a64cb9a6c10da0529d77cc60a1eb2d46fdc8a698d46e",
+        "source": "https://commons.wikimedia.org/wiki/File:Alice_in_Wonderland.djvu?page=10"
+      },
+      "reference": "her knowledge, as there was no one to listen to her, still it was good practice to say it over) yes, that's about the right distance but then I wonder what Latitude or Longitude I've got to? Alice had no idea what Latitude was, or Longitude either, but thought they were nice grand words to say.",
+      "engine": {
+        "name": "Windows OCR",
+        "version": "10.0.22631.0",
+        "model": "Windows.Media.Ocr:0.2.0-preview.1:en-US",
+        "device": ""
+      },
+      "durationMs": 219,
+      "wallMs": 247,
+      "lines": 41,
+      "characters": 2878,
+      "excerpt": {
+        "normalizedReferenceCharacters": 230,
+        "edits": 0,
+        "excerptCER": 0
+      }
+    },
+    {
+      "id": "english-skew-3deg",
+      "input": {
+        "file": "alice-skew3.png",
+        "width": 1920,
+        "height": 2484,
+        "sha256": "2a371ae47de1933bd423ad0475f082387d6644f3ff513b18c5e084389f070a1d",
+        "source": "https://commons.wikimedia.org/wiki/File:Alice_in_Wonderland.djvu?page=10"
+      },
+      "notes": "Same real scan rotated clockwise 3 degrees, not a different original",
+      "reference": "her knowledge, as there was no one to listen to her, still it was good practice to say it over) yes, that's about the right distance but then I wonder what Latitude or Longitude I've got to? Alice had no idea what Latitude was, or Longitude either, but thought they were nice grand words to say.",
+      "engine": {
+        "name": "Windows OCR",
+        "version": "10.0.22631.0",
+        "model": "Windows.Media.Ocr:0.2.0-preview.1:en-US",
+        "device": ""
+      },
+      "durationMs": 313,
+      "wallMs": 331,
+      "lines": 40,
+      "characters": 2880,
+      "excerpt": {
+        "normalizedReferenceCharacters": 230,
+        "edits": 0,
+        "excerptCER": 0
+      }
+    },
+    {
+      "id": "english-derived-two-columns",
+      "input": {
+        "file": "alice-columns.png",
+        "width": 2560,
+        "height": 620,
+        "sha256": "c58dde0c488e43beff40eaee103a21fba847fac1b81c19e8b9218f4303cd07cf",
+        "source": "https://commons.wikimedia.org/wiki/File:Alice_in_Wonderland.djvu?page=10"
+      },
+      "notes": "Two different crops from the real scan placed side-by-side; assess order, not an authentic multi-column source",
+      "engine": {
+        "name": "Windows OCR",
+        "version": "10.0.22631.0",
+        "model": "Windows.Media.Ocr:0.2.0-preview.1:en-US",
+        "device": ""
+      },
+      "durationMs": 114,
+      "wallMs": 125,
+      "lines": 26,
+      "characters": 1862,
+      "excerpt": null
+    },
+    {
+      "id": "traditional-vertical-scan",
+      "input": {
+        "file": "nongshu.png",
+        "width": 1280,
+        "height": 1069,
+        "sha256": "0fa213f8fed8e1593bce111b53d97e3f4745c2d3680171707d9db7b32898473d",
+        "source": "https://commons.wikimedia.org/wiki/?curid=147681943"
+      },
+      "notes": "Original vertical traditional Chinese; this Windows machine has only a Simplified Chinese OCR model",
+      "reference": "二畝半在鄭詩云入此室處者是也以二畝半在田詩云中田有廬者是也方于耦舉趾之時出居",
+      "engine": {
+        "name": "Windows OCR",
+        "version": "10.0.22631.0",
+        "model": "Windows.Media.Ocr:0.2.0-preview.1:zh-Hans-CN",
+        "device": ""
+      },
+      "durationMs": 213,
+      "wallMs": 221,
+      "lines": 48,
+      "characters": 390,
+      "excerpt": {
+        "normalizedReferenceCharacters": 38,
+        "edits": 34,
+        "excerptCER": 0.8947368421052632
+      }
+    }
+  ]
+}

@@ -31,6 +31,7 @@ import { configFingerprint, createConfigBroadcaster } from './lib/config-broadca
 import { OCR_NATIVE_HOST, OcrError } from './lib/ocr/protocol.js';
 import { createNativeOcrSource } from './lib/ocr/native-source.js';
 import { createOcrService } from './lib/ocr/service.js';
+import { systemOcrPreviewChoice } from './lib/ocr/feature.js';
 
 // 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
 const usageStats = createUsageStats();
@@ -1056,7 +1057,7 @@ const ocrService = createOcrService({
       : Promise.resolve(false)),
     clientVersion: (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || ''
   })],
-  getChoice: async () => (await getConfig()).ocrEngine
+  getChoice: async () => systemOcrPreviewChoice((await getConfig()).ocrEngine)
 });
 if (chrome.permissions && chrome.permissions.onAdded) {
   chrome.permissions.onAdded.addListener(() => ocrService.invalidate());

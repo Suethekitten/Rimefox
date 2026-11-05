@@ -2,7 +2,7 @@
 
 状态：**仅评估，未跑探针、未集成、未改代码**。记录时间 2026-10-31。
 
-> 2026-11-04 补记：用户已选择独立本地组件交付，当前方案以 [PDF-HANDOFF §5](../PDF-HANDOFF.md#5-ocr方案已确定尚未实现) 为准。下文是历史评估，其中「扩展页无法跨源隔离、只能单线程」的判断有误：Chrome 扩展支持 COOP / COEP manifest 配置，WASM 多线程与 WebGPU 的条件应分别验证，不能据此排除。参考 [Chrome 官方说明](https://developer.chrome.com/docs/extensions/develop/concepts/cross-origin-isolation)。
+> 2026-11-04 补记：用户已选择独立本地组件交付，当前方案以 [PDF-HANDOFF §5](../PDF-HANDOFF.md#5-ocr-系统预览与后续后端) 为准。下文是历史评估，其中「扩展页无法跨源隔离、只能单线程」的判断有误：Chrome 扩展支持 COOP / COEP manifest 配置，WASM 多线程与 WebGPU 的条件应分别验证，不能据此排除。参考 [Chrome 官方说明](https://developer.chrome.com/docs/extensions/develop/concepts/cross-origin-isolation)。
 
 **2026-11-01 拍板：OCR 放到未来版本（ROADMAP P2-11），0.14.0 不做。
 

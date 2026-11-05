@@ -1,8 +1,7 @@
 # OCR 接口与使用方法
 
-状态：**扩展侧流程与 macOS 连接器已实现，界面未开放**（`lib/ocr/feature.js` 的 `OCR_UI_ENABLED = false`）。用户看到的行为与之前相同：扫描页只显示「本页没有可提取的文字」。
-打开开关后的完整流程（设置页、逐页识别、缓存、送翻、取消）由 `tools/e2e-ocr.mjs` 在真实 Chrome 里验证；开放前仍需完成 §8。
-为什么做独立本地组件、交付和验收顺序见 [PDF-HANDOFF §5](PDF-HANDOFF.md#5-ocr方案已确定尚未实现)。本文只写扩展侧的接口、协议和接入方法。
+状态：**系统 OCR 预览界面已开放**（`OCR_UI_ENABLED = true`），仅提供系统 OCR / 关闭；`nativeMessaging` 是可选权限，用户点击时才申请。组件缺失或尚无可用预览包时如实提示，不提供虚构下载入口。
+平台构建、交付层级与实机未测项唯一维护于 [组件 README](../native/ocr-host/README.md)，用户安装说明见 [INSTALL](../native/ocr-host/INSTALL.md)。本文只写扩展侧接口、协议和接入方法。
 
 ## 1. 分层与文件
 
@@ -33,17 +32,18 @@
 | `reader/reader.js`（OCR 段） | 零文本页逐页识别、页内提示、缓存、取消 | 阅读器 |
 | `lib/reader/store.js` | `getOcrResult` / `putOcrResult`：OCR 结果存 IndexedDB | 阅读器 |
 | `native/ocr-host/macos/` | macOS 连接器（Swift + Apple Vision），见其 [README](../native/ocr-host/README.md) | 本机 |
+| `native/ocr-host/windows/` | Windows 连接器（C# / .NET 8 + Windows OCR），构建与验证见同一 [README](../native/ocr-host/README.md#windows-构建与边界) | 本机 |
 | `tools/ocr-mock-host/host.mjs` | 参考 / 假宿主：协议的可运行实现，供组件开发与测试 | Node |
-| `tools/e2e-ocr.mjs` | 真实 Chrome 端到端：未授权、参考宿主、真实 macOS 连接器三个阶段 | Node + Chrome |
+| `tools/e2e-ocr.mjs` | 真实浏览器：未授权、参考宿主、真实连接器、实际安装器生成的清单 | Node + Chrome / Edge |
 | `test/ocr.test.mjs`、`test/ocr-routes.test.mjs` | 协议、状态、来源、服务、缓存键、版面、配置、路由与参考宿主进程 | Node |
 | `test/ocr-native-host.test.mjs` | 真实本机连接器识别夹具图（按平台找 macOS / Windows 构建产物，找不到时跳过） | Node |
 | `test/fixtures/ocr-sample.png`、`reader/pdf-samples/ocr-scan.pdf` | 已知文字的识别样本（PNG 由 `native/ocr-host/macos/Tools/render-sample.swift` 生成，PDF 由 `tools/make-pdf-samples.mjs` 生成） | — |
 
-配置项只有一个：`ocrEngine`，取值 `auto`（默认）/ `system` / `paddle` / `off`，清洗在 `mergeConfig`，导入校验在 `pickImportedConfig`。它只是偏好，能否识别以检测结果为准。
+配置项 `ocrEngine` 保留 `auto` / `system` / `paddle` / `off` 的协议兼容能力，清洗在 `mergeConfig`，导入校验在 `pickImportedConfig`。**当前产品入口**经 `systemOcrPreviewChoice` 把除 `off` 外的旧偏好统一解析为 `system`，设置页保存仅写 system / off，后台也应用该策略，不回退到 PaddleOCR。以后开放新后端须单独调整产品策略和验收，不能仅因宿主上报就绪就显示。
 
 ## 2. 选择与状态
 
-`resolveOcr(choice, backends)` 是唯一判定入口，设置页和阅读器都用它的结果，不各写一套。
+`resolveOcr(choice, backends)` 是通用判定入口；调用前先应用上述系统预览策略。下表保留未来后端的底层语义，不表示当前用户可选择它们。
 
 | 选择 | 规则 |
 |---|---|
@@ -106,7 +106,7 @@
 ```
 
 - `image.mime` 只接受 `image/png`、`image/jpeg`；单边不超过 8192，base64 不超过 32 Mi 字符。
-- `options.device`：`auto` / `gpu` / `cpu`。GPU 初始化或识别失败时组件自行回退 CPU，并在结果里写 `fallback: "gpu_failed"`；只有 CPU 也失败才回错误。
+- `options.device`：`auto` / `gpu` / `cpu`，供未来可控制设备的引擎使用；GPU 失败回退 CPU 时写 `fallback: "gpu_failed"`。当前系统 OCR 由操作系统调度，不提供用户设备选择，也不猜测返回的 CPU / GPU 信息。
 - `box` 为 `[x, y, w, h]`，单位是输入图像像素，原点在左上角；无法给出时省略或写 `null`。
 - `confidence` 是 0–1，可省略。超范围会被截断。
 - 结果上限：5000 行、每行 4000 字、总计 30 万字，超出视为坏响应。整条响应须小于 1 MB。
@@ -174,7 +174,8 @@
 - 下拉框 `#ocrEngine` 属于设置表单：`readForm` / `applyConfig` 经 `ocrSettings.value()` / `fill()` 读写，随「保存」写入 `ocrEngine`，和其他设置项一样计入未保存改动。开关关闭时区块隐藏，只透传已保存的值。
 - 状态横幅按**当前下拉框的值**和最近一次 `ocr:status` 结果用 `resolveOcr` 实时计算，所以改选后不保存也能看到该选择是否可用。
 - 需要授权时，在下拉框 `change` 或「授权连接」按钮的用户手势里调用 `requestOcrPermission()`；拒绝不重复弹出。
-- 缺组件 / 缺引擎包时显示「安装说明」弹窗：当前平台、组件上报的下载大小与磁盘占用（未上报写「以发布页为准」）、本机识别说明、安装步骤。`OCR_COMPONENT_RELEASES` 里没有当前平台的地址时下载按钮禁用并说明「尚未发布」；扩展只在用户点击后打开发布页地址。
+- 设置页明确标注预览、实际扩展 ID、组件版本、引擎状态、实际语言标签和语言名称。Windows 未检测到中文时显示手动安装 OCR 语言功能的指引，不自动提权。
+- 安装弹窗说明当前平台、大小（未知不猜测）、未签名限制和安装步骤；`verifiedOcrRelease` 只接受本仓库 HTTPS Release 的真实资产路径与 SHA-256 元数据。当前资产表为空，下载按钮禁用并说明尚未发布；将来填表前仍须独立核对真实资产和校验值。完整用户步骤以 INSTALL 为准，不内置下载或自动执行程序。
 - 「重新检测」= `getOcrStatus({ refresh: true })`。界面语言切换后调用 `ocrSettings.render()` 重画动态文案。
 
 区块锚点是 `#sec-ocr`（`OCR_SETTINGS_HASH`），阅读器的「前往设置」按钮打开它。
@@ -183,7 +184,7 @@
 
 开关关闭时这些代码不执行。流程（`reader/reader.js` 的 OCR 段）：
 
-1. `renderPdfPage` 遇到零文本页 → `handlePdfOcrPage`。只处理进入渲染范围的页，不以零文本为由识别整本书。
+1. `renderPdfPage` 遇到零文本页 → `handlePdfOcrPage`。以原始文字层是否含文字判断，不以过滤后的正文块数量判断；只有页眉 / 页码的文字页也不触发 OCR。只处理进入渲染范围的页，不以零文本为由识别整本书。
 2. 按文档缓存一次 `ocr:status`；未就绪时页内显示 `ocrNotice` 文案和「前往设置」/「重试」，不弹窗、不自动下载。
 3. 就绪时显示「正在本机识别本页文字…」，`ensurePdfOcr` 先查 IndexedDB 缓存，未命中再用独立倍率（`OCR_RENDER_SCALE = 3`，受单页 4 Mi 像素预算约束，与显示缩放无关）渲染一张不挂到页面的画布，经 `recognizeCanvas` 识别后立即释放画布。同页并发请求合并为一个任务。
 4. 缓存键：`ocrCacheKey({ bookId, page, backend, engine: 握手时的 name/version/model, params: { languages, scale } })`，不含翻译目标语言等配置；记录存 `translations` 存储（见 [READER-ARCHITECTURE](READER-ARCHITECTURE.md)）。
@@ -204,29 +205,26 @@ node test/ocr-routes.test.mjs
 sh native/ocr-host/macos/build.sh
 node test/ocr-native-host.test.mjs
 
-# 真实 Chrome 端到端（自动复制扩展、打开开关、注册临时宿主；不改仓库文件）
+# 真实 Chrome 端到端（隔离配置目录、临时宿主；结束恢复注册，不改仓库文件）
 node tools/e2e-ocr.mjs
 
 # 手动联调：生成参考宿主的本机清单与启动脚本（输出到 tools/ocr-mock-host/.local/，已 gitignore），按提示复制到浏览器目录
 node tools/ocr-mock-host/host.mjs --setup <扩展ID>
 ```
 
-- 手动联调时要在本地副本里把 `OCR_UI_ENABLED` 改成 `true`，并在 `manifest.json` 加 `"optional_permissions": ["nativeMessaging"]`（或直接放进 `permissions` 免去授权弹窗）。
+- 生产扩展已有可选权限；手动联调按 INSTALL 安装当前构建，用户点击授权。E2E 的已授权夹具使用必需权限模拟已授予状态，拒绝分支注入权限请求返回值；它不能证明真实权限确认对话框已人工验收。
 - 参考宿主用 `OCR_MOCK_MODE` / `OCR_MOCK_MODE_FILE` 模拟各种状态（`ready` / `system-only` / `paddle-model-missing` / `gpu-fallback` / `protocol2` / `slow` / `exit`），`OCR_MOCK_LOG` 记录收到的消息，说明在 `host.mjs` 开头。
 - macOS 上不要让浏览器直接启动仓库目录里的宿主：仓库在 `~/Documents` 等受保护目录时，系统会对「浏览器拉起的程序读取该目录」反复弹出访问授权（未签名的开发版二进制每次重建都算新程序）。`tools/e2e-ocr.mjs` 会先把宿主和样本复制到临时目录；手动联调时也把宿主放到受保护目录之外。
 
-## 8. 打开界面前的清单
+## 8. 交付与验收
 
-`OCR_UI_ENABLED` 改成 `true` 之前须全部完成：
+开发联调可用、本地预览构建、普通用户下载可安装与签名正式分发是不同层级；各平台现状见组件 README，不以静态检查或 CI 编译代替实机验收。当前系统预览不以 PaddleOCR、购买 / 申请证书为前置条件。
 
-| # | 事项 | 状态 |
-|---|---|---|
-| 1 | 本地组件原型通过 PDF-HANDOFF §5.3 第 1 步 | macOS Vision 连接器已完成并实测；Windows OCR 已交接（[WINDOWS-HANDOFF](../native/ocr-host/WINDOWS-HANDOFF.md)）；PaddleOCR 引擎包未开始 |
-| 2 | 签名安装包：macOS Developer ID 签名 + 公证（缺证书，暂无替代）、Windows 用 SignPath Foundation 免费签名；宿主清单注册 Chrome 与 Edge；`OCR_COMPONENT_RELEASES` 填正式地址 | 未开始；签名前可用安装脚本分发（见 WINDOWS-HANDOFF §5） |
-| 3 | `manifest.json` 加 `"optional_permissions": ["nativeMessaging"]`（可选权限不会让老用户的扩展被停用） | 未做，打开开关时一起改 |
-| 4 | 设置页 `#sec-ocr` 区块（§6.1） | 已完成 |
-| 5 | 阅读器逐页识别、OCR 缓存与取消（§6.2） | 已完成 |
-| 6 | 真实扩展 E2E：未授权、组件缺失 / 引擎缺失 / 缺模型、取消、换书、文字型 PDF 不触发 OCR、真实连接器 | 已完成（`tools/e2e-ocr.mjs`）；GPU 回退与 Windows 待对应后端实现后补 |
-| 7 | 更新隐私说明：扫描图像只发给本机组件，识别出的文字送翻时仍发给翻译服务商 | 未做 |
-| 8 | 用《蠶書》等真实扫描件按 PDF-HANDOFF §5.3 探针表评估识别质量 | 未做（需要真实样本） |
-| 9 | `service.recognize` 先登记 `jobId` 再检测组件，检测期间到达的 `ocr:cancel` 也生效 | 已修（0.16.5 发布后发现；有单测） |
+- `test/ocr*.test.mjs` 检查协议、路由、状态、请求校验与缓存；真实组件测试在未构建时跳过，CI 可设 `RIMEFOX_REQUIRE_NATIVE=1` 禁止假绿。
+- `RIMEFOX_TEST_INSTALLERS=1 node --test test/ocr-installers.test.mjs` 实际执行当前用户安装器；Windows 使用独立测试注册路径，Mac 使用隔离用户 Library。该测试不等于干净机器下载验收。
+- `node tools/e2e-ocr.mjs` 检查系统预览选项、权限调用时机、组件缺失、语言缺失、协议不兼容、失败 / 重试、扫描 PDF 识别 / 送翻 / 缓存、取消 / 换书 / 关书、文字型 PDF 不触发 OCR，以及真实安装后浏览器连接。
+- `node tools/evaluate-ocr.mjs <cases.json>` 用真实扫描 PNG 直接调用实际系统 OCR；样本、人工参考及输出放在忽略的 `reader/pdf-real/`。报告片段 CER 时必须明确参考范围、正规化规则和未测语言，不把合成夹具当质量样本。
+- 隐私行为以 [PRIVACY](../PRIVACY.md) 为准；安装、安全提示和手动系统语言操作以 INSTALL 为准。
+- 签名 / 公证、未来 PaddleOCR、最低系统 / 双架构实机矩阵与干净机器仍需分别验收。普通用户尚无可验证的下载包时，界面必须保持诚实的未发布状态。
+
+一次性执行证据、真实扫描质量与未测项见 [本轮验证记录](archive/2026-11-05-system-ocr-preview.md)。

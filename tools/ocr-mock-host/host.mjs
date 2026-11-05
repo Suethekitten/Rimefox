@@ -51,7 +51,8 @@ export function helloResponse(id, mode) {
     v: 1, id, type: 'hello',
     component: { version: '0.0.0-mock', platform: process.platform, protocols: mode === 'protocol2' ? [2] : [1] },
     backends: [
-      { id: 'system', status: 'ready', name: 'Mock System OCR', version: '1', languages: ['zh-Hans', 'zh-Hant', 'en'] },
+      { id: 'system', status: mode === 'system-language-missing' ? 'language_unavailable' : 'ready', name: 'Mock System OCR', version: '1',
+        languages: mode === 'system-language-missing' ? [] : mode === 'system-no-chinese' ? ['en-US'] : ['zh-Hans', 'zh-Hant', 'en'] },
       { id: 'paddle', status: paddleStatus, name: 'Mock PaddleOCR', version: '0', model: 'mock-model', devices: ['gpu', 'cpu'],
         languages: ['zh-Hans', 'zh-Hant', 'en'], downloadBytes: 0, diskBytes: 0 }
     ]
@@ -59,6 +60,7 @@ export function helloResponse(id, mode) {
 }
 
 export function recognizeResponse(msg, mode) {
+  if (mode === 'system-error') return { v: 1, id: msg.id, type: 'result', ok: false, error: { code: 'internal', message: 'Simulated OCR failure' } };
   const img = msg.image || {};
   const w = Number(img.width) || 1;
   const h = Number(img.height) || 1;

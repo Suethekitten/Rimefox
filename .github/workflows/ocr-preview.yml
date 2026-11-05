@@ -1,0 +1,66 @@
+name: System OCR preview checks
+on:
+  pull_request:
+    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/ocr.js', 'options/index.html', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml']
+  push:
+    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/ocr.js', 'options/index.html', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ocr-preview-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      - name: Build and inspect both Mach-O slices (deployment target macOS 12)
+        run: |
+          sh native/ocr-host/macos/build.sh
+          lipo -verify_arch arm64 x86_64 native/ocr-host/macos/build/rimefox-ocr-host
+          otool -l native/ocr-host/macos/build/rimefox-ocr-host | sed -n '/LC_BUILD_VERSION/,+6p'
+      - name: Native Vision protocol and real fixture recognition
+        env:
+          RIMEFOX_REQUIRE_NATIVE: '1'
+        run: node test/ocr-native-host.test.mjs
+      - name: Install / reinstall / uninstall using an isolated user Library
+        env:
+          RIMEFOX_TEST_INSTALLERS: '1'
+        run: node --test test/ocr-installers.test.mjs
+      - name: OCR extension E2E in Chrome
+        run: node tools/e2e-ocr.mjs
+      - name: OCR extension E2E in Edge
+        env:
+          RIMEFOX_BROWSER: /Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge
+        run: node tools/e2e-ocr.mjs
+      - name: Produce local universal preview archive and checksums
+        run: node tools/package-ocr-preview.mjs --platform macos
+      # No upload or Release step: publishing requires separate approval.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      - run: ./native/ocr-host/windows/build.ps1
+      - name: Current-user installer integration, without installing Windows language packs
+        env:
+          RIMEFOX_TEST_INSTALLERS: '1'
+        run: node --test test/ocr-installers.test.mjs
+      - run: node tools/package-ocr-preview.mjs --platform windows
+      # Language availability on this runner is diagnostic only, not Chinese-quality acceptance.
