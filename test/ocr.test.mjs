@@ -486,3 +486,19 @@ test('回归：检测缓存过期后重新握手，不沿用连接里的旧 hell
   assert.equal(port.sent.filter((m) => m.type === 'hello').length, 2);
   src.dispose();
 });
+
+test('服务：组件检测期间到达的取消同样生效（0.16.5 后修复）', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const src = fakeSource('native', ['system', 'paddle'], () => [B('system', 'ready')]);
+  const slowDetect = src.detect.bind(src);
+  src.detect = async (opts) => { await gate; return slowDetect(opts); };
+  const svc = createOcrService({ sources: [src], getChoice: async () => 'system' });
+  const job = svc.recognize({ image: PNG, jobId: 'early' });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(svc.cancel('early'), true, '检测还没完成时也能找到任务');
+  release();
+  await assert.rejects(job, (e) => e.code === 'cancelled');
+  assert.equal(src.calls.length, 0, '取消后不再调用来源识别');
+  assert.equal(svc.cancel('early'), false, '任务结束后从表里移除');
+});

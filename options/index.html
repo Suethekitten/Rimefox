@@ -914,6 +914,18 @@
               <input id="debug" type="checkbox" class="switch" />
             </label>
 
+            <div class="row" id="diagRow">
+              <span class="row-text">
+                <span class="row-title">页面诊断</span>
+                <span class="row-desc">选一个已打开的网页，生成段落切分与跳过原因的诊断信息并复制到剪贴板，反馈问题时直接粘贴。不发翻译请求。</span>
+                <span class="row-desc result" id="diagResult" role="status" aria-live="polite"></span>
+              </span>
+              <span class="btn-group">
+                <select id="diagTab" class="control" aria-label="要诊断的网页"></select>
+                <button type="button" id="diagRun" class="btn">生成诊断</button>
+              </span>
+            </div>
+
 
 
             <div class="row">

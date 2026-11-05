@@ -16,7 +16,6 @@ import { providerById } from '../lib/providers.js';
 import { applyI18n, t } from '../lib/i18n.js';
 import { normalizeHosts, hostListed } from '../lib/site-rules.js';
 import { applyUiTheme, applyUiAppearance, switchThemeAnimated, rememberSaved, watchConfig } from '../lib/ui-appearance.js';
-import { openWelcomePage } from '../lib/welcome.js';
 import { mountGlassDock } from '../lib/liquid-glass/dock.js';
 import { ensureGlassFilter } from '../lib/liquid-glass/material.js';
 
@@ -42,8 +41,6 @@ const el = {
   openReader: document.getElementById('openReader'),
   retranslate: document.getElementById('retranslate'),
   clearCache: document.getElementById('clearCache'),
-  diagnose: document.getElementById('diagnose'),
-  openGuide: document.getElementById('openGuide'),
   openOptions: document.getElementById('openOptions'),
   quickInput: document.getElementById('quickInput'),
   quickGo: document.getElementById('quickGo'),
@@ -689,32 +686,6 @@ el.clearCache.addEventListener('click', async () => {
   el.stat.textContent = t('缓存已清空，下次翻译会重新请求。');
 });
 
-el.diagnose.addEventListener('click', async () => {
-  el.stat.textContent = t('正在生成诊断信息…');
-  try {
-    const report = await sendToTab({ type: 'dt:diagnose' });
-    const text = JSON.stringify(report, null, 1);
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(text);
-      copied = true;
-    } catch (err) {
-      copied = false;
-    }
-    const s = report && report.summary ? report.summary : { units: 0, skipped: 0 };
-    el.stat.textContent =
-      t(
-        copied
-          ? '诊断信息已复制到剪贴板，直接粘贴给我。'
-          : '复制失败：在网页上按 ' + KEYS.console + ' 打开控制台，把左上角的「top」切换成本扩展，再执行 copy(JSON.stringify(__DT_LAST_DIAG)) 然后粘贴给我。'
-      ) +
-      t('\n翻译单元 ' + s.units + ' 个 · 被跳过 ' + s.skipped + ' 个') +
-      t('\n其中：文本过短 ' + s.wouldSkipByText + ' 个 · 判定为目标语言 ' + s.wouldSkipByLang + ' 个');
-  } catch (err) {
-    el.stat.textContent = t('诊断失败：') + err.message;
-  }
-});
-
 // ---------------- 快捷翻译（不依赖页面） ----------------
 async function runQuickTranslate() {
   if (currentCfg.authPaused) { el.stat.textContent = t('鉴权失败，翻译已暂停；更新密钥或测试连接后恢复。'); return; }
@@ -813,11 +784,6 @@ el.langToggle.addEventListener('click', async () => {
   renderThemeToggle();
   renderNight();
   renderHover();
-});
-
-// 使用指南：重新打开首次安装时的欢迎页，不改配置、不触发安装逻辑
-el.openGuide.addEventListener('click', () => {
-  openWelcomePage().catch(() => {});
 });
 
 init();

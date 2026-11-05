@@ -975,7 +975,7 @@ kbd {
    这里没有选中项：按钮是命令，不是导航，拖动跨过按钮不会触发任何命令。 */
 
 .foot {
-  --glass-slots: 5;
+  --glass-slots: 4; /* 与工具坞按钮数一致；关闭液态玻璃时用这个默认值 */
   --glass-height: 54px;
   --glass-padding: 5px;
   --glass-radius: calc(var(--glass-height) / 2);

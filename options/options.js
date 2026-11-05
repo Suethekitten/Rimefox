@@ -60,6 +60,7 @@ import {
 } from './provider-list.js';
 import { createGlossaryEditor } from './glossary.js';
 import { createOcrSettings } from './ocr.js';
+import { createPageDiagnostics } from './diagnose.js';
 import { mergeGlossaryEntries } from '../lib/glossary.js';
 
 // 思考模式的三种取值（与 lib/config.js 的 DEFAULTS.thinkingMode 对应）
@@ -1134,6 +1135,7 @@ async function init() {
   runWhenIdle(renderBrowserShortcut);
   runWhenIdle(renderCacheStats);
   runWhenIdle(hideSelftestIfMissing);
+  runWhenIdle(() => createPageDiagnostics());
   if (ocrSettings.enabled) runWhenIdle(() => ocrSettings.refresh(false));
   runWhenIdle(() => fetchModels()); // 已经保存过地址和 Key 时，打开设置页就把列表准备好
   watchConfig(onConfigElsewhere);

@@ -161,12 +161,13 @@ t('后台只在 install 时打开欢迎页，不再自动打开设置页', () =>
   assert(/onInstalled[\s\S]{0,400}openWelcomePage\(\)/.test(background), '安装回调应打开欢迎页');
 });
 
-t('设置页和弹窗都有手动重开使用指南的入口', () => {
+t('设置页有手动重开使用指南的入口；弹窗工具坞不再放指南与诊断（0.16.5 之后）', () => {
   assert(/sidebar-guide[^>]*href="\.\.\/welcome\/index\.html"/.test(optionsHtml));
   assert(optionsHtml.includes('使用指南'));
-  assert(popupHtml.includes('id="openGuide"'));
-  assert(popupHtml.includes('指南'));
-  assert(popupJs.includes('openWelcomePage'));
+  assert(!popupHtml.includes('id="openGuide"'));
+  assert(!popupHtml.includes('id="diagnose"'));
+  assert(optionsHtml.includes('id="diagRun"'));
+  assert(!popupJs.includes('openWelcomePage'));
 });
 
 t('欢迎页不会清空配置；只保存初始语言、语言切换和主题切换', () => {

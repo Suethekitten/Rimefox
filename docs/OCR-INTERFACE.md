@@ -229,4 +229,4 @@ node tools/ocr-mock-host/host.mjs --setup <扩展ID>
 | 6 | 真实扩展 E2E：未授权、组件缺失 / 引擎缺失 / 缺模型、取消、换书、文字型 PDF 不触发 OCR、真实连接器 | 已完成（`tools/e2e-ocr.mjs`）；GPU 回退与 Windows 待对应后端实现后补 |
 | 7 | 更新隐私说明：扫描图像只发给本机组件，识别出的文字送翻时仍发给翻译服务商 | 未做 |
 | 8 | 用《蠶書》等真实扫描件按 PDF-HANDOFF §5.3 探针表评估识别质量 | 未做（需要真实样本） |
-| 9 | 已知问题：`service.recognize` 在组件检测完成后才登记 `jobId`，检测期间（首次连接、握手）到达的 `ocr:cancel` 返回 `false` 且不生效。修法：先登记 `AbortController` 再 `await status()`，并补「检测中取消」的单测 | 未修（0.16.5 发布后发现，界面关闭时用户碰不到；下个版本修） |
+| 9 | `service.recognize` 先登记 `jobId` 再检测组件，检测期间到达的 `ocr:cancel` 也生效 | 已修（0.16.5 发布后发现；有单测） |
