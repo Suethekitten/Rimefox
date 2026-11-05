@@ -26,3 +26,6 @@ desktop.ini
 
 # real PDFs for the stage-0 probe (downloaded locally, not committed)
 reader/pdf-real/
+
+# OCR 参考宿主在本机生成的清单与启动脚本
+tools/ocr-mock-host/.local/

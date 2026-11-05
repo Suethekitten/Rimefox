@@ -176,6 +176,7 @@ texts ──► 缓存查找（原文） ──► privacy.maskTexts()
 | `ensure` | `{tabId}` | `{ok}` | 补注入内容脚本（页面在安装前打开时） |
 | `resume:set` | `{value: boolean}` | `{ok}` | 记录本标签页"在翻译"，用于返回/刷新后自动续翻 |
 | `resume:get` | — | `{ok, value}` | 查询（会校验域名一致） |
+| `ocr:status` / `ocr:recognize` / `ocr:cancel` | 见文档 | `{ok, …}` / `{ok:false, errorCode, error}` | 仅可信扩展页；OCR 接口骨架，入参与状态码见 [OCR-INTERFACE §5](docs/OCR-INTERFACE.md#5-后台消息路由) |
 
 ### 消息协议（popup/background → content）
 
@@ -727,6 +728,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 | `selectionImmediate` | false | 划词：选中即翻译（会消耗额度，默认关） |
 | `subtitleTranslate` | false | 视频字幕双语（YouTube / 哔哩哔哩）：打开字幕后接管，只翻播放位置往后约 90 秒（0.5.2 起默认关闭；已保存过设置的用户保持原值） |
 | `hoverCompare` | true | 悬停对照：高亮同一处的原文和译文 |
+| `ocrEngine` | `auto` | PDF 扫描页 OCR 偏好：`auto` / `system` / `paddle` / `off`；能否识别以本地组件检测为准，界面未开放，见 [OCR-INTERFACE](docs/OCR-INTERFACE.md) |
 | `privacyEnabled` | false | 可选：翻译前在本地把敏感信息换成占位符，回包后还原（映射只在请求内存里） |
 | `privacyMaskEmail` | true | 脱敏邮箱地址 |
 | `privacyMaskPhone` | true | 脱敏电话号码 |

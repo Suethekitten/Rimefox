@@ -16,6 +16,7 @@
 | `tools/e2e-pdf-reader.mjs` | PDF 阅读器 E2E（真实扩展 + 真 PDF + 假翻译 API） |
 | `tools/e2e-pdf-probe.mjs` | 探针批量跑分（真实 PDF 放 `reader/pdf-real/`，已 gitignore） |
 | `reader/vendor/pdfjs/` | pdf.js 4.10.38 legacy 构建 + worker + 169 个 CJK cmaps |
+| `lib/ocr/` | OCR 接口骨架（协议、状态、Native 来源、服务、缓存键）；界面未开放，见 [OCR-INTERFACE](OCR-INTERFACE.md) |
 
 ## 2. 数据流（排查顺序）
 
@@ -66,7 +67,7 @@
 
 ## 5. OCR（方案已确定，尚未实现）
 
-**当前状态**：2026-11-04 已确定采用「可选安装的本地 OCR 组件」。扩展端的检测、设置、下载入口与 OCR 调用尚未开发；现有版本仍只提示扫描页，不能识别扫描件。排期以 [ROADMAP P2-11](ROADMAP.md#p2--可配置性) 为准。
+**当前状态**：2026-11-04 已确定采用「可选安装的本地 OCR 组件」。扩展侧接口骨架已落地（配置项、状态判定、后台路由、Native Messaging 协议与参考宿主，见 [OCR-INTERFACE](OCR-INTERFACE.md)），但界面开关关闭；设置页区块、下载入口、逐页识别与本地组件本身尚未开发，现有版本仍只提示扫描页，不能识别扫描件。排期以 [ROADMAP P2-11](ROADMAP.md#p2--可配置性) 为准。
 
 ### 5.1 交付方式
 
@@ -75,6 +76,21 @@
 - 本地 PaddleOCR 由组件提供。可用时优先 GPU，初始化或识别不兼容时按可恢复的错误回退 CPU；CPU / GPU 共用兼容模型。具体运行库、安装包体积与平台支持须在原型验证后确定，不直接沿用浏览器 WASM 方案的体积估计。
 - 系统 OCR 按实际能力显示；其它平台没有系统后端时不显示为已配置。扫描图片在本机识别；识别出的文字若进入现有翻译流程，仍按用户配置发送给翻译服务商。
 - 用户主动选择下载组件后才联网获取安装资产，并由用户完成系统安装；扩展不静默安装或执行下载程序。安装来源、平台匹配与完整性校验随正式组件一起实现。
+- 模型随组件安装包或安装步骤一次就位，识别时不再从 PaddleOCR 官方源或第三方 CDN 拉取模型；装好后断网可用。
+- 引擎许可证限 Apache-2.0 / MIT 等宽松协议。PaddleOCR 与 Tesseract 均为 Apache-2.0；Scribe.js 为 AGPL-3.0，组件内同样不集成，只参考其「图片型 PDF → 隐形文字层」流程。
+- **组件分两层交付**：轻量连接器（Native Messaging 宿主 + 系统 OCR 调用，目标为几 MB）与 PaddleOCR 引擎包（运行库 + 模型，体积按原型实测）。只用系统 OCR 的用户不必下载 PaddleOCR；PaddleOCR 包依赖连接器，可一次安装两者。扩展里的「系统 OCR」同样需要连接器：浏览器扩展无法直接调用 Vision / Windows OCR，这点与桌面应用不同。
+- **`nativeMessaging` 只放 `optional_permissions`**，在用户于设置页选择需要组件的 OCR 选项时（用户手势内）用 `chrome.permissions.request` 申请。放进必需权限会让老用户升级时扩展被停用，直到接受「与协作的本机应用通信」的新权限警告。拒绝授权按「未授权」状态处理，不当作未配置反复提示。
+- **签名与公证是组件发布的前置条件**：macOS 安装包须 Developer ID 签名并公证，Windows 安装包须代码签名，否则 Gatekeeper / SmartScreen 会拦截。宿主清单的 `allowed_origins` 只列正式扩展 ID（不允许通配），商店版与 GitHub 版 ID 不同时须分别列出。
+- **引擎无关接口**：扩展侧只依赖统一的 OCR 后端接口（能力检测、识别、取消）和统一状态码，不在设置页或阅读器里写死引擎。原生组件维护不过来时，可把 10-31 评估中的浏览器内 WASM 方案作为第三种后端接入；注意 MV3 禁止远程代码，WASM 运行库必须随扩展包发布，只有模型 / 语言包这类数据能按需下载。接口与协议见 [OCR-INTERFACE](OCR-INTERFACE.md)。
+
+### 5.1.1 原型阶段待定项
+
+以下事项两份评估都未实测，原型前不写进用户承诺：
+
+- **Windows 系统 OCR**：Edge 用户以 Windows 为主，而 Windows 10+ 自带 [Windows.Media.Ocr](https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr)，可用语言取决于已装语言包。原型须确认它能否作为 Windows 上的「系统 OCR」，以及繁体 / 古籍效果；确认前 Windows 只走本地 PaddleOCR。
+- **Tesseract 的角色**：可作对照基线，也可作 PaddleOCR 之外的轻量后备。只有当 PaddleOCR 在 §5.3 的样本上明显胜出时，才值得为它付出安装体积；差距不大时改以 Tesseract 为主或二者择一。
+- **繁体覆盖**：首个扫描样本《蠶書》是繁体古籍。PaddleOCR 的 `ch` 模型和 Tesseract 的 `chi_tra` / `chi_sim` 对它的效果都须实测，不按官方语言列表认定可用。
+- **识别结果的呈现**：首版只把 OCR 文本接入下方文本块与翻译流程。是否像 Scribe.js 那样给画布叠一层可选中的隐形文字层（同时解决 §3 第 6 条），留到首版之后再评估。
 
 ### 5.2 设置与阅读器交互
 
@@ -92,6 +108,11 @@
 - 当页面需要新增 OCR 且没有可用引擎时，在阅读器内显示上述提示，提供直达 OCR 设置的按钮。设置页同时显示未配置状态；不反复弹窗或强制打开设置页。
 - PDF 原版仍可阅读；现有文字层照常处理，已有 OCR 文本 / 译文缓存不因组件暂时不可用而删除。空白页也可能没有文字，不以零文本为由自动下载组件或识别整本书。
 - 用户选择未安装的本地 PaddleOCR 时，弹窗显示当前平台、实际下载大小、所需磁盘空间、本机识别说明、下载及取消按钮。下载后显示安装步骤和「重新检测」入口。
+- 文案须如实反映扩展场景（参考稿来自桌面应用，以下几处不能照搬）：
+  - 系统 OCR 只显示**实际检测到的**平台与可用识别语言，例如「已检测到 macOS 文本识别（简体中文、繁体中文、英文）」，不写「macOS Live Text / Windows OCR」并列；Windows 缺中文语言包时明确提示缺哪种语言。
+  - 不写「完全离线」。写「识别在本机完成，无需 API Key」；识别出的文字送翻时仍发给所配置的翻译服务商。
+  - 不写「在本地进程内运行」，写「在独立本地组件中运行」。
+  - 体积写当前平台的实际下载大小与所需磁盘空间，不写跨平台的约数。
 - 组件经过检测确认就绪后才启用。取消、下载失败或安装未完成时保留此前可用选择，允许重试；缺组件、识别失败和用户主动关闭使用不同状态，避免都误报为未配置。
 - 缺组件 / 模型或检测失败时，不向翻译 API 发送空文本，不把未配置状态当成可无限重试的 OCR 任务。
 
@@ -102,7 +123,31 @@
 3. 接入逐页识别、页图像 / 像素与并发限制、取消及旧任务晚归隔离。OCR 缓存区分原书、页码、引擎 / 模型版本和识别参数；不因切翻译目标语言重复识别原图。
 4. 用简体、繁体和英文扫描页核对正文保留、识别误差、耗时及内存；补真实扩展与组件的 E2E，覆盖组件未安装、模型缺失、GPU 失败回退 CPU、取消下载、组件断开、换书与停止后晚归。无 OCR 时的文字型 PDF、原版阅读和翻译请求次数必须保持正确。
 
-浏览器内方案的历史候选见 [2026-10-31 评估](archive/2026-10-31-ocr-candidates.md)。该记录的跨源隔离判断已更正，不作为排除 GPU / 多线程的依据。当前选择独立组件是交付方案决定，不是浏览器算力限制。
+扩展侧的接口骨架（配置、状态、后端注册、Native Messaging 协议、阅读器与设置页的接入点）已先行落地，见 [OCR-INTERFACE](OCR-INTERFACE.md)；上面 4 步仍按顺序推进。
+
+第 1 步与第 4 步的引擎对比沿用 10-31 评估中设计好、但当时没跑的探针：
+
+| 项 | 内容 |
+|---|---|
+| 样本 | 《蠶書》3 页（繁体扫描，0 文本）；`r003` 中文期刊 1 页（简体文字型，按 OCR 输入分辨率渲染成图片后识别，原文字层作为参考答案）；英文扫描 1 页（待补） |
+| 引擎 | 已接入平台的系统 OCR、本地 PaddleOCR（GPU / CPU 各跑一次）、Tesseract 基线 |
+| 指标 | 单页耗时、峰值内存、识别字符数、平均置信度、人工转写 100 字的 CER、引擎间输出一致率 |
+| 放行条件 | 记录实际安装体积；PaddleOCR 须在繁体与简体样本上明显优于 Tesseract，否则按 §5.1.1 重新选择默认引擎 |
+
+样本与探针资产放 gitignore 目录（参照 `reader/pdf-real/`），不进仓库，也不进打包产物。
+
+### 5.4 两份评估的合并说明
+
+| 议题 | 2026-10-31 浏览器内评估 | 2026-11-04 交付决定 | 现行口径 |
+|---|---|---|---|
+| 运行位置 | 扩展内 WASM，作可选增强包或懒下载 | 独立本地组件，经 Native Messaging 调用 | 独立组件 |
+| 体积 | PaddleOCR 整包约 40–60 MB，Tesseract + 语言包约 20 MB | 原型后按真实资产确定 | 浏览器估算不沿用，按组件实测 |
+| 多线程 / GPU | 认为扩展页做不到跨源隔离，只能单线程 | 已更正：扩展支持 COOP / COEP | 不作为排除依据；选组件是交付决定，不是算力限制 |
+| 候选与许可证 | PaddleOCR、Tesseract 可用；Scribe.js 因 AGPL 排除 | 系统 Vision + 本地 PaddleOCR | 加 Tesseract 作基线 / 后备，Scribe.js 继续排除（§5.1、§5.1.1） |
+| 离线 | 模型默认联网取，须自托管 | 用户主动下载组件 | 模型随组件就位，识别时不联网（§5.1） |
+| 验收 | 繁 / 简 / 英样本，CER 等指标 | 简 / 繁 / 英，正确性、耗时、内存与 E2E | 合并为 §5.3 的探针表 |
+
+原始记录见 [2026-10-31 评估](archive/2026-10-31-ocr-candidates.md)。该记录作为历史保留，新增结论只更新本节。
 
 参考：[Chrome Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging)、[Apple Vision 文本识别](https://developer.apple.com/documentation/vision/recognizing-text-in-images)、[Chrome 扩展跨源隔离](https://developer.chrome.com/docs/extensions/develop/concepts/cross-origin-isolation)。
 
@@ -162,9 +207,10 @@ node tools/e2e-pdf-probe.mjs
 | 已知问题全表 | `HANDOFF.md` §9（PDF 是 21–26 条） |
 | 0.16.0 实施记录 | `HANDOFF.md` §14 与 [PDF 文本质量归档](archive/2026-11-02-pdf-quality-0.16.0.md) |
 | 接下来做什么、优先级 | `ROADMAP.md`（P1-4 已完成，P2-11 OCR） |
-| OCR 评估细节 | `docs/archive/2026-10-31-ocr-candidates.md` |
+| OCR 现行方案与评估合并结论 | 本文 §5（历史候选：`docs/archive/2026-10-31-ocr-candidates.md`） |
+| OCR 接口、协议与接入方法 | [OCR-INTERFACE](OCR-INTERFACE.md) |
 | 阅读器接口 / BookDocument | `docs/READER-ARCHITECTURE.md` |
 
-## 7. 画布资源契约（0.16.4）
+## 10. 画布资源契约（0.16.4）
 
 `pdf-raster.js` 约束单页 4 Mi 像素、单文档全部画布 16 Mi 像素、单边 8192，超限按比例降采样并显示提示。预算覆盖真实 canvas，而不只是页面/译文缓存；LRU 释放离屏 bitmap，滚回时重绘。预算约对应 64 MiB RGBA，**不代表整个 pdf.js、GPU 或浏览器进程内存上限**。缩放、换书、关闭会取消已启动的 RenderTask，未完成的旧代际任务不得再分配画布；无效尺寸直接拒绝。合成样本包括 `/Rotate 90` 与 15000×15000 的 12 页文档，生成命令为 `node tools/make-pdf-samples.mjs`。

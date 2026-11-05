@@ -28,6 +28,9 @@ import { pdfCacheIdentity } from './lib/reader/pdf-cache.js';
 import { configStore, LOCAL_SECRETS, SESSION_SECRETS } from './lib/config-storage.js';
 import { authGuard, authErrorCode } from './lib/auth-state.js';
 import { configFingerprint, createConfigBroadcaster } from './lib/config-broadcast.js';
+import { OCR_NATIVE_HOST, OcrError } from './lib/ocr/protocol.js';
+import { createNativeOcrSource } from './lib/ocr/native-source.js';
+import { createOcrService } from './lib/ocr/service.js';
 
 // 仅开发调试用的用量统计：只记数字，不记正文 / Key / Prompt / 原始响应
 const usageStats = createUsageStats();
@@ -1042,6 +1045,40 @@ async function handleSubtitleFetch(msg, sender) {
   }
 }
 
+// ---------------- OCR（接口骨架，界面未开放，见 docs/OCR-INTERFACE.md） ----------------
+// 所有 chrome 能力都在调用时才取：未授予 nativeMessaging 时 connectNative 不存在，按「需要授权」处理。
+const ocrService = createOcrService({
+  sources: [createNativeOcrSource({
+    connect: () => (chrome.runtime.connectNative ? chrome.runtime.connectNative(OCR_NATIVE_HOST) : null),
+    lastError: () => (chrome.runtime.lastError && chrome.runtime.lastError.message) || '',
+    hasPermission: () => (chrome.permissions && chrome.permissions.contains
+      ? chrome.permissions.contains({ permissions: ['nativeMessaging'] })
+      : Promise.resolve(false)),
+    clientVersion: (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || ''
+  })],
+  getChoice: async () => (await getConfig()).ocrEngine
+});
+if (chrome.permissions && chrome.permissions.onAdded) {
+  chrome.permissions.onAdded.addListener(() => ocrService.invalidate());
+  chrome.permissions.onRemoved.addListener(() => { ocrService.dispose(); });
+}
+
+function ocrFailure(err) {
+  if (err instanceof OcrError) return { ok: false, errorCode: err.code, error: err.message };
+  return { ok: false, errorCode: 'error', error: describeError(err) };
+}
+
+async function handleOcr(msg) {
+  try {
+    if (msg.type === 'ocr:status') return { ok: true, ocr: await ocrService.status({ refresh: msg.refresh === true }) };
+    if (msg.type === 'ocr:cancel') return { ok: true, cancelled: ocrService.cancel(msg.jobId) };
+    const result = await ocrService.recognize({ image: msg.image, languages: msg.languages, jobId: msg.jobId, device: msg.device });
+    return { ok: true, result };
+  } catch (err) {
+    return ocrFailure(err);
+  }
+}
+
 // ---------------- 消息路由 ----------------
 function trustedPage(sender) {
   return !!(sender && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL('')));
@@ -1061,6 +1098,9 @@ const ROUTES = {
   translate: handleTranslate,
   'subtitle:fetch': handleSubtitleFetch,
   test: handleTest,
+  'ocr:status': handleOcr,
+  'ocr:recognize': handleOcr,
+  'ocr:cancel': handleOcr,
   ensure: async (msg) => {
     const ok = await ensureInjected(msg.tabId);
     return { ok: ok };
@@ -1204,7 +1244,8 @@ const ROUTES = {
 
 // 只给扩展自己的页面（设置页 / 弹窗）用的路由：内容脚本跑在网页进程里，
 // 不能清空所有站点共用的缓存、重置统计或往任意标签页注入（QA F11）。
-const TRUSTED_ONLY = new Set(['cache:clear', 'cache:stats', 'usage:reset', 'ensure']);
+// OCR 会唤起本机程序并传输页面图像，同样只给扩展页面（阅读器 / 设置页）。
+const TRUSTED_ONLY = new Set(['cache:clear', 'cache:stats', 'usage:reset', 'ensure', 'ocr:status', 'ocr:recognize', 'ocr:cancel']);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const route = msg && msg.type ? ROUTES[msg.type] : null;

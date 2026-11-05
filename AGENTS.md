@@ -48,6 +48,7 @@
 | 架构、消息协议、踩坑、调试、配置项、技术向已知问题、发版技术命令 | [HANDOFF.md](HANDOFF.md) |
 | EPUB 阅读器接口、BookDocument、reader 缓存与 PDF 预留边界 | [docs/READER-ARCHITECTURE.md](docs/READER-ARCHITECTURE.md) |
 | PDF 阅读器实现、已知限制、未来更新与 OCR 准备（维护交接） | [docs/PDF-HANDOFF.md](docs/PDF-HANDOFF.md) |
+| OCR 扩展侧接口、本地组件协议、状态码与接入方法 | [docs/OCR-INTERFACE.md](docs/OCR-INTERFACE.md) |
 | 翻译引擎实现（单元模型 / 渲染 / 句子对齐） | [docs/TRANSLATION-ENGINE-HANDOFF.md](docs/TRANSLATION-ENGINE-HANDOFF.md) |
 | 上架材料 | [docs/STORE.md](docs/STORE.md)（通用 + Chrome）、[docs/STORE-EDGE.md](docs/STORE-EDGE.md)（Edge 差异） |
 | 隐私 | [PRIVACY.md](PRIVACY.md)、[docs/privacy.en.md](docs/privacy.en.md) |

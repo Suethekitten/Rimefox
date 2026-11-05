@@ -12,6 +12,9 @@ import { PdfTranslator } from '../lib/reader/pdf-translate.js';
 import { pdfCacheIdentity } from '../lib/reader/pdf-cache.js';
 import { openPdfDocument, looksLikePdf } from '../lib/reader/pdf.js';
 import { isComplexPage } from '../lib/reader/pdf-text.js';
+import { OCR_UI_ENABLED } from '../lib/ocr/feature.js';
+import { ocrNotice } from '../lib/ocr/status.js';
+import { getOcrStatus, openOcrSettings } from '../lib/ocr/page.js';
 
 const PDF_TRANS_MAX = 24;
 let pdfViewEpoch = 0;
@@ -714,7 +717,48 @@ async function renderPdfPage(el, index, epoch) {
     note.className = 'pdf-empty-text';
     note.textContent = '本页没有可提取的文字（可能是扫描页）。';
     el.appendChild(note);
+    if (OCR_UI_ENABLED) showPdfOcrNotice(el, doc).catch(() => {});
   }
+}
+
+// OCR 接入点（docs/OCR-INTERFACE.md §6.2）：零文本页只查一次状态，未就绪时在页内提示并给出设置入口，
+// 不弹窗、不自动下载、不把空文本送去翻译。就绪后的逐页识别留到 PDF-HANDOFF §5.3 第 3 步接入。
+let pdfOcrStatus = null; // { doc, promise }：同一文档内复用检测结果，换书后重新检测
+function pdfOcrStatusFor(doc, refresh) {
+  if (refresh || !pdfOcrStatus || pdfOcrStatus.doc !== doc) {
+    const promise = getOcrStatus({ refresh: !!refresh });
+    pdfOcrStatus = { doc, promise };
+    promise.catch(() => { if (pdfOcrStatus && pdfOcrStatus.promise === promise) pdfOcrStatus = null; });
+  }
+  return pdfOcrStatus.promise;
+}
+
+async function showPdfOcrNotice(el, doc, refresh) {
+  const snap = await pdfOcrStatusFor(doc, refresh);
+  if (doc !== state.pdf || !el.isConnected) return;
+  const old = el.querySelector('.pdf-ocr-notice');
+  if (old) old.remove();
+  const lang = state.config && state.config.uiLang === 'en' ? 'en' : 'zh';
+  const notice = ocrNotice(snap.status, lang);
+  if (notice.kind === 'none') return;
+  const box = document.createElement('div');
+  box.className = 'pdf-ocr-notice';
+  box.dataset.ocrStatus = snap.status;
+  const text = document.createElement('span');
+  text.textContent = notice.text;
+  box.appendChild(text);
+  if (notice.action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pdf-ocr-action';
+    btn.textContent = notice.action === 'retry' ? (lang === 'en' ? 'Retry' : '重试') : (lang === 'en' ? 'Open Settings' : '前往设置');
+    btn.addEventListener('click', () => {
+      if (notice.action === 'retry') showPdfOcrNotice(el, doc, true).catch(() => {});
+      else openOcrSettings();
+    });
+    box.appendChild(btn);
+  }
+  el.appendChild(box);
 }
 
 function applyPdfTranslationsTo(root, texts) {
