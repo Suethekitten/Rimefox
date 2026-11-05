@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-03；当前版本为 0.16.3，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.3 修复 0.16.1 独立 QA 的阅读器、PDF 文本层、会话密钥与字幕费用问题；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-04；当前版本为 0.16.3，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.16.3 修复 0.16.1 独立 QA 的阅读器、PDF 文本层、会话密钥与字幕费用问题；实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -131,7 +131,7 @@
 | P2-9 | 翻译引擎内部优化（不加请求、不加设置） | 轻量上下文、片段稳定映射、低成本质检、术语一致性：现状、成本、风险和下一步最小任务见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)；不定版本 |
 | P2-10 | 拆 `main.js` | 把纯函数（离屏距离、取批上限、退避时间表）挪到 `core.js`，只动这两个文件 + 自检页；P1-5 的前置（原 HANDOFF §10） |
 | P2-12 | ✅ PDF 表格 / 公式文本清洗（**0.16.0 已完成**） | 表格仅在单栏页且数据行带数字时按单元格拆（不重建合并单元格）；公式残渣换 `[公式]` 占位且公式块不送翻；脚注标记 / 上标编号剥离；目录页不再被当成第二栏。跨页段落合并、表格结构重建与公式识别仍未做，见 [PDF 维护交接](PDF-HANDOFF.md) |
-| P2-11 | PDF 扫描件 OCR（未来版本，**准备中**） | 准备工作已开始：候选 PaddleOCR.js / Tesseract.js / Scribe.js 的体积、许可与适配性评估完成（见 [归档评估](archive/2026-10-31-ocr-candidates.md)），探针计划已定；尚未跑探针、未集成代码。下一步：Tesseract 基线探针，再决定是否值得为 PaddleOCR 付 40–60 MB 可选增强包 |
+| P2-11 | PDF 扫描件 OCR（未来版本，**方案已定，未实现**） | 采用用户按需下载并安装的独立本地组件，基础扩展不打包 OCR 引擎和模型；设置页与 PDF 阅读器共用配置入口，无可用 OCR 时提示用户前往设置。系统 OCR、本地 PaddleOCR、GPU / CPU 回退及验收规则统一见 [PDF-HANDOFF §5](PDF-HANDOFF.md#5-ocr方案已确定尚未实现) |
 
 ### P3 — 明确暂不做
 
@@ -170,7 +170,7 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 
 1. 本地试用 0.16.2，重点打开 600+ 页 PDF 看首屏和目录，并测试地图 / 视频页点击不卡。
 2. 跨页段落合并（PDF-HANDOFF §4 第 1 条）与真实 API 延迟仍待排期；真实延迟要用服务商配置实测，不能用假接口结果代替。
-3. P2-11 继续做 OCR 基线探针；真实 API 延迟与质量实测单列任务，不能用假接口结果代替。
+3. P2-11 先验证可选本地 OCR 组件与能力检测，再接设置页 / PDF 阅读器的配置、下载和未配置提示，最后接逐页识别与回归；契约只在 [PDF-HANDOFF §5](PDF-HANDOFF.md#5-ocr方案已确定尚未实现) 维护。真实 API 延迟与质量实测单列任务。
 
 | 版本 | 内容 |
 |---|---|
