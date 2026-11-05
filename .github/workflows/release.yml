@@ -150,10 +150,18 @@ jobs:
 
           ---
 
-          **安装**：下载下面的 zip 并解压 → 打开 `chrome://extensions/`（Edge：`edge://extensions/`）→ 开启开发者模式 → 「加载已解压的扩展程序」→ 选择解压出来的 `Rimefox` 文件夹。
+          **扩展安装**：下载 `Rimefox-${{ steps.ver.outputs.tag }}.zip` 并解压 → 打开 `chrome://extensions/`（Edge：`edge://extensions/`）→ 开启开发者模式 → 「加载已解压的扩展程序」→ 选择解压出来的 `Rimefox` 文件夹。
 
           **升级**：把新版本解压后覆盖原来的 `Rimefox` 文件夹，再在扩展管理页点「重新加载」。文件夹路径不变，设置与设备记忆密钥会保留；会话密钥在重载后需重新填写。
           EOF
+          if node --input-type=module -e "import {OCR_COMPONENT_RELEASES as r} from './lib/ocr/feature.js'; process.exit(r.windows?.connector?.includes('/releases/download/${{ steps.ver.outputs.tag }}/')?0:1)"; then
+            cat >> "$RUNNER_TEMP/notes.md" <<'EOF'
+
+          **Windows x64 系统 OCR 体验**：下载 `Rimefox-${{ steps.ver.outputs.tag }}-Windows-OCR-Preview.zip` 及其 `.sha256`，外层解压后阅读「安装说明.md」。先安装扩展，再使用自己浏览器的实际扩展 ID 安装组件；Chrome / Edge ID 可能不同。扩展中的组件下载入口提供独立组件 ZIP。
+
+          这是未签名系统 OCR 预览，Windows 10 2004+ 为构建目标，当前开发机验证不能代替干净机器或未打包 OCR API 的全面兼容保证，系统安全策略可能阻止安装。macOS 暂无通过下载实机验收的发布包；完整限制和安装步骤见[本版本安装说明](https://github.com/Suethekitten/Rimefox/blob/${{ steps.ver.outputs.tag }}/native/ocr-host/INSTALL.md)及其链接的验收状态。
+          EOF
+          fi
 
       - name: 等待完整检查与系统 OCR 检查
         if: steps.check.outputs.skip == 'false'
