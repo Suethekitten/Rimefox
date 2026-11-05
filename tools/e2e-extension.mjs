@@ -802,6 +802,12 @@ const patchConfig = (patch) => {
   return swEval("const c = (await chrome.storage.local.get('config')).config; Object.assign(c, " + JSON.stringify(next) + '); await chrome.storage.local.set({ config: c }); return true;');
 };
 
+// On first install, onInstalled -> getConfig() persists a default config (no _storageRevision yet).
+// If that write lands after the fixture below, the fixture is replaced by defaults and no request
+// ever reaches the fake API. Wait for the first-run write, then for the fixture to survive migration.
+if (!await until(() => swEval("return !!((await chrome.storage.local.get('config')).config || {})._storageRevision;"), 15000)) {
+  throw new Error('Extension did not finish its first-run config write');
+}
 await swEval(
   'await chrome.storage.local.set({ config: ' +
     JSON.stringify({
@@ -820,6 +826,11 @@ await swEval(
     }) +
     ' }); return true;'
 );
+const fixtureKept = await until(async () => {
+  const c = await readConfig();
+  return c && c._storageRevision && c.currentProvider === '__custom__' && c.providerConfig?.__custom__?.baseUrl === ORIGIN + '/v1';
+}, 15000);
+if (!fixtureKept) throw new Error('E2E config fixture was not kept: ' + JSON.stringify(await readConfig()));
 
 // 新开一个标签页，等内容脚本起来（它会在 <html> 上写 data-dt）
 // cache:clear 只接受扩展页面（内容脚本不能清空共享缓存）：临时开一个设置页发，发完就关，
