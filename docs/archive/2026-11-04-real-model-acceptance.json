@@ -1,0 +1,117 @@
+{
+  "version": "0.16.4",
+  "date": "2026-11-04",
+  "environment": {
+    "os": "macOS 27.2",
+    "browser": "Chrome 156.0.8078.80",
+    "extensionPath": "edge-bilingual",
+    "runtimeReloadVerified": true
+  },
+  "configuredProtocols": [
+    {
+      "provider": "deepseek",
+      "engine": "openai",
+      "model": "deepseek-flash"
+    },
+    {
+      "provider": "gemini",
+      "engine": "gemini",
+      "model": "gemini-3.8-flash"
+    }
+  ],
+  "missingProtocols": [
+    "anthropic"
+  ],
+  "clinicalSource": "Among 120 adults, mortality fell from 8% to 6%; the result was not statistically significant (p=0.18). The dose remained 5 mg once daily.",
+  "inlineSource": "Keep <f1>5 mg</f1> once daily; see <k1><f2>Table 1</f2></k1>.",
+  "alignmentSource": "Researchers enrolled 120 adults. Blood pressure was measured every morning. This trial continued for six weeks.",
+  "cases": [
+    {
+      "name": "deepseek-general",
+      "ok": true,
+      "translation": "在120名成年人中，死亡率从8%降至6%；结果无统计学显著性（p=0.18）。剂量仍为每日一次5 mg。"
+    },
+    {
+      "name": "deepseek-inline",
+      "ok": true,
+      "translation": "每日一次，每次 <f1>5 mg</f1>；参见<k1><f2>表 1</f2></k1>。",
+      "inlineError": null
+    },
+    {
+      "name": "deepseek-alignment",
+      "ok": true,
+      "translation": "研究人员招募了120名成年人。每天早晨测量血压。这项试验持续了六周。",
+      "alignment": null,
+      "fallback": "paragraph"
+    },
+    {
+      "name": "deepseek-medical",
+      "ok": true,
+      "translation": "在120名成人中，死亡率从8%降至6%；该结果无统计学显著性（p=0.18）。剂量仍为5 mg每日一次。",
+      "qualityImprovementProven": false
+    },
+    {
+      "name": "deepseek-invalid-model",
+      "ok": false,
+      "httpStatus": 400,
+      "model": "rimefox-nonexistent-qa-model",
+      "expectedError": true
+    },
+    {
+      "name": "deepseek-recovery",
+      "ok": true,
+      "translation": "修正模型名称后，翻译恢复正常。"
+    },
+    {
+      "name": "gemini-general",
+      "ok": true,
+      "translation": "在 120 名成年人中，死亡率从 8% 降至 6%；该结果在统计学上无显著意义（p=0.18）。剂量保持为每日一次 5 mg。"
+    },
+    {
+      "name": "gemini-inline",
+      "ok": true,
+      "translation": "维持每日一次 <f1>5 mg</f1>；参见 <k1><f2>表 1</f2></k1>。",
+      "inlineError": null
+    },
+    {
+      "name": "gemini-alignment",
+      "ok": true,
+      "translation": "研究人员招募了120名成年人。每天早晨测量血压。这项试验持续了六周。",
+      "alignment": null,
+      "fallback": "paragraph"
+    }
+  ],
+  "measuredUsage": {
+    "scope": "controlled batch only; excludes earlier popup and subtitle calls",
+    "deepseek": {
+      "requests": 6,
+      "responses": 5,
+      "inputTokens": 4107,
+      "outputTokens": 161,
+      "retries": 0,
+      "failed": 1
+    },
+    "gemini": {
+      "requests": 4,
+      "responses": 3,
+      "inputTokens": 2619,
+      "outputTokens": 136,
+      "retries": 0,
+      "failed": 0
+    },
+    "reasoningTokens": "not collected",
+    "actualInvoice": "not available"
+  },
+  "restoredPreferences": {
+    "provider": "deepseek",
+    "debug": false,
+    "professionalProfile": "general",
+    "medicalMode": false
+  },
+  "notes": [
+    "Counter counts HTTP attempts, including protocol negotiation; response count need not equal request count.",
+    "Structured sentence alignment returned null for both tested models; translation remained usable at paragraph granularity.",
+    "An earlier malformed marker sample used f0/k0 and was rejected before network. The final sample uses valid f1/k1/f2 markers.",
+    "Official Flash pricing and short per-request output budgets keep this small batch far below the authorized CNY 10 budget; invoice was not checked."
+  ]
+}

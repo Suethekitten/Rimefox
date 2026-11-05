@@ -7,6 +7,7 @@
 | 文件 | 是什么 | 版本 / 状态 |
 |---|---|---|
 | [2026-11-04-hardening-0.16.4.md](2026-11-04-hardening-0.16.4.md) | 密钥、异常 EPUB、PDF 资源、升级恢复及验收边界 | 本地 0.16.4 验证，未推送发布 |
+| [2026-11-04-real-model-acceptance.json](2026-11-04-real-model-acceptance.json) | 已配置 DeepSeek/Gemini 的真实译文、格式、对齐回退、400 恢复与 HTTP/Token 统计 | 0.16.4；缺少 Anthropic；不含 Key |
 | [2026-11-03-qa-fixes-0.16.3.md](2026-11-03-qa-fixes-0.16.3.md) | 0.16.1 独立 QA 的修复清单、未修项与验证记录 | 0.16.3 验证记录，发布状态见 ROADMAP |
 | [2026-11-02-pdf-quality-0.16.0.md](2026-11-02-pdf-quality-0.16.0.md) | PDF 多栏 / 目录 / 公式 / 表格文本质量、阅读器存储拆分、版式切换与渲染稳定性、配置导入清 Key 的验证记录 | 0.16.0 验证记录，发布状态见 ROADMAP |
 | [2026-11-01-session-keys-0.15.0.md](2026-11-01-session-keys-0.15.0.md) | 会话密钥、旧 Key 迁移、鉴权暂停、配置同步及真实 Chrome 生命周期验证 | 0.15.0 验证记录，发布状态见 ROADMAP |
