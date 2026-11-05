@@ -454,3 +454,31 @@ test('版面：句末标点 + 右缘短于段宽时分段', async () => {
   ]);
   assert.deepEqual(out.map((b) => b.text), ['这是第一段的第一行文字比较长第一段到这里结束。', '第二段从这里开始，同样的行距Rimefox sample page continues here.']);
 });
+
+// ---------------- 回归：2026-11-05 修复的两个问题 ----------------
+test('回归：后端自报的语言不再被截成 8 种（请求语言仍限 8 种）', () => {
+  const langs = ['en-US', 'fr-FR', 'it-IT', 'de-DE', 'es-ES', 'pt-BR', 'zh-Hans', 'zh-Hant', 'yue-Hans', 'ko-KR', 'ja-JP', 'ru-RU'];
+  const hello = parseHostMessage({ v: 1, id: 'r1', type: 'hello', component: { protocols: [1] }, backends: [{ id: 'system', status: 'ready', languages: langs }] });
+  assert.deepEqual(hello.backends[0].languages, langs);
+  assert.ok(hello.backends[0].languages.includes('zh-Hant'));
+  const req = buildRecognize({ id: 'r2', backend: 'system', image: PNG, languages: langs });
+  assert.equal(req.languages.length, OCR_LIMITS.maxLanguages);
+});
+
+test('回归：检测缓存过期后重新握手，不沿用连接里的旧 hello', async () => {
+  let t = 0;
+  let paddle = 'engine_missing';
+  const port = fakePort((m, p) => queueMicrotask(() => {
+    if (m.type === 'hello') p.reply(HELLO(m.id, { backends: [{ id: 'system', status: 'ready' }, { id: 'paddle', status: paddle }] }));
+  }));
+  const src = createNativeOcrSource({ hasPermission: async () => true, connect: () => port });
+  const svc = createOcrService({ sources: [src], getChoice: async () => 'paddle', now: () => t, ttlMs: 1000 });
+  assert.equal((await svc.status()).status, 'engine_missing');
+  paddle = 'ready'; // 用户装好了引擎包，连接没断
+  t = 500;
+  assert.equal((await svc.status()).status, 'engine_missing', '缓存期内沿用检测结果');
+  t = 2000;
+  assert.equal((await svc.status()).status, 'ready', '过期后应重新握手拿到新状态');
+  assert.equal(port.sent.filter((m) => m.type === 'hello').length, 2);
+  src.dispose();
+});
