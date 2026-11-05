@@ -153,9 +153,13 @@ func recognize(_ message: [String: Any], _ job: Job) {
         guard lines.count < 5000, top.string.utf16.count <= 4000, total <= 300000 else {
             fail(job, "too_large", "recognized text exceeds protocol limits"); return
         }
-        let b = observation.boundingBox, w = Double(width), h = Double(height)
-        lines.append(["text": top.string, "confidence": Double(top.confidence),
-            "box": [Double(b.minX) * w, (1 - Double(b.maxY)) * h, Double(b.width) * w, Double(b.height) * h].map { ($0 * 100).rounded() / 100 }])
+        let b = observation.boundingBox
+        let w = Double(width), h = Double(height)
+        let box: [Double] = [Double(b.minX) * w, (1.0 - Double(b.maxY)) * h,
+                             Double(b.width) * w, Double(b.height) * h]
+        let roundedBox: [Double] = box.map { ($0 * 100.0).rounded() / 100.0 }
+        let line: [String: Any] = ["text": top.string, "confidence": Double(top.confidence), "box": roundedBox]
+        lines.append(line)
     }
     finish(job, ["v": 1, "id": job.id, "type": "result", "ok": true, "backend": "system",
         "engine": ["name": "Apple Vision", "version": osVersionString(), "model": "VNRecognizeTextRequest-accurate:" + componentVersion],

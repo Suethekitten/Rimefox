@@ -93,7 +93,12 @@ test('system OCR preview installer: checksum, IDs, spaces, reinstall/upgrade, re
     const manifestPath = platform === 'windows' ? path.join(destination, 'com.rimefox.ocr.json') : chromeManifest;
     const first = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     assert.deepEqual(first.allowed_origins.sort(), [a, b].map(id => 'chrome-extension://' + id + '/'));
-    assert.ok(first.path.startsWith(destination + path.sep) && fs.existsSync(first.path));
+    assert.ok(fs.existsSync(first.path), 'Manifest executable is missing: ' + first.path);
+    // Windows PowerShell expands an 8.3 TEMP path (RUNNER~1 on CI); compare
+    // canonical filesystem paths while still rejecting any executable outside the install.
+    const relativeBinary = path.relative(fs.realpathSync(destination), fs.realpathSync(first.path));
+    assert.ok(relativeBinary && !path.isAbsolute(relativeBinary) && relativeBinary !== '..' && !relativeBinary.startsWith('..' + path.sep),
+      'Manifest executable is outside the installation: ' + JSON.stringify({ destination, executable: first.path }));
     if (platform === 'windows') assert.ok(fs.existsSync(path.join(path.dirname(first.path), 'licenses/dotnet-library-license.txt')));
     const diagnostic = JSON.parse(succeeded(run(first.path, ['--diagnose'])).stdout);
     assert.equal(diagnostic.protocol, 1); assert.ok(Array.isArray(diagnostic.languages));

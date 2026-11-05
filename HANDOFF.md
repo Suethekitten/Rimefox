@@ -889,7 +889,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - 系统 OCR 开放可选 nativeMessaging 权限和 system/off 界面，设置显示真实语言、就绪状态、版本、扩展 ID、下载校验值；状态协议的唯一说明见 [OCR-INTERFACE](docs/OCR-INTERFACE.md)。
 - Windows 自包含连接器与当前用户安装器、macOS 通用构建及用户 Library 安装器、验收层级和 Mac 实机清单见 [本地组件 README](native/ocr-host/README.md)；安装及接手 Agent 提示词仅维护于其 INSTALL。
 - 文档阅读统一入口、纯文本安全解析、双列视图、可调书库容量的接口见 [阅读器架构](docs/READER-ARCHITECTURE.md)；PDF 默认双列及版式叠字预览的边界见 [PDF 交接](docs/PDF-HANDOFF.md)。
-- 设置导航 hover 不再通过改变行高移动后续选项；设备记忆密钥使用既有 switch 样式。新增阅读器及 OCR 生命周期浏览器回归，真实公开扫描质量和本机验证见 [实施记录](docs/archive/2026-11-05-system-ocr-preview.md)。
+- 设置导航 hover 不再通过改变行高移动后续选项；设备记忆密钥使用既有 switch 样式，诊断选择器在窄屏允许收缩，避免长标签页标题挤出操作按钮。新增阅读器及 OCR 生命周期浏览器回归，真实公开扫描质量和本机验证见 [实施记录](docs/archive/2026-11-05-system-ocr-preview.md)。
 - Release 在同一提交的 Checks / 系统 OCR 检查全部成功后创建；引用当前版本组件时先建草稿，待审核者上传校验后的独立组件与体验包后公开。Windows 组件输入独立于扩展下载元数据，先冻结组件再固定 ZIP SHA-256，最后从提交源码重建并比较；具体命令仅维护于 [组件打包说明](native/ocr-host/README.md#本地打包)。
 
 ## 15. 专业翻译引擎

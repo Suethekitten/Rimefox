@@ -808,10 +808,21 @@ const patchConfig = (patch) => {
 if (!await until(() => swEval("return !!((await chrome.storage.local.get('config')).config || {})._storageRevision;"), 15000)) {
   throw new Error('Extension did not finish its first-run config write');
 }
+// The welcome page may persist the browser's initial UI language after onInstalled.
+// Finish that real first-run flow before the explicitly Chinese assertion fixture.
+const welcomeTarget = await until(async () => {
+  const { targetInfos } = await send('Target.getTargets');
+  return targetInfos.find(t => t.type === 'page' && t.url === 'chrome-extension://' + extId + '/welcome/index.html');
+}, 10000);
+if (!welcomeTarget) throw new Error('First-run welcome page did not open');
+const welcomeSession = await attach(welcomeTarget.targetId);
+if (!await until(() => evaluate(welcomeSession, 'document.documentElement.hasAttribute("data-ready")'), 10000)) throw new Error('Welcome initialization did not finish');
+await send('Target.closeTarget', { targetId: welcomeTarget.targetId });
 await swEval(
   'await chrome.storage.local.set({ config: ' +
     JSON.stringify({
       _v: 6,
+      uiLang: 'zh',
       currentProvider: '__custom__',
       customProviders: [{ id: '__custom__', name: 'Fake' }, { id: 'custom:2', name: 'Two' }],
       providerConfig: {
@@ -1962,6 +1973,7 @@ async function glossaryNotesChecks(o) {
   const screenshot = await send('Page.captureScreenshot', { format: 'png' }, o);
   fs.writeFileSync(path.join(WORK, 'glossary-notes-wide.png'), Buffer.from(screenshot.data, 'base64'));
   await send('Emulation.setDeviceMetricsOverride', { width: 520, height: 900, deviceScaleFactor: 1, mobile: false }, o);
+  await evaluate(o, 'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   const narrow = await inRow('response', "const box=textarea.getBoundingClientRect();const parent=row.getBoundingClientRect();return {width:box.width,inside:box.left>=parent.left&&box.right<=parent.right+1,overflow:document.documentElement.scrollWidth>innerWidth}");
   check('说明：窄屏 textarea 独占整行且不横向溢出', narrow.width > 250 && narrow.inside && !narrow.overflow, JSON.stringify(narrow));
   const narrowScreenshot = await send('Page.captureScreenshot', { format: 'png' }, o);
@@ -1970,6 +1982,17 @@ async function glossaryNotesChecks(o) {
   await patchConfig({ uiLang: 'en' });
   const english = await until(() => inRow('response', "return row.querySelector('summary').textContent.includes('Term note') && document.querySelector('.glossary-head').textContent.includes('Preferred translation')"));
   check('说明：英文界面的标签与说明提示可翻译', english === true);
+  // Long real tab titles must not force the diagnostic selector beyond the card.
+  await evaluate(o, "const s=document.getElementById('diagTab');s.add(new Option('Long browser tab title '.repeat(15),'layout-fixture'));s.value='layout-fixture';true");
+  await send('Emulation.setDeviceMetricsOverride', { width: 520, height: 900, deviceScaleFactor: 1, mobile: false }, o);
+  await evaluate(o, 'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  const englishNarrow = await inRow('response', "const box=textarea.getBoundingClientRect();const parent=row.getBoundingClientRect();return {width:box.width,inside:box.left>=parent.left&&box.right<=parent.right+1,overflow:document.documentElement.scrollWidth>innerWidth,scrollWidth:document.documentElement.scrollWidth,wide:[...document.querySelectorAll('body *')].filter(e=>!e.closest('.sidebar')&&e.getClientRects().length&&e.getBoundingClientRect().right>innerWidth+1).slice(0,16).map(e=>({tag:e.tagName,id:e.id,cls:e.className,right:e.getBoundingClientRect().right,text:e.textContent.slice(0,50)}))}");
+  if (englishNarrow.overflow) {
+    const shot = await send('Page.captureScreenshot', { format: 'png' }, o);
+    fs.writeFileSync(path.join(WORK, 'settings-english-overflow.png'), Buffer.from(shot.data, 'base64'));
+  }
+  check('说明：英文窄屏布局不横向溢出', englishNarrow.width > 250 && englishNarrow.inside && !englishNarrow.overflow, JSON.stringify(englishNarrow));
+  await send('Emulation.clearDeviceMetricsOverride', {}, o);
   await patchConfig({ uiLang: 'zh' });
 }
 
