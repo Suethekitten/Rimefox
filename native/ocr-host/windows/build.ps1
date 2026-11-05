@@ -26,5 +26,5 @@ Copy-Item -LiteralPath (Join-Path $dotnetRoot 'LICENSE.txt') -Destination (Join-
 Copy-Item -LiteralPath (Join-Path $runtimePack 'LICENSE.TXT') -Destination (Join-Path $notices 'dotnet-MIT.txt') -Force
 Copy-Item -LiteralPath (Join-Path $runtimePack 'THIRD-PARTY-NOTICES.TXT') -Destination (Join-Path $notices 'dotnet-third-party-notices.txt') -Force
 Copy-Item -LiteralPath "$PSScriptRoot/licenses/CsWinRT-MIT.txt" -Destination $notices -Force
-@{ runtime = $Runtime; dotnetRuntime = $runtimeVersion; windowsProjection = ($deps.libraries.PSObject.Properties.Name | Where-Object { $_ -like 'runtimepack.Microsoft.Windows.SDK.NET.Ref/*' }) } |
+[ordered]@{ runtime = $Runtime; dotnetRuntime = $runtimeVersion; windowsProjection = ($deps.libraries.PSObject.Properties.Name | Where-Object { $_ -like 'runtimepack.Microsoft.Windows.SDK.NET.Ref/*' }) } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $notices 'components.json') -Encoding UTF8

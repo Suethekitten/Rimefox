@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { OCR_COMPONENT_RELEASES, verifiedOcrRelease } from '../lib/ocr/feature.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
@@ -327,8 +328,9 @@ fs.writeFileSync(modeFile, 'ready');
   await sleep(600);
   check('PaddleOCR 未装不影响系统 OCR 就绪', await pageEval(opt, 'return document.getElementById("ocrStatus").dataset.ocrStatus==="ready"'));
   await pageEval(opt, "document.getElementById('ocrInstall').click(); return true;");
-  const dialog = await until(() => pageEval(opt, "const d=document.getElementById('ocrInstallDialog'); return d.open ? { title: document.getElementById('ocrInstallTitle').textContent, platform: document.getElementById('ocrInstallPlatform').textContent, note: document.getElementById('ocrInstallNote').textContent, disabled: document.getElementById('ocrInstallDownload').disabled } : null"), 3000);
-  check('系统预览安装说明：当前平台、未发布时禁用下载', dialog && dialog.title === '安装系统 OCR 预览组件' && !!dialog.platform && dialog.disabled && /尚未发布/.test(dialog.note), JSON.stringify(dialog));
+  const dialog = await until(() => pageEval(opt, "const d=document.getElementById('ocrInstallDialog'); return d.open ? { title: document.getElementById('ocrInstallTitle').textContent, platform: document.getElementById('ocrInstallPlatform').textContent, note: document.getElementById('ocrInstallNote').textContent, checksum: document.getElementById('ocrInstallSha256').textContent, disabled: document.getElementById('ocrInstallDownload').disabled } : null"), 3000);
+  const published = verifiedOcrRelease(OCR_COMPONENT_RELEASES[IS_WIN ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux']);
+  check('系统预览安装说明：当前平台、校验值与下载状态', dialog && dialog.title === '安装系统 OCR 预览组件' && !!dialog.platform && (published ? !dialog.disabled && dialog.checksum === published.sha256 && /SHA-256/.test(dialog.note) : dialog.disabled && /尚未发布/.test(dialog.note)), JSON.stringify(dialog));
   await pageEval(opt, "document.getElementById('ocrInstallDialog').close('cancel'); return true;");
   // 保存选择，验证随设置页「保存」写入配置
   await pageEval(opt, "const s=document.getElementById('ocrEngine');s.value='off';s.dispatchEvent(new Event('change',{bubbles:true}));return true;");

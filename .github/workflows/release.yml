@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: write # 创建 tag 和 Release
+  actions: read # 等待同一提交的独立检查，不能抢先发布
 
 concurrency:
   group: release
@@ -154,12 +155,22 @@ jobs:
           **升级**：把新版本解压后覆盖原来的 `Rimefox` 文件夹，再在扩展管理页点「重新加载」。文件夹路径不变，设置与设备记忆密钥会保留；会话密钥在重载后需重新填写。
           EOF
 
-      - name: 发布 Release
+      - name: 等待完整检查与系统 OCR 检查
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/wait-release-checks.mjs
+
+      - name: 创建 Release（组件尚待上传时保留草稿）
         if: steps.check.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          DRAFT=()
+          if node --input-type=module -e "import {OCR_COMPONENT_RELEASES as r} from './lib/ocr/feature.js'; process.exit(Object.values(r).some(x=>x.connector?.includes('/releases/download/${{ steps.ver.outputs.tag }}/'))?0:1)"; then
+            DRAFT=(--draft)
+          fi
           gh release create "${{ steps.ver.outputs.tag }}" "${{ steps.pack.outputs.zip }}" \
             --title "凛狐 Rimefox ${{ steps.ver.outputs.tag }}" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            --target "$GITHUB_SHA"
+            --target "$GITHUB_SHA" "${DRAFT[@]}"

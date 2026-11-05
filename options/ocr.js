@@ -187,6 +187,7 @@ export function createOcrSettings({ uiLang } = {}) {
     $('ocrInstallPlatform').textContent = PLATFORM_LABEL[platform] || t('未知平台');
     $('ocrInstallSize').textContent = formatBytes(release && release.downloadBytes) || t('尚未发布');
     $('ocrInstallDisk').textContent = formatBytes(release && release.diskBytes) || t('以预览包说明为准');
+    $('ocrInstallSha256').textContent = release ? release.sha256 : t('尚未发布');
     $('ocrInstallNote').textContent = url ? t('下载后先按预览包说明核对 SHA-256，再安装。') : t('当前平台的预览组件尚未发布。请仅使用维护者提供的完整预览包及校验值；没有预览包时请保持 OCR 关闭。');
     const steps = $('ocrInstallSteps'); steps.textContent = '';
     const instructions = platform === 'windows' ? [

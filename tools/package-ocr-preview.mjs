@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { zipSync } from '../lib/vendor/fflate.browser.mjs';
+import { componentProvenance } from './ocr-package-inputs.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const option = (key, fallback) => args.includes(key) ? args[args.indexOf(key) + 1] : fallback;
@@ -22,6 +23,8 @@ if (!version) throw new Error('Invalid connector version output');
 const diagnostic = spawnSync(binary, ['--diagnose'], { encoding: 'utf8', windowsHide: true });
 if (diagnostic.status !== 0) throw new Error('Connector diagnostics failed');
 const capability = JSON.parse(diagnostic.stdout);
+const provenance = componentProvenance(root, platform);
+if (provenance.dirtyWorktree) throw new Error('Commit and review all source changes before packaging a distributable component.');
 const architecture = platform === 'macos' ? 'universal' : capability.architecture.toLowerCase();
 let deploymentTargets = [];
 if (platform === 'macos') {
@@ -48,8 +51,7 @@ if (platform === 'windows') {
 files['preview.json'] = Buffer.from(JSON.stringify({ product: 'com.rimefox.ocr', version, platform, architecture,
   channel: 'system-ocr-preview', publisherSignature: 'not-verified', notarization: 'not-verified', deploymentTargets,
   compatibility: platform === 'windows' ? 'Unpackaged API compatibility is not guaranteed across Windows environments.' : 'macOS 12+ deployment target; real downloaded/quarantined installation still needs manual acceptance.',
-  sourceCommit: spawnSync('git', ['-c', 'safe.directory=' + root.replaceAll('\\', '/'), 'rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(),
-  dirtyWorktree: !!spawnSync('git', ['-c', 'safe.directory=' + root.replaceAll('\\', '/'), 'status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout.trim(),
+  ...provenance,
   buildMachineDiagnostic: capability }, null, 2));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 files.SHA256SUMS = Buffer.from(Object.entries(files).map(([name, bytes]) => sha(bytes) + '  ' + name).join('\n') + '\n');
