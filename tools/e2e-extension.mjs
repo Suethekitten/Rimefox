@@ -3000,16 +3000,20 @@ async function stylePersistenceChecks() {
   await patchConfig({ targetLang: 'zh-CN', customLanguages: [], mode: 'dual', lazy: false, aiContextEnabled: false, privacyEnabled: false, funStyle: 'plain' });
   let page = await openTab(ORIGIN + '/page.html');
   await tabMsg(page.tabId, { type: 'dt:status' });
-  const pageTabId = await swEval(`return new Promise((resolve) => chrome.tabs.query({ url: ${JSON.stringify(ORIGIN + '/page.html')} }, (tabs) => resolve(tabs && tabs[0] ? tabs[0].id : null)))`);
+  const pageTabId = page.tabId;
   const { targetId } = await send('Target.createTarget', { url: 'chrome-extension://' + extId + '/popup/index.html' });
   const pop = await attach(targetId);
   await until(() => evaluate(pop, "!!document.getElementById('styleSelect')"), 10000);
   await swEval(`return new Promise((resolve) => chrome.tabs.update(${JSON.stringify(pageTabId)}, { active: true }, () => resolve(true)))`);
+  const previousDocument = await evaluate(pop, 'performance.timeOrigin');
   await evaluate(pop, 'location.reload(); true');
-  await until(() => evaluate(pop, "document.getElementById('styleSelect') && !document.getElementById('styleSelect').disabled"), 10000);
+  if (!await until(() => evaluate(pop, `performance.timeOrigin !== ${previousDocument} && document.readyState === 'complete' && !!document.querySelector('#styleSelect option[value="catgirl"]') && !document.getElementById('styleSelect').disabled && !/检测中|Checking/.test(document.getElementById('statusTitle').textContent)`), 15000)) {
+    throw new Error('Popup did not finish navigation, load styles and bind the article tab');
+  }
+  const requestsBeforeStyle = stats.requests;
   await evaluate(pop, "(function(){var s=document.getElementById('styleSelect');s.value='catgirl';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()");
   const saved = await until(async () => ((await readConfig()).funStyle === 'catgirl' ? 'saved' : null), 5000);
-  check('弹窗选择趣味风格：写入配置，不触发翻译', saved === 'saved', String(saved));
+  check('弹窗选择趣味风格：写入配置，不触发翻译', saved === 'saved' && stats.requests === requestsBeforeStyle, JSON.stringify({ saved, requests: stats.requests - requestsBeforeStyle }));
   await send('Target.closeTarget', { targetId }, pop);
   await send('Target.closeTarget', { targetId: page.targetId }, page.s);
   page = await openTab(ORIGIN + '/page.html');

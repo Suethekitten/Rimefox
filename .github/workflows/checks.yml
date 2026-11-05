@@ -33,6 +33,7 @@ jobs:
     timeout-minutes: 20
     env:
       RIMEFOX_TEST_BROWSER: ${{ matrix.browser }}
+      RIMEFOX_TEST_UI_LANG: ${{ matrix.browser == 'edge' && 'en' || 'zh' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

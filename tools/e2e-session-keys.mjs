@@ -9,6 +9,8 @@ import { zipSync, strToU8 } from '../lib/vendor/fflate.browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXTENSION = process.env.RIMEFOX_EXTENSION || ROOT;
+const UI_LANG = process.env.RIMEFOX_TEST_UI_LANG;
+if (UI_LANG && !['zh', 'en'].includes(UI_LANG)) throw new Error('RIMEFOX_TEST_UI_LANG must be zh or en');
 const BROWSER = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : process.platform === 'win32' ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : 'google-chrome');
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-session-e2e-'));
 const profile = path.join(WORK, 'profile');
@@ -55,7 +57,12 @@ const server = http.createServer((req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const ORIGIN = 'http://127.0.0.1:' + server.address().port;
 let untrustedRequests = 0;
-const untrustedServer = http.createServer((req, res) => { untrustedRequests++; res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"data":[{"id":"fake"}]}'); });
+const untrustedTargets = [];
+const untrustedServer = http.createServer((req, res) => {
+  untrustedRequests++;
+  untrustedTargets.push({ path: req.url, hasAuthorization: !!req.headers.authorization });
+  res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"data":[{"id":"fake"}]}');
+});
 await new Promise((resolve) => untrustedServer.listen(0, '127.0.0.1', resolve));
 const UNTRUSTED = 'http://127.0.0.1:' + untrustedServer.address().port;
 let browser;
@@ -88,6 +95,13 @@ async function open(url) {
   const { targetId } = await send('Target.createTarget', { url });
   return { targetId, session: await attach(targetId) };
 }
+function optionsReady(session) {
+  // The initial HTML already says "saved"; populated API fields prove config was applied.
+  return evaluate(session, 'return !!document.querySelector("#provider option") && !!document.getElementById("baseUrl")?.value && document.getElementById("savebar")?.dataset.dirty === "false" && !!document.getElementById("rememberKey")');
+}
+function uiContains(session, id, source) {
+  return evaluate(session, 'return import("/lib/i18n.js").then(m=>document.getElementById(' + JSON.stringify(id) + ')?.textContent.includes(m.t(' + JSON.stringify(source) + ')))');
+}
 async function start() {
   fs.mkdirSync(profile, { recursive: true });
   fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
@@ -116,9 +130,13 @@ async function start() {
   extId = loaded.id;
   console.log(version.Browser + ' · ' + extId + ' · ' + EXTENSION);
   options = (await open('chrome-extension://' + extId + '/options/index.html')).session;
-  if (!await until(() => evaluate(options, 'return !!document.querySelector("#provider option") && !!document.getElementById("rememberKey") && document.getElementById("saveState").textContent.includes("所有更改已保存")'))) throw new Error('Options did not load');
+  if (!await until(() => optionsReady(options))) throw new Error('Options did not load config');
   const debug = await evaluate(options, 'return chrome.runtime.sendMessage({type:"config:trustedGet"}).then(v=>({ok:v.ok,error:v.error}))');
   if (!debug.ok) throw new Error('Config initialization: ' + debug.error);
+  if (UI_LANG) {
+    await evaluate(options, 'return import("/lib/config.js").then(m=>m.saveConfig({uiLang:' + JSON.stringify(UI_LANG) + '}))');
+    if (!await until(() => evaluate(options, 'return document.documentElement.lang === ' + JSON.stringify(UI_LANG === 'en' ? 'en' : 'zh-CN')))) throw new Error('UI language did not apply');
+  }
   await sleep(300);
 }
 async function close() {
@@ -158,7 +176,9 @@ try {
   await keyForm('mock-session');
   await evaluate(options, 'const e=document.getElementById("baseUrl");e.value=' + JSON.stringify(UNTRUSTED + '/v1') + ';e.dispatchEvent(new Event("input",{bubbles:true}));document.getElementById("refreshModels").click();return true;');
   await sleep(1200);
-  check('QA F9：新地址未保存时自动和手动模型刷新均不发送旧 Key', untrustedRequests === 0 && await evaluate(options, 'return document.getElementById("modelHint").textContent.includes("接口地址已更改")'));
+  check('QA F9：新地址未保存时自动和手动模型刷新均为零请求', untrustedRequests === 0, JSON.stringify({ requests: untrustedRequests, origin: UNTRUSTED, targets: untrustedTargets }));
+  const changedAddressMessage = '接口地址已更改。请确认并保存新地址，或填写对应的 Key 后再获取模型列表。';
+  check('QA F9：当前界面语言显示地址更改提示', !!await until(() => uiContains(options, 'modelHint', changedAddressMessage), 5000), await evaluate(options, 'return JSON.stringify({lang:document.documentElement.lang,hint:document.getElementById("modelHint").textContent})'));
   await evaluate(options, 'const e=document.getElementById("baseUrl");e.value=' + JSON.stringify(ORIGIN + '/v1') + ';e.dispatchEvent(new Event("input",{bubbles:true}));return true;');
   let c = await cfg();
   check('新 Key 默认 session，设备记忆开关默认关闭', c.providerConfig[c.currentProvider].keyStorage === 'session' && !(await evaluate(options, 'return document.getElementById("rememberKey").checked')));
@@ -167,7 +187,7 @@ try {
   check('公开配置只有 hasKey 与修订号、不含 Key', publicResult.config.hasKey && !JSON.stringify(publicResult).includes('mock-session'));
   const secondOptions = await open('chrome-extension://' + extId + '/options/index.html');
   // saveState 的默认 HTML 已写着「已保存」；必须等真实配置填入，不能在 init 之前输入。
-  if (!await until(() => evaluate(secondOptions.session, 'return document.getElementById("apiKey")?.value === "mock-session" && document.getElementById("model")?.value === "fake" && document.getElementById("saveState")?.textContent.includes("所有更改已保存")'))) throw new Error('Second options did not initialize');
+  if (!await until(async () => await optionsReady(secondOptions.session) && await evaluate(secondOptions.session, 'return document.getElementById("apiKey")?.value === "mock-session" && document.getElementById("model")?.value === "fake"'))) throw new Error('Second options did not initialize with saved credentials');
   await evaluate(options, 'const e=document.getElementById("customPrompt");e.value="Use clear wording.";e.dispatchEvent(new Event("input",{bubbles:true}));return true;');
   await evaluate(secondOptions.session, 'const e=document.getElementById("model");e.value="fake-two";e.dispatchEvent(new Event("input",{bubbles:true}));return true;');
   if (!await until(() => evaluate(options, 'return !document.getElementById("save").disabled'))) throw new Error('First form did not become dirty');
@@ -206,12 +226,13 @@ try {
   const before401 = requests;
   const failed = await translation('A rejected authentication request.');
   check('真实 API 401 写入全局暂停', failed.errorCode === 'auth_paused' && (await cfg()).authPaused && requests === before401 + 1);
-  await until(() => evaluate(options, 'return document.getElementById("authStatus").textContent.includes("暂停")'));
+  const authMessage = '鉴权失败，翻译已暂停；更新密钥或测试连接后恢复。';
+  await until(() => uiContains(options, 'authStatus', authMessage));
   const popup = await open('chrome-extension://' + extId + '/popup/index.html');
-  await until(() => evaluate(popup.session, 'return document.getElementById("statusTitle")?.textContent.includes("暂停")'));
+  await until(() => uiContains(popup.session, 'statusTitle', '翻译已暂停'));
   const settingsStatus = await evaluate(options, 'return document.getElementById("authStatus").textContent');
   const popupStatus = await evaluate(popup.session, 'return document.getElementById("statusTitle").textContent');
-  check('设置页与弹窗显示暂停状态', settingsStatus.includes('暂停') && popupStatus.includes('暂停'), JSON.stringify({ settingsStatus, popupStatus }));
+  check('设置页与弹窗显示暂停状态', await uiContains(options, 'authStatus', authMessage) && await uiContains(popup.session, 'statusTitle', '翻译已暂停'), JSON.stringify({ settingsStatus, popupStatus }));
   const beforeBlocked = requests;
   await until(async () => (await Promise.all(pages.map((page) => evaluate(page.session, 'return !!window.__DT.state.config.authPaused', page.context)))).every(Boolean));
   for (const page of pages) await evaluate(page.session, 'window.__translationMessages=0;const old=chrome.runtime.sendMessage.bind(chrome.runtime);chrome.runtime.sendMessage=function(m,...rest){if(m.type==="translate")window.__translationMessages++;return old(m,...rest)};return true;', page.context);
@@ -333,7 +354,7 @@ try {
   }
   await sleep(600);
   options = (await open('chrome-extension://' + extId + '/options/index.html')).session;
-  if (!await until(() => evaluate(options, 'return !!chrome.runtime?.id && document.getElementById("saveState")?.textContent.includes("所有更改已保存")'), 5000)) {
+  if (!await until(() => optionsReady(options), 15000)) {
     console.log('Reload diagnostic', await evaluate(options, 'return {url:location.href,title:document.title,body:document.body?.innerText.slice(0,400),runtime:!!globalThis.chrome?.runtime}'));
     throw new Error('Reloaded options did not initialize');
   }

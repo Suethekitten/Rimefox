@@ -4114,13 +4114,19 @@
       return '首帧矩形不是最终坐标：style=' + left + ',' + top + ' rect=' + rect.left + ',' + rect.top;
     }
     if (left === 0 || top === 0) return '保存坐标越界时仍先落在左上角';
-    if (getComputedStyle(host).transitionProperty.indexOf('left') < 0) return '初始化后没有恢复 left/top 过渡';
+    var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var initialTransition = getComputedStyle(host).transitionProperty;
+    if (reducedMotion ? initialTransition !== 'none' : initialTransition.indexOf('left') < 0) {
+      return reducedMotion ? '减少动画时仍启用了位置过渡：' + initialTransition : '初始化后没有恢复 left/top 过渡';
+    }
     var initial = host.getAnimations().filter(function (a) { return a.transitionProperty === 'left' || a.transitionProperty === 'top'; });
     if (initial.length) return '首帧仍触发了位置过渡：' + initial.map(function (a) { return a.transitionProperty; }).join(',');
-    // 后续配置移动仍走 left/top 过渡（不能为了首帧全局删掉动画）。
+    // 后续移动遵守无障碍偏好；普通模式仍需保留 left/top 过渡。
     emitConfig({ dockEnabled: true, dockAutoHide: true, dockSide: 'right', dockPos: { x: Math.round(vw / 2), y: 120 }, page: {} });
     var tr = getComputedStyle(host).transitionProperty;
-    if (tr.indexOf('left') < 0 || tr.indexOf('top') < 0) return '后续 left/top 过渡被删：' + tr;
+    if (reducedMotion ? tr !== 'none' : tr.indexOf('left') < 0 || tr.indexOf('top') < 0) {
+      return reducedMotion ? '减少动画时后续移动仍启用了过渡：' + tr : '后续 left/top 过渡被删：' + tr;
+    }
     emitConfig({ dockEnabled: false, page: {} });
     return true;
   });

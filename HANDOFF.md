@@ -546,6 +546,8 @@ chrome-extension://<扩展ID>/selftest/index.html
 ```
 纯前端用例覆盖切分、注入、替换（含区域判定 `DT.areaOf`）、还原、长文拆分、调度纯函数、简繁区分、近似重复闸门、YouTube 字幕解析与拼句（`DT.subs`）、趣味翻译单元判定、逐句悬停对照（`DT.hover`）、站点规则区域、网页外观（强调色 / 排版 / 明暗 / 夜间）、悬浮入口（含半隐藏：左右贴边露半球 / 展开收起 / 关闭自动隐藏 / 中间不缩进）、Aeon 风格大标题 / 首字下沉 / 紧行高 / 引用富文本 / 窄容器 / 仅译文首字下沉拆分回归、小说正文分行（`tpl-novel`：span + `<br>`、连续空行、pre-line、对白、行内强调、模型合并 / 拆分行、还原、切换模式、途中改原文）、0.9.1 青空文库式 3 段拆分与锚点、Ruby（普通 / rp / rb / 多个混合 / 未翻译不受影响 / 释放）、结构化对齐的合法 / 非法 / 一对多 / 多对一、断句（缩写 / 首字母 / 脚注号 / 小写续接）、本地句子对齐（一对多 / 多对一 / 数字锚点 / 调换语序整段合并）、悬停句级 / 行级 / 段落级（双语不弹气泡、没有模型对齐也逐句）、代际隔离与段落级 SPA 更新、真实《罗生门》夹具（单 `<br>`+全角缩进 / rb/rp/rt / 图片基字 Ruby / 只有 fixture 时也要跑）、0.9.7 容器保护（直接文本 + 块级 / 控件子元素不整块替换、句子不被拆、嵌套列表 / `<main>`、正文夹标题的注音归属、引用块前后分段、懒翻译第二轮仍收子段落、诊断一致）、已翻译元素重新检查（双语改字重收、只改样式不重翻、子菜单露出补收 / 译文挪到子菜单前、祖先 class 展开、仅译文不闪、整块改下钻不重复、行内子元素并成整段、原文藏起来撤译文）、段落里的保留区（notranslate / translate="no" / 站点规则排除：送翻标记、双语、仅译文原地分段写回、换序 / 漏标记兜底、GitHub 式行内 code、分行段落、0.9.7 局部段落、own 单元和局部段落直接子级的保留元素（隐藏 / 块级的不收、旁边已翻过的子元素不动）、还原逐字一致）、0.9.8 容器形态与保留区边界（flex / grid 块化的链接 / span 仍是一句、子块翻完后仍是局部段落并收敛、形态变化撤旧译文、碎片过滤不变形、局部段落 firstNode、长段落切片不切开标记、`!important` 下兜底藏得住、行内样式逐字还原、带链接 / 图标的保留元素不藏、少回一行时保留行不藏）、文献引用（`tpl-nature-cite` 是 nature.com 的真实段落 DOM：收集与标记、双语上标副本 / 点击跳转 / 无重复 id、仅译文原地写回、换序挪句末、丢标记降级、改号 / 抄重 / 编号不成链接、长段落切片、双语和仅译文的悬停逐句、数学上标 / 序数 / 化学式 / 站外链接 / 普通链接不误判、Wikipedia 引注与 Markdown 脚注照认，都校验还原逐字一致）、混合行内内容（Science 等价段落：引用 + Fig. 1 图表链接整段原地翻译、链接节点 / 属性不变、「图 1」标签与点击、嵌套父节点、图表链接紧挨引用、只有图表链接、`<br>` 分行、丢图表标记、引用 + 普通链接、注音段落的失败分类、切换模式 / 撤销 / 重翻 / 站点改写后重翻）。**改 `dom.js` 前后必跑。**（真实 Chrome 里自动跑：`node tools/e2e-extension.mjs` 的「自检页」一节）
 
+命令行在两种动画偏好下各跑一遍（CDP 模拟 `prefers-reduced-motion` 为 `no-preference` / `reduce`，失败时打印失败项；CI 的 browser 任务用的就是它）：`node tools/check-selftest.mjs`。减少动画模式下悬浮入口按设计关闭位置过渡，自检对两种模式分别断言。
+
 > 用例条数以自检页输出的 `通过 / 总数` 为准，本文不记数字：上次记数字，三个地方记成了 163 / 201 / 211。
 
 ### 7.1b Node 单测（接口层）
@@ -611,7 +613,7 @@ node tools/e2e-extension.mjs --chosun-live  # 真实朝鲜日报正文的韩文�
 node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》验收（需要能上 aozora.gr.jp；诊断写 docs/verification/）
 node tools/e2e-extension.mjs --bilibili-live  # 真实 B 站视频页评论区验收（需要能上 bilibili.com；未登录只显示首屏，滚动 / 楼中楼会显示未验证）
 node tools/e2e-extension.mjs --headed --science-live  # 真实 Science Advances 论文页（Cloudflare 需要 headed；只验证引用识别 / 注入 / 还原，不调用真实模型）
-node tools/e2e-session-keys.mjs             # 会话 Key、设备记忆、完整浏览器重启 / 扩展重载、20 标签与鉴权暂停
+node tools/e2e-session-keys.mjs             # 会话 Key、设备记忆、完整浏览器重启 / 扩展重载、20 标签与鉴权暂停（RIMEFOX_TEST_UI_LANG=zh|en 指定界面语言；CI 的 Chrome 用 zh、Edge 用 en）
 node tools/e2e-extension.mjs --selftest-only  # 只跑离线自检页
 node tools/e2e-extension.mjs --medical-only   # 只跑弹窗 + 医学专业模式
 node tools/stability-audit.mjs                # 真实 Chrome 长文 / 大量段落 / 动态 / 内存基准（直接页面）
