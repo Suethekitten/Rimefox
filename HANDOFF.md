@@ -884,7 +884,14 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.16.5）
+## 14. 本版技术记录（0.16.6）
+
+- **弹窗**：工具坞去掉「诊断」「指南」，剩 4 个按钮；`popup.css` 的 `--glass-slots` 默认值改为 4（液态玻璃关闭时 `mountGlassDock` 不设该变量，旧默认 5 配 6 个按钮会换行）。
+- **设置页**：「高级 → 页面诊断」（`options/diagnose.js`）列出已打开的 http(s) / file 标签页（按 `lastAccessed` 排序），对主框架发 `dt:diagnose`；内容脚本不在时经可信路由 `ensure` 补注入后重试，结果复制到剪贴板。使用指南沿用侧栏入口。
+- **OCR**：`lib/ocr/service.js` 先登记 `jobId` 再检测组件，修复首次连接 / 握手期间 `ocr:cancel` 不生效（0.16.5 发布后的 Windows CI 暴露）；`test/ocr.test.mjs` 的慢识别取消改为等识别请求发出后再取消。
+- **验证（macOS，Chrome 156）**：Node 全部单测、扩展整体 E2E 301/301（含离线自检 269/269）、OCR E2E 46/46；真实 Chrome 中从设置页对本地网页生成诊断并确认复制、弹窗开 / 关液态玻璃时工具坞一行。
+
+### 0.16.5 记录
 
 0.16.5 是 OCR 的开发者预览版：代码随包发布，但 `lib/ocr/feature.js` 的 `OCR_UI_ENABLED` 仍为 `false`，`manifest.json` 未加 `nativeMessaging`，普通用户看不到 OCR 入口。完整说明见 [OCR-INTERFACE](docs/OCR-INTERFACE.md)，开放前清单见其 §8。
 
@@ -893,10 +900,6 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **顺带修复**：PDF 页面重画时先清掉旧的「没有可提取的文字」提示，缩放不再叠加多条。
 - **测试**：新增 `test/ocr.test.mjs`、`test/ocr-routes.test.mjs`、`test/ocr-native-host.test.mjs`（找不到本机连接器时跳过）、`tools/e2e-ocr.mjs`（复制扩展打开开关，三阶段：未授权 / 参考宿主 / 真实连接器）。E2E 的宿主与样本放临时目录，避免 macOS 反复弹出「访问文稿」授权。E2E 的 Windows 分支（`.bat` 启动、HKCU 注册表）未在 Windows 上实测。
 - **验证（macOS，Chrome 156）**：Node 全部单测、离线自检 269/269（两种动效模式）、扩展整体 E2E 301/301、PDF 阅读器 60/60、EPUB 阅读器 28/28、OCR E2E 46/46（含真实 Vision 连接器）。未测：Windows、Edge 上的 OCR、真实扫描件质量、签名安装流程。
-
-### 0.16.4 记录
-
-设备凭据迁出 local；模型列表拒绝旧 Key 跟随未保存的新地址；EPUB 分块校验实际解压量并在可终止 Worker 中执行；PDF 单页 4 Mi 像素、总计 16 Mi 像素和最大边长 8192，缩放/关闭取消 RenderTask。配置新增无 Key 的升级快照恢复，独立 Checks 覆盖提交/PR。测试证据、未完成的真实环境验收见 [本次归档](docs/archive/2026-11-04-hardening-0.16.4.md)；更早版本的记录见 git log。
 
 ## 15. 专业翻译引擎
 
