@@ -1,5 +1,7 @@
-// macOS 连接器（native/ocr-host/macos）的真实识别：只在 macOS 上、且已运行 build.sh 生成二进制时执行，否则跳过。
-// 运行：sh native/ocr-host/macos/build.sh && node test/ocr-native-macos.test.mjs
+// 本机 OCR 连接器的真实识别（不经浏览器）：按平台找已构建的二进制，找不到就跳过。
+//   macOS：sh native/ocr-host/macos/build.sh        → native/ocr-host/macos/build/rimefox-ocr-host
+//   Windows：见 native/ocr-host/WINDOWS-HANDOFF.md   → native/ocr-host/windows/build/rimefox-ocr-host.exe
+// 运行：node test/ocr-native-host.test.mjs
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
@@ -11,9 +13,13 @@ import { createOcrService } from '../lib/ocr/service.js';
 import { linesToBlocks } from '../lib/ocr/layout.js';
 import { encodeFrame, createFrameReader } from '../tools/ocr-mock-host/host.mjs';
 
-const BIN = fileURLToPath(new URL('../native/ocr-host/macos/build/rimefox-ocr-host', import.meta.url));
+const BINARIES = {
+  darwin: '../native/ocr-host/macos/build/rimefox-ocr-host',
+  win32: '../native/ocr-host/windows/build/rimefox-ocr-host.exe'
+};
+const BIN = BINARIES[process.platform] ? fileURLToPath(new URL(BINARIES[process.platform], import.meta.url)) : '';
 const FIXTURE = fileURLToPath(new URL('./fixtures/ocr-sample.png', import.meta.url));
-const skip = process.platform !== 'darwin' ? '仅 macOS' : !fs.existsSync(BIN) ? '未构建：先运行 native/ocr-host/macos/build.sh' : false;
+const skip = !BIN ? '当前平台没有连接器' : !fs.existsSync(BIN) ? '未构建：' + BIN : false;
 
 function hostPort() {
   const child = spawn(BIN, [], { stdio: ['pipe', 'pipe', 'ignore'] });
@@ -35,7 +41,7 @@ function pngImage(file) {
   return { mime: 'image/png', data: png.toString('base64'), width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
-test('macOS 连接器：握手报告系统 OCR 就绪、PaddleOCR 未安装，并识别夹具文字', { skip, timeout: 120000 }, async () => {
+test('本机连接器：握手报告系统 OCR 就绪、PaddleOCR 未安装，并识别夹具文字', { skip, timeout: 120000 }, async () => {
   let port;
   const svc = createOcrService({
     sources: [createNativeOcrSource({ hasPermission: async () => true, connect: () => (port = hostPort()), clientVersion: 'test' })],
@@ -46,7 +52,8 @@ test('macOS 连接器：握手报告系统 OCR 就绪、PaddleOCR 未安装，�
     assert.equal(snap.status, 'ready');
     assert.equal(snap.backend, 'system');
     const system = snap.backends.find((b) => b.id === 'system');
-    assert.ok(system.languages.includes('zh-Hans'), '应支持简体中文');
+    // macOS 报 zh-Hans；Windows 按已装语言包报 zh-Hans-CN / zh-CN 等，缺中文语言包时这里会失败并提示去装
+    assert.ok(system.languages.some((tag) => /^zh/i.test(tag)), '应支持中文识别（Windows 需安装中文 OCR 语言包）：' + system.languages.join(','));
     assert.equal(snap.backends.find((b) => b.id === 'paddle').status, 'engine_missing');
     assert.equal(snap.sources[0].component.protocols[0], 1);
 
@@ -67,7 +74,7 @@ test('macOS 连接器：握手报告系统 OCR 就绪、PaddleOCR 未安装，�
   }
 });
 
-test('macOS 连接器：协议版本不对时回 unsupported_protocol，未知后端回 engine_missing', { skip, timeout: 60000 }, async () => {
+test('本机连接器：协议版本不对时回 unsupported_protocol，未装的 PaddleOCR 回 engine_missing', { skip, timeout: 60000 }, async () => {
   const port = hostPort();
   const got = [];
   port.onMessage.addListener((m) => got.push(m));

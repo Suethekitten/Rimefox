@@ -7,7 +7,7 @@
 // 阶段 A：可选权限未授予 → 设置页「未配置OCR」、阅读器页内提示与「前往设置」。
 // 阶段 B：参考宿主（tools/ocr-mock-host）→ 设置页状态、逐页识别、译文、缓存复用、流式 / 搜索、取消与错误提示。
 // 阶段 C：macOS 且已构建 native/ocr-host/macos/build/rimefox-ocr-host 时，切到真实 Vision 连接器识别样本 PDF。
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,7 +19,12 @@ const CHROME = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
   ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
   : process.platform === 'win32' ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : 'google-chrome');
 
-const REAL_HOST = path.join(ROOT, 'native', 'ocr-host', 'macos', 'build', 'rimefox-ocr-host');
+const IS_WIN = process.platform === 'win32';
+// 各平台连接器的构建产物（Windows 约定见 native/ocr-host/WINDOWS-HANDOFF.md）
+const REAL_HOST = IS_WIN
+  ? path.join(ROOT, 'native', 'ocr-host', 'windows', 'build', 'rimefox-ocr-host.exe')
+  : path.join(ROOT, 'native', 'ocr-host', 'macos', 'build', 'rimefox-ocr-host');
+const REAL_LABEL = IS_WIN ? 'Windows OCR' : 'macOS 文本识别';
 const PORT = 21200 + Math.floor(Math.random() * 300);
 const HEADED = process.env.RIMEFOX_HEADED === '1';
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-ocr-e2e-'));
@@ -79,25 +84,67 @@ const hostDir = path.join(work, 'host');
 fs.mkdirSync(hostDir);
 const mockHost = path.join(hostDir, 'host.mjs');
 fs.copyFileSync(path.join(ROOT, 'tools', 'ocr-mock-host', 'host.mjs'), mockHost);
-const realHostCopy = path.join(hostDir, 'rimefox-ocr-host');
-if (fs.existsSync(REAL_HOST)) { fs.copyFileSync(REAL_HOST, realHostCopy); fs.chmodSync(realHostCopy, 0o755); }
-const launcher = path.join(work, 'host.sh');
-fs.writeFileSync(launcher, [
-  '#!/bin/sh',
-  'cd "' + hostDir + '"',
-  'if [ -f "' + useReal + '" ]; then exec "' + realHostCopy + '" "$@"; fi',
-  'export OCR_MOCK_LOG="' + hostLog + '" OCR_MOCK_MODE_FILE="' + modeFile + '" OCR_MOCK_DELAY_MS=4000',
-  'exec "' + process.execPath + '" "' + mockHost + '" "$@"',
-  ''
-].join('\n'));
-fs.chmodSync(launcher, 0o755);
+const realHostCopy = path.join(hostDir, IS_WIN ? 'rimefox-ocr-host.exe' : 'rimefox-ocr-host');
+if (fs.existsSync(REAL_HOST)) { fs.copyFileSync(REAL_HOST, realHostCopy); if (!IS_WIN) fs.chmodSync(realHostCopy, 0o755); }
+const launcher = path.join(work, IS_WIN ? 'host.bat' : 'host.sh');
+if (IS_WIN) {
+  // Windows：Chrome 用 cmd 启动 .bat，stdin / stdout 原样转给子进程。（未在 Windows 上实测，见 WINDOWS-HANDOFF）
+  fs.writeFileSync(launcher, [
+    '@echo off',
+    'cd /d "' + hostDir + '"',
+    'if exist "' + useReal + '" (',
+    '  "' + realHostCopy + '" %*',
+    '  exit /b %errorlevel%',
+    ')',
+    'set "OCR_MOCK_LOG=' + hostLog + '"',
+    'set "OCR_MOCK_MODE_FILE=' + modeFile + '"',
+    'set "OCR_MOCK_DELAY_MS=4000"',
+    '"' + process.execPath + '" "' + mockHost + '" %*',
+    ''
+  ].join('\r\n'));
+} else {
+  fs.writeFileSync(launcher, [
+    '#!/bin/sh',
+    'cd "' + hostDir + '"',
+    'if [ -f "' + useReal + '" ]; then exec "' + realHostCopy + '" "$@"; fi',
+    'export OCR_MOCK_LOG="' + hostLog + '" OCR_MOCK_MODE_FILE="' + modeFile + '" OCR_MOCK_DELAY_MS=4000',
+    'exec "' + process.execPath + '" "' + mockHost + '" "$@"',
+    ''
+  ].join('\n'));
+  fs.chmodSync(launcher, 0o755);
+}
+
+// 宿主注册：macOS / Linux 的 Chrome 读 <用户目录>/NativeMessagingHosts；Windows 只读注册表（按用户全局，
+// 不随 --user-data-dir 变化），所以先记下原值，测试结束后恢复，避免覆盖开发者自己装的组件。
+const REG_KEY = 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.rimefox.ocr';
+let regBackup;
+function restoreRegistry() {
+  if (!IS_WIN || regBackup === undefined) return;
+  try {
+    if (regBackup === null) execFileSync('reg', ['delete', REG_KEY, '/f'], { stdio: 'ignore' });
+    else execFileSync('reg', ['add', REG_KEY, '/ve', '/t', 'REG_SZ', '/d', regBackup, '/f'], { stdio: 'ignore' });
+  } catch (err) { console.log('  NOTE 恢复注册表失败，请手动检查 ' + REG_KEY); }
+  regBackup = undefined;
+}
 function writeHostManifest(ids) {
-  const dir = path.join(profile, 'NativeMessagingHosts');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'com.rimefox.ocr.json'), JSON.stringify({
+  const manifest = JSON.stringify({
     name: 'com.rimefox.ocr', description: 'Rimefox OCR E2E host', path: launcher, type: 'stdio',
     allowed_origins: ids.map((id) => 'chrome-extension://' + id + '/')
-  }, null, 2));
+  }, null, 2);
+  if (!IS_WIN) {
+    const dir = path.join(profile, 'NativeMessagingHosts');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'com.rimefox.ocr.json'), manifest);
+    return;
+  }
+  const file = path.join(work, 'com.rimefox.ocr.json');
+  fs.writeFileSync(file, manifest);
+  try {
+    const out = execFileSync('reg', ['query', REG_KEY, '/ve'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const m = /REG_SZ\s+(.+)\s*$/m.exec(out);
+    regBackup = m ? m[1].trim() : null;
+  } catch (err) { regBackup = null; }
+  execFileSync('reg', ['add', REG_KEY, '/ve', '/t', 'REG_SZ', '/d', file, '/f'], { stdio: 'ignore' });
 }
 
 // ---------- 假翻译 API ----------
@@ -131,6 +178,7 @@ const browser = spawn(CHROME, [
   '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check', 'about:blank'
 ], { stdio: 'ignore' });
 const cleanup = () => {
+  restoreRegistry();
   try { browser.kill('SIGKILL'); } catch (err) { /* ignore */ }
   try { fs.rmSync(work, { recursive: true, force: true }); } catch (err) { /* ignore */ }
 };
@@ -380,8 +428,8 @@ fs.writeFileSync(modeFile, 'ready');
 }
 
 // ================= 阶段 C：真实 macOS 连接器 =================
-if (process.platform === 'darwin' && fs.existsSync(REAL_HOST)) {
-  console.log('\n[C] 真实 macOS Vision 连接器');
+if ((process.platform === 'darwin' || IS_WIN) && fs.existsSync(REAL_HOST)) {
+  console.log('\n[C] 真实本机连接器（' + REAL_LABEL + '）');
   fs.writeFileSync(useReal, '1');
   // 让 mock 宿主收到下一条消息就退出：连接断开后，下一次检测经启动脚本连到真实连接器
   fs.writeFileSync(modeFile, 'exit');
@@ -389,18 +437,18 @@ if (process.platform === 'darwin' && fs.existsSync(REAL_HOST)) {
   await until(() => pageEval(opt, "return !!document.getElementById('ocrRecheck')"), 10000);
   // 第一次检测让 mock 宿主退出（报检测失败），之后再点「重新检测」才连到真实连接器
   const ready = await until(async () => {
-    const got = await pageEval(opt, "const b=document.getElementById('ocrStatus'); return b && b.dataset.ocrStatus === 'ready' && /0\\.1\\./.test(document.getElementById('ocrComponentInfo').textContent) ? { t: document.getElementById('ocrStatusTitle').textContent, d: document.getElementById('ocrStatusDetail').textContent, i: document.getElementById('ocrComponentInfo').textContent } : null");
+    const got = await pageEval(opt, "const b=document.getElementById('ocrStatus'); return b && b.dataset.ocrStatus === 'ready' && !/0\\.0\\.0-mock/.test(document.getElementById('ocrComponentInfo').textContent) ? { t: document.getElementById('ocrStatusTitle').textContent, d: document.getElementById('ocrStatusDetail').textContent, i: document.getElementById('ocrComponentInfo').textContent } : null");
     if (!got) await pageEval(opt, "document.getElementById('ocrRecheck').click(); return true;");
     return got;
   }, 40000, 1500);
-  check('设置页：macOS 文本识别就绪', ready && /macOS 文本识别/.test(ready.t), JSON.stringify(ready));
+  check('设置页：' + REAL_LABEL + ' 就绪', ready && ready.t.includes(REAL_LABEL), JSON.stringify(ready));
   if (!ready) {
     console.log('    诊断 banner=', JSON.stringify(await pageEval(opt, "const b=document.getElementById('ocrStatus'); return { s: b.dataset.ocrStatus, t: document.getElementById('ocrStatusTitle').textContent, i: document.getElementById('ocrComponentInfo').textContent }")));
     console.log('    诊断 status=', JSON.stringify(await pageEval(opt, 'return chrome.runtime.sendMessage({ type: "ocr:status", refresh: true })')).slice(0, 300));
     console.log('    诊断 host=', JSON.stringify(hostMessages().slice(-4)));
   }
   check('设置页列出实际可识别语言', ready && /中文/.test(ready.d), ready && ready.d);
-  check('设置页显示真实组件版本', ready && /0\.1\.0/.test(ready.i), ready && ready.i);
+  check('设置页显示真实组件版本', ready && /已连接本地组件 \d+\.\d+/.test(ready.i), ready && ready.i);
   await send('Target.closeTarget', { targetId: opt.targetId });
   const reader = await openReader(idB);
   const scanCopy3 = path.join(work, 'scan-copy-3.pdf');
@@ -415,7 +463,7 @@ if (process.platform === 'darwin' && fs.existsSync(REAL_HOST)) {
   check('真实识别：中英文段落不混在一起', blocks.length >= 3 && !blocks.some((b) => /测试/.test(b) && /Rimefox/.test(b)), blocks.length + ' 块');
   await send('Target.closeTarget', { targetId: reader.targetId });
 } else {
-  console.log('\n[C] 跳过：需要 macOS 并先运行 native/ocr-host/macos/build.sh');
+  console.log('\n[C] 跳过：未找到 ' + REAL_HOST + '（macOS 运行 native/ocr-host/macos/build.sh；Windows 见 WINDOWS-HANDOFF）');
 }
 
 check('全程无未捕获异常', exceptions.length === 0, exceptions.slice(0, 3).join(' | '));

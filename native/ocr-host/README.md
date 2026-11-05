@@ -7,7 +7,7 @@
 | 平台 | 目录 | 系统 OCR | PaddleOCR | 状态 |
 |---|---|---|---|---|
 | macOS 12+ | `macos/` | Apple Vision（`VNRecognizeTextRequest`，accurate） | 报告 `engine_missing` | 原型可用，未签名 |
-| Windows | — | 计划用 `Windows.Media.Ocr` | — | 未开始 |
+| Windows | `windows/`（待建） | 计划用 `Windows.Media.Ocr` | — | 未开始，交接见 [WINDOWS-HANDOFF](WINDOWS-HANDOFF.md) |
 
 ## macOS 连接器
 
@@ -22,7 +22,7 @@ native/ocr-host/macos/build/rimefox-ocr-host --version
 native/ocr-host/macos/build/rimefox-ocr-host --languages   # Vision 实际支持的识别语言
 
 # 真实识别单测、真实 Chrome 端到端
-node test/ocr-native-macos.test.mjs
+node test/ocr-native-host.test.mjs
 node tools/e2e-ocr.mjs
 ```
 

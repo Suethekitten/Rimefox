@@ -884,20 +884,19 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.16.4）
+## 14. 本版技术记录（0.16.5）
 
-设备凭据迁出 local；模型列表拒绝旧 Key 跟随未保存的新地址；EPUB 分块校验实际解压量并在可终止 Worker 中执行；PDF 单页 4 Mi 像素、总计 16 Mi 像素和最大边长 8192，缩放/关闭取消 RenderTask。配置新增无 Key 的升级快照恢复，独立 Checks 覆盖提交/PR。测试证据、未完成的真实环境验收见 [本次归档](docs/archive/2026-11-04-hardening-0.16.4.md)。
+0.16.5 是 OCR 的开发者预览版：代码随包发布，但 `lib/ocr/feature.js` 的 `OCR_UI_ENABLED` 仍为 `false`，`manifest.json` 未加 `nativeMessaging`，普通用户看不到 OCR 入口。完整说明见 [OCR-INTERFACE](docs/OCR-INTERFACE.md)，开放前清单见其 §8。
 
-### 0.16.3 记录
+- **扩展侧**：`lib/ocr/`（协议 v1、状态判定、Native Messaging 来源、服务、缓存键、行→段落版面）；后台 `ocr:status` / `ocr:recognize` / `ocr:cancel` 仅限可信扩展页；配置新增 `ocrEngine`（`auto` 默认）；设置页 `#sec-ocr` 区块（`options/ocr.js`）；阅读器对渲染范围内的零文本页逐页识别，结果存 `translations` 存储的 `ocr-` 键，随后进入流式视图、搜索与送翻，换书 / 关书取消。
+- **本地组件**：`native/ocr-host/macos`（Swift + Apple Vision，未签名）；`build.sh` 自动绕过本机 Command Line Tools 重复 `SwiftBridging` modulemap 的问题。Windows 端交接见 [WINDOWS-HANDOFF](native/ocr-host/WINDOWS-HANDOFF.md)。签名：macOS 缺 Developer ID，暂无免费替代；Windows 计划用 SignPath Foundation。
+- **顺带修复**：PDF 页面重画时先清掉旧的「没有可提取的文字」提示，缩放不再叠加多条。
+- **测试**：新增 `test/ocr.test.mjs`、`test/ocr-routes.test.mjs`、`test/ocr-native-host.test.mjs`（找不到本机连接器时跳过）、`tools/e2e-ocr.mjs`（复制扩展打开开关，三阶段：未授权 / 参考宿主 / 真实连接器）。E2E 的宿主与样本放临时目录，避免 macOS 反复弹出「访问文稿」授权。E2E 的 Windows 分支（`.bat` 启动、HKCU 注册表）未在 Windows 上实测。
+- **验证（macOS，Chrome 156）**：Node 全部单测、离线自检 269/269（两种动效模式）、扩展整体 E2E 301/301、PDF 阅读器 60/60、EPUB 阅读器 28/28、OCR E2E 46/46（含真实 Vision 连接器）。未测：Windows、Edge 上的 OCR、真实扫描件质量、签名安装流程。
 
-0.16.3 修复 0.16.1 独立 QA（0 P0 / 17 P1）中的全部 P1（H13、H23 除外）及一批 P2 / P3；编号与未修项见 [0.16.3 归档](docs/archive/2026-11-03-qa-fixes-0.16.3.md)。
+### 0.16.4 记录
 
-- **配置**：pending 日志按键排序比较（F2）；`keyMigrationProviders` 限定一次性迁移范围（F3）；`configFormPatch()` 改 Key 时带上本窗口的保存方式（F4）；后台错误文本经 `redactSecrets()` 再给内容脚本（F6）；`cache:clear` / `cache:stats` / `usage:reset` / `ensure` 只接受扩展页（F11），扩展 E2E 改从隐藏设置页清缓存。
-- **EPUB**：请求带与 PDF 相同的配置身份，配置变化时后台拒绝、阅读器 `rekey()`（G1）；`saveReaderSettings()` 在同一事务里合并字段（G2）；`batchOf()` 顺序装箱（G5）；`saveBook` / `saveProgress` / `putTranslation` / `putFailure` 只在书仍存在时写，新书走 `createBook()`（G6）；查重先于单本上限（G7）；打开时清失败退避并先只读缓存，付费请求等 400 ms 停留（G8 / G9）；晚归结果按请求时的键和元数据入缓存（G10）；`splitHref()` 不再对空基址规范化（E1）。
-- **PDF 计费**：仅译文下未翻译块保留淡色原文占位，送翻再按「屏上页 −1 / +2」限页（G3）；一页多批时先缓存完成的块再报错（G4）；失败页指数退避 15 s → 5 min（G11）；内存 LRU 不淘汰可视窗口内的页。
-- **PDF 文本层（`pdf-text.js`）**：页眉只在上下边带删、只学每页最外 3 行（H1）；栏中心需左右并排且不被左栏多数行越过（H2）；上下标并入当前行并转 Unicode 上 / 下标（H3 / H4）；脚注剥离按上下文判断（H5 / H6）；横幅只认全大写且在顶部 12%，卷期行须整行匹配（H7 / H11）；页边带只删页码 / 小字 / 孤立行（H8）；目录需 ≥4 点引导线（H9）；行距按本页中位数（H10）；跨栏行按纵向位置分段排序（H14）；文字布局用未旋转视口（H15）；另修 H12、H16、H17、H19–H22。
-- **字幕与快捷键**：YouTube 字幕进入同一套标签页 / 跨标签页预算（S1）；页面快捷键只认 `isTrusted` 事件（F5）；PDF 探针按平台选 Chrome、缺私有样本时跳过（S3）。
-- **验证**：Node 全部单测、离线自检 269/269、扩展整体 300/300（另一轮 299/300，失败项为与基线同类的偶发项）、行内排版与链接语序、会话密钥 25/25、EPUB 阅读器 25/25、PDF 阅读器 56/56、PDF 探针通过；QA 复现脚本对应项全部通过。未测：真实 YouTube / B 站页面、真实服务商错误文案、阅读器界面里的旋转 PDF。更早版本的记录见 git log。
+设备凭据迁出 local；模型列表拒绝旧 Key 跟随未保存的新地址；EPUB 分块校验实际解压量并在可终止 Worker 中执行；PDF 单页 4 Mi 像素、总计 16 Mi 像素和最大边长 8192，缩放/关闭取消 RenderTask。配置新增无 Key 的升级快照恢复，独立 Checks 覆盖提交/PR。测试证据、未完成的真实环境验收见 [本次归档](docs/archive/2026-11-04-hardening-0.16.4.md)；更早版本的记录见 git log。
 
 ## 15. 专业翻译引擎
 

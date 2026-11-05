@@ -36,7 +36,7 @@
 | `tools/ocr-mock-host/host.mjs` | 参考 / 假宿主：协议的可运行实现，供组件开发与测试 | Node |
 | `tools/e2e-ocr.mjs` | 真实 Chrome 端到端：未授权、参考宿主、真实 macOS 连接器三个阶段 | Node + Chrome |
 | `test/ocr.test.mjs`、`test/ocr-routes.test.mjs` | 协议、状态、来源、服务、缓存键、版面、配置、路由与参考宿主进程 | Node |
-| `test/ocr-native-macos.test.mjs` | 真实 macOS 连接器识别夹具图（未构建或非 macOS 时跳过） | Node |
+| `test/ocr-native-host.test.mjs` | 真实本机连接器识别夹具图（按平台找 macOS / Windows 构建产物，找不到时跳过） | Node |
 | `test/fixtures/ocr-sample.png`、`reader/pdf-samples/ocr-scan.pdf` | 已知文字的识别样本（PNG 由 `native/ocr-host/macos/Tools/render-sample.swift` 生成，PDF 由 `tools/make-pdf-samples.mjs` 生成） | — |
 
 配置项只有一个：`ocrEngine`，取值 `auto`（默认）/ `system` / `paddle` / `off`，清洗在 `mergeConfig`，导入校验在 `pickImportedConfig`。它只是偏好，能否识别以检测结果为准。
@@ -202,7 +202,7 @@ node test/ocr-routes.test.mjs
 
 # macOS：构建连接器后跑真实识别单测
 sh native/ocr-host/macos/build.sh
-node test/ocr-native-macos.test.mjs
+node test/ocr-native-host.test.mjs
 
 # 真实 Chrome 端到端（自动复制扩展、打开开关、注册临时宿主；不改仓库文件）
 node tools/e2e-ocr.mjs
@@ -221,8 +221,8 @@ node tools/ocr-mock-host/host.mjs --setup <扩展ID>
 
 | # | 事项 | 状态 |
 |---|---|---|
-| 1 | 本地组件原型通过 PDF-HANDOFF §5.3 第 1 步 | macOS Vision 连接器已完成并实测；PaddleOCR 引擎包、Windows OCR 未开始 |
-| 2 | 签名安装包：macOS Developer ID 签名 + 公证、Windows 代码签名；宿主清单注册 Chrome 与 Edge；`OCR_COMPONENT_RELEASES` 填正式地址 | 未开始 |
+| 1 | 本地组件原型通过 PDF-HANDOFF §5.3 第 1 步 | macOS Vision 连接器已完成并实测；Windows OCR 已交接（[WINDOWS-HANDOFF](../native/ocr-host/WINDOWS-HANDOFF.md)）；PaddleOCR 引擎包未开始 |
+| 2 | 签名安装包：macOS Developer ID 签名 + 公证（缺证书，暂无替代）、Windows 用 SignPath Foundation 免费签名；宿主清单注册 Chrome 与 Edge；`OCR_COMPONENT_RELEASES` 填正式地址 | 未开始；签名前可用安装脚本分发（见 WINDOWS-HANDOFF §5） |
 | 3 | `manifest.json` 加 `"optional_permissions": ["nativeMessaging"]`（可选权限不会让老用户的扩展被停用） | 未做，打开开关时一起改 |
 | 4 | 设置页 `#sec-ocr` 区块（§6.1） | 已完成 |
 | 5 | 阅读器逐页识别、OCR 缓存与取消（§6.2） | 已完成 |

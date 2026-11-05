@@ -123,7 +123,7 @@
 3. 接入逐页识别、页图像 / 像素与并发限制、取消及旧任务晚归隔离。OCR 缓存区分原书、页码、引擎 / 模型版本和识别参数；不因切翻译目标语言重复识别原图。
 4. 用简体、繁体和英文扫描页核对正文保留、识别误差、耗时及内存；补真实扩展与组件的 E2E，覆盖组件未安装、模型缺失、GPU 失败回退 CPU、取消下载、组件断开、换书与停止后晚归。无 OCR 时的文字型 PDF、原版阅读和翻译请求次数必须保持正确。
 
-进度：第 2、3 步已完成；第 1 步完成 macOS 系统 OCR（Vision），PaddleOCR GPU / CPU 与 Windows 未开始；第 4 步已有真实扩展 E2E（参考宿主 + macOS 连接器），真实扫描件质量评估未做。逐项状态见 [OCR-INTERFACE §8](OCR-INTERFACE.md#8-打开界面前的清单)。
+进度：第 2、3 步已完成；第 1 步完成 macOS 系统 OCR（Vision），PaddleOCR GPU / CPU 与 Windows 未开始；第 4 步已有真实扩展 E2E（参考宿主 + macOS 连接器），真实扫描件质量评估未做。逐项状态见 [OCR-INTERFACE §8](OCR-INTERFACE.md#8-打开界面前的清单)；Windows 端交接见 [WINDOWS-HANDOFF](../native/ocr-host/WINDOWS-HANDOFF.md)。
 
 第 1 步与第 4 步的引擎对比沿用 10-31 评估中设计好、但当时没跑的探针：
 
