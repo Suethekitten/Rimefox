@@ -1136,7 +1136,9 @@ async function init() {
   runWhenIdle(renderCacheStats);
   runWhenIdle(hideSelftestIfMissing);
   runWhenIdle(() => createPageDiagnostics());
-  if (ocrSettings.enabled) runWhenIdle(() => ocrSettings.refresh(false));
+  // OCR permission/readiness is visible feedback; keep its asynchronous check
+  // independent of idle callbacks, which background tabs may defer indefinitely.
+  if (ocrSettings.enabled) ocrSettings.refresh(false);
   runWhenIdle(() => fetchModels()); // 已经保存过地址和 Key 时，打开设置页就把列表准备好
   watchConfig(onConfigElsewhere);
 }

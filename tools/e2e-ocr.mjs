@@ -229,6 +229,7 @@ async function open(url) {
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
   await send('Runtime.enable', {}, sessionId);
   await send('Page.enable', {}, sessionId);
+  await send('Page.bringToFront', {}, sessionId);
   return { sessionId, targetId };
 }
 async function pageEval(tab, code) {
