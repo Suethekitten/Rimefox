@@ -1874,13 +1874,19 @@ async function glossaryNotesChecks(o) {
   check('说明：已有说明显示标识，默认折叠；首选译法和分类布局保留', compact === true);
   const empty = await inRow('charge', "return !details.open && row.querySelector('.glossary-note-indicator').hidden");
   check('说明：空词条保持折叠且无已填写标识', empty === true);
+  // Dirty tracking is debounced (setTimeout 0); a click on the still-disabled Save button is a no-op.
+  const savable = () => until(() => evaluate(o, "!document.getElementById('save').disabled"));
   const setNote = async (source, value) => {
     await inRow(source, `details.open=true;textarea.value=${JSON.stringify(value)};textarea.dispatchEvent(new Event('input',{bubbles:true}));return true;`);
-    await until(() => evaluate(o, "!document.getElementById('save').disabled"));
+    await savable();
   };
+  // The stored note may already equal `expected` before the click (e.g. after a target-only import);
+  // also wait for the save handler to finish (savebar clean again), or the next step races its
+  // late currentCfg replacement and loses the next import.
   const saveNote = async (source, expected) => {
     await evaluate(o, "document.getElementById('save').click();true");
     return until(async () => {
+      if (await evaluate(o, "document.getElementById('savebar').dataset.dirty") !== 'false') return null;
       const cfg = await readConfig();
       const item = cfg.glossary.find(one => one.source === source);
       return item && item.note === expected ? item : null;
@@ -1915,13 +1921,17 @@ async function glossaryNotesChecks(o) {
   }
   await importFile('#glossaryFile', 'source,target\nresponse,答复\n', 'csv');
   await until(() => inRow('response', "return row.querySelectorAll('input')[1].value==='答复'"));
+  await savable();
   check('CSV：旧两列更新首选译法，保留已有分类与说明', (await inRow('response', 'return textarea.value')) === edited && (await inRow('response', "return row.querySelectorAll('input')[2].value")) === '医学');
   await saveNote('response', edited);
   await importFile('#glossaryFile', 'source,target,category,note\nresponse,答复,,\n', 'csv');
   await until(() => inRow('response', "return textarea.value===''") );
-  check('CSV：明确的空说明可清空', !!(await saveNote('response', undefined)));
+  await savable();
+  const clearedNote = await saveNote('response', undefined);
+  check('CSV：明确的空说明可清空', !!clearedNote, clearedNote ? '' : JSON.stringify({ stored: (await readConfig()).glossary.find(one => one.source === 'response'), form: await evaluate(o, "({save:document.getElementById('save').disabled,state:document.getElementById('saveState').textContent,result:document.getElementById('saveResult').textContent,glossary:document.getElementById('glossaryResult').textContent})") }));
   await importFile('#glossaryFile', 'source,target,category,note\nresponse,治疗反应,医学,"' + edited.replace(/"/g, '""') + '"\n', 'csv');
   await until(() => inRow('response', 'return textarea.value===' + JSON.stringify(edited)));
+  await savable();
   check('CSV：含逗号、引号及换行的四列说明完整导入', !!(await saveNote('response', edited)));
   const downloadPath = path.join(WORK, 'downloads');
   fs.mkdirSync(downloadPath, { recursive: true });
