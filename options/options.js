@@ -59,6 +59,7 @@ import {
   renderProviderPills
 } from './provider-list.js';
 import { createGlossaryEditor } from './glossary.js';
+import { createOcrSettings } from './ocr.js';
 import { mergeGlossaryEntries } from '../lib/glossary.js';
 
 // 思考模式的三种取值（与 lib/config.js 的 DEFAULTS.thinkingMode 对应）
@@ -137,6 +138,7 @@ const fields = {
 fields.uiTheme.addEventListener('change', () => switchThemeAnimated(() => applyUiTheme(fields.uiTheme.value), fields.uiTheme));
 fields.uiLang.addEventListener('change', () => {
   applyI18n(document, fields.uiLang.value);
+  ocrSettings.render();
   if (glassNav) glassNav.refresh();
 });
 
@@ -194,6 +196,9 @@ let currentCfg = {};
 let glassNav = null;
 
 // 术语表编辑器：直接改 currentCfg.glossary，保存时统一清洗
+// OCR 区块：界面开关关闭时只透传已保存的 ocrEngine，不显示也不检测本地组件。
+const ocrSettings = createOcrSettings({ uiLang: () => fields.uiLang.value });
+
 const glossaryEditor = createGlossaryEditor({
   getConfig: () => currentCfg,
   onChanged: () => scheduleDirty()
@@ -588,6 +593,7 @@ function applyConfig(cfg) {
   fields.selectionMenu.checked = cfg.selectionMenu !== false;
   fields.selectionButton.checked = cfg.selectionButton !== false;
   fields.selectionImmediate.checked = cfg.selectionImmediate === true;
+  ocrSettings.fill(cfg);
   fields.privacyEnabled.checked = cfg.privacyEnabled === true;
   fields.privacyMaskEmail.checked = cfg.privacyMaskEmail !== false;
   fields.privacyMaskPhone.checked = cfg.privacyMaskPhone !== false;
@@ -687,6 +693,7 @@ function readForm() {
     selectionMenu: fields.selectionMenu.checked,
     selectionButton: fields.selectionButton.checked,
     selectionImmediate: fields.selectionImmediate.checked,
+    ocrEngine: ocrSettings.value(),
     privacyEnabled: fields.privacyEnabled.checked,
     privacyMaskEmail: fields.privacyMaskEmail.checked,
     privacyMaskPhone: fields.privacyMaskPhone.checked,
@@ -1127,6 +1134,7 @@ async function init() {
   runWhenIdle(renderBrowserShortcut);
   runWhenIdle(renderCacheStats);
   runWhenIdle(hideSelftestIfMissing);
+  if (ocrSettings.enabled) runWhenIdle(() => ocrSettings.refresh(false));
   runWhenIdle(() => fetchModels()); // 已经保存过地址和 Key 时，打开设置页就把列表准备好
   watchConfig(onConfigElsewhere);
 }

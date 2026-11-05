@@ -406,3 +406,51 @@ test('参考宿主：慢识别可取消，协议 2 判为不兼容', async () =>
     if (port2) port2.child.kill();
   }
 });
+
+// ---------------- 行 → 文本块 ----------------
+test('版面：同段续行合并，段距 / 字号变化处分段', async () => {
+  const { linesToBlocks, joinOcrText } = await import('../lib/ocr/layout.js');
+  assert.equal(joinOcrText('扫描图像只在', '本机识别'), '扫描图像只在本机识别');
+  assert.equal(joinOcrText('Local recog-', 'nition keeps'), 'Local recognition keeps');
+  assert.equal(joinOcrText('Hello', 'World'), 'Hello World');
+  assert.equal(joinOcrText('中文', 'English'), '中文English');
+  const blocks = linesToBlocks([
+    { text: '标题很大', box: [80, 40, 400, 60], confidence: 1 },
+    { text: '第一段第一行', box: [80, 130, 600, 30], confidence: 0.9 },
+    { text: '第一段第二行', box: [80, 165, 580, 30], confidence: 0.7 },
+    { text: '第二段与上一段隔开', box: [80, 260, 600, 30] },
+    { text: '   ', box: [80, 300, 10, 30] },
+    { text: 'no box line' }
+  ]);
+  assert.deepEqual(blocks.map((b) => b.text), ['标题很大', '第一段第一行第一段第二行', '第二段与上一段隔开', 'no box line']);
+  assert.equal(blocks[1].lines, 2);
+  assert.equal(blocks[1].confidence, 0.8);
+  assert.equal(blocks[2].confidence, null);
+  assert.deepEqual(linesToBlocks([]), []);
+  assert.deepEqual(linesToBlocks(null), []);
+});
+
+test('版面：左缘差太大不合并，超长段落按上限切开', async () => {
+  const { linesToBlocks } = await import('../lib/ocr/layout.js');
+  const cols = linesToBlocks([
+    { text: '左栏', box: [50, 100, 200, 30] },
+    { text: '右栏', box: [400, 135, 200, 30] }
+  ]);
+  assert.equal(cols.length, 2);
+  const long = Array.from({ length: 120 }, (_, i) => ({ text: '这是一行很长的测试文字用于触发段落长度上限', box: [50, 100 + i * 34, 600, 30] }));
+  const out = linesToBlocks(long);
+  assert.ok(out.length >= 2);
+  assert.ok(out.every((b) => b.text.length <= 1800));
+});
+
+test('版面：句末标点 + 右缘短于段宽时分段', async () => {
+  const { linesToBlocks } = await import('../lib/ocr/layout.js');
+  const out = linesToBlocks([
+    { text: '这是第一段的第一行文字比较长', box: [80, 100, 700, 50] },
+    { text: '第一段到这里结束。', box: [80, 180, 400, 50] },
+    { text: '第二段从这里开始，同样的行距', box: [80, 260, 700, 50] },
+    { text: 'Rimefox sample page', box: [80, 340, 500, 50] },
+    { text: 'continues here.', box: [80, 420, 300, 50] }
+  ]);
+  assert.deepEqual(out.map((b) => b.text), ['这是第一段的第一行文字比较长第一段到这里结束。', '第二段从这里开始，同样的行距Rimefox sample page continues here.']);
+});

@@ -4,7 +4,7 @@
 import { EpubError } from '../lib/reader/epub.js';
 import { loadEpub } from '../lib/reader/epub-loader.js';
 import { sanitizeXhtml } from '../lib/reader/sanitize.js';
-import { listBooks, getBook, saveBook, createBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, READER_LIMITS } from '../lib/reader/store.js';
+import { getOcrResult, putOcrResult, listBooks, getBook, saveBook, createBook, saveBookFile, getBookFile, deleteBook, saveProgress, sha256, getReaderSettings, saveReaderSettings, estimateUsage, requestPersistence, getUserFont, saveUserFont, deleteUserFont, READER_LIMITS } from '../lib/reader/store.js';
 import { saveConfig } from '../lib/config.js';
 import { LOCAL_SECRETS, SESSION_SECRETS } from '../lib/config-storage.js';
 import { ReaderTranslator } from '../lib/reader/translate.js';
@@ -14,7 +14,9 @@ import { openPdfDocument, looksLikePdf } from '../lib/reader/pdf.js';
 import { isComplexPage } from '../lib/reader/pdf-text.js';
 import { OCR_UI_ENABLED } from '../lib/ocr/feature.js';
 import { ocrNotice } from '../lib/ocr/status.js';
-import { getOcrStatus, openOcrSettings } from '../lib/ocr/page.js';
+import { getOcrStatus, openOcrSettings, recognizeCanvas, cancelOcr } from '../lib/ocr/page.js';
+import { ocrCacheKey } from '../lib/ocr/cache-key.js';
+import { linesToBlocks } from '../lib/ocr/layout.js';
 
 const PDF_TRANS_MAX = 24;
 let pdfViewEpoch = 0;
@@ -596,7 +598,7 @@ async function searchPdf(query) {
   const hits = [];
   for (let page = 1; page <= doc.numPages && hits.length < 50; page += 1) {
     if (!alive()) return;
-    const loaded = await doc.page(page);
+    const loaded = await pdfPageData(doc, page);
     if (!alive()) return;
     for (const block of loaded.blocks) {
       const index = block.text.toLowerCase().indexOf(q.toLowerCase());
@@ -666,7 +668,7 @@ async function renderPdfPage(el, index, epoch) {
   const loaded = await doc.page(index);
   if (doc !== state.pdf || epoch !== pdfRasterEpoch || !el.isConnected) return;
   // 失败重试 / 缩放后重画时先清掉上一轮的画布、文本块和错误提示，避免叠加。
-  for (const old of el.querySelectorAll('canvas, .pdf-blocks, .pdf-render-failed')) { if (old.tagName === 'CANVAS') doc.releaseCanvas(old); old.remove(); }
+  for (const old of el.querySelectorAll('canvas, .pdf-blocks, .pdf-render-failed, .pdf-empty-text, .pdf-ocr-notice, .pdf-ocr-progress')) { if (old.tagName === 'CANVAS') doc.releaseCanvas(old); old.remove(); }
   const content = document.getElementById('bookContent');
   const baseWidth = Math.max(320, (content ? content.clientWidth : 720) - 56);
   const cssWidth = Math.round(baseWidth * state.pdfZoom);
@@ -691,39 +693,52 @@ async function renderPdfPage(el, index, epoch) {
     if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 页面较大，已降低预览分辨率';
   }
   if (loaded.blocks.length) {
-    const panel = document.createElement('div');
-    panel.className = 'pdf-blocks';
-    for (let i = 0; i < loaded.blocks.length; i += 1) {
-      const block = document.createElement('div');
-      block.className = 'pdf-block';
-      block.dataset.block = String(i);
-      const src = document.createElement('span');
-      src.className = 'pdf-src';
-      src.textContent = loaded.blocks[i].text;
-      block.appendChild(src);
-      panel.appendChild(block);
-    }
-    el.appendChild(panel);
-    if (isComplexPage(loaded.blocks)) {
-      const label = el.querySelector('.pdf-page-label');
-      if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 复杂版式，文本顺序可能不准确';
-    }
-    applyPdfTranslations(index);
-    if (state.mode !== 'original' && state.config && state.config.hasKey) {
-      schedulePdfPageTranslation(index);
-    }
+    appendPdfBlocks(el, index, loaded.blocks, doc);
   } else {
     const note = document.createElement('p');
     note.className = 'pdf-empty-text';
     note.textContent = '本页没有可提取的文字（可能是扫描页）。';
     el.appendChild(note);
-    if (OCR_UI_ENABLED) showPdfOcrNotice(el, doc).catch(() => {});
+    if (OCR_UI_ENABLED) handlePdfOcrPage(el, index, doc).catch(() => {});
   }
 }
 
-// OCR 接入点（docs/OCR-INTERFACE.md §6.2）：零文本页只查一次状态，未就绪时在页内提示并给出设置入口，
-// 不弹窗、不自动下载、不把空文本送去翻译。就绪后的逐页识别留到 PDF-HANDOFF §5.3 第 3 步接入。
-let pdfOcrStatus = null; // { doc, promise }：同一文档内复用检测结果，换书后重新检测
+// 原版视图的文本块面板：文字层与 OCR 结果共用。
+function appendPdfBlocks(el, index, blocks, doc, opts) {
+  const panel = document.createElement('div');
+  panel.className = 'pdf-blocks';
+  if (opts && opts.ocr) panel.dataset.ocr = '1';
+  for (let i = 0; i < blocks.length; i += 1) {
+    const block = document.createElement('div');
+    block.className = 'pdf-block';
+    block.dataset.block = String(i);
+    const src = document.createElement('span');
+    src.className = 'pdf-src';
+    src.textContent = blocks[i].text;
+    block.appendChild(src);
+    panel.appendChild(block);
+  }
+  el.appendChild(panel);
+  const label = el.querySelector('.pdf-page-label');
+  if (opts && opts.ocr) {
+    if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · OCR 识别文字，可能有误';
+  } else if (isComplexPage(blocks)) {
+    if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 复杂版式，文本顺序可能不准确';
+  }
+  applyPdfTranslations(index);
+  if (state.mode !== 'original' && state.config && state.config.hasKey) {
+    schedulePdfPageTranslation(index);
+  }
+}
+
+// ---------------- OCR（docs/OCR-INTERFACE.md §6.2） ----------------
+// 只识别进入渲染范围的零文本页，不以零文本为由识别整本书；未就绪时页内提示，不弹窗、不自动下载。
+// OCR 文本按页缓存在 IndexedDB（键不含翻译配置），之后与文字层一样进入翻译、流式视图与搜索。
+const OCR_RENDER_SCALE = 3; // 识别用的独立渲染倍率，受单页 4 Mi 像素预算约束，与显示缩放无关
+let pdfOcrStatus = null; // { doc, promise }：同一文档内复用检测结果，换书或配置变化后重新检测
+let pdfOcr = null; // { doc, token, results: Map(page → 结果), pending: Map(page → { promise, jobId }) }
+let pdfOcrToken = 0;
+
 function pdfOcrStatusFor(doc, refresh) {
   if (refresh || !pdfOcrStatus || pdfOcrStatus.doc !== doc) {
     const promise = getOcrStatus({ refresh: !!refresh });
@@ -733,17 +748,79 @@ function pdfOcrStatusFor(doc, refresh) {
   return pdfOcrStatus.promise;
 }
 
-async function showPdfOcrNotice(el, doc, refresh) {
-  const snap = await pdfOcrStatusFor(doc, refresh);
-  if (doc !== state.pdf || !el.isConnected) return;
-  const old = el.querySelector('.pdf-ocr-notice');
-  if (old) old.remove();
+function pdfOcrStateFor(doc) {
+  if (!pdfOcr || pdfOcr.doc !== doc) {
+    cancelPdfOcr();
+    pdfOcr = { doc, token: ++pdfOcrToken, results: new Map(), pending: new Map() };
+  }
+  return pdfOcr;
+}
+
+// 关闭 / 换书时取消在途识别；晚归结果因 doc 已变而被丢弃。
+function cancelPdfOcr() {
+  if (!pdfOcr) return;
+  for (const job of pdfOcr.pending.values()) cancelOcr(job.jobId).catch(() => {});
+  pdfOcr = null;
+}
+
+function pdfOcrResult(doc, index) {
+  return pdfOcr && pdfOcr.doc === doc ? pdfOcr.results.get(index) || null : null;
+}
+
+// 文字层为空时用已有的 OCR 结果代替；翻译、流式视图与搜索都经这里取块。
+async function pdfPageData(doc, index) {
+  const loaded = await doc.page(index);
+  if (loaded.blocks.length) return loaded;
+  const ocr = pdfOcrResult(doc, index);
+  return ocr ? { pageNo: loaded.pageNo, page: loaded.page, viewport: loaded.viewport, blocks: ocr.blocks, ocr: true } : loaded;
+}
+
+function ensurePdfOcr(doc, index, snap) {
+  const st = pdfOcrStateFor(doc);
+  if (st.results.has(index)) return Promise.resolve(st.results.get(index));
+  if (st.pending.has(index)) return st.pending.get(index).promise;
+  const backend = (snap.backends || []).find((b) => b.id === snap.backend) || {};
+  const params = { languages: [], scale: OCR_RENDER_SCALE };
+  const bookId = state.book && state.book.id;
+  const key = ocrCacheKey({ bookId, page: index, backend: snap.backend,
+    engine: { name: backend.name, version: backend.version, model: backend.model }, params });
+  const jobId = 'ocr-' + st.token + '-' + index;
+  const promise = (async () => {
+    const hit = await getOcrResult(key).catch(() => null);
+    if (hit && Array.isArray(hit.blocks)) return { blocks: hit.blocks, backend: hit.backend, engine: hit.engine, cached: true };
+    const canvas = document.createElement('canvas');
+    try {
+      await doc.render(index, canvas, OCR_RENDER_SCALE);
+      if (doc !== state.pdf) throw new DOMException('Aborted', 'AbortError');
+      const res = await recognizeCanvas(canvas, { jobId, languages: params.languages });
+      const blocks = linesToBlocks(res.lines);
+      if (doc === state.pdf && bookId) {
+        putOcrResult({ key, bookId, page: index, backend: res.backend, engine: res.engine, blocks,
+          lineCount: res.lines.length, createdAt: Date.now() }).catch(() => {});
+      }
+      return { blocks, backend: res.backend, engine: res.engine, fallback: res.fallback };
+    } finally {
+      doc.releaseCanvas(canvas);
+    }
+  })();
+  st.pending.set(index, { promise, jobId });
+  promise.then((result) => { if (pdfOcr === st) st.results.set(index, result); }, () => {})
+    .finally(() => { if (st.pending.get(index) && st.pending.get(index).promise === promise) st.pending.delete(index); });
+  return promise;
+}
+
+function clearPdfOcrUi(el) {
+  for (const old of el.querySelectorAll('.pdf-ocr-notice, .pdf-ocr-progress')) old.remove();
+}
+
+function showPdfOcrNotice(el, index, doc, status) {
+  clearPdfOcrUi(el);
   const lang = state.config && state.config.uiLang === 'en' ? 'en' : 'zh';
-  const notice = ocrNotice(snap.status, lang);
+  const notice = ocrNotice(status, lang);
   if (notice.kind === 'none') return;
   const box = document.createElement('div');
   box.className = 'pdf-ocr-notice';
-  box.dataset.ocrStatus = snap.status;
+  box.dataset.ocrStatus = status;
   const text = document.createElement('span');
   text.textContent = notice.text;
   box.appendChild(text);
@@ -753,12 +830,54 @@ async function showPdfOcrNotice(el, doc, refresh) {
     btn.className = 'pdf-ocr-action';
     btn.textContent = notice.action === 'retry' ? (lang === 'en' ? 'Retry' : '重试') : (lang === 'en' ? 'Open Settings' : '前往设置');
     btn.addEventListener('click', () => {
-      if (notice.action === 'retry') showPdfOcrNotice(el, doc, true).catch(() => {});
+      if (notice.action === 'retry') handlePdfOcrPage(el, index, doc, true).catch(() => {});
       else openOcrSettings();
     });
     box.appendChild(btn);
   }
   el.appendChild(box);
+}
+
+// 识别期间不阻塞阅读；状态码类错误（缺组件 / 缺模型等）作废状态缓存，下次重新检测。
+const OCR_STATUS_ERRORS = new Set(['not_configured', 'permission_needed', 'component_missing', 'engine_missing',
+  'model_missing', 'language_unavailable', 'incompatible', 'unsupported', 'disabled']);
+async function handlePdfOcrPage(el, index, doc, refresh) {
+  const alive = () => doc === state.pdf && el.isConnected;
+  const snap = await pdfOcrStatusFor(doc, refresh);
+  if (!alive()) return;
+  if (snap.status !== 'ready') { showPdfOcrNotice(el, index, doc, snap.status); return; }
+  clearPdfOcrUi(el);
+  let progress = null;
+  if (!pdfOcrResult(doc, index)) {
+    progress = document.createElement('p');
+    progress.className = 'pdf-ocr-progress';
+    progress.textContent = '正在本机识别本页文字…';
+    el.appendChild(progress);
+  }
+  let result;
+  try {
+    result = await ensurePdfOcr(doc, index, snap);
+  } catch (err) {
+    if (!alive()) return;
+    if (progress) progress.remove();
+    // 缩放 / 重画打断了识别用的渲染：页面重画时会再来一次，这里不报错。
+    if (err && err.name === 'AbortError') return;
+    if (err && err.code === 'cancelled') return;
+    const code = err && OCR_STATUS_ERRORS.has(err.code) ? err.code : 'error';
+    if (code !== 'error') pdfOcrStatus = null;
+    showPdfOcrNotice(el, index, doc, code);
+    return;
+  }
+  if (!alive()) return;
+  clearPdfOcrUi(el);
+  if (el.querySelector('.pdf-blocks')) return;
+  const empty = el.querySelector('.pdf-empty-text');
+  if (!result.blocks.length) {
+    if (empty) empty.textContent = '本页没有识别到文字。';
+    return;
+  }
+  if (empty) empty.remove();
+  appendPdfBlocks(el, index, result.blocks, doc, { ocr: true });
 }
 
 function applyPdfTranslationsTo(root, texts) {
@@ -899,8 +1018,9 @@ async function translatePdfPage(index) {
   state.pdfTransPending += 1;
   renderPdfProgress();
   try {
-    const page = await doc.page(index);
+    const page = await pdfPageData(doc, index);
     if (!current()) return;
+    if (!page.blocks.length) return;
     const texts = await currentTranslator.translatePage({
       bookId: bookId,
       page: page,
@@ -1012,8 +1132,17 @@ async function ensurePdfFlowPage(section) {
   const pageNo = Number(section.dataset.page);
   const doc = state.pdf;
   try {
-    const loaded = await doc.page(pageNo);
+    let loaded = await pdfPageData(doc, pageNo);
     if (doc !== state.pdf || !section.isConnected) return;
+    // 流式视图里的零文本页：OCR 就绪时识别后再显示；未就绪不提示（原版视图负责提示）。
+    if (!loaded.blocks.length && OCR_UI_ENABLED) {
+      const snap = await pdfOcrStatusFor(doc).catch(() => null);
+      if (snap && snap.status === 'ready') {
+        await ensurePdfOcr(doc, pageNo, snap).catch(() => null);
+        if (doc !== state.pdf || !section.isConnected) return;
+        loaded = await pdfPageData(doc, pageNo);
+      }
+    }
     const holder = document.createElement('div');
     holder.className = 'pdf-flow-blocks';
     for (let i = 0; i < loaded.blocks.length; i += 1) {
@@ -1187,6 +1316,7 @@ async function openPdfBook(record, seq, signal) {
   pdfViewEpoch += 1;
   clearTimeout(pdfModeTimer);
   if (pdfFlowScrollRaf) { cancelAnimationFrame(pdfFlowScrollRaf); pdfFlowScrollRaf = 0; }
+  cancelPdfOcr();
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   const file = await getBookFile(record.id);
@@ -1403,6 +1533,7 @@ function closeReader() {
   clearTimeout(pdfModeTimer);
   if (pdfFlowScrollRaf) { cancelAnimationFrame(pdfFlowScrollRaf); pdfFlowScrollRaf = 0; }
   state.pdfIdentity = '';
+  cancelPdfOcr();
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
   const pdfNav = document.querySelector('.pdf-nav');
@@ -1529,6 +1660,7 @@ async function openBook(record) {
     }
     return;
   }
+  cancelPdfOcr();
   if (state.pdf) { try { state.pdf.destroy(); } catch (err) { /* ignore */ } state.pdf = null; }
   cancelPdfTranslations(true);
   if (state.pdfObserver) { state.pdfObserver.disconnect(); state.pdfObserver = null; }
@@ -1881,7 +2013,10 @@ async function boot() {
   bindEvents();
   // 阅读器是可信扩展页；只重拉去 Key 的配置，配置变化不自动触发付费翻译。
   chrome.storage.onChanged.addListener((changes, area) => {
-    if ((area === 'local' && (changes.config || changes[LOCAL_SECRETS])) || (area === 'session' && changes[SESSION_SECRETS])) loadConfig().catch(() => {});
+    if ((area === 'local' && (changes.config || changes[LOCAL_SECRETS])) || (area === 'session' && changes[SESSION_SECRETS])) {
+      pdfOcrStatus = null;
+      loadConfig().catch(() => {});
+    }
   });
   await renderLibrary();
 }

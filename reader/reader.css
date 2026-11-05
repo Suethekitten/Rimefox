@@ -178,6 +178,7 @@ button { cursor: pointer; }
 .pdf-blocks { margin-top: 10px; border-top: 1px dashed var(--reader-line); padding-top: 8px; }
 .pdf-block { font-size: calc(var(--reader-font-size, 18px) * 0.84); line-height: 1.6; margin: 0 0 0.8em; color: var(--reader-ink); }
 .pdf-empty-text { font-size: 13px; color: var(--reader-muted); }
+.pdf-ocr-progress { font-size: 13px; color: var(--reader-muted); }
 .pdf-ocr-notice { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 13px; color: var(--reader-muted); }
 .pdf-ocr-notice .pdf-ocr-action { font: inherit; padding: 2px 10px; border-radius: 6px; border: 1px solid currentColor; background: transparent; color: inherit; cursor: pointer; }
 

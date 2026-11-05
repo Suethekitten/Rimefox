@@ -29,3 +29,6 @@ reader/pdf-real/
 
 # OCR 参考宿主在本机生成的清单与启动脚本
 tools/ocr-mock-host/.local/
+
+# macOS OCR 连接器构建产物
+native/ocr-host/macos/build/

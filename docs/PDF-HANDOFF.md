@@ -16,7 +16,7 @@
 | `tools/e2e-pdf-reader.mjs` | PDF 阅读器 E2E（真实扩展 + 真 PDF + 假翻译 API） |
 | `tools/e2e-pdf-probe.mjs` | 探针批量跑分（真实 PDF 放 `reader/pdf-real/`，已 gitignore） |
 | `reader/vendor/pdfjs/` | pdf.js 4.10.38 legacy 构建 + worker + 169 个 CJK cmaps |
-| `lib/ocr/` | OCR 接口骨架（协议、状态、Native 来源、服务、缓存键）；界面未开放，见 [OCR-INTERFACE](OCR-INTERFACE.md) |
+| `lib/ocr/`、`options/ocr.js`、`native/ocr-host/` | OCR：协议、状态、Native 来源、服务、缓存键、版面、设置页区块与 macOS 连接器；界面未开放，见 [OCR-INTERFACE](OCR-INTERFACE.md) |
 
 ## 2. 数据流（排查顺序）
 
@@ -67,7 +67,7 @@
 
 ## 5. OCR（方案已确定，尚未实现）
 
-**当前状态**：2026-11-04 已确定采用「可选安装的本地 OCR 组件」。扩展侧接口骨架已落地（配置项、状态判定、后台路由、Native Messaging 协议与参考宿主，见 [OCR-INTERFACE](OCR-INTERFACE.md)），但界面开关关闭；设置页区块、下载入口、逐页识别与本地组件本身尚未开发，现有版本仍只提示扫描页，不能识别扫描件。排期以 [ROADMAP P2-11](ROADMAP.md#p2--可配置性) 为准。
+**当前状态**：2026-11-04 已确定采用「可选安装的本地 OCR 组件」。2026-11-05 扩展侧流程（设置页区块、逐页识别、缓存、送翻、取消）与 macOS Vision 连接器（`native/ocr-host/macos`）已实现并在真实 Chrome 中端到端验证，但界面开关关闭：PaddleOCR 引擎包、Windows、签名安装包与隐私说明尚未完成，现有版本仍只提示扫描页。进度与开放前清单见 [OCR-INTERFACE §8](OCR-INTERFACE.md#8-打开界面前的清单)。排期以 [ROADMAP P2-11](ROADMAP.md#p2--可配置性) 为准。
 
 ### 5.1 交付方式
 
@@ -123,7 +123,7 @@
 3. 接入逐页识别、页图像 / 像素与并发限制、取消及旧任务晚归隔离。OCR 缓存区分原书、页码、引擎 / 模型版本和识别参数；不因切翻译目标语言重复识别原图。
 4. 用简体、繁体和英文扫描页核对正文保留、识别误差、耗时及内存；补真实扩展与组件的 E2E，覆盖组件未安装、模型缺失、GPU 失败回退 CPU、取消下载、组件断开、换书与停止后晚归。无 OCR 时的文字型 PDF、原版阅读和翻译请求次数必须保持正确。
 
-扩展侧的接口骨架（配置、状态、后端注册、Native Messaging 协议、阅读器与设置页的接入点）已先行落地，见 [OCR-INTERFACE](OCR-INTERFACE.md)；上面 4 步仍按顺序推进。
+进度：第 2、3 步已完成；第 1 步完成 macOS 系统 OCR（Vision），PaddleOCR GPU / CPU 与 Windows 未开始；第 4 步已有真实扩展 E2E（参考宿主 + macOS 连接器），真实扫描件质量评估未做。逐项状态见 [OCR-INTERFACE §8](OCR-INTERFACE.md#8-打开界面前的清单)。
 
 第 1 步与第 4 步的引擎对比沿用 10-31 评估中设计好、但当时没跑的探针：
 

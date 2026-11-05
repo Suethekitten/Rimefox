@@ -29,6 +29,7 @@
           <a class="nav-item" href="#sec-translate"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" /></svg></span>翻译</a>
           <a class="nav-item" href="#sec-appearance"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5c0-4.3-4-7.7-9-7.7Z" /><circle cx="7.5" cy="11.5" r="1" /><circle cx="10.5" cy="7.5" r="1" /><circle cx="15.5" cy="8.5" r="1" /></svg></span>外观</a>
           <a class="nav-item" href="#sec-reading"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg></span>划词与字幕</a>
+          <a class="nav-item" href="#sec-ocr" id="navOcr" hidden><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2" /><path d="M8 9h8M8 12h8M8 15h5" /></svg></span>OCR</a>
           <a class="nav-item" href="#sec-privacy"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /><path d="M12 15v2" /></svg></span>隐私保护</a>
           <a class="nav-item" href="#sec-compat"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v6c0 4.4 3.2 8.2 7.5 9 4.3-.8 7.5-4.6 7.5-9V6Z" /><path d="m9 12 2 2 4-4" /></svg></span>站点与兼容性</a>
           <a class="nav-item" href="#sec-hotkey"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3Z" /></svg></span>快捷键</a>
@@ -599,6 +600,68 @@
         </section>
 
         <!-- ================= 隐私保护 ================= -->
+        <section class="section" id="sec-ocr" hidden>
+          <header class="section-head">
+            <h2>OCR</h2>
+            <p>识别 PDF 扫描页里的文字。需要安装凛狐本地 OCR 组件；扩展不会自动下载或安装任何程序。</p>
+          </header>
+
+          <div class="card">
+            <div class="card-title">扫描页文字识别</div>
+
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">OCR 引擎</span>
+                <span class="row-desc">识别在本机完成，无需 API Key；识别出的文字送翻时仍会发给你配置的翻译服务商。自动选择会优先使用系统 OCR。</span>
+              </span>
+              <select id="ocrEngine" class="control">
+                <option value="auto">自动选择</option>
+                <option value="system">系统 OCR</option>
+                <option value="paddle">本地 PaddleOCR</option>
+                <option value="off">关闭 OCR</option>
+              </select>
+            </div>
+
+            <div id="ocrStatus" class="test-banner" role="status" aria-live="polite" hidden>
+              <div class="tb-head"><span class="tb-title" id="ocrStatusTitle"></span></div>
+              <div class="tb-detail" id="ocrStatusDetail"></div>
+            </div>
+
+            <div class="row">
+              <span class="row-text">
+                <span class="row-title">组件状态</span>
+                <span class="row-desc" id="ocrComponentInfo">尚未检测。</span>
+              </span>
+              <span class="btn-group">
+                <button type="button" id="ocrGrant" class="btn" hidden>授权连接</button>
+                <button type="button" id="ocrInstall" class="btn" hidden>安装说明</button>
+                <button type="button" id="ocrRecheck" class="btn">重新检测</button>
+              </span>
+            </div>
+          </div>
+
+          <dialog id="ocrInstallDialog" class="ocr-dialog" aria-labelledby="ocrInstallTitle">
+            <form method="dialog">
+              <h3 id="ocrInstallTitle">安装本地 OCR 组件</h3>
+              <dl class="ocr-facts">
+                <dt>当前平台</dt><dd id="ocrInstallPlatform"></dd>
+                <dt>下载大小</dt><dd id="ocrInstallSize"></dd>
+                <dt>所需空间</dt><dd id="ocrInstallDisk"></dd>
+              </dl>
+              <p>识别在本机完成，无需 API Key；识别出的文字送翻时仍会发给你配置的翻译服务商。</p>
+              <ol class="ocr-steps">
+                <li>点击「下载」获取安装包，并按系统提示完成安装。</li>
+                <li>回到此页，点击「重新检测」。</li>
+              </ol>
+              <p class="row-desc" id="ocrInstallNote"></p>
+              <div class="ocr-dialog-actions">
+                <button type="submit" value="cancel" class="btn soft">取消</button>
+                <button type="button" id="ocrInstallDownload" class="btn primary">下载</button>
+              </div>
+            </form>
+          </dialog>
+        </section>
+
         <section class="section" id="sec-privacy">
           <header class="section-head">
             <h2>隐私保护</h2>

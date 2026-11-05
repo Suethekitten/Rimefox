@@ -138,6 +138,9 @@ fonts        keyPath: id
 translations keyPath: key
   { key, bookId, sectionId, contentHash, targetLang, style, intensity,
     provider, model, source, translated, updatedAt }
+  // 同一存储里还有 OCR 识别结果：键以 ocr- 开头（lib/ocr/cache-key.js），
+  // { key, bookId, kind:'ocr', page, backend, engine, blocks, lineCount, createdAt }；
+  // 删书时一并删除，「清除译文」（deleteBookTranslations）保留它们。见 docs/OCR-INTERFACE.md §6.2
   index: bookId
 
 failures     keyPath: key

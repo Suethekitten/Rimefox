@@ -11,9 +11,12 @@
 //   paddle-model-missing paddle 报 model_missing
 //   gpu-fallback         paddle 识别时报告 GPU 失败已回退 CPU
 //   protocol2            只声明协议 2（扩展应判定为 incompatible）
+//   exit                 收到任何消息即退出（模拟组件崩溃或被替换）
 //   slow                 每次识别等待 OCR_MOCK_DELAY_MS（默认 3000）毫秒，用于取消测试
+// OCR_MOCK_MODE_FILE：每条消息到达时从这个文件读模式（存在时优先于 OCR_MOCK_MODE），E2E 中途切换状态用。
+// OCR_MOCK_LOG：每条收到的消息追加一行 JSON（type / id / backend / target，不含图像），E2E 统计识别次数用。
 import { endianness } from 'node:os';
-import { mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, chmodSync, readFileSync, appendFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -62,6 +65,9 @@ export function recognizeResponse(msg, mode) {
   if (msg.backend === 'paddle' && mode === 'system-only') {
     return { v: 1, id: msg.id, type: 'result', ok: false, error: { code: 'engine_missing', message: 'PaddleOCR engine pack not installed' } };
   }
+  if (msg.backend === 'paddle' && mode === 'paddle-model-missing') {
+    return { v: 1, id: msg.id, type: 'result', ok: false, error: { code: 'model_missing', message: 'PaddleOCR model files are missing' } };
+  }
   return {
     v: 1, id: msg.id, type: 'result', ok: true,
     backend: msg.backend,
@@ -75,16 +81,30 @@ export function recognizeResponse(msg, mode) {
   };
 }
 
+function currentMode() {
+  const file = process.env.OCR_MOCK_MODE_FILE;
+  if (file) {
+    try { return readFileSync(file, 'utf8').trim() || 'ready'; } catch (err) { /* 文件不存在：用环境变量 */ }
+  }
+  return process.env.OCR_MOCK_MODE || 'ready';
+}
+
 function runHost() {
-  const mode = process.env.OCR_MOCK_MODE || 'ready';
   const delay = Number(process.env.OCR_MOCK_DELAY_MS) || 3000;
   const cancelled = new Set();
   const send = (obj) => process.stdout.write(encodeFrame(obj));
   process.stdin.on('data', createFrameReader((msg) => {
+    const mode = currentMode();
+    if (process.env.OCR_MOCK_LOG) {
+      try {
+        appendFileSync(process.env.OCR_MOCK_LOG, JSON.stringify({ type: msg && msg.type, id: msg && msg.id, backend: msg && msg.backend, target: msg && msg.target, mode, pid: process.pid }) + '\n');
+      } catch (err) { /* 日志只用于测试 */ }
+    }
     if (!msg || msg.v !== 1) {
       send({ v: 1, id: String((msg && msg.id) || 'r0'), type: 'result', ok: false, error: { code: 'unsupported_protocol', message: 'expected v1' } });
       return;
     }
+    if (mode === 'exit') process.exit(0); // E2E：模拟宿主进程退出 / 被替换
     if (msg.type === 'hello') send(helloResponse(msg.id, mode));
     else if (msg.type === 'cancel') {
       cancelled.add(msg.target);
@@ -97,7 +117,7 @@ function runHost() {
     }
   }));
   process.stdin.on('end', () => process.exit(0));
-  process.stderr.write('[ocr-mock-host] started, mode=' + mode + '\n'); // stderr 只用于调试；stdout 只能写协议帧
+  process.stderr.write('[ocr-mock-host] started, mode=' + currentMode() + '\n'); // stderr 只用于调试；stdout 只能写协议帧
 }
 
 function setup(extensionId) {
@@ -126,7 +146,11 @@ function setup(extensionId) {
   console.log('                （Edge 用 HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\…）');
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// 比较真实路径：macOS 的 /var 是 /private/var 的符号链接，直接比较字符串会把入口脚本误判成被导入。
+function sameFile(a, b) {
+  try { return realpathSync(a) === realpathSync(b); } catch (err) { return a === b; }
+}
+const isMain = !!process.argv[1] && sameFile(fileURLToPath(import.meta.url), process.argv[1]);
 if (isMain) {
   if (process.argv[2] === '--setup') setup(process.argv[3]);
   else runHost();

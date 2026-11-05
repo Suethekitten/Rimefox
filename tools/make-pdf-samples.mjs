@@ -2,6 +2,7 @@
 //   single.pdf  单栏文章
 //   columns.pdf 双栏排版
 //   scan.pdf    只有图形、没有文本层（模拟扫描页）
+//   ocr-scan.pdf 两页真实文字图像、没有文本层（OCR 端到端样本；图像来自 test/fixtures/ocr-sample.png）
 //   cjk.pdf     中文 CID 字体 / cmaps
 //   reader.pdf  可搜索、多页的阅读器回归样本
 // 运行：node tools/make-pdf-samples.mjs
@@ -122,7 +123,66 @@ const reader = buildPdf(Array.from({ length: 8 }, (_, i) => ({
 })));
 
 const huge = buildPdf(Array.from({ length: 12 }, (_, i) => ({ w: 15000, h: 15000, content: textBlock(['Huge page ' + (i + 1)], 60, 780, 16) })));
-for (const [name, buf] of [['single.pdf', single], ['columns.pdf', columns], ['scan.pdf', scan], ['cjk.pdf', cjk], ['reader.pdf', reader], ['huge.pdf', huge]]) {
+// 把 8 位灰度 / RGB、不隔行的 PNG 直接嵌成 PDF 图像：IDAT 拼起来就是带 PNG 预测器的 zlib 流（FlateDecode + Predictor 15）。
+function pngImage(file) {
+  const png = fs.readFileSync(file);
+  if (png.readUInt32BE(0) !== 0x89504e47) throw new Error('not a PNG: ' + file);
+  let off = 8;
+  let info = null;
+  const idat = [];
+  while (off < png.length) {
+    const len = png.readUInt32BE(off);
+    const type = png.toString('latin1', off + 4, off + 8);
+    const data = png.subarray(off + 8, off + 8 + len);
+    if (type === 'IHDR') info = { w: data.readUInt32BE(0), h: data.readUInt32BE(4), depth: data[8], color: data[9], interlace: data[12] };
+    if (type === 'IDAT') idat.push(data);
+    off += 12 + len;
+  }
+  if (!info || info.depth !== 8 || info.interlace !== 0 || ![0, 2].includes(info.color)) throw new Error('need 8-bit gray/RGB non-interlaced PNG');
+  return { ...info, colors: info.color === 2 ? 3 : 1, data: Buffer.concat(idat) };
+}
+
+function buildImagePdf(pages) {
+  const parts = [];
+  const objects = [];
+  const add = (head, stream) => { objects.push({ head, stream }); return objects.length; };
+  const catalogId = add('');
+  const pagesId = add('');
+  const pageIds = [];
+  for (const page of pages) {
+    const img = page.image;
+    const imageId = add('<< /Type /XObject /Subtype /Image /Width ' + img.w + ' /Height ' + img.h +
+      ' /ColorSpace ' + (img.colors === 3 ? '/DeviceRGB' : '/DeviceGray') + ' /BitsPerComponent 8 /Filter /FlateDecode' +
+      ' /DecodeParms << /Predictor 15 /Colors ' + img.colors + ' /BitsPerComponent 8 /Columns ' + img.w + ' >> /Length ' + img.data.length + ' >>', img.data);
+    const draw = Buffer.from('q ' + page.dw + ' 0 0 ' + page.dh + ' ' + page.dx + ' ' + page.dy + ' cm /Im1 Do Q', 'latin1');
+    const contentId = add('<< /Length ' + draw.length + ' >>', draw);
+    pageIds.push(add('<< /Type /Page /Parent ' + pagesId + ' 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 ' + imageId + ' 0 R >> >> /Contents ' + contentId + ' 0 R >>'));
+  }
+  objects[catalogId - 1] = { head: '<< /Type /Catalog /Pages ' + pagesId + ' 0 R >>' };
+  objects[pagesId - 1] = { head: '<< /Type /Pages /Kids [' + pageIds.map((id) => id + ' 0 R').join(' ') + '] /Count ' + pageIds.length + ' >>' };
+  let size = 0;
+  const push = (buf) => { parts.push(buf); size += buf.length; };
+  push(Buffer.from('%PDF-1.4\n', 'latin1'));
+  const offsets = [];
+  objects.forEach((obj, i) => {
+    offsets.push(size);
+    push(Buffer.from((i + 1) + ' 0 obj\n' + obj.head + '\n', 'latin1'));
+    if (obj.stream) { push(Buffer.from('stream\n', 'latin1')); push(obj.stream); push(Buffer.from('\nendstream\n', 'latin1')); }
+    push(Buffer.from('endobj\n', 'latin1'));
+  });
+  const xref = size;
+  let tail = 'xref\n0 ' + (objects.length + 1) + '\n0000000000 65535 f \n';
+  offsets.forEach((offset) => { tail += String(offset).padStart(10, '0') + ' 00000 n \n'; });
+  tail += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root ' + catalogId + ' 0 R >>\nstartxref\n' + xref + '\n%%EOF\n';
+  push(Buffer.from(tail, 'latin1'));
+  return Buffer.concat(parts);
+}
+
+const sample = pngImage(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures', 'ocr-sample.png'));
+// 图像按 1200×700 像素画在 A4 上方，宽 515pt；两页相同，用来检查逐页识别、缓存复用与翻页。
+const ocrScan = buildImagePdf([1, 2].map(() => ({ image: sample, dx: 40, dy: 842 - 40 - 300, dw: 515, dh: 300 })));
+
+for (const [name, buf] of [['single.pdf', single], ['columns.pdf', columns], ['scan.pdf', scan], ['cjk.pdf', cjk], ['reader.pdf', reader], ['huge.pdf', huge], ['ocr-scan.pdf', ocrScan]]) {
   fs.writeFileSync(path.join(outDir, name), buf);
   console.log(name, buf.length, 'bytes');
 }

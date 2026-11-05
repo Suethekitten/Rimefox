@@ -131,7 +131,7 @@
 | P2-9 | 翻译引擎内部优化（不加请求、不加设置） | 轻量上下文、片段稳定映射、低成本质检、术语一致性：现状、成本、风险和下一步最小任务见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)；不定版本 |
 | P2-10 | 拆 `main.js` | 把纯函数（离屏距离、取批上限、退避时间表）挪到 `core.js`，只动这两个文件 + 自检页；P1-5 的前置（原 HANDOFF §10） |
 | P2-12 | ✅ PDF 表格 / 公式文本清洗（**0.16.0 已完成**） | 表格仅在单栏页且数据行带数字时按单元格拆（不重建合并单元格）；公式残渣换 `[公式]` 占位且公式块不送翻；脚注标记 / 上标编号剥离；目录页不再被当成第二栏。跨页段落合并、表格结构重建与公式识别仍未做，见 [PDF 维护交接](PDF-HANDOFF.md) |
-| P2-11 | PDF 扫描件 OCR（未来版本，**方案已定；扩展侧接口骨架已落地，界面未开放**） | 采用用户按需下载并安装的独立本地组件，基础扩展不打包 OCR 引擎和模型；设置页与 PDF 阅读器共用配置入口，无可用 OCR 时提示用户前往设置。系统 OCR、本地 PaddleOCR、GPU / CPU 回退及验收规则统一见 [PDF-HANDOFF §5](PDF-HANDOFF.md#5-ocr方案已确定尚未实现)；接口与开放前清单见 [OCR-INTERFACE](OCR-INTERFACE.md) |
+| P2-11 | PDF 扫描件 OCR（未来版本，**扩展侧流程与 macOS Vision 连接器已实现，界面未开放**） | 采用用户按需下载并安装的独立本地组件，基础扩展不打包 OCR 引擎和模型；设置页与 PDF 阅读器共用配置入口，无可用 OCR 时提示用户前往设置。系统 OCR、本地 PaddleOCR、GPU / CPU 回退及验收规则统一见 [PDF-HANDOFF §5](PDF-HANDOFF.md#5-ocr方案已确定尚未实现)；接口与开放前清单见 [OCR-INTERFACE](OCR-INTERFACE.md) |
 
 ### P3 — 明确暂不做
 
