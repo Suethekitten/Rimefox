@@ -322,6 +322,9 @@ async function diagnoseOptions(tab, trace) {
   await grab('targets', async () => (await send('Target.getTargets')).targetInfos
     .filter((t) => /^chrome-extension:/.test(t.url) || t.type !== 'page')
     .map((t) => t.type + ' ' + t.url.replace(/^chrome-extension:\/\/[a-p]{32}/, (m) => m.slice(19, 23) + '…') + (t.attached ? ' (attached)' : '')));
+  // 浏览器各进程累计 CPU 秒数：判断是否在与其他扩展页 / service worker 争用。
+  await grab('processes', async () => (await send('SystemInfo.getProcessInfo')).processInfo
+    .map((p) => p.type + '#' + p.id + ' ' + Math.round(p.cpuTime * 100) / 100 + 's'));
   out.console = consoleLog.filter((c) => c.session === tab.sessionId).slice(-10).map((c) => c.type + ': ' + c.text);
   out.exceptions = exceptions.slice(-5);
   return out;
@@ -355,10 +358,29 @@ const fakeApi = {
   targetLang: 'zh-CN', mode: 'dual', thinkingMode: 'off'
 };
 
+// 首次安装时 onInstalled 会打开欢迎页，它与同一扩展的设置页共用渲染进程。慢 runner 上欢迎页初始化期间，
+// 随后打开的设置页曾 20 多秒未执行模块脚本（readyState 停在 interactive）。与 e2e-extension 一致：
+// 先确认欢迎页确实打开并完成初始化，再关闭它，测试从用户正常打开设置页的状态开始。
+async function settleWelcome(extId) {
+  const started = Date.now();
+  const url = 'chrome-extension://' + extId + '/welcome/index.html';
+  const target = await until(async () => (await send('Target.getTargets')).targetInfos.find((t) => t.type === 'page' && t.url === url), 20000);
+  if (!target) throw new Error('First-run welcome page did not open for ' + extId);
+  const { sessionId } = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+  const welcome = { sessionId };
+  if (!await until(() => pageEval(welcome, 'return document.documentElement.hasAttribute("data-ready")'), 20000)) throw new Error('Welcome initialization did not finish for ' + extId);
+  // 欢迎页可能已按浏览器语言保存 uiLang；断言使用中文夹具，在这里明确指定（英文文案另有断言）。
+  await pageEval(welcome, 'return import("/lib/config.js").then((m) => m.saveConfig({ uiLang: "zh" })).then(() => true)');
+  await send('Target.closeTarget', { targetId: target.targetId });
+  console.log('  欢迎页就绪并关闭 ' + extId.slice(0, 4) + '… ' + (Date.now() - started) + 'ms');
+}
+
 const { id: idA } = await send('Extensions.loadUnpacked', { path: extA });
 const { id: idB } = await send('Extensions.loadUnpacked', { path: extB });
 writeHostManifest([idA, idB]);
 console.log('A=' + idA + ' B=' + idB + ' work=' + work);
+await settleWelcome(idA);
+await settleWelcome(idB);
 
 // ================= 阶段 A：未授权 =================
 console.log('\n[A] 可选权限未授予');
@@ -369,8 +391,8 @@ console.log('\n[A] 可选权限未授予');
   const banner = await until(() => pageEval(opt, "const b=document.getElementById('ocrStatus'); return b && !b.hidden && b.dataset.ocrStatus ? { s: b.dataset.ocrStatus, t: document.getElementById('ocrStatusTitle').textContent, d: document.getElementById('ocrStatusDetail').textContent } : null"), 15000, 200, bannerTrace);
   const bannerMs = Date.now() - openedAt;
   const bannerOk = banner && banner.s === 'permission_needed' && /需要授权/.test(banner.t);
-  // 失败时先于其他交互收集诊断，记录的是超时当下的页面状态。
-  const bannerDiag = bannerOk ? null : await diagnoseOptions(opt, bannerTrace);
+  // 失败或明显偏慢（> 5 秒）时先于其他交互收集诊断，记录的是当下的页面状态。
+  const bannerDiag = bannerOk && bannerMs < 5000 ? null : await diagnoseOptions(opt, bannerTrace);
   check('设置页显示 OCR 区块与导航', await pageEval(opt, "return !document.getElementById('sec-ocr').hidden && !document.getElementById('navOcr').hidden"));
   check('系统 OCR 预览版：未授权状态', bannerOk, JSON.stringify(banner) + ' · ' + bannerMs + 'ms, ' + bannerTrace.polls + ' polls, slowest ' + bannerTrace.slowest + 'ms');
   if (bannerDiag) console.log('    诊断：' + JSON.stringify(bannerDiag, null, 2).replace(/\n/g, '\n    '));
