@@ -42,8 +42,8 @@ node tools/package-ocr-preview.mjs --platform windows
 
 ```sh
 sh native/ocr-host/macos/build.sh
-lipo -verify_arch arm64 x86_64 native/ocr-host/macos/build/rimefox-ocr-host
-otool -l native/ocr-host/macos/build/rimefox-ocr-host
+lipo native/ocr-host/macos/build/rimefox-ocr-host -verify_arch arm64 x86_64
+otool -arch all -l native/ocr-host/macos/build/rimefox-ocr-host
 native/ocr-host/macos/build/rimefox-ocr-host --diagnose
 RIMEFOX_REQUIRE_NATIVE=1 node test/ocr-native-host.test.mjs
 RIMEFOX_TEST_INSTALLERS=1 node --test test/ocr-installers.test.mjs

@@ -33,7 +33,7 @@ YAML
 fi
 compile x86_64
 lipo -create build/rimefox-ocr-host-arm64 build/rimefox-ocr-host-x86_64 -output build/rimefox-ocr-host
-lipo -verify_arch arm64 x86_64 build/rimefox-ocr-host
+lipo build/rimefox-ocr-host -verify_arch arm64 x86_64
 # Ad-hoc integrity signature required by Apple Silicon; this is not Developer ID signing or notarization.
 codesign --force --sign "${RIMEFOX_CODESIGN_IDENTITY:--}" build/rimefox-ocr-host
 codesign --verify --strict build/rimefox-ocr-host

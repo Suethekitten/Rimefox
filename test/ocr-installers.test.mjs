@@ -96,7 +96,7 @@ test('system OCR preview installer: checksum, IDs, spaces, reinstall/upgrade, re
     assert.ok(fs.existsSync(first.path), 'Manifest executable is missing: ' + first.path);
     // Windows PowerShell expands an 8.3 TEMP path (RUNNER~1 on CI); compare
     // canonical filesystem paths while still rejecting any executable outside the install.
-    const relativeBinary = path.relative(fs.realpathSync(destination), fs.realpathSync(first.path));
+    const relativeBinary = path.relative(fs.realpathSync.native(destination), fs.realpathSync.native(first.path));
     assert.ok(relativeBinary && !path.isAbsolute(relativeBinary) && relativeBinary !== '..' && !relativeBinary.startsWith('..' + path.sep),
       'Manifest executable is outside the installation: ' + JSON.stringify({ destination, executable: first.path }));
     if (platform === 'windows') assert.ok(fs.existsSync(path.join(path.dirname(first.path), 'licenses/dotnet-library-license.txt')));

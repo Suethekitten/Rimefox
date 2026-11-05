@@ -28,9 +28,9 @@ if (provenance.dirtyWorktree) throw new Error('Commit and review all source chan
 const architecture = platform === 'macos' ? 'universal' : capability.architecture.toLowerCase();
 let deploymentTargets = [];
 if (platform === 'macos') {
-  if (spawnSync('lipo', ['-verify_arch', 'arm64', 'x86_64', binary]).status !== 0)
+  if (spawnSync('lipo', [binary, '-verify_arch', 'arm64', 'x86_64']).status !== 0)
     throw new Error('macOS preview must contain Apple Silicon and Intel slices');
-  const details = spawnSync('otool', ['-l', binary], { encoding: 'utf8' });
+  const details = spawnSync('otool', ['-arch', 'all', '-l', binary], { encoding: 'utf8' });
   deploymentTargets = [...(details.stdout || '').matchAll(/cmd LC_BUILD_VERSION[\s\S]*?minos (\d+\.\d+(?:\.\d+)?)/g)].map(match => match[1]);
   if (details.status !== 0 || deploymentTargets.length !== 2 || deploymentTargets.some(target => !/^12\.0(?:\.0)?$/.test(target)))
     throw new Error('Both Mach-O slices must target macOS 12.0; inspect otool -l output before packaging.');
