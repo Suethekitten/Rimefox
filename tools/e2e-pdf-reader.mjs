@@ -16,6 +16,16 @@ const CHROME = process.env.RIMEFOX_BROWSER || (process.platform === 'darwin'
 const PDF = process.argv[2] || path.join(ROOT, 'reader', 'pdf-samples', 'reader.pdf');
 const PORT = 20600 + Math.floor(Math.random() * 300);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-pdf-reader-'));
+const badPdf = path.join(profile, 'corrupt.pdf');
+// 临时用户目录（损坏 PDF 也放在里面）每次都要删：以前只 kill 浏览器，每跑一次在系统临时目录留下约 120 MB。
+// 正常结束先等 Chrome 真正退出再删（SIGKILL 后子进程可能还在写，立即删会 ENOTEMPTY）；中途抛错时 exit 里同步兜底。
+let removed = false;
+function removeProfile() {
+  if (removed) return;
+  removed = true;
+  try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+  catch (err) { console.log('NOTE temporary profile not fully removed (' + err.code + '): ' + profile); }
+}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const results = [];
 function check(name, ok, detail) {
@@ -80,7 +90,7 @@ const browser = spawn(CHROME, [
   '--remote-debugging-port=' + PORT, '--remote-allow-origins=*',
   '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check', 'about:blank'
 ], { stdio: 'ignore' });
-process.on('exit', () => { try { browser.kill('SIGKILL'); } catch (err) { /* cleanup */ } });
+process.on('exit', () => { try { browser.kill('SIGKILL'); } catch (err) { /* cleanup */ } removeProfile(); });
 process.on('SIGTERM', () => process.exit(143));
 
 let version = null;
@@ -539,7 +549,6 @@ await pageEval(page, 'window.__releasedCanvases=Array.from(document.querySelecto
 check('关闭 PDF 后释放全部画布像素', await pageEval(page, 'return window.__releasedCanvases.every(c=>c.width===0 && c.height===0)'));
 
 // 损坏 PDF：放在最后，导入失败会回到书库
-const badPdf = path.join(os.tmpdir(), 'rimefox-corrupt-' + Date.now() + '.pdf');
 fs.writeFileSync(badPdf, 'this is not a pdf file');
 const badDoc = await send('DOM.getDocument', { depth: 0, pierce: true }, page);
 const badInput = await send('DOM.querySelector', { nodeId: badDoc.root.nodeId, selector: '#fileInput' }, page);
@@ -552,5 +561,8 @@ check('损坏 PDF 给出明确提示', /损坏|有效的 PDF/.test(badStatus), b
 const failed = results.filter((one) => !one.ok).length;
 console.log('\n' + (results.length - failed) + ' / ' + results.length + ' 通过');
 try { server.close(); } catch (err) { /* ignore */ }
+const browserExited = browser.exitCode !== null || browser.signalCode !== null ? Promise.resolve() : new Promise((resolve) => browser.once('exit', resolve));
 try { browser.kill('SIGKILL'); } catch (err) { /* ignore */ }
+await Promise.race([browserExited, sleep(5000)]);
+removeProfile();
 process.exit(failed ? 1 : 0);

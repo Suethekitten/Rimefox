@@ -91,6 +91,15 @@ const browser = spawn(BROWSER, [
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
   '--remote-allow-origins=*', '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check', 'about:blank'
 ], { stdio: 'ignore' });
+// 只删 Chrome 用户目录（每次约 50 MB），WORK 里的 result.json 留作结果。正常结束先等 Chrome 退出再删；中途退出时 exit 里同步兜底。
+let profileRemoved = false;
+function removeProfile() {
+  if (profileRemoved) return;
+  profileRemoved = true;
+  try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+  catch (err) { console.log('NOTE temporary profile not fully removed (' + err.code + '): ' + profile); }
+}
+process.on('exit', () => { try { browser.kill('SIGKILL'); } catch (err) { /* cleanup */ } removeProfile(); });
 let version = null;
 for (let i = 0; i < 100; i += 1) {
   try { version = await (await fetch('http://127.0.0.1:' + DEBUG + '/json/version')).json(); break; } catch (err) { await sleep(150); }
@@ -409,7 +418,10 @@ check('阅读器无未捕获异常', exceptions.length === 0, exceptions.join(' 
 console.log('\n[阅读器 E2E]');
 console.log(hits.requests + ' 请求 / ' + hits.texts + ' 条；异常 ' + exceptions.length);
 server.close();
+const browserExited = browser.exitCode !== null || browser.signalCode !== null ? Promise.resolve() : new Promise((resolve) => browser.once('exit', resolve));
 try { browser.kill('SIGKILL'); } catch (err) { /* ignore */ }
+await Promise.race([browserExited, sleep(5000)]);
+removeProfile();
 const failed = results.filter((r) => !r.ok);
 console.log((results.length - failed.length) + ' / ' + results.length + ' 通过');
 fs.writeFileSync(path.join(WORK, 'result.json'), JSON.stringify({ results, hits, exceptions }, null, 2));
