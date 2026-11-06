@@ -185,7 +185,10 @@ test('本机连接器：协议版本不对时回 unsupported_protocol，未装�
 });
 
 // 倾斜扫描：整页逆时针约 1.5°，长行左端低、右端高。识别框必须是原图坐标下盖住整行墨迹的外接矩形，
-// 不能是去倾斜坐标系里的水平带（0.17.2 修 Windows 的 TextAngle 换算；macOS Vision 实测本来就覆盖）。
+// 不能是去倾斜坐标系里的水平带（0.17.2 修 Windows 的 TextAngle 换算）。
+// 引擎给的框不是墨迹外接矩形：Windows OCR 的框在基线下方少一截（实测 5.7 px），Vision 不同版本
+// 之间还有几像素配准差（同一份夹具：Intel 15.7.9 通过、arm64 15.8.2 越界 3.1 px、arm64 27.2 余量 0.7 px）。
+// 所以容差按行高给比例，而不是写死 3 px；它仍远小于「框没跟着倾斜转」的错误量（1.5° 下这条长行约 18 px）。
 // 夹具与墨迹四角由 native/ocr-host/macos/Tools/render-sample.swift --tilt 1.5 --json 生成；只用英文，
 // Windows CI 只装英文 OCR 也能跑：node --test --test-name-pattern=倾斜 test/ocr-native-host.test.mjs
 test('本机连接器：倾斜扫描的识别框在原图坐标里盖住整行墨迹', { skip, timeout: 120000 }, async () => {
@@ -195,19 +198,21 @@ test('本机连接器：倾斜扫描的识别框在原图坐标里盖住整行�
   try {
     const res = await reply(port, { v: 1, id: 't1', type: 'recognize', backend: 'system', image: pngImage(file), languages: ['en'] });
     assert.equal(res.ok, true, JSON.stringify(res.error || {}));
-    const TOLERANCE = 3;
+    const TOLERANCE_MIN = 3, TOLERANCE_RATIO = 0.12;
     for (const line of expected.lines) {
       const first = line.text.split(' ')[0];
       const hit = res.lines.find((l) => l.text.replace(/\s+/g, ' ').startsWith(first));
       assert.ok(hit, '应识别出以「' + first + '」开头的行：' + res.lines.map((l) => l.text).join(' | '));
       const [x, y, w, h] = hit.box;
+      const inkTop = Math.min(...line.corners.map((c) => c[1])), inkBottom = Math.max(...line.corners.map((c) => c[1]));
+      const inkBand = inkBottom - inkTop;
+      const tolerance = Math.max(TOLERANCE_MIN, inkBand * TOLERANCE_RATIO);
       for (const [cx, cy] of line.corners) {
         const outside = Math.max(x - cx, cx - (x + w), y - cy, cy - (y + h), 0);
-        assert.ok(outside <= TOLERANCE, '「' + first + '」行的墨迹角 (' + cx + ', ' + cy + ') 超出识别框 ' + outside.toFixed(1) + ' px，框 ' + JSON.stringify(hit.box));
+        assert.ok(outside <= tolerance, '「' + first + '」行的墨迹角 (' + cx + ', ' + cy + ') 超出识别框 ' + outside.toFixed(1) + ' px（容差 ' + tolerance.toFixed(1) + ' px），框 ' + JSON.stringify(hit.box));
       }
       // 框也不能大得离谱（例如整页框）：高度不超过墨迹带的 2 倍
-      const inkTop = Math.min(...line.corners.map((c) => c[1])), inkBottom = Math.max(...line.corners.map((c) => c[1]));
-      assert.ok(h <= (inkBottom - inkTop) * 2 + 10, '「' + first + '」行的框过高：' + h);
+      assert.ok(h <= inkBand * 2 + 10, '「' + first + '」行的框过高：' + h);
     }
   } finally {
     port.child.kill();
