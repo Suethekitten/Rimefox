@@ -885,22 +885,20 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.17.2）
+## 14. 本版技术记录（0.17.3）
+
+- **窄栏距双栏扫描页退回原文（0.17.2 回归）**：`separateLayoutRects` 原先只要两块水平有交叠就按上下块从中线切开。扫描页 OCR 框四周补 `OCR_BOX_PAD`（0.3 倍行高）再加 `layoutRect` 的 1.5，栏距小于约 2×(0.3·行高 + 1.5)（10 单位行高约 9）时左右两栏的框也交叠，被切开后两块框边都切过正文，底色检查失败、整段保留原文。现在水平交叠须超过较窄一块宽度的一半才视为上下叠放；同栏上下相邻的重叠照旧分开。`test/reader-pdf-layout.test.mjs` 新增窄栏距双栏夹具（不含修复时失败）。
+- **测试脚本不再泄漏临时目录**：`tools/e2e-pdf-reader.mjs` 以前只 kill 浏览器，每次在系统临时目录留下约 120 MB 的 Chrome 用户目录和一个损坏 PDF；`tools/e2e-reader.mjs` 每次留下约 50 MB 用户目录。现在正常结束时等 Chrome 退出后删除（带重试），中途退出时在 `exit` 里同步兜底；`e2e-reader` 保留 WORK 里的夹具与 `result.json`，损坏 PDF 改放在用户目录里一起删除。
+- **OCR 组件**：本版不更新。`lib/ocr/feature.js` 的 macOS 入口仍指向 v0.17.2 附件、Windows 仍指向 v0.17.0 附件，Release 工作流因此不附加组件、不保留草稿。
+- **验证（macOS，Chrome 157）**：见本版提交说明。未测：真实扫描件上的窄栏距样本、Windows、Edge。
+
+### 0.17.2 记录
 
 - **macOS 系统 OCR 组件随 Release 发布**：组件 `0.2.0-preview.2` 的通用 ZIP 在本机由干净源码打包（两次打包 SHA-256 一致），提交到 `release-assets/ocr/`，`lib/ocr/feature.js` 固定其下载地址、SHA-256 与尺寸。`tools/ocr-release-assets.mjs` 校验已提交 ZIP 与固定值、外附 `.sha256`、包内 `SHA256SUMS`、`preview.json` 平台 / 版本及来源摘要（只比内容摘要，CI 是浅克隆）；`test/ocr-release-assets.test.mjs` 在每个单元任务里跑同一校验。Release 工作流用它自动附加组件，只有指向本标签却未提交资产的平台才保留草稿等手动上传（原 Windows 流程不变）。组件未签名、未公证，发版说明写明可能被 macOS 警告或拦截。CI 重新构建的字节与本机工具链不同，所以不在 CI 里重建发布资产。
 - **扫描页版式重叠**：OCR 行框四周补 `OCR_BOX_PAD` 后，相邻块的原框会互相重叠，后画的块盖住前一段末行。`separateLayoutRects` 从上下重叠区中线各让一半；放置改为两遍（先定底色框，扫描页补边避开已定的框；再缩字 / 扩展，只扩到其他块实际使用的框之前）。OCR E2E 真实连接器阶段新增「版式译文框互不重叠」，修复前测得 0.6 / 3.1 px 重叠。
 - **倾斜扫描的识别框**：Windows 连接器把 `OcrWord.BoundingRect`（去倾斜坐标）按 `OcrResult.TextAngle` 绕图像中心顺时针旋回原图再求外接矩形；macOS Vision 实测本来就是原图坐标下的外接矩形（最多 0.7 px 误差），未改。新增英文倾斜夹具 `test/fixtures/ocr-tilted.png` 与墨迹四角 JSON（`render-sample.swift --tilt 1.5 --json`），真实连接器测试断言墨迹四角都在行框内；Windows OCR CI 任务新增该测试。
 - **Windows 安装器识别被重定向的安装**：写入后若刚写的 `installation.json`（同产品、同连接器 SHA-256）也出现在 `%LOCALAPPDATA%\Packages\*\LocalCache\Local` 下，即撤销本次安装并报错，提示改用开始菜单的 PowerShell。Windows 组件本版不重新发布：上述两项 Windows 修复在源码中，由 CI 构建与测试，待在 Windows 上构建 `0.2.0-preview.2` 后随组件发布。
 - **验证（macOS，Chrome 156）**：见本版提交说明。未测：Windows 实机（仅 CI）、浏览器下载 macOS 组件后的隔离 / Gatekeeper 实际提示、Edge、Intel 实机与 macOS 12。
-
-### 0.17.1 记录
-
-- 版式预览的背景判定：中文较密的段落里非背景像素超过原 28% 上限，被误当复杂背景而整段保留原文。`flatBackground` 保留原规则，另接受「边缘同色、背景过半、其余均为贴近背景的笔画」的区域；笔画半径由调用方按字号像素的 15% 传入（至少 4 px），实心色块与插图仍拒绝。规则与排查入口（`data-layout-skips`）见 [PDF 交接](docs/PDF-HANDOFF.md#版式译文预览)。
-- 扫描页版式：`linesToBlocks` 保留行框，缓存存原始框与识别图像宽度（`ocr-v2`），显示时由 `ocrLayoutLines` 换算并补边、按 `inkEmRatio` 估字号；扫描页颜色容差 ±16、边缘仍 98%，不通过时用 `expandLayoutRect` 逐级加边距。实测样本（约 1° 倾斜的扫描通知）由 1/27 提升到 22/27 处覆盖，无原字残片；倾斜根因在连接器，留给 0.17.2（见 [ROADMAP](docs/ROADMAP.md#0172交接系统-ocr-组件-020-preview2)）。数据流见 [OCR-INTERFACE §6.2](docs/OCR-INTERFACE.md#62-pdf-阅读器)。
-- 「显示原文 / 显示译文」：底色改画在译文覆盖层上，右侧位图保持原页，切换只隐藏覆盖层，不重画、不重新翻译；离开双列版式时复位。
-- 短段落为主的页面（例：段间距 34.8pt × 16、行内 18.1pt × 10）中位行距落在段间距上，整页并成一段；`typicalLineGap` 改取最小一簇间距，占比不足四分之一时仍用中位数，1.5 倍 / 双倍行距不受影响。
-- 单行短段的长译文：原框内最多缩到原字号 80%，之后按 `growLayoutRect` 扩到同色空白再缩，避免缩成极小字。阅读器工具栏按翻译 / 导航 / 页面视图 / 窗口分组，组内全隐藏时整组隐藏（`:has()`，最低 Chrome 114 支持）。
-- 测试：新增密集笔画 / 粗笔画 / 实心块的背景判定、扩展空白、短段落分段单测和 OCR 框坐标往返单测；OCR E2E 在参考宿主下检查版式改用 OCR 文本块及缓存，在真实连接器下按 1440 宽窗口检查扫描页覆盖、不溢出和原文切换。参考宿主的框不贴合样本文字，不用于判断能否覆盖。
 
 ## 15. 专业翻译引擎
 
