@@ -63,7 +63,18 @@ button { cursor: pointer; }
 .reader-heading { flex: 1; min-width: 0; }
 .reader-title { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .reader-subtitle { color: var(--reader-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
-.reader-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.reader-actions { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; justify-content: flex-end; }
+/* 工具栏分组：组间细分隔线；组内一个可见控件都没有时（例如 EPUB 下的页面视图组）整组不占位 */
+.reader-group { display: inline-flex; align-items: center; gap: 6px; }
+.reader-group + .reader-group { padding-left: 14px; border-left: 1px solid var(--reader-line); }
+.reader-group:not(:has(> :not([hidden]):not(.reader-stepper)), > .reader-stepper > :not([hidden])) { display: none; }
+/* 缩放：− 100% ＋ 合成一个步进器 */
+.reader-stepper { display: inline-flex; align-items: center; border: 1px solid var(--reader-line); border-radius: 8px; background: var(--reader-paper); }
+.reader-stepper:not(:has(> :not([hidden]))) { display: none; }
+.reader-stepper .reader-button { border: 0; background: transparent; padding: 7px 9px; }
+.reader-stepper .reader-zoom { min-width: 42px; }
+/* 开关按钮（显示原文）：按下时用强调色，和普通按钮区分 */
+.reader-button[aria-pressed="true"] { border-color: var(--reader-accent); background: color-mix(in srgb, var(--reader-accent) 14%, var(--reader-paper)); color: var(--reader-accent); }
 #targetSelect { max-width: 150px; }
 .font-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .setting-note { margin: -4px 0 0; color: var(--reader-muted); font-size: 11px; line-height: 1.5; }
@@ -159,7 +170,9 @@ button { cursor: pointer; }
 @media (max-width: 760px) {
   .reader-top { align-items: flex-start; flex-wrap: wrap; padding: 9px 12px; }
   .reader-heading { order: 2; flex-basis: 100%; }
-  .reader-actions { gap: 5px; }
+  .reader-actions { gap: 5px 10px; }
+  .reader-group { gap: 5px; }
+  .reader-group + .reader-group { padding-left: 10px; }
   .reader-button, .reader-control { padding: 6px 8px; font-size: 12px; }
   .library-view { padding: 28px 16px 70px; }
   .library-hero { grid-template-columns: 1fr; gap: 24px; padding-top: 18px; }

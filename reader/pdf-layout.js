@@ -1,4 +1,4 @@
-import { layoutRect, flatBackground } from '../lib/reader/pdf-layout.js';
+import { layoutRect, flatBackground, growLayoutRect } from '../lib/reader/pdf-layout.js';
 
 export function clearPdfLayout(el, doc) {
   const view = el.querySelector('.pdf-layout-view');
@@ -26,31 +26,50 @@ export function updatePdfLayout(el, loaded, texts, doc) {
   let placed = 0;
   // 未替换的原因计数，写在 data-layout-skips 上供诊断：untranslated / position / background / fit
   const skips = { untranslated: 0, position: 0, background: 0, fit: 0 };
-  for (let i = 0; i < Math.min(loaded.blocks.length, 400); i += 1) {
+  const count = Math.min(loaded.blocks.length, 400);
+  const rects = Array.from({ length: count }, (_, i) => layoutRect(loaded.blocks[i], loaded.viewport));
+  const toPixels = (r) => ({ x: r.x * sx, y: r.y * sy, width: r.width * sx, height: r.height * sy });
+  const vp = loaded.viewport;
+  for (let i = 0; i < count; i += 1) {
     if (!image) continue;
     if (!texts[i]) { skips.untranslated += 1; continue; }
-    const rect = layoutRect(loaded.blocks[i], loaded.viewport);
+    const rect = rects[i];
     if (!rect) { skips.position += 1; continue; }
-    const pixels = { x: rect.x * sx, y: rect.y * sy, width: rect.width * sx, height: rect.height * sy };
     // 笔画半宽随字号增长：粗大标题的笔画中心也要能找到附近的背景。
-    const color = flatBackground(image, pixels, { stroke: Math.max(4, Math.ceil(rect.fontSize * sy * 0.15)) });
+    const stroke = Math.max(4, Math.ceil(rect.fontSize * sy * 0.15));
+    const color = flatBackground(image, toPixels(rect), { stroke });
     if (!color) { skips.background += 1; continue; }
     const text = document.createElement('div'); text.className = 'pdf-layout-translation';
     text.textContent = texts[i]; text.dir = 'auto';
-    text.style.left = rect.x / loaded.viewport.width * 100 + '%';
-    text.style.top = rect.y / loaded.viewport.height * 100 + '%';
-    text.style.width = rect.width / loaded.viewport.width * 100 + '%';
-    text.style.height = rect.height / loaded.viewport.height * 100 + '%';
+    const place = (r) => {
+      text.style.left = r.x / vp.width * 100 + '%';
+      text.style.top = r.y / vp.height * 100 + '%';
+      text.style.width = r.width / vp.width * 100 + '%';
+      text.style.height = r.height / vp.height * 100 + '%';
+    };
+    place(rect);
     // 底色画在译文层上而不是改画布：画布保持原页，「显示原文」只需隐藏译文层。
     text.style.backgroundColor = 'rgb(' + color.join(',') + ')';
     text.style.color = color.reduce((a, b) => a + b) > 384 ? '#111' : '#fff';
     view.appendChild(text);
-    let font = Math.max(8, rect.fontSize * scale);
-    text.style.fontSize = font + 'px';
-    while ((text.scrollHeight > text.clientHeight + 1 || text.scrollWidth > text.clientWidth + 1) && font > 8) {
-      font = Math.max(8, font - 0.5); text.style.fontSize = font + 'px';
+    const base = Math.max(8, rect.fontSize * scale);
+    let font = base;
+    const fits = () => text.scrollHeight <= text.clientHeight + 1 && text.scrollWidth <= text.clientWidth + 1;
+    const shrink = (min) => {
+      text.style.fontSize = font + 'px';
+      while (!fits() && font > min) { font = Math.max(min, font - 0.5); text.style.fontSize = font + 'px'; }
+      return fits();
+    };
+    // 先在原框里缩到原字号的 80%；仍放不下时，向右（本栏右缘）和向下（下一段之前）的同色空白扩展，
+    // 扩展区也要通过同一底色检查，最后才继续缩到 8px。避免单行短段的长译文缩成极小字。
+    let ok = shrink(Math.max(8, base * 0.8));
+    if (!ok) {
+      const grown = growLayoutRect(rect, rects, vp);
+      const same = grown && flatBackground(image, toPixels(grown), { stroke });
+      if (same && same.every((v, k) => Math.abs(v - color[k]) <= 10)) { place(grown); font = base; }
+      ok = shrink(8);
     }
-    if (text.scrollHeight > text.clientHeight + 1 || text.scrollWidth > text.clientWidth + 1) { text.remove(); skips.fit += 1; continue; }
+    if (!ok) { text.remove(); skips.fit += 1; continue; }
     placed += 1;
   }
   view.dataset.layoutSkips = Object.entries(skips).map(([k, v]) => k + ':' + v).join(',');

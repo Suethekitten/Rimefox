@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { layoutRect, flatBackground } from '../lib/reader/pdf-layout.js';
+import { layoutRect, flatBackground, growLayoutRect } from '../lib/reader/pdf-layout.js';
 import { groupParagraphs } from '../lib/reader/pdf-text.js';
 
 test('layout geometry follows a paragraph without crossing columns; legacy blocks unchanged', () => {
@@ -51,4 +51,20 @@ test('layout masking accepts dense thin-stroke text but still declines filled bo
   for (let y = 4; y < 56; y++) for (let x = 4; x < 116; x++) if (x % 30 < 12) bold.data.set([...ink, 255], (y * 120 + x) * 4);
   assert.equal(flatBackground(bold, rect), null);
   assert.deepEqual(flatBackground(bold, rect, { stroke: 7 }), bg);
+});
+
+test('short paragraphs may grow into free column space but never into another block', () => {
+  const viewport = { width: 595, height: 842 };
+  const wide = { x: 36, y: 100, width: 516, height: 35, fontSize: 11 };
+  const short = { x: 36, y: 150, width: 200, height: 17, fontSize: 11 };
+  const next = { x: 36, y: 190, width: 516, height: 35, fontSize: 11 };
+  const grown = growLayoutRect(short, [wide, short, next], viewport);
+  assert.deepEqual(grown, { x: 36, y: 150, width: 516, height: 38, fontSize: 11 });
+  // Never more than three times the original height, even with free space below.
+  assert.equal(growLayoutRect(short, [wide, short], viewport).height, 51);
+  // A block in the way (e.g. a right-hand note at the same height) blocks growth entirely.
+  const note = { x: 300, y: 152, width: 100, height: 14, fontSize: 9 };
+  assert.equal(growLayoutRect(short, [wide, short, note, next], viewport), null);
+  // Nothing to gain: already full column width with the next block right below.
+  assert.equal(growLayoutRect(wide, [wide, { x: 36, y: 137, width: 516, height: 10, fontSize: 9 }], viewport), null);
 });

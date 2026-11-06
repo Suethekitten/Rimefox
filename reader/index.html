@@ -15,22 +15,33 @@
     <div id="readerSubtitle" class="reader-subtitle"></div>
   </div>
   <div class="reader-actions">
-    <select id="targetSelect" class="reader-control" title="目标语言" aria-label="目标语言" disabled></select>
-    <select id="modeSelect" class="reader-control" title="显示模式" disabled>
-      <option value="original">原文</option>
-      <option value="bilingual">双语</option>
-      <option value="translation">仅译文</option>
-    </select>
-    <button id="translateChapter" class="reader-button" type="button" disabled title="翻译当前章节">翻译本章</button>
-    <button id="tocToggle" class="reader-button" type="button" disabled title="目录">目录</button>
-    <button id="fullscreenToggle" class="reader-button" type="button" title="全屏阅读" aria-label="全屏阅读">⛶</button>
-    <button id="pdfZoomOut" class="reader-button" type="button" title="缩小" hidden>−</button>
-    <span id="pdfZoomLabel" class="reader-zoom" hidden>100%</span>
-    <button id="pdfZoomIn" class="reader-button" type="button" title="放大" hidden>＋</button>
-    <button id="pdfFitWidth" class="reader-button" type="button" title="适合宽度" hidden>适合宽度</button>
-    <button id="pdfFitColumn" class="reader-button" type="button" title="单栏放大" hidden>单栏</button>
-    <button id="pdfLayoutOriginal" class="reader-button" type="button" title="在译文页和原页之间切换" aria-pressed="false" hidden>显示原文</button>
-    <button id="settingsToggle" class="reader-button" type="button" title="阅读设置">Aa</button>
+    <!-- 按用途分组：翻译 / 导航 / 页面视图 / 窗口；组内没有可见按钮时整组隐藏（见 reader.css .reader-group） -->
+    <div class="reader-group" role="group" aria-label="翻译">
+      <select id="targetSelect" class="reader-control" title="目标语言" aria-label="目标语言" disabled></select>
+      <select id="modeSelect" class="reader-control" title="显示模式" disabled>
+        <option value="original">原文</option>
+        <option value="bilingual">双语</option>
+        <option value="translation">仅译文</option>
+      </select>
+      <button id="translateChapter" class="reader-button" type="button" disabled title="翻译当前章节">翻译本章</button>
+      <button id="pdfLayoutOriginal" class="reader-button" type="button" title="在译文页和原页之间切换" aria-pressed="false" hidden>显示原文</button>
+    </div>
+    <div class="reader-group" role="group" aria-label="导航">
+      <button id="tocToggle" class="reader-button" type="button" disabled title="目录">目录</button>
+    </div>
+    <div class="reader-group" role="group" aria-label="页面视图">
+      <span class="reader-stepper">
+        <button id="pdfZoomOut" class="reader-button" type="button" title="缩小" hidden>−</button>
+        <span id="pdfZoomLabel" class="reader-zoom" hidden>100%</span>
+        <button id="pdfZoomIn" class="reader-button" type="button" title="放大" hidden>＋</button>
+      </span>
+      <button id="pdfFitWidth" class="reader-button" type="button" title="适合宽度" hidden>适合宽度</button>
+      <button id="pdfFitColumn" class="reader-button" type="button" title="单栏放大" hidden>单栏</button>
+    </div>
+    <div class="reader-group" role="group" aria-label="窗口">
+      <button id="fullscreenToggle" class="reader-button" type="button" title="全屏阅读" aria-label="全屏阅读">⛶</button>
+      <button id="settingsToggle" class="reader-button" type="button" title="阅读设置">Aa</button>
+    </div>
   </div>
 </header>
 

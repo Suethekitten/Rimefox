@@ -396,6 +396,20 @@ t('H10/H19/H20 1.5 倍行距不一行一段；中文折行不插空格；复合�
   assert.deepEqual(textsOf(pageBlocks({ items: [it('The method is well-', 72, 700), it('known and self-', 72, 688), it('supervised. A hyphen-', 72, 676), it('ated word.', 72, 664)] }, A4)), ['The method is well-known and self-supervised. A hyphenated word.']);
 });
 
+t('短段落居多的页面按段间距分段，不并成整页一段（0.17.1 第四幕第 2 页）', function () {
+  // 实测间距序列：行内 18.1pt × 10，段间 34.8pt × 16；中位数落在段间距上时整页曾合成 1 段。
+  const gaps = [18.1, 34.8, 18.1, 34.8, 18.1, 34.8, 18.1, 34.8, 18.1, 34.8, 34.8, 18.1, 18.1, 34.8, 34.8, 34.8, 34.8, 18.1, 34.8, 18.1, 18.1, 34.8, 34.8, 34.8, 34.8, 18.1];
+  let y = 780;
+  const lines = [{ text: '“夏弥、明非、子航！”', y, x0: 36, x1: 550, size: 11.14 }];
+  gaps.forEach((gap, i) => { y -= gap; lines.push({ text: '第' + (i + 2) + '行文字。', y, x0: 36, x1: 550, size: 11.14 }); });
+  const blocks = groupParagraphs(lines);
+  assert.equal(blocks.length, gaps.filter((g) => g > 30).length + 1);
+  // 少数几处紧密行距（同字号的两行标题）不会让 1.5 倍行距正文一行一段：结果与原中位数规则相同
+  const mostlyNormal = [{ text: '标题', y: 700, x0: 72, x1: 300, size: 12 }, { text: '副标题', y: 690, x0: 72, x1: 300, size: 12 }];
+  for (let i = 0; i < 8; i += 1) mostlyNormal.push({ text: '一点五倍行距的正文第' + i + '行', y: 666 - i * 23.4, x0: 72, x1: 500, size: 12 });
+  assert.equal(groupParagraphs(mostlyNormal).length, 1);
+});
+
 t('H12 十六进制哈希和 DNA 序列不当成 base64 公式', function () {
   assert.equal(stripLatexArtifacts('9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'), '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08');
   assert.equal(stripLatexArtifacts('ATGGCTAGCTAGGCTTACGATCGATCGGCTAGCTAGCTTAGGCTAGCATCGATCGATGCTAGCTAG'), 'ATGGCTAGCTAGGCTTACGATCGATCGGCTAGCTAGCTTAGGCTAGCATCGATCGATGCTAGCTAG');
