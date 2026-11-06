@@ -19,6 +19,14 @@ on:
       # 测试 / 自检改动也要重新校验：0.9.4 的教训是自检用例只在 CI 上失败
       - selftest/**
       - test/**
+      # 发版前跑的浏览器检查脚本（checks.mjs browser）：修了它们也要能重新校验并补发本版本（0.17.3 的教训）。
+      # 这份列表与 ocr-preview.yml 的 push 路径保持一致，否则 wait-release-checks 等不到同一提交的 OCR 检查
+      - tools/checks.mjs
+      - tools/check-selftest.mjs
+      - tools/make-pdf-samples.mjs
+      - tools/e2e-session-keys.mjs
+      - tools/e2e-reader.mjs
+      - tools/e2e-pdf-reader.mjs
   workflow_dispatch:
 
 permissions:

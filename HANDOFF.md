@@ -822,6 +822,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 7. 推送到 `main`：`.github/workflows/release.yml` 依次校验三处版本号、发版说明格式、跑全部 Node 单测（`node --test`）和离线自检，
    再用 `node tools/package-store.mjs --release` 打 `Rimefox-v<版本号>.zip`（与商店包同一份白名单）、检查安装包清单，全部通过才创建 `v<版本号>` 的 Release。
    同一版本只发一次；没改版本号的推送不会发版。也可以在 GitHub 的 Actions 页面手动运行
+   发版会等同一提交由推送触发的 Checks 与 System OCR preview checks 都通过（`tools/wait-release-checks.mjs`），手动运行等不到这两项。检查失败、Release 被拒时，修好 `test/`、`selftest/` 或 `checks.mjs browser` 跑的浏览器检查脚本再推，即可为同一版本重新校验并补发；这些脚本列在 `release.yml` 与 `ocr-preview.yml` 两边的 push 路径里，两边须保持一致
 
 ---
 
@@ -889,6 +890,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 - **窄栏距双栏扫描页退回原文（0.17.2 回归）**：`separateLayoutRects` 原先只要两块水平有交叠就按上下块从中线切开。扫描页 OCR 框四周补 `OCR_BOX_PAD`（0.3 倍行高）再加 `layoutRect` 的 1.5，栏距小于约 2×(0.3·行高 + 1.5)（10 单位行高约 9）时左右两栏的框也交叠，被切开后两块框边都切过正文，底色检查失败、整段保留原文。现在水平交叠须超过较窄一块宽度的一半才视为上下叠放；同栏上下相邻的重叠照旧分开。`test/reader-pdf-layout.test.mjs` 新增窄栏距双栏夹具（不含修复时失败）。
 - **测试脚本不再泄漏临时目录**：`tools/e2e-pdf-reader.mjs` 以前只 kill 浏览器，每次在系统临时目录留下约 120 MB 的 Chrome 用户目录和一个损坏 PDF；`tools/e2e-reader.mjs` 每次留下约 50 MB 用户目录。现在正常结束时等 Chrome 退出后删除（带重试），中途退出时在 `exit` 里同步兜底；`e2e-reader` 保留 WORK 里的夹具与 `result.json`，损坏 PDF 改放在用户目录里一起删除。
+- **CI 补发**：推送 0.17.3 后 `browser (macos-15, chrome)` 两次在 `tools/e2e-reader.mjs` 失败（`renderLibrary` 先清空书卡再读书库，脚本在书库可见时就点书卡），Release 被拒。脚本改为等目标书卡出现；`checks.mjs browser` 跑的浏览器检查脚本加入 `release.yml` 与 `ocr-preview.yml` 的 push 路径，修这些脚本的推送能为同一版本补发。
 - **OCR 组件**：本版不更新。`lib/ocr/feature.js` 的 macOS 入口仍指向 v0.17.2 附件、Windows 仍指向 v0.17.0 附件，Release 工作流因此不附加组件、不保留草稿。
 - **验证（macOS，Chrome 157）**：见本版提交说明。未测：真实扫描件上的窄栏距样本、Windows、Edge。
 
