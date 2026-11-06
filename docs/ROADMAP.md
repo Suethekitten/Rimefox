@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-06；最新发布 0.17.4，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.17.x 完成 TXT / Markdown / LOG 阅读、PDF 版式翻译预览与系统 OCR 预览；0.18 计划见 [下一小版本交接](NEXT-MINOR-HANDOVER.md)。实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-06；最新发布 0.17.4，0.17.5 待发布，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.17.x 完成 TXT / Markdown / LOG 阅读、PDF 版式翻译预览与系统 OCR 预览；0.18 计划见 [下一小版本交接](NEXT-MINOR-HANDOVER.md)。实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -96,6 +96,7 @@
 | 0.17.2 | macOS 系统 OCR 组件 `0.2.0-preview.2`；扫描页版式译文框不再重叠 |
 | 0.17.3 | 窄栏距双栏扫描版 PDF 不再被当成上下块切开，左右栏恢复版式翻译 |
 | 0.17.4 | 设置页保存修复：保存途中的改动不被覆盖、并发保存排队、后台未响应时自动重试、失败原因可见 |
+| 0.17.5 | Windows 系统 OCR 组件更新到 `0.2.0-preview.2`：倾斜扫描文字框修正、MSIX 重定向安装检查 |
 
 ---
 
@@ -139,7 +140,7 @@
 | P2-9 | 翻译引擎内部优化（不加请求、不加设置） | 轻量上下文、片段稳定映射、低成本质检、术语一致性：现状、成本、风险和下一步最小任务见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)；不定版本 |
 | P2-10 | 拆 `main.js` | 把纯函数（离屏距离、取批上限、退避时间表）挪到 `core.js`，只动这两个文件 + 自检页；P1-5 的前置（原 HANDOFF §10） |
 | P2-12 | ✅ PDF 表格 / 公式文本清洗（**0.16.0 已完成**） | 表格仅在单栏页且数据行带数字时按单元格拆（不重建合并单元格）；公式残渣换 `[公式]` 占位且公式块不送翻；脚注标记 / 上标编号剥离；目录页不再被当成第二栏。跨页段落合并、表格结构重建与公式识别仍未做，见 [PDF 维护交接](PDF-HANDOFF.md) |
-| P2-11 | PDF 扫描件系统 OCR（**预览，本地审核**） | 采用用户按需下载并安装的独立本地组件，基础扩展不打包 OCR 引擎和模型；设置页与 PDF 阅读器共用配置入口，无可用 OCR 时提示用户前往设置。首阶段只开放 Windows / macOS 系统 OCR，保留未来 PaddleOCR 和签名分发能力；Windows `0.2.0-preview.2` 已在本机构建，待发布，组件仍未签名；接口见 [OCR-INTERFACE](OCR-INTERFACE.md)，平台交付层级和实机未测项见 [组件 README](../native/ocr-host/README.md) |
+| P2-11 | PDF 扫描件系统 OCR（**预览，本地审核**） | 采用用户按需下载并安装的独立本地组件，基础扩展不打包 OCR 引擎和模型；设置页与 PDF 阅读器共用配置入口，无可用 OCR 时提示用户前往设置。首阶段只开放 Windows / macOS 系统 OCR，保留未来 PaddleOCR 和签名分发能力；Windows `0.2.0-preview.2` 已构建并打包，随 0.17.5 待发布，组件仍未签名；接口见 [OCR-INTERFACE](OCR-INTERFACE.md)，平台交付层级和实机未测项见 [组件 README](../native/ocr-host/README.md) |
 
 ### P3 — 明确暂不做
 
@@ -154,7 +155,7 @@
 
 ## 4. 近期安排
 
-0.17.4 已发布；0.17.x 完成 TXT / Markdown / LOG 阅读、PDF 版式翻译预览与系统 OCR 预览。Windows OCR 组件 `0.2.0-preview.2` 已在本机构建成功，仍待发布；macOS 组件未签名、未公证。继续执行 [SUPPORT](SUPPORT.md) 的验收矩阵；缺真实环境证据的项目保持待验收。PDF Beta、直播字幕和医学质量提升不作为已兑现的 1.0 承诺。系统 OCR 预览按 P2-11 独立推进。
+0.17.5 已准备：Windows OCR 组件 `0.2.0-preview.2` 已构建并打包，待发布；macOS 组件未签名、未公证。继续执行 [SUPPORT](SUPPORT.md) 的验收矩阵；缺真实环境证据的项目保持待验收。PDF Beta、直播字幕和医学质量提升不作为已兑现的 1.0 承诺。系统 OCR 预览按 P2-11 独立推进。
 
 ### 0.15.0（实现与验证）
 
@@ -178,7 +179,7 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 
 ### 0.17.2（macOS 系统 OCR 组件；Windows 组件修复已构建，待发布）
 
-已完成：macOS 组件 `0.2.0-preview.2` 随 v0.17.2 Release 发布（未签名、未公证，见 [组件 README](../native/ocr-host/README.md#macos-组件随-release-发布)）；扫描页版式译文框不再重叠；下列第 1、2 项的代码与测试已在仓库，Windows 部分由 CI 的 Windows 任务构建与测试（本机无 Windows 环境）。**仍待**：发布 Windows `0.2.0-preview.2`（2026-11-06 已在本机按 [Windows 体验包构建顺序](../native/ocr-host/README.md#windows-体验包构建顺序) 构建并打包成功，未签名；尚未上传，`lib/ocr/feature.js` 的下载地址与校验值仍是 preview.1），届时第 1、2 项才到达 Windows 用户，第 3 项随之完成。原始交接内容：
+已完成：macOS 组件 `0.2.0-preview.2` 随 v0.17.2 Release 发布（未签名、未公证，见 [组件 README](../native/ocr-host/README.md#macos-组件随-release-发布)）；扫描页版式译文框不再重叠；下列第 1、2 项的代码与测试已在仓库，Windows 部分由 CI 的 Windows 任务构建与测试（本机无 Windows 环境）。**已完成**：Windows `0.2.0-preview.2` 已在本机构建并打包，`lib/ocr/feature.js` 已指向 v0.17.5 附件（未签名）；待发布后第 1、2 项到达 Windows 用户，第 3 项随之完成。原始交接内容：
 
 1. **倾斜扫描件的识别框**：Windows 连接器（`native/ocr-host/windows/Program.cs`，取 `line.Words` 的 `BoundingRect` 求并集）没有使用 `OcrResult.TextAngle`。实测约 1° 倾斜的扫描页，长行左端墨迹比框底低 7–14 px、右端比框顶高 11–14 px（识别图 3 倍渲染），框是去倾斜坐标系下的直带。应按 `TextAngle` 绕图像中心把每个单词框旋回原图坐标后再求外接矩形，并加入一张倾斜扫描夹具（真实识别 + 坐标断言）。macOS Vision 也需核对 `boundingBox` 在倾斜文本下是否覆盖墨迹。扩展侧 0.17.1 已用逐级加边距绕开（见 [PDF 交接](PDF-HANDOFF.md#版式译文预览)），修好后可复核这些扫描页覆盖数是否上升、边距是否可收回。
 2. **安装器识别被重定向的安装**：在 MSIX 打包桌面应用（如 Claude 桌面版）的内置终端里运行时，`%LOCALAPPDATA%` 与 HKCU 写入可能被重定向到 `%LOCALAPPDATA%\Packages\<应用>\LocalCache`，使用者的浏览器看不到组件。排查步骤已写进 [INSTALL](../native/ocr-host/INSTALL.md#安装后仍显示未检测到本地-ocr-组件)；安装器应在安装后自检该位置，命中时停止并提示改用开始菜单的 PowerShell，而不是报告成功。
@@ -191,6 +192,10 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 ### 0.17.4（补丁）
 
 修复设置页保存期间修改其他选项被回填覆盖、并发保存互相覆盖、后台未响应时一直停在默认表单、读写设置失败无提示。发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.4) 为准。
+
+### 0.17.5（补丁）
+
+更新 Windows 系统 OCR 组件到 `0.2.0-preview.2`：倾斜扫描页按 `TextAngle` 修正文字框，长行两端不再被裁掉；安装器识别 MSIX 重定向并提示改用开始菜单的 PowerShell。组件仍未签名；扩展下载元数据指向 v0.17.5，组件 ZIP 与 Windows 体验包随 Release 上传。发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.5) 为准。
 
 ### 0.18.0（PDF 版式预览覆盖）
 

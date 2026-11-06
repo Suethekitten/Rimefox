@@ -889,21 +889,22 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.17.4）
+## 14. 本版技术记录（0.17.5）
+
+- **Windows OCR 组件 0.2.0-preview.2**：两处连接器修复进入实际二进制——倾斜扫描件按 `OcrResult.TextAngle` 绕图像中心把每个单词框转回原图坐标再求外接矩形；安装器在 MSIX 重定向的 `%LOCALAPPDATA%` / HKCU 下自检并停止。组件源码提交 `5c909909`，输入摘要 `9ed084b0f6eeb612de31b8a7ed3e5f11223a07e63e0e7d5b01dcf6d715fb71ac`；Windows x64 自包含单文件（未签名），`--diagnose` 报 `0.2.0-preview.2`、`apiStatus: ready`、`en-US` / `zh-Hans-CN`。
+- **组件包**：`tools/package-ocr-preview.mjs --platform windows` 生成 `Rimefox-OCR-0.2.0-preview.2-windows-x64.zip`（36,697,008 字节，SHA-256 `62b86ebcb6314480f131d0a7103d6281c12d4a4e253b5218d35f38f706f7c7db`，解压 93,050,372 字节），`preview.json` 为 `publisherSignature: not-verified`、`dirtyWorktree: false`。
+- **扩展元数据**：`lib/ocr/feature.js` 的 Windows 入口指向 v0.17.5 附件并写入实际 SHA-256、下载字节与解压字节；macOS 入口保持 v0.17.2。`tools/package-ocr-experience.mjs` 的默认组件路径同步到 preview.2。
+- **发布方式**：Windows 组件 ZIP 不提交到 `release-assets/ocr/`（避免 36 MB 二进制进仓库），Release 工作流按 `tools/ocr-release-assets.mjs` 的规则保留草稿，由维护者上传独立组件与 Windows 体验包后公开。体验包用 `tools/package-ocr-experience.mjs --component <ZIP>` 生成，内含扩展 ZIP、组件 ZIP、其 `.sha256` 和「安装说明.md」。
+- **验证**：`RIMEFOX_REQUIRE_NATIVE=1 node test/ocr-native-host.test.mjs` 6/6；`node tools/ocr-release-assets.mjs v0.17.5` 报 `draft: true`（Windows 待上传）；体验包生成器校验组件来源、扩展版本与下载元数据。未签名；干净机器、MOTW / SmartScreen、Windows ARM64 仍未验收。
+- **仍是预览**：签名继续推迟；已安装 preview.1 的用户不会自动更新，需要重新下载安装。
+
+### 0.17.4 记录
 
 - **设置页保存途中的改动**：所有写配置的入口经 `queueSave()` 串行，轮到时才按最新表单算补丁；应答回来由 `settleSaved(saved, base)` 收尾，等待期间表单没变才整页回填，变了只挪已保存基线、途中改动保持未保存。保存在途时忽略 `watchConfig` 的外部更新。实现与边界见 §4.7「保存途中的改动」。
 - **扩展页读写配置限时**：`lib/config.js` 的 `configRequest()`：读每次 4 s、最多 3 次退避重试；保存只发一次、15 s 超时、不重试。失败时 `init()` 记 `data-options-init-error` 并在保存岛提示。见 §4.7「读写超时」。
 - **外部改动不丢**：读配置有了时限后，`watchConfig()` 的读取失败不再静默放弃：按 1 / 2 / 4 / 8 s 退避重读，新的存储变化重新排队，扩展重载则停止（`test/watch-config.test.mjs`）。起因：推送 0.17.4 后 CI 的 Ubuntu Edge 在会话 Key E2E 中「界面语言没有切换」（外部写入 uiLang 后设置页没收到），本机未复现。
 - **测试**：新增 `test/config-request.test.mjs`（超时、重试次数、保存不重试）与 `tools/e2e-options-save.mjs`（真实 Chrome + 假 API，扣住保存应答 / 丢弃读请求；修复前 8/22，修复后 22/22，zh、en），后者加入 `checks.mjs browser`，并同步加入 `release.yml` 与 `ocr-preview.yml` 的 push 路径（见 §11 发版步骤 7）。
 - **验证（macOS，Chrome 157）**：见本版提交说明。未测：Edge、Windows（仅 CI）。
-
-### 0.17.3 记录
-
-- **窄栏距双栏扫描页退回原文（0.17.2 回归）**：`separateLayoutRects` 原先只要两块水平有交叠就按上下块从中线切开。扫描页 OCR 框四周补 `OCR_BOX_PAD`（0.3 倍行高）再加 `layoutRect` 的 1.5，栏距小于约 2×(0.3·行高 + 1.5)（10 单位行高约 9）时左右两栏的框也交叠，被切开后两块框边都切过正文，底色检查失败、整段保留原文。现在水平交叠须超过较窄一块宽度的一半才视为上下叠放；同栏上下相邻的重叠照旧分开。`test/reader-pdf-layout.test.mjs` 新增窄栏距双栏夹具（不含修复时失败）。
-- **测试脚本不再泄漏临时目录**：`tools/e2e-pdf-reader.mjs` 以前只 kill 浏览器，每次在系统临时目录留下约 120 MB 的 Chrome 用户目录和一个损坏 PDF；`tools/e2e-reader.mjs` 每次留下约 50 MB 用户目录。现在正常结束时等 Chrome 退出后删除（带重试），中途退出时在 `exit` 里同步兜底；`e2e-reader` 保留 WORK 里的夹具与 `result.json`，损坏 PDF 改放在用户目录里一起删除。
-- **CI 补发**：推送 0.17.3 后 `browser (macos-15, chrome)` 两次在 `tools/e2e-reader.mjs` 失败（`renderLibrary` 先清空书卡再读书库，脚本在书库可见时就点书卡），Release 被拒。脚本改为等目标书卡出现；`checks.mjs browser` 跑的浏览器检查脚本加入 `release.yml` 与 `ocr-preview.yml` 的 push 路径，修这些脚本的推送能为同一版本补发。
-- **OCR 组件**：本版不更新。`lib/ocr/feature.js` 的 macOS 入口仍指向 v0.17.2 附件、Windows 仍指向 v0.17.0 附件，Release 工作流因此不附加组件、不保留草稿。
-- **验证（macOS，Chrome 157）**：见本版提交说明。未测：真实扫描件上的窄栏距样本、Windows、Edge。
 
 ## 15. 专业翻译引擎
 

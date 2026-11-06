@@ -10,7 +10,7 @@ import { OCR_COMPONENT_RELEASES, verifiedOcrRelease } from '../lib/ocr/feature.j
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2), option = (name, fallback) => args.includes(name) ? args[args.indexOf(name) + 1] : fallback;
 const version = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'))).version;
-const componentPath = path.resolve(option('--component', path.join(root, 'dist/ocr-preview/Rimefox-OCR-0.2.0-preview.1-windows-x64.zip')));
+const componentPath = path.resolve(option('--component', path.join(root, 'dist/ocr-preview/Rimefox-OCR-0.2.0-preview.2-windows-x64.zip')));
 const componentName = path.basename(componentPath), extensionName = `Rimefox-v${version}.zip`;
 const extensionPath = path.resolve(option('--extension', path.join(root, 'dist', extensionName)));
 const output = path.resolve(option('--output', path.join(root, 'dist', 'release-' + version)));

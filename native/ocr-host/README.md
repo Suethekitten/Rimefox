@@ -10,7 +10,7 @@
 
 | 平台 | 开发联调 | 本地预览构建 | 普通用户下载验收 |
 |---|---|---|---|
-| Windows x64 | 当前开发机上的真实系统 OCR、Chrome / Edge 已通过 | 自包含 exe、用户级安装 / 卸载、ZIP 与 SHA-256 已实现 | 干净机器、带下载标记的 ZIP、安全提示与兼容矩阵未验收；Windows 体验包由 v0.17.0 Release 交付，公开状态以 Release 为准 |
+| Windows x64 | 当前开发机上的真实系统 OCR、Chrome / Edge 已通过 | 自包含 exe、用户级安装 / 卸载、ZIP 与 SHA-256 已实现 | 干净机器、带下载标记的 ZIP、安全提示与兼容矩阵未验收；Windows 体验包由 v0.17.5 Release 交付，公开状态以 Release 为准 |
 | macOS Apple Silicon / Intel | Apple Silicon Mac 上真实 Vision、隔离安装、Chrome OCR E2E 与真实用户 Library 安装后浏览器连接已通过（2026-11-06） | 组件 `0.2.0-preview.2` 通用 ZIP 随 v0.17.2 Release 发布，见下方「macOS 组件随 Release 发布」 | 未签名、未公证；浏览器下载后的隔离 / Gatekeeper 实际提示、Intel 实机、macOS 12 与 Edge 未验收 |
 
 这不是签名正式分发。macOS 默认 ad-hoc 完整性签名不提供 Developer ID 身份，也不表示已公证。尚无可信发布者签名的 Windows 包。保留后续签名入口，不要求用户降低全局安全设置。一次性证据和初始缺口见 [本轮验证记录](../../docs/archive/2026-11-05-system-ocr-preview.md)。
