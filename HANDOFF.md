@@ -893,6 +893,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 - **设置页保存途中的改动**：所有写配置的入口经 `queueSave()` 串行，轮到时才按最新表单算补丁；应答回来由 `settleSaved(saved, base)` 收尾，等待期间表单没变才整页回填，变了只挪已保存基线、途中改动保持未保存。保存在途时忽略 `watchConfig` 的外部更新。实现与边界见 §4.7「保存途中的改动」。
 - **扩展页读写配置限时**：`lib/config.js` 的 `configRequest()`：读每次 4 s、最多 3 次退避重试；保存只发一次、15 s 超时、不重试。失败时 `init()` 记 `data-options-init-error` 并在保存岛提示。见 §4.7「读写超时」。
+- **外部改动不丢**：读配置有了时限后，`watchConfig()` 的读取失败不再静默放弃：按 1 / 2 / 4 / 8 s 退避重读，新的存储变化重新排队，扩展重载则停止（`test/watch-config.test.mjs`）。起因：推送 0.17.4 后 CI 的 Ubuntu Edge 在会话 Key E2E 中「界面语言没有切换」（外部写入 uiLang 后设置页没收到），本机未复现。
 - **测试**：新增 `test/config-request.test.mjs`（超时、重试次数、保存不重试）与 `tools/e2e-options-save.mjs`（真实 Chrome + 假 API，扣住保存应答 / 丢弃读请求；修复前 8/22，修复后 22/22，zh、en），后者加入 `checks.mjs browser`，并同步加入 `release.yml` 与 `ocr-preview.yml` 的 push 路径（见 §11 发版步骤 7）。
 - **验证（macOS，Chrome 157）**：见本版提交说明。未测：Edge、Windows（仅 CI）。
 
