@@ -344,6 +344,11 @@ try {
   const recovered = await until(async () => { const c=await cfg(); return c.targetLang === 'zh-CN' && c.providerConfig.deepseek.apiKey === 'mock-legacy'; });
   check('设置页实际恢复升级前设置，同一接口保留当前 Key', !!recovered);
   }
+  // 记下重载前的 service worker：重载后要等新的 worker 起来再开设置页。设置页启动时向 worker 要配置，
+  // 在 CI 的慢机器上，重载后固定 600 ms 就开页，配置请求可能落到正在退出的旧 worker 上、一直没有应答。
+  const extensionWorkers = async () => (await send('Target.getTargets')).targetInfos
+    .filter((t) => t.type === 'service_worker' && t.url.startsWith('chrome-extension://' + extId + '/')).map((t) => t.targetId);
+  const workersBeforeReload = new Set(await extensionWorkers());
   if (process.env.RIMEFOX_TEST_BROWSER === 'edge') {
     // Edge's manager UI differs; exercise the same runtime lifecycle without Chrome selectors.
     await evaluate(options, 'setTimeout(()=>chrome.runtime.reload(),0);return true;');
@@ -359,11 +364,18 @@ try {
   const clicked = await evaluate(manager.session, allElements + 'const card=all(document).find(e=>e.localName==="extensions-item" && e.id===' + JSON.stringify(extId) + ');const button=card && all(card.shadowRoot).find(e=>/reload/i.test(e.id) && /button/.test(e.localName));if(!button || !button.getBoundingClientRect().width)return false;button.click();return true;');
   if (!clicked) throw new Error('Visible extension reload control unavailable');
   }
-  await sleep(600);
+  if (!await until(async () => (await extensionWorkers()).some((id) => !workersBeforeReload.has(id)), 15000)) console.log('NOTE no new service worker seen after reload');
+  await sleep(300);
   options = (await open('chrome-extension://' + extId + '/options/index.html')).session;
-  if (!await until(() => optionsReady(options), 15000)) {
-    console.log('Reload diagnostic', await evaluate(options, 'return {url:location.href,title:document.title,body:document.body?.innerText.slice(0,400),runtime:!!globalThis.chrome?.runtime}'));
-    throw new Error('Reloaded options did not initialize');
+  const reloadDiagnostic = () => evaluate(options, 'return {init:document.documentElement.dataset.optionsInit,initError:document.documentElement.dataset.optionsInitError,provider:!!document.querySelector("#provider option"),baseUrl:!!document.getElementById("baseUrl")?.value,dirty:document.getElementById("savebar")?.dataset.dirty,url:location.href,runtime:!!globalThis.chrome?.runtime}').catch((err) => String(err));
+  if (!await until(() => optionsReady(options), 10000)) {
+    // 记录卡在哪一步，再像用户一样刷新一次设置页；刷新后仍起不来才算失败
+    console.log('NOTE reloaded options not ready, refreshing once', await reloadDiagnostic());
+    await reloadPage(options);
+    if (!await until(() => optionsReady(options), 15000)) {
+      console.log('Reload diagnostic', await reloadDiagnostic());
+      throw new Error('Reloaded options did not initialize');
+    }
   }
   check('重新加载扩展后可打开新入口，并提示重新填写会话 Key', !(await cfg()).providerConfig.deepseek.apiKey && await evaluate(options, 'return !!document.getElementById("rememberKey") && !document.getElementById("apiKey").value'));
   check('扩展页面与内容脚本没有未捕获异常', errors.length === 0, errors.join(' | '));
