@@ -3,6 +3,7 @@ import {
   DEFAULTS,
   getConfig,
   configFormPatch,
+  configPatchSince,
   saveConfig,
   THEMES,
   languageOptions,
@@ -555,6 +556,14 @@ function renderIntensity(value) {
     button.classList.toggle('active', button.dataset.intensity === wanted);
   });
 }
+// 只随「已保存的配置」变化、不属于表单草稿的状态：密钥迁移提示、鉴权提示、悬浮窗位置重置按钮
+function renderSavedStatus(cfg) {
+  const slot = slotFor(cfg, cfg.currentProvider);
+  $('keyMigration').hidden = !cfg.keyMigrationPending;
+  $('authStatus').textContent = cfg.authPaused ? t('鉴权失败，翻译已暂停；更新密钥或测试连接后恢复。') : !slot.apiKey ? t('本次会话尚未配置密钥。') : '';
+  fields.dockPosReset.disabled = !cfg.dockPos;
+}
+
 function applyConfig(cfg) {
   refreshProviderList();
 
@@ -565,8 +574,7 @@ function applyConfig(cfg) {
   fields.baseUrl.value = slot.baseUrl || '';
   fields.apiKey.value = slot.apiKey || '';
   fields.rememberKey.checked = slot.keyStorage === 'local';
-  $('keyMigration').hidden = !cfg.keyMigrationPending;
-  $('authStatus').textContent = cfg.authPaused ? t('鉴权失败，翻译已暂停；更新密钥或测试连接后恢复。') : !slot.apiKey ? t('本次会话尚未配置密钥。') : '';
+  renderSavedStatus(cfg);
   fields.model.value = slot.model || '';
   fields.thinkingMode.value = cfg.thinkingMode || DEFAULTS.thinkingMode;
   fields.thinkingExtra.value = cfg.thinkingExtra || '';
@@ -627,7 +635,6 @@ function applyConfig(cfg) {
   fields.dockEnabled.checked = !!cfg.dockEnabled;
   fields.dockSide.value = cfg.dockSide === 'left' ? 'left' : 'right';
   fields.dockAutoHide.checked = cfg.dockAutoHide !== false;
-  fields.dockPosReset.disabled = !cfg.dockPos;
   previewLook();
   showSiteRulesResult(fields.siteRules.value);
   showCustomCssResult(fields.customCss.value);
@@ -871,10 +878,10 @@ for (const [id, policy] of [['migrateSession', 'session'], ['keepLocalKey', 'loc
       return;
     }
     try {
-      currentCfg = await saveConfig({ keyMigration: policy });
-      applyConfig(currentCfg);
-      rememberSaved(currentCfg);
-      markSaved(currentCfg);
+      await queueSave(async () => {
+        const base = clone(savedForm || readForm());
+        settleSaved(await saveConfig({ keyMigration: policy }), base);
+      });
     } catch (err) { setResult($('saveResult'), err.message, 'bad'); }
   });
 }
@@ -1022,6 +1029,40 @@ function markSaved(cfg) {
   updateDirty();
 }
 
+// 写配置的操作（保存、测试连接前的保存、密钥保存方式、悬浮窗位置、导入）排成一队依次执行：
+// 每次都在轮到自己时读最新的表单和基线，两次点击不会拿同一份旧基线各存一遍。
+let saveQueue = Promise.resolve();
+let savesInFlight = 0;
+function queueSave(task) {
+  savesInFlight += 1;
+  const run = saveQueue.then(task).finally(() => { savesInFlight -= 1; });
+  saveQueue = run.catch(() => {});
+  return run;
+}
+
+// 一次保存落盘后更新「已保存」基线。base 是这次保存所依据的表单快照（表单保存时是提交时的表单，
+// 其它保存是当时的已保存表单）。等后台应答期间表单没再改动：用保存结果整页回填，显示清洗 / 回退后的值；
+// 有新改动：不回填表单（否则刚选的下拉框会被改回去），只把基线挪到这次提交的内容，
+// 新改动保持「未保存」，可以再点一次「保存」。表单之外的字段（修订号、鉴权暂停、悬浮窗位置等）照常更新。
+function settleSaved(saved, base) {
+  rememberSaved(saved);
+  const during = configPatchSince(base, readForm());
+  if (!Object.keys(during).length) {
+    currentCfg = saved;
+    applyConfig(saved);
+    markSaved(saved);
+    return true;
+  }
+  Object.keys(saved).forEach((key) => {
+    if (!(key in base)) currentCfg[key] = clone(saved[key]);
+  });
+  savedCfg = clone(saved);
+  savedForm = clone(base);
+  renderSavedStatus(saved);
+  updateDirty();
+  return false;
+}
+
 // 表单的任何交互之后重新比较一次（下拉、开关、输入、快捷键录制、删除服务商、选模型都覆盖到）
 // 合并同一轮里的多个事件（一次点击会连发 click / input / change），等事件处理完再比较
 let dirtyTimer = 0;
@@ -1152,6 +1193,8 @@ async function init() {
 // 别的页面（弹窗切深色、另一个设置页）改了配置：没有未保存的改动就整页刷新成新值；
 // 有未保存的改动时只同步界面外观，并提示保存会以这里为准
 function onConfigElsewhere(next) {
+  // 自己的保存还没收到应答：存储变化多半就是这次保存，应答回来后 settleSaved 会处理（含别处的改动）
+  if (savesInFlight) return;
   const merged = mergeConfig(DEFAULTS, next);
   // 输入事件的脏状态计数可能还在下一轮定时器里，不能据旧标志覆盖刚输入的内容。
   updateDirty();
@@ -1169,7 +1212,8 @@ function onConfigElsewhere(next) {
   setResult($('saveResult'), '设置在别的页面被修改过；保存时会以这里的内容为准', 'bad');
 }
 
-$('save').addEventListener('click', async () => {
+$('save').addEventListener('click', () => { queueSave(saveForm); });
+async function saveForm() {
   // 先把还没跑的「改动数」更新做掉：不然它稍后才跑，会把下面刚写出来的提示冲掉
   clearTimeout(dirtyTimer);
   dirtyTimer = 0;
@@ -1186,31 +1230,26 @@ $('save').addEventListener('click', async () => {
     (ruleErrors.length ? fields.siteRules : fields.customCss).scrollIntoView({ block: 'center', behavior: 'smooth' });
     return;
   }
-  const patch = configFormPatch(savedForm || {}, readForm());
+  const base = readForm();
+  const patch = configFormPatch(savedForm || {}, base);
   const insecure = Object.keys(patch.providerConfig || {}).find((id) => {
     const one = patch.providerConfig[id];
     return one && isInsecureRemoteEndpoint(one.baseUrl);
   });
   if (insecure && !confirm('服务商「' + insecure + '」使用明文 HTTP，API Key 会在网络上明文传输。仍要保存吗？')) return;
+  let saved;
   try {
-    currentCfg = await saveConfig(patch);
-    applyConfig(currentCfg);
+    saved = await saveConfig(patch);
   } catch (err) {
     setResult($('saveResult'), err.message, 'bad');
     return;
   }
-  // 语言列表 / 目标语言可能被 mergeConfig 清洗或回退：以保存后的结果为准，避免表单还显示无效值。
-  draftLanguages = normalizeCustomLanguages(currentCfg.customLanguages);
-  refreshLanguageSelects();
-  fields.targetLang.value = currentCfg.targetLang;
-  fields.inputTargetLang.value = currentCfg.inputTargetLang;
-  renderCustomLanguages();
-  rememberSaved(currentCfg);
-  markSaved(currentCfg);
-  glossaryEditor.render(); // 清洗后的结果（去空行 / 去重）反映到表格
-  if (activeConfig(currentCfg).apiKey) setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
+  // 语言列表 / 目标语言 / 术语表可能被 mergeConfig 清洗或回退：没有新改动时 applyConfig 整页按保存结果回填；
+  // 保存途中又改过表单则保留这些改动，清洗结果在下次保存后显示。
+  settleSaved(saved, base);
+  if (activeConfig(saved).apiKey) setResult($('saveResult'), '已保存（' + new Date().toLocaleTimeString() + '）', 'ok');
   else setResult($('saveResult'), '已保存，但还没有填 API Key，翻译会失败。', 'bad');
-});
+}
 
 // 恢复默认：只填进表单，确认后点「保存」才生效（可以「放弃更改」反悔）。
 // 只重置翻译 / 显示设置：不切走当前服务商，也不动已保存的地址 / Key / 模型和自定义服务商
@@ -1230,11 +1269,17 @@ $('reset').addEventListener('click', () => {
 // 悬浮窗拖拽位置：恢复成「位置」里的贴边默认值（立即生效，和导入 / 测试连接一样直接落盘）
 fields.dockPosReset.addEventListener('click', async () => {
   fields.dockPosReset.disabled = true;
-  currentCfg = await saveConfig({ dockPos: null });
-  rememberSaved(currentCfg);
-  markSaved(currentCfg);
-  applyConfig(currentCfg);
-  setResult($('saveResult'), '悬浮窗位置已恢复默认', 'ok');
+  try {
+    // 只改了悬浮窗位置：表单里还没保存的改动保留（settleSaved 以当前已保存表单为基线）
+    await queueSave(async () => {
+      const base = clone(savedForm || readForm());
+      settleSaved(await saveConfig({ dockPos: null }), base);
+    });
+    setResult($('saveResult'), '悬浮窗位置已恢复默认', 'ok');
+  } catch (err) {
+    fields.dockPosReset.disabled = false;
+    setResult($('saveResult'), err.message, 'bad');
+  }
 });
 
 $('test').addEventListener('click', async () => {
@@ -1242,10 +1287,10 @@ $('test').addEventListener('click', async () => {
   btn.disabled = true;
   setResult($('testResult'), '测试中…');
   try {
-    currentCfg = await saveConfig(configFormPatch(savedForm || {}, readForm()));
-    applyConfig(currentCfg);
-    rememberSaved(currentCfg);
-    markSaved(currentCfg);
+    await queueSave(async () => {
+      const base = readForm();
+      settleSaved(await saveConfig(configFormPatch(savedForm || {}, base)), base);
+    });
     const res = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ type: 'test' }, (r) => {
         const err = chrome.runtime.lastError;
@@ -1495,11 +1540,15 @@ $('importFile').addEventListener('change', async (event) => {
     if (patch.customProviders) {
       patch.customProviders = mergeCustomProviderLists((currentCfg && currentCfg.customProviders) || [], patch.customProviders);
     }
-    const next = await saveConfig(patch);
-    rememberSaved(next);
-    currentCfg = next;
-    applyConfig(next);
-    markSaved(next);
+    // 导入就是用文件内容替换设置：保存后按结果整页回填（排在其它保存之后，不和它们交错）
+    const next = await queueSave(async () => {
+      const result = await saveConfig(patch);
+      rememberSaved(result);
+      currentCfg = result;
+      applyConfig(result);
+      markSaved(result);
+      return result;
+    });
     renderBrowserShortcut();
     // applyConfig 已把导入后的当前服务商填进表单：有地址和 Key 就刷新模型列表
     // （以前读的是 v5 之前的扁平字段 next.baseUrl / next.apiKey，迁移后永远是空的，这一步从来没跑过）
@@ -1549,5 +1598,7 @@ fields.funIntensity.addEventListener('click', (event) => {
 init().catch((err) => {
   // 仍然抛出：未捕获异常计数照常能发现初始化失败
   document.documentElement.dataset.optionsInitError = String((err && err.message) || err).slice(0, 200);
+  // 读不到配置时表单还是 HTML 默认值：明确提示，不让人对着一张假表单改设置
+  try { setResult($('saveResult'), String((err && err.message) || err), 'bad'); } catch (_) { /* 页面结构不完整 */ }
   throw err;
 });

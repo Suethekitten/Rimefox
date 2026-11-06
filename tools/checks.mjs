@@ -26,5 +26,5 @@ if (process.argv[2] === 'unit') {
   if (!browser) throw new Error('Requested browser is not installed: ' + (edge ? 'Edge' : 'Chrome'));
   process.env.RIMEFOX_BROWSER = browser;
   run(['tools/check-selftest.mjs']);
-  for (const script of ['make-pdf-samples', 'e2e-session-keys', 'e2e-reader', 'e2e-pdf-reader']) run(['tools/' + script + '.mjs']);
+  for (const script of ['make-pdf-samples', 'e2e-session-keys', 'e2e-options-save', 'e2e-reader', 'e2e-pdf-reader']) run(['tools/' + script + '.mjs']);
 } else throw new Error('Usage: node tools/checks.mjs unit|browser');

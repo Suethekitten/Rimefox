@@ -284,6 +284,8 @@ lib/
 - **旧用户选择**：旧 config 中的 Key 先转为设备记忆，显示一次迁移选择，不擅自改成会话。迁移范围记在 `keyMigrationProviders`：只含旧版本写在配置里的服务商，升级后用户亲自改过 Key 或保存方式的服务商会移出名单；0.16.2 及更早没有名单时只把当时在设备上的 Key 当作旧 Key（0.16.3）。选择 session 后清理设备凭据与 `config_backup_v3` 等旧配置副本；新填 Key 默认 session。删除服务商会删除两处凭据，恢复默认保留接口；导入的新 Key 沿用已有保存选择或默认 session，导出只有显式勾选才包含 Key。
 - **写失败 / 回收恢复**：后台串行队列，session pending 日志只含会话 Key；设备库 `{active,pending:{id,keys}}` 只含设备 Key。两处准备完成后，以 local.config._storageRevision 为提交事实；下一次读取将匹配候选提交，不匹配则放弃并保留原 active。凭据库不可用时失败关闭，不退回 local。配置 schema 10，每次结构升级保留无 Key 的 `config_migration_backup`；恢复入口与程序回退边界见 [UPGRADING](docs/UPGRADING.md)。完整关闭浏览器或扩展重载清 session，单独回收 worker 不会。
 - **并发编辑**：设置页通过 `configFormPatch()`（`configPatchSince()` + 改 Key 时带上本窗口的保存方式）只提交相对已保存表单的字段变化，独立窗口的独立修改可合并；同一字段仍按最后保存。处理外部更新前同步计算脏状态，保护刚输入、尚未到定时器的草稿；暂停提示可独立更新，不覆盖草稿。
+- **保存途中的改动**：设置页所有写配置的入口（保存、测试连接、密钥保存方式、悬浮窗位置、导入）经 `queueSave()` 串行，轮到时才按最新表单算补丁；保存在途时忽略 `watchConfig` 的外部更新（多半就是这次保存）。应答回来由 `settleSaved(saved, base)` 收尾：等待期间表单没变才按保存结果整页回填，变了就不回填、只把已保存基线挪到提交的那份表单，途中的改动保持未保存、可再存（导入除外：导入就是整页替换）。回归：`node tools/e2e-options-save.mjs`。
+- **读写超时**：扩展页的 `getConfig()` / `saveConfig()` 走 `configRequest()`：读（`config:trustedGet`）每次限时 4 s、最多 3 次、退避重试（不回 / 没有接收端 / 空应答都算传输失败，后台明确返回的错误不重试）；保存（`config:save`）只发一次、限时 15 s，超时报「设置可能没有保存」，不重试，避免同一补丁写两遍。全部失败时 `init()` 记 `data-options-init-error` 并在保存岛显示错误，不再永远停在 `config` 阶段。
 - **暂停边界**：`auth-state.js` 在每次实际模型 HTTP 发送前检查当前凭据修订号和 session 暂停状态，包含排队、重试、思考回退和严格复核。401，或明确标识无效 Key 的 400 / 403，记录暂停；普通权限 403、限流、断网不按 Key 失效处理。已发出的请求无法撤回，但后续发送会被拦住。
 - **恢复与晚归**：凭据修订号是随机版本加非敏感接口身份，不是 Key 散列。更正 Key / 切换可用接口使旧暂停不再适用；只有可信扩展页可调用测试连接绕过暂停，成功后解除匹配版本的暂停。旧 Key 的晚归失败不能暂停新 Key，网页不能借 `test` 或自报继续标记解除后台暂停。
 - **广播**：`config-broadcast.js` 用公开配置生成 SHA-256 指纹，排除 Key 和写入日志 ID，保留随机凭据版本以识别 hasKey 未变的替换；合并短时存储变化并错开发给标签页，不等待前一标签应答才发送下一条；单条应答超时不阻塞后续广播，按标签跳过已送达指纹。内容脚本保存指纹，重复通知不再拉配置；可信设置页 / 弹窗监听相关存储事件后合并重拉，不把密钥传播到网页。
@@ -616,6 +618,7 @@ node tools/e2e-extension.mjs --aozora-live   # 真实青空文库《罗生门》
 node tools/e2e-extension.mjs --bilibili-live  # 真实 B 站视频页评论区验收（需要能上 bilibili.com；未登录只显示首屏，滚动 / 楼中楼会显示未验证）
 node tools/e2e-extension.mjs --headed --science-live  # 真实 Science Advances 论文页（Cloudflare 需要 headed；只验证引用识别 / 注入 / 还原，不调用真实模型）
 node tools/e2e-session-keys.mjs             # 会话 Key、设备记忆、完整浏览器重启 / 扩展重载、20 标签与鉴权暂停（RIMEFOX_TEST_UI_LANG=zh|en 指定界面语言；CI 的 Chrome 用 zh、Edge 用 en）
+node tools/e2e-options-save.mjs             # 设置页保存途中改表单不被回填、保存串行、测试连接 / 悬浮窗位置入口、读配置丢包 / 被拒仍能初始化（同样认 RIMEFOX_TEST_UI_LANG）
 node tools/e2e-extension.mjs --selftest-only  # 只跑离线自检页
 node tools/e2e-extension.mjs --medical-only   # 只跑弹窗 + 医学专业模式
 node tools/stability-audit.mjs                # 真实 Chrome 长文 / 大量段落 / 动态 / 内存基准（直接页面）
