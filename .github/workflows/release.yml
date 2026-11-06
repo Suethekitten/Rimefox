@@ -108,6 +108,16 @@ jobs:
           echo "zip=dist/Rimefox-${{ steps.ver.outputs.tag }}.zip" >> "$GITHUB_OUTPUT"
           echo "store=dist/Rimefox-${{ steps.ver.outputs.tag }}-store.zip" >> "$GITHUB_OUTPUT"
 
+      # 指向本标签的 OCR 组件：已提交在 release-assets/ocr/ 的逐项校验（固定 SHA、尺寸、包内校验、来源摘要）后
+      # 随 Release 自动附加；未提交的平台需要维护者手动上传，Release 先保留草稿。见 tools/ocr-release-assets.mjs。
+      - name: 校验随仓库提交的 OCR 组件
+        if: steps.check.outputs.skip == 'false'
+        id: ocr
+        run: |
+          node tools/ocr-release-assets.mjs "${{ steps.ver.outputs.tag }}" > "$RUNNER_TEMP/ocr-assets.json"
+          cat "$RUNNER_TEMP/ocr-assets.json"
+          node -e "const p=require(process.argv[1]); console.log('draft=' + p.draft); console.log('files=' + p.attach.join(' ')); console.log('mac=' + ((p.platforms.find((x) => x.platform === 'macos' && x.committed) || {}).name || ''))" "$RUNNER_TEMP/ocr-assets.json" >> "$GITHUB_OUTPUT"
+
       - name: 检查安装包清单
         if: steps.check.outputs.skip == 'false'
         run: |
@@ -162,7 +172,24 @@ jobs:
 
           **Windows x64 系统 OCR 体验**：下载 `Rimefox-${{ steps.ver.outputs.tag }}-Windows-OCR-Preview.zip` 及其 `.sha256`，外层解压后阅读「安装说明.md」。先安装扩展，再使用自己浏览器的实际扩展 ID 安装组件；Chrome / Edge ID 可能不同。扩展中的组件下载入口提供独立组件 ZIP。
 
-          这是未签名系统 OCR 预览，Windows 10 2004+ 为构建目标，当前开发机验证不能代替干净机器或未打包 OCR API 的全面兼容保证，系统安全策略可能阻止安装。macOS 暂无通过下载实机验收的发布包；完整限制和安装步骤见[本版本安装说明](https://github.com/Suethekitten/Rimefox/blob/${{ steps.ver.outputs.tag }}/native/ocr-host/INSTALL.md)及其链接的验收状态。
+          这是未签名系统 OCR 预览，Windows 10 2004+ 为构建目标，当前开发机验证不能代替干净机器或未打包 OCR API 的全面兼容保证，系统安全策略可能阻止安装。完整限制和安装步骤见[本版本安装说明](https://github.com/Suethekitten/Rimefox/blob/${{ steps.ver.outputs.tag }}/native/ocr-host/INSTALL.md)及其链接的验收状态。
+          EOF
+          else
+            WIN_URL=$(node --input-type=module -e "import {OCR_COMPONENT_RELEASES as r} from './lib/ocr/feature.js'; console.log(r.windows?.connector || '')")
+            if [ -n "$WIN_URL" ]; then
+              cat >> "$RUNNER_TEMP/notes.md" <<EOF
+
+          **Windows 系统 OCR 组件**：本版本没有更新 Windows 组件，扩展内的下载入口沿用 [$(basename "$WIN_URL")]($WIN_URL)。
+          EOF
+            fi
+          fi
+          MAC_ZIP="${{ steps.ocr.outputs.mac }}"
+          if [ -n "$MAC_ZIP" ]; then
+            cat >> "$RUNNER_TEMP/notes.md" <<EOF
+
+          **macOS 系统 OCR 组件（预览）**：下载 \`$MAC_ZIP\` 及其 \`.sha256\`，核对校验值后解压，按包内 INSTALL.md 用自己浏览器的实际扩展 ID 运行 \`install.sh\`。通用程序同时支持 Apple Silicon 与 Intel，构建目标 macOS 12+；扩展设置页的下载入口指向同一附件。
+
+          **注意：目前缺少 Apple 开发者证书，组件未签名、未经公证，下载后可能被 macOS 警告甚至拦截，正在解决。** 请勿为此关闭 Gatekeeper 或 SIP；处理方式见[本版本安装说明](https://github.com/Suethekitten/Rimefox/blob/${{ steps.ver.outputs.tag }}/native/ocr-host/INSTALL.md#macos)。
           EOF
           fi
 
@@ -172,16 +199,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node tools/wait-release-checks.mjs
 
-      - name: 创建 Release（组件尚待上传时保留草稿）
+      - name: 创建 Release（附加已提交的组件；仍待上传时保留草稿）
         if: steps.check.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           DRAFT=()
-          if node --input-type=module -e "import {OCR_COMPONENT_RELEASES as r} from './lib/ocr/feature.js'; process.exit(Object.values(r).some(x=>x.connector?.includes('/releases/download/${{ steps.ver.outputs.tag }}/'))?0:1)"; then
+          # 仍有指向本标签、但没有随仓库提交的组件时保留草稿，等维护者上传
+          if [ "${{ steps.ocr.outputs.draft }}" = "true" ]; then
             DRAFT=(--draft)
           fi
-          gh release create "${{ steps.ver.outputs.tag }}" "${{ steps.pack.outputs.zip }}" \
+          # 已校验的已提交组件（ZIP 与 .sha256）随扩展包一起附加
+          read -r -a OCR_FILES <<< "${{ steps.ocr.outputs.files }}"
+          gh release create "${{ steps.ver.outputs.tag }}" "${{ steps.pack.outputs.zip }}" "${OCR_FILES[@]}" \
             --title "凛狐 Rimefox ${{ steps.ver.outputs.tag }}" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             --target "$GITHUB_SHA" "${DRAFT[@]}"

@@ -885,7 +885,15 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.17.1）
+## 14. 本版技术记录（0.17.2）
+
+- **macOS 系统 OCR 组件随 Release 发布**：组件 `0.2.0-preview.2` 的通用 ZIP 在本机由干净源码打包（两次打包 SHA-256 一致），提交到 `release-assets/ocr/`，`lib/ocr/feature.js` 固定其下载地址、SHA-256 与尺寸。`tools/ocr-release-assets.mjs` 校验已提交 ZIP 与固定值、外附 `.sha256`、包内 `SHA256SUMS`、`preview.json` 平台 / 版本及来源摘要（只比内容摘要，CI 是浅克隆）；`test/ocr-release-assets.test.mjs` 在每个单元任务里跑同一校验。Release 工作流用它自动附加组件，只有指向本标签却未提交资产的平台才保留草稿等手动上传（原 Windows 流程不变）。组件未签名、未公证，发版说明写明可能被 macOS 警告或拦截。CI 重新构建的字节与本机工具链不同，所以不在 CI 里重建发布资产。
+- **扫描页版式重叠**：OCR 行框四周补 `OCR_BOX_PAD` 后，相邻块的原框会互相重叠，后画的块盖住前一段末行。`separateLayoutRects` 从上下重叠区中线各让一半；放置改为两遍（先定底色框，扫描页补边避开已定的框；再缩字 / 扩展，只扩到其他块实际使用的框之前）。OCR E2E 真实连接器阶段新增「版式译文框互不重叠」，修复前测得 0.6 / 3.1 px 重叠。
+- **倾斜扫描的识别框**：Windows 连接器把 `OcrWord.BoundingRect`（去倾斜坐标）按 `OcrResult.TextAngle` 绕图像中心顺时针旋回原图再求外接矩形；macOS Vision 实测本来就是原图坐标下的外接矩形（最多 0.7 px 误差），未改。新增英文倾斜夹具 `test/fixtures/ocr-tilted.png` 与墨迹四角 JSON（`render-sample.swift --tilt 1.5 --json`），真实连接器测试断言墨迹四角都在行框内；Windows OCR CI 任务新增该测试。
+- **Windows 安装器识别被重定向的安装**：写入后若刚写的 `installation.json`（同产品、同连接器 SHA-256）也出现在 `%LOCALAPPDATA%\Packages\*\LocalCache\Local` 下，即撤销本次安装并报错，提示改用开始菜单的 PowerShell。Windows 组件本版不重新发布：上述两项 Windows 修复在源码中，由 CI 构建与测试，待在 Windows 上构建 `0.2.0-preview.2` 后随组件发布。
+- **验证（macOS，Chrome 156）**：见本版提交说明。未测：Windows 实机（仅 CI）、浏览器下载 macOS 组件后的隔离 / Gatekeeper 实际提示、Edge、Intel 实机与 macOS 12。
+
+### 0.17.1 记录
 
 - 版式预览的背景判定：中文较密的段落里非背景像素超过原 28% 上限，被误当复杂背景而整段保留原文。`flatBackground` 保留原规则，另接受「边缘同色、背景过半、其余均为贴近背景的笔画」的区域；笔画半径由调用方按字号像素的 15% 传入（至少 4 px），实心色块与插图仍拒绝。规则与排查入口（`data-layout-skips`）见 [PDF 交接](docs/PDF-HANDOFF.md#版式译文预览)。
 - 扫描页版式：`linesToBlocks` 保留行框，缓存存原始框与识别图像宽度（`ocr-v2`），显示时由 `ocrLayoutLines` 换算并补边、按 `inkEmRatio` 估字号；扫描页颜色容差 ±16、边缘仍 98%，不通过时用 `expandLayoutRect` 逐级加边距。实测样本（约 1° 倾斜的扫描通知）由 1/27 提升到 22/27 处覆盖，无原字残片；倾斜根因在连接器，留给 0.17.2（见 [ROADMAP](docs/ROADMAP.md#0172交接系统-ocr-组件-020-preview2)）。数据流见 [OCR-INTERFACE §6.2](docs/OCR-INTERFACE.md#62-pdf-阅读器)。

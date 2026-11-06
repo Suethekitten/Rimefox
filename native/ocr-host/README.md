@@ -11,7 +11,7 @@
 | 平台 | 开发联调 | 本地预览构建 | 普通用户下载验收 |
 |---|---|---|---|
 | Windows x64 | 当前开发机上的真实系统 OCR、Chrome / Edge 已通过 | 自包含 exe、用户级安装 / 卸载、ZIP 与 SHA-256 已实现 | 干净机器、带下载标记的 ZIP、安全提示与兼容矩阵未验收；Windows 体验包由 v0.17.0 Release 交付，公开状态以 Release 为准 |
-| macOS Apple Silicon / Intel | 新版代码已实现，当前 Windows 环境无法验证 Vision | 通用构建、安装 / 卸载、打包及双架构 macOS CI 已接入代码；执行结果以对应提交 Actions 为准 | CI 构建不能代替下载实机验收；下载隔离、Gatekeeper 和浏览器启动均待实机验收 |
+| macOS Apple Silicon / Intel | Apple Silicon Mac 上真实 Vision、隔离安装、Chrome OCR E2E 与真实用户 Library 安装后浏览器连接已通过（2026-11-06） | 组件 `0.2.0-preview.2` 通用 ZIP 随 v0.17.2 Release 发布，见下方「macOS 组件随 Release 发布」 | 未签名、未公证；浏览器下载后的隔离 / Gatekeeper 实际提示、Intel 实机、macOS 12 与 Edge 未验收 |
 
 这不是签名正式分发。macOS 默认 ad-hoc 完整性签名不提供 Developer ID 身份，也不表示已公证。尚无可信发布者签名的 Windows 包。保留后续签名入口，不要求用户降低全局安全设置。一次性证据和初始缺口见 [本轮验证记录](../../docs/archive/2026-11-05-system-ocr-preview.md)。
 
@@ -63,6 +63,15 @@ node tools/package-ocr-preview.mjs --platform macos
 3. 用含空格的 HOME / 解压路径安装；确认宿主固定在用户 Library，Chrome / Edge 清单使用各自实际 ID，不从 Documents 启动；重复安装、更新 ID、卸载恢复旧清单。
 4. 运行上列原生与安装自动测试；用简体、繁体、英文真实扫描件验证 Apple Vision 文字与坐标、斜图、多栏和竖排限制。
 5. Chrome 和 Edge 各自加载当前扩展，用户点击授予真实可选权限，再检测、导入扫描 PDF、翻译、重开缓存、重试、取消、换书、关书；文字型 PDF 不应触发 OCR。核对没有重复“访问文稿”授权。
+
+## macOS 组件随 Release 发布
+
+macOS 组件 ZIP 由维护者在 Mac 上从干净源码打包，**提交到仓库的 `release-assets/ocr/`**（含 `.sha256`），不在 CI 重建：CI 的 Xcode 与本机工具链不同，重建字节对不上已固定的 SHA-256。顺序：
+
+1. 提交组件输入（`native/ocr-host/macos/`、`INSTALL.md` 等，见 `tools/ocr-package-inputs.mjs`）后，`node tools/package-ocr-preview.mjs --platform macos`；再打包一次确认 SHA-256 不变。
+2. 把 ZIP 与 `.sha256` 复制到 `release-assets/ocr/`，在 `lib/ocr/feature.js` 的 `macos` 写入指向本版本标签的下载地址、SHA-256、下载与解压字节数。
+3. `node tools/ocr-release-assets.mjs v<版本>` 应输出 `draft: false` 并列出要附加的两个文件；`node test/ocr-release-assets.test.mjs` 通过。之后不要再改组件输入，否则来源摘要不符、Release 拒绝发布。
+4. 按 AGENTS 获得许可后推送；Release 工作流校验通过后自动附加组件，发版说明附 macOS 安装说明与“未签名、未公证，可能被警告或拦截”的提示。
 
 ## 本地打包
 

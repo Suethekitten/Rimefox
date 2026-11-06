@@ -4,6 +4,8 @@ dist/
 
 # 打包产物
 *.zip
+# 例外：随仓库提交、由 Release 工作流校验后自动附加的 OCR 组件（见 tools/ocr-release-assets.mjs）
+!release-assets/ocr/*.zip
 
 # 编辑器与系统文件
 .vscode/
