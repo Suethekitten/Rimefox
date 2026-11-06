@@ -224,7 +224,8 @@ check('Text/ + Images/ 结构的 ../ 图片与跨章链接能渲染', await page
 
 const firstRequests = hits.requests;
 await pageEval("document.getElementById('backToLibrary').click(); return true;");
-await until(() => pageEval("return !document.getElementById('libraryView').hidden"), 10000);
+// renderLibrary 先清空书卡、读完书库再重画：书库可见不等于书卡已经回来，要等到要点的那张书卡出现
+await until(() => pageEval("return !document.getElementById('libraryView').hidden && !!document.querySelector('.book-card .reader-button')"), 10000);
 await pageEval("document.querySelector('.book-card .reader-button').click(); return true;");
 await until(() => pageEval("return !document.getElementById('readerView').hidden"), 10000);
 await until(() => pageEval("return !!document.querySelector('#bookContent [data-dt-target]')"), 15000);
@@ -321,7 +322,7 @@ await pageEval("const c = Array.from(document.querySelectorAll('.book-card')).fi
 const legacyOpened = await until(() => pageEval("return !document.getElementById('readerView').hidden && document.getElementById('bookContent').textContent.includes('First Chapter')"), 15000);
 check('升级后的旧书能正常打开和阅读', !!legacyOpened);
 await pageEval("document.getElementById('backToLibrary').click(); return true;");
-await until(() => pageEval("return !document.getElementById('libraryView').hidden"), 10000);
+await until(() => pageEval("return !document.getElementById('libraryView').hidden && Array.from(document.querySelectorAll('.book-card')).some((x) => x.textContent.includes('Legacy Book'))"), 10000);
 await pageEval("const c = Array.from(document.querySelectorAll('.book-card')).find((x) => x.textContent.includes('Legacy Book')); c.querySelector('.book-actions button:last-child').click(); return true;");
 await until(() => pageEval("return document.querySelectorAll('.book-card').length === 0"), 10000);
 const legacyLeft = await pageEval("return new Promise((resolve) => { const req = indexedDB.open('rimefox-reader'); req.onsuccess = () => { const db = req.result; const tx = db.transaction(['books', 'progress', 'files'], 'readonly'); Promise.all(['books', 'progress', 'files'].map((name) => new Promise((done) => { const q = tx.objectStore(name).count(); q.onsuccess = () => done(q.result); q.onerror = () => done(-1); }))).then((counts) => resolve({ books: counts[0], progress: counts[1], files: counts[2] })); }; req.onerror = () => resolve({ error: 'open' }); })");
@@ -342,8 +343,9 @@ await send('DOM.setFileInputFiles', { nodeId: input3.nodeId, files: [epubPath] }
 await pageEval("document.getElementById('fileInput').dispatchEvent(new Event('change',{bubbles:true})); return true;");
 await until(() => pageEval("return !document.getElementById('readerView').hidden"), 15000);
 const dupStatus = await pageEval("return document.getElementById('libraryStatus').textContent");
-const dupCards = await pageEval("return document.querySelectorAll('.book-card').length");
-check('书库接近上限时重复导入已有书不被误拦', /已导入/.test(dupStatus) && dupCards === 1, dupStatus);
+// 书卡由 renderLibrary 异步重画，等它稳定在 1 张；真的重复导入会一直是 2 张，仍然失败
+const dupCards = await until(() => pageEval("return document.querySelectorAll('.book-card').length === 1"), 5000);
+check('书库接近上限时重复导入已有书不被误拦', /已导入/.test(dupStatus) && !!dupCards, dupStatus);
 
 // Documents and split view: use the same extension, API and persistent reader store.
 await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, page);
@@ -375,7 +377,7 @@ await documentMode('bilingual');
 await documentMode('parallel');
 check('TXT 双语 / 双列切换复用缓存，不重复请求', hits.requests === beforeColumns, beforeColumns + ' → ' + hits.requests);
 await pageEval("document.getElementById('backToLibrary').click();return true;");
-await until(() => pageEval("return !document.getElementById('libraryView').hidden"));
+await until(() => pageEval("return !document.getElementById('libraryView').hidden && Array.from(document.querySelectorAll('.book-card')).some(c=>c.textContent.includes('Plain Document'))"));
 await pageEval("const c=Array.from(document.querySelectorAll('.book-card')).find(c=>c.textContent.includes('Plain Document'));c.querySelector('button').click();return true;");
 await until(() => pageEval("return !document.getElementById('readerView').hidden && document.getElementById('bookContent').textContent.includes('译:')"));
 await sleep(700);
