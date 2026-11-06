@@ -27,7 +27,7 @@
 | `lib/ocr/cache-key.js` | OCR 结果缓存键（不含翻译配置） | 任意（纯函数） |
 | `lib/ocr/page.js` | 页面侧帮助函数：查状态、识别画布、取消、申请权限、打开设置 | 扩展页面 |
 | `lib/ocr/layout.js` | OCR 行 → 阅读器文本块（同段续行合并、标题 / 段落切分） | 任意（纯函数） |
-| `lib/ocr/feature.js` | 界面总开关、已发布安装包地址表（`OCR_COMPONENT_RELEASES`，目前为空） | 任意 |
+| `lib/ocr/feature.js` | 界面总开关、已发布安装包地址表（`OCR_COMPONENT_RELEASES`：macOS 指向 v0.17.2、Windows 指向 v0.17.5 预览包） | 任意 |
 | `options/ocr.js` | 设置页 OCR 区块 | 设置页 |
 | `reader/reader.js`（OCR 段） | 零文本页逐页识别、页内提示、缓存、取消 | 阅读器 |
 | `lib/reader/store.js` | `getOcrResult` / `putOcrResult`：OCR 结果存 IndexedDB | 阅读器 |
@@ -175,7 +175,7 @@
 - 状态横幅按**当前下拉框的值**和最近一次 `ocr:status` 结果用 `resolveOcr` 实时计算，所以改选后不保存也能看到该选择是否可用。
 - 需要授权时，在下拉框 `change` 或「授权连接」按钮的用户手势里调用 `requestOcrPermission()`；拒绝不重复弹出。
 - 设置页明确标注预览、实际扩展 ID、组件版本、引擎状态、实际语言标签和语言名称。Windows 未检测到中文时显示手动安装 OCR 语言功能的指引，不自动提权。
-- 安装弹窗说明当前平台、下载 / 解压大小、SHA-256、未签名限制和安装步骤；`verifiedOcrRelease` 只接受本仓库 HTTPS Release 的资产路径与真实构建校验值。平台元数据唯一维护于 `lib/ocr/feature.js`；Windows x64 配置对应组件包，未配置的 macOS 保持下载禁用，公开状态以对应 Release 为准。完整用户步骤以 INSTALL 为准，不内置下载或自动执行程序。
+- 安装弹窗说明当前平台、下载 / 解压大小、SHA-256、未签名限制和安装步骤；`verifiedOcrRelease` 只接受本仓库 HTTPS Release 的资产路径与真实构建校验值。平台元数据唯一维护于 `lib/ocr/feature.js`；当前 macOS 与 Windows x64 均已配置组件包（macOS 随 v0.17.2 已发布、Windows 随 v0.17.5 待发布），未配置的平台保持下载禁用，公开状态以对应 Release 为准。完整用户步骤以 INSTALL 为准，不内置下载或自动执行程序。
 - 「重新检测」= `getOcrStatus({ refresh: true })`。界面语言切换后调用 `ocrSettings.render()` 重画动态文案。
 
 区块锚点是 `#sec-ocr`（`OCR_SETTINGS_HASH`），阅读器的「前往设置」按钮打开它。

@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-11-04；本地待发布 0.16.4，最新已发布 GitHub 版本 0.16.3。今日读取两家公开商店页面，Chrome / Edge 均为 **0.12.5**（页面更新日期均为 2026-10-27）。
+最后更新：2026-11-06；最新已发布 GitHub 版本 0.17.4（0.17.5 准备中）。商店页 2026-11-04 核实 Chrome / Edge 均为 **0.12.5**（页面更新日期均为 2026-10-27）。
 
 > 本文只写**通用材料 + Chrome**；Edge 的差异与专属填写内容见 [STORE-EDGE.md](STORE-EDGE.md)。
 > 历史审计（0.8.5 的「差哪 5 项」）已归档到 [archive/STORE-READINESS.md](archive/STORE-READINESS.md)，不再是现状。
@@ -15,9 +15,9 @@
 | 提交状态（Chrome） | **0.12.5 已上线**（2026-11-04 公开页核实；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
 | Chrome 更新负责人 | 协助者（商店提供方 APXS 的账号）；出包与商店文案交给他上传 |
 
-两个商店都落后于 GitHub Release。下一次更新应使用完成验收后的同一版本商店包、说明、截图与中英文隐私政策；Chrome / Edge 版本号都必须大于 0.12.5。当前材料对应本地 0.16.4，尚未上传或提交审核，不能把材料更新当成已上线。
+两个商店都落后于 GitHub Release。下一次更新应使用完成验收后的同一版本商店包、说明、截图与中英文隐私政策；Chrome / Edge 版本号都必须大于 0.12.5。商店材料仍对应 0.16.4，下一轮需按 0.17.x 界面重拍并出同版包，尚未上传或提交审核，不能把材料更新当成已上线。
 
-1.0 支持范围以 [SUPPORT](SUPPORT.md) 为准：PDF 标注 Beta，直播字幕标注实验，医学模式不宣传已证明的质量提升。OCR 尚未实现，不写入功能卖点。最新中英文截图及生成依据见 [screenshots/README](screenshots/README.md)。
+1.0 支持范围以 [SUPPORT](SUPPORT.md) 为准：PDF 标注 Beta，直播字幕标注实验，医学模式不宣传已证明的质量提升。OCR 为可选本地组件预览，不随扩展包分发，不作为基础功能卖点。最新中英文截图及生成依据见 [screenshots/README](screenshots/README.md)。
 
 ## Chrome 商店标识
 
@@ -175,8 +175,8 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 事项 | 说明 |
 |---|---|
 | 开发者账号 | 已完成（Chrome）；后续保持 2FA |
-| 商店包上传 | 当前两店均为 0.12.5；0.16.4 材料已更新，待最终验收后出同版商店包，尚未上传 |
-| 截图 / 宣传图 | 中英文各 5 张已更新为 0.16.4；真实扩展 + 本地假接口，上传前再次核对版本 |
+| 商店包上传 | 当前两店均为 0.12.5；商店材料仍为 0.16.4，下一轮按最新已发布版本（0.17.4）重拍并出同版包，尚未上传 |
+| 截图 / 宣传图 | 中英文各 5 张仍为 0.16.4（真实扩展 + 本地假接口）；下一轮上架前按 0.17.4 界面重拍并核对版本 |
 | 审核专用 API Key | 首次审核已通过；后续更新沿用同一个限额、可撤销的 Key |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
 | 支持入口 | 已可用：GitHub Issues 公开 |
@@ -191,7 +191,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | BYOK 无法直接测试 | 最高优先级：准备审核专用、限额、可撤销 Key，通过控制台私密说明交付 |
 | YouTube 非官方接口 | 明示非官方、默认关闭、仅 CC；验证当前可用性，避免品牌背书与「保证全部字幕可用」的承诺 |
 | 隐私政策与实际行为不一致 | 本次已按 0.8.5 代码核对；悬停对照开关、字幕稳定性、仅调试可见的用量统计都没有新增请求接收方或权限，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
-| 版本与仓库差异 | Chrome / Edge 公开页均为 0.12.5（2026-11-04）；GitHub Release 0.16.3；本地 0.16.4 待验收发布 |
+| 版本与仓库差异 | Chrome / Edge 公开页均为 0.12.5（2026-11-04）；GitHub Release 0.17.4（0.17.5 准备中）；商店材料 0.16.4，待按 0.17.4 更新 |
 
 ## 官方依据（2026-10-18 查询）
 

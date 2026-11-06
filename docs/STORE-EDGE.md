@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Microsoft Edge 加载项商店上架材料
 
-最后更新：2026-11-04，本地待发布 0.16.4。Edge 公开商店页今日核实为 0.12.5（页面更新日期 2026-10-27），下一次版本号需 > 0.12.5；提交状态统一见 STORE.md。
+最后更新：2026-11-06；最新已发布 GitHub 版本 0.17.4。Edge 公开商店页 2026-11-04 核实为 0.12.5（页面更新日期 2026-10-27），下一次版本号需 > 0.12.5；提交状态统一见 STORE.md。
 
 > **分工**：提交状态、差哪几项、待办清单在 [STORE.md](STORE.md)（唯一主人）。
 > 本文只写 **Edge 与 Chrome 的差异**、Partner Center 的提交流程，以及只给 Edge 控制台用的粘贴文案（≥250 字符描述、search terms、notes for certification）。
@@ -236,11 +236,11 @@ Notes:
 | 素材 | 要求 | 现状 |
 |---|---|---|
 | 商店 logo | 1:1，推荐 300×300 | 本轮从 `icons/source.png` 生成 `docs/edge-store/logo-300.png` |
-| 截图（英文行） | ≤6 张，1280×800 或 640×480 | `docs/screenshots/en/en-0*.png` 5 张：英文界面 + 日文→英文，`node tools/screenshot-store.mjs` 生成（0.9.6 界面） |
-| 截图（中文行） | 同上 | `docs/screenshots/store-0*.png` 5 张：中文界面 + 英文→中文，`node tools/screenshot-store.mjs --lang zh` 生成（0.9.6 界面） |
+| 截图（英文行） | ≤6 张，1280×800 或 640×480 | `docs/screenshots/en/en-0*.png` 5 张：英文界面 + 日文→英文，`node tools/screenshot-store.mjs` 生成（0.16.4 界面） |
+| 截图（中文行） | 同上 | `docs/screenshots/store-0*.png` 5 张：中文界面 + 英文→中文，`node tools/screenshot-store.mjs --lang zh` 生成（0.16.4 界面） |
 | 小宣传图 | 440×280，可选 | 未做 |
 | 大宣传图 | 1400×560，可选 | 未做 |
-| 扩展包 | zip，manifest 在根 | 0.9.7 的包已上传并过审；下次更新重新 `node tools/package-store.mjs` 出包 |
+| 扩展包 | zip，manifest 在根 | 0.12.5 的包已上传并过审；下次更新重新 `node tools/package-store.mjs` 出包 |
 
 截图内容为真实扩展界面 + 本地测试接口返回的人工示例译文，未使用真实 Key；上传前自己再确认一遍没有泄露 Key、账号、私人页面。
 
@@ -277,9 +277,8 @@ Notes:
 
 提交状态见 [STORE.md](STORE.md)「当前状态」；Edge 这边只剩：
 
-1. 确认 0.9.7 的认证结果（以 Partner Center 为准）；被驳回就按报告改完重提，可能要求先升版本号。
-2. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大（当前线上 0.9.7，目标用最新已发布版本）。
-3. 可选：补 440×280 小宣传图、1400×560 大宣传图。
+1. 0.12.5 已上线（2026-11-04 核实）；下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大（当前线上 0.12.5，目标用最新已发布版本 0.17.4）。
+2. 可选：补 440×280 小宣传图、1400×560 大宣传图。
 
 ## 八、官方依据（2026-10-20 查询）
 
