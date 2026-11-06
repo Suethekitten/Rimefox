@@ -889,21 +889,20 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.17.3）
+## 14. 本版技术记录（0.17.4）
+
+- **设置页保存途中的改动**：所有写配置的入口经 `queueSave()` 串行，轮到时才按最新表单算补丁；应答回来由 `settleSaved(saved, base)` 收尾，等待期间表单没变才整页回填，变了只挪已保存基线、途中改动保持未保存。保存在途时忽略 `watchConfig` 的外部更新。实现与边界见 §4.7「保存途中的改动」。
+- **扩展页读写配置限时**：`lib/config.js` 的 `configRequest()`：读每次 4 s、最多 3 次退避重试；保存只发一次、15 s 超时、不重试。失败时 `init()` 记 `data-options-init-error` 并在保存岛提示。见 §4.7「读写超时」。
+- **测试**：新增 `test/config-request.test.mjs`（超时、重试次数、保存不重试）与 `tools/e2e-options-save.mjs`（真实 Chrome + 假 API，扣住保存应答 / 丢弃读请求；修复前 8/22，修复后 22/22，zh、en），后者加入 `checks.mjs browser`，并同步加入 `release.yml` 与 `ocr-preview.yml` 的 push 路径（见 §11 发版步骤 7）。
+- **验证（macOS，Chrome 157）**：见本版提交说明。未测：Edge、Windows（仅 CI）。
+
+### 0.17.3 记录
 
 - **窄栏距双栏扫描页退回原文（0.17.2 回归）**：`separateLayoutRects` 原先只要两块水平有交叠就按上下块从中线切开。扫描页 OCR 框四周补 `OCR_BOX_PAD`（0.3 倍行高）再加 `layoutRect` 的 1.5，栏距小于约 2×(0.3·行高 + 1.5)（10 单位行高约 9）时左右两栏的框也交叠，被切开后两块框边都切过正文，底色检查失败、整段保留原文。现在水平交叠须超过较窄一块宽度的一半才视为上下叠放；同栏上下相邻的重叠照旧分开。`test/reader-pdf-layout.test.mjs` 新增窄栏距双栏夹具（不含修复时失败）。
 - **测试脚本不再泄漏临时目录**：`tools/e2e-pdf-reader.mjs` 以前只 kill 浏览器，每次在系统临时目录留下约 120 MB 的 Chrome 用户目录和一个损坏 PDF；`tools/e2e-reader.mjs` 每次留下约 50 MB 用户目录。现在正常结束时等 Chrome 退出后删除（带重试），中途退出时在 `exit` 里同步兜底；`e2e-reader` 保留 WORK 里的夹具与 `result.json`，损坏 PDF 改放在用户目录里一起删除。
 - **CI 补发**：推送 0.17.3 后 `browser (macos-15, chrome)` 两次在 `tools/e2e-reader.mjs` 失败（`renderLibrary` 先清空书卡再读书库，脚本在书库可见时就点书卡），Release 被拒。脚本改为等目标书卡出现；`checks.mjs browser` 跑的浏览器检查脚本加入 `release.yml` 与 `ocr-preview.yml` 的 push 路径，修这些脚本的推送能为同一版本补发。
 - **OCR 组件**：本版不更新。`lib/ocr/feature.js` 的 macOS 入口仍指向 v0.17.2 附件、Windows 仍指向 v0.17.0 附件，Release 工作流因此不附加组件、不保留草稿。
 - **验证（macOS，Chrome 157）**：见本版提交说明。未测：真实扫描件上的窄栏距样本、Windows、Edge。
-
-### 0.17.2 记录
-
-- **macOS 系统 OCR 组件随 Release 发布**：组件 `0.2.0-preview.2` 的通用 ZIP 在本机由干净源码打包（两次打包 SHA-256 一致），提交到 `release-assets/ocr/`，`lib/ocr/feature.js` 固定其下载地址、SHA-256 与尺寸。`tools/ocr-release-assets.mjs` 校验已提交 ZIP 与固定值、外附 `.sha256`、包内 `SHA256SUMS`、`preview.json` 平台 / 版本及来源摘要（只比内容摘要，CI 是浅克隆）；`test/ocr-release-assets.test.mjs` 在每个单元任务里跑同一校验。Release 工作流用它自动附加组件，只有指向本标签却未提交资产的平台才保留草稿等手动上传（原 Windows 流程不变）。组件未签名、未公证，发版说明写明可能被 macOS 警告或拦截。CI 重新构建的字节与本机工具链不同，所以不在 CI 里重建发布资产。
-- **扫描页版式重叠**：OCR 行框四周补 `OCR_BOX_PAD` 后，相邻块的原框会互相重叠，后画的块盖住前一段末行。`separateLayoutRects` 从上下重叠区中线各让一半；放置改为两遍（先定底色框，扫描页补边避开已定的框；再缩字 / 扩展，只扩到其他块实际使用的框之前）。OCR E2E 真实连接器阶段新增「版式译文框互不重叠」，修复前测得 0.6 / 3.1 px 重叠。
-- **倾斜扫描的识别框**：Windows 连接器把 `OcrWord.BoundingRect`（去倾斜坐标）按 `OcrResult.TextAngle` 绕图像中心顺时针旋回原图再求外接矩形；macOS Vision 实测本来就是原图坐标下的外接矩形（最多 0.7 px 误差），未改。新增英文倾斜夹具 `test/fixtures/ocr-tilted.png` 与墨迹四角 JSON（`render-sample.swift --tilt 1.5 --json`），真实连接器测试断言墨迹四角都在行框内；Windows OCR CI 任务新增该测试。
-- **Windows 安装器识别被重定向的安装**：写入后若刚写的 `installation.json`（同产品、同连接器 SHA-256）也出现在 `%LOCALAPPDATA%\Packages\*\LocalCache\Local` 下，即撤销本次安装并报错，提示改用开始菜单的 PowerShell。Windows 组件本版不重新发布：上述两项 Windows 修复在源码中，由 CI 构建与测试，待在 Windows 上构建 `0.2.0-preview.2` 后随组件发布。
-- **验证（macOS，Chrome 156）**：见本版提交说明。未测：Windows 实机（仅 CI）、浏览器下载 macOS 组件后的隔离 / Gatekeeper 实际提示、Edge、Intel 实机与 macOS 12。
 
 ## 15. 专业翻译引擎
 

@@ -25,6 +25,7 @@ on:
       - tools/check-selftest.mjs
       - tools/make-pdf-samples.mjs
       - tools/e2e-session-keys.mjs
+      - tools/e2e-options-save.mjs
       - tools/e2e-reader.mjs
       - tools/e2e-pdf-reader.mjs
   workflow_dispatch:

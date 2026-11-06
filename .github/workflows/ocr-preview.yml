@@ -1,9 +1,9 @@
 name: System OCR preview checks
 on:
   pull_request:
-    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/**', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml', '.github/workflows/release.yml', 'selftest/**', 'test/**', 'tools/checks.mjs', 'tools/check-selftest.mjs', 'tools/make-pdf-samples.mjs', 'tools/e2e-session-keys.mjs', 'tools/e2e-reader.mjs', 'tools/e2e-pdf-reader.mjs']
+    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/**', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml', '.github/workflows/release.yml', 'selftest/**', 'test/**', 'tools/checks.mjs', 'tools/check-selftest.mjs', 'tools/make-pdf-samples.mjs', 'tools/e2e-session-keys.mjs', 'tools/e2e-options-save.mjs', 'tools/e2e-reader.mjs', 'tools/e2e-pdf-reader.mjs']
   push:
-    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/**', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml', '.github/workflows/release.yml', 'selftest/**', 'test/**', 'tools/checks.mjs', 'tools/check-selftest.mjs', 'tools/make-pdf-samples.mjs', 'tools/e2e-session-keys.mjs', 'tools/e2e-reader.mjs', 'tools/e2e-pdf-reader.mjs']
+    paths: ['native/ocr-host/**', 'lib/ocr/**', 'options/**', 'reader/**', 'background.js', 'manifest.json', 'tools/*ocr*', 'test/ocr*', '.github/workflows/ocr-preview.yml', '.github/workflows/release.yml', 'selftest/**', 'test/**', 'tools/checks.mjs', 'tools/check-selftest.mjs', 'tools/make-pdf-samples.mjs', 'tools/e2e-session-keys.mjs', 'tools/e2e-options-save.mjs', 'tools/e2e-reader.mjs', 'tools/e2e-pdf-reader.mjs']
   workflow_dispatch:
 permissions:
   contents: read
