@@ -13,7 +13,7 @@ using Windows.Storage.Streams;
 
 internal static class Program
 {
-    const string Version = "0.2.0-preview.1";
+    const string Version = "0.2.0-preview.2";
     const int MaxSide = 8192;
     static readonly Stream Input = Console.OpenStandardInput();
     static readonly Stream Output = Console.OpenStandardOutput();
@@ -241,6 +241,14 @@ internal static class Program
         var result = await engine.RecognizeAsync(bitmap).AsTask(token);
         var lines = new List<object>();
         int chars = 0;
+        // OcrWord.BoundingRect is reported as if TextAngle were 0 (the deskewed image); TextAngle is the clockwise
+        // rotation of the text around the image center. Rotate each word's corners back into source coordinates and
+        // take the bounding box, otherwise both ends of long lines on tilted scans fall outside the box (0.17.2).
+        double angle = result.TextAngle ?? 0;
+        double rad = angle * Math.PI / 180, cos = Math.Cos(rad), sin = Math.Sin(rad);
+        double cx = bitmap.PixelWidth / 2.0, cy = bitmap.PixelHeight / 2.0;
+        (double X, double Y) ToSource(double x, double y) => angle == 0 ? (x, y)
+            : (cx + (x - cx) * cos - (y - cy) * sin, cy + (x - cx) * sin + (y - cy) * cos);
         foreach (var line in result.Lines)
         {
             token.ThrowIfCancellationRequested();
@@ -249,8 +257,11 @@ internal static class Program
             chars += text.Length;
             if (lines.Count >= 5000 || text.Length > 4000 || chars > 300000)
                 throw new OcrFailure("too_large", "recognized text exceeds protocol limits");
-            double left = line.Words.Min(w => w.BoundingRect.Left), top = line.Words.Min(w => w.BoundingRect.Top);
-            double right = line.Words.Max(w => w.BoundingRect.Right), bottom = line.Words.Max(w => w.BoundingRect.Bottom);
+            var corners = line.Words.SelectMany(w => new[] {
+                ToSource(w.BoundingRect.Left, w.BoundingRect.Top), ToSource(w.BoundingRect.Right, w.BoundingRect.Top),
+                ToSource(w.BoundingRect.Right, w.BoundingRect.Bottom), ToSource(w.BoundingRect.Left, w.BoundingRect.Bottom) }).ToArray();
+            double left = Math.Max(0, corners.Min(c => c.X)), top = Math.Max(0, corners.Min(c => c.Y));
+            double right = Math.Min(bitmap.PixelWidth, corners.Max(c => c.X)), bottom = Math.Min(bitmap.PixelHeight, corners.Max(c => c.Y));
             double sx = (double)width / bitmap.PixelWidth, sy = (double)height / bitmap.PixelHeight;
             lines.Add(new { text, box = new[] { left * sx, top * sy, (right - left) * sx, (bottom - top) * sy }
                 .Select(n => Math.Round(n, 2)).ToArray() });

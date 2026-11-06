@@ -58,3 +58,24 @@ function Remove-OwnedDirectory([string]$Directory, [string]$Root) {
         Remove-Item -LiteralPath $full -Recurse -Force
     }
 }
+# MSIX / Store-packaged desktop apps (seen with the Claude desktop app, 2026-11) can redirect their built-in
+# terminal's writes under %LOCALAPPDATA% to %LOCALAPPDATA%\Packages\<app>\LocalCache\Local, where the user's own
+# browser never looks. The same process sees both the virtual path and the real Packages path: if the
+# installation.json just written (same product and connector SHA-256) also exists under a
+# Packages\*\LocalCache\Local folder, this install was redirected. Returns that copy's path, otherwise $null.
+function Find-RedirectedInstall([string]$Directory, [string]$LocalAppData, [string]$Sha256) {
+    if (!$LocalAppData) { return $null }
+    $base = [IO.Path]::GetFullPath($LocalAppData).TrimEnd('\')
+    if (!$Directory.StartsWith($base + '\', [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    $relative = $Directory.Substring($base.Length + 1)
+    $packages = Join-Path $base 'Packages'
+    if (!(Test-Path -LiteralPath $packages)) { return $null }
+    foreach ($app in @(Get-ChildItem -LiteralPath $packages -Directory -Force -ErrorAction SilentlyContinue)) {
+        $candidate = Join-Path $app.FullName ('LocalCache\Local\' + $relative + '\installation.json')
+        if (!(Test-Path -LiteralPath $candidate)) { continue }
+        try { $copy = [IO.File]::ReadAllText($candidate) | ConvertFrom-Json } catch { continue }
+        if ($copy.PSObject.Properties['product'] -and $copy.PSObject.Properties['sha256'] -and
+            $copy.product -eq $ProductId -and $copy.sha256 -eq $Sha256) { return $candidate }
+    }
+    return $null
+}

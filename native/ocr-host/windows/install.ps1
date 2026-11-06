@@ -72,6 +72,14 @@ try {
     Write-JsonFile (Join-Path $directory 'installation.json') $next
     Write-JsonFile $manifest $hostManifest
     foreach ($entry in $registrations) { Set-Registration $entry.key $manifest }
+    # Post-install self-check (0.17.2): in a terminal that redirects writes, roll back and fail instead of reporting success.
+    $localAppData = if ($env:RIMEFOX_OCR_TEST_LOCALAPPDATA) { $env:RIMEFOX_OCR_TEST_LOCALAPPDATA } else { $env:LOCALAPPDATA }
+    $redirected = Find-RedirectedInstall $directory $localAppData $expected
+    if ($redirected) {
+        & (Join-Path $directory 'uninstall.ps1') -InstallDirectory $directory | Out-Null
+        throw ("This terminal redirects writes into an app's private folder ($redirected), so your browser cannot see the component. " +
+            'The installation was rolled back. Open Windows PowerShell from the Start menu (not a terminal inside another app) and run install.ps1 again with the same extension IDs.')
+    }
     Write-Host "Installed current-user OCR preview: $binary"
     Write-Host ('OCR languages: ' + ($capability.languages -join ', '))
     if ($capability.apiStatus -ne 'ready') { Write-Warning 'Windows OCR is not available in this environment. Keep the preview disabled and report --diagnose output.' }

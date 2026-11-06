@@ -58,6 +58,10 @@ jobs:
         with:
           node-version: 24
       - run: ./native/ocr-host/windows/build.ps1
+      - name: Tilted scan boxes cover the ink in source coordinates (English fixture, TextAngle)
+        env:
+          RIMEFOX_REQUIRE_NATIVE: '1'
+        run: node --test --test-name-pattern=倾斜 test/ocr-native-host.test.mjs
       - name: Current-user installer integration, without installing Windows language packs
         env:
           RIMEFOX_TEST_INSTALLERS: '1'

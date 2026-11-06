@@ -141,3 +141,43 @@ test('system OCR preview installer: checksum, IDs, spaces, reinstall/upgrade, re
     try { uninstall(); } finally { if (platform === 'windows') succeeded(registry('clear')); removeTemporary(work); }
   }
 });
+
+// 0.17.2：在会重定向写入的终端（MSIX 打包的桌面应用）里安装时，安装器自检到 Packages\*\LocalCache\Local 下的副本，
+// 撤销安装并失败。用 RIMEFOX_OCR_TEST_LOCALAPPDATA 指向临时目录，预置一份「重定向副本」模拟该视图。
+test('Windows installer: a redirected install is detected, rolled back and reported as a failure', {
+  skip: enabled && platform === 'windows' ? false : 'Windows installer integration only (RIMEFOX_TEST_INSTALLERS=1)', timeout: 120000
+}, () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'rimefox-install-test-'));
+  const pkg = path.join(work, 'pkg'); fs.mkdirSync(pkg);
+  const source = path.join(pkg, binaryName);
+  fs.copyFileSync(binary, source);
+  fs.cpSync(path.join(path.dirname(binary), 'licenses'), path.join(pkg, 'licenses'), { recursive: true });
+  for (const script of ['install.ps1', 'install-common.ps1', 'uninstall.ps1']) fs.copyFileSync(path.join(directory, script), path.join(pkg, script));
+  const digest = sha(source);
+  fs.writeFileSync(path.join(pkg, 'SHA256SUMS'), digest + '  ' + binaryName + '\n');
+  const local = path.join(work, 'Local');
+  const destination = path.join(local, 'Rimefox', 'OCR');
+  const redirectedCopy = path.join(local, 'Packages', 'Fake.DesktopApp_test', 'LocalCache', 'Local', 'Rimefox', 'OCR');
+  fs.mkdirSync(redirectedCopy, { recursive: true });
+  fs.writeFileSync(path.join(redirectedCopy, 'installation.json'), JSON.stringify({ product: 'com.rimefox.ocr', sha256: digest }));
+  const prefix = 'Software\\Rimefox\\OCR\\InstallTests\\' + randomUUID();
+  const env = { ...process.env, RIMEFOX_OCR_TEST_LOCALAPPDATA: local };
+  try {
+    const result = run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(pkg, 'install.ps1'), '-PackageDirectory', pkg,
+      '-ExtensionIds', 'a'.repeat(32), '-InstallDirectory', destination, '-RegistryPrefix', prefix, '-NoPrompt'], env);
+    assert.notEqual(result.status, 0, 'a redirected install must not report success: ' + result.output);
+    assert.match(result.output, /redirects writes/);
+    assert.equal(fs.existsSync(path.join(destination, 'installation.json')), false, 'the redirected install is rolled back');
+    const reg = run('powershell.exe', ['-NoProfile', '-Command',
+      `$k=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('${prefix}\\Google\\Chrome\\NativeMessagingHosts\\com.rimefox.ocr'); if ($k) { 'present' } else { 'absent' }`]);
+    assert.match(reg.stdout, /absent/, 'browser registration is restored');
+    // Without the redirected copy the same command succeeds.
+    fs.rmSync(path.join(local, 'Packages'), { recursive: true, force: true });
+    succeeded(run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(pkg, 'install.ps1'), '-PackageDirectory', pkg,
+      '-ExtensionIds', 'a'.repeat(32), '-InstallDirectory', destination, '-RegistryPrefix', prefix, '-NoPrompt'], env));
+    succeeded(run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(destination, 'uninstall.ps1'), '-InstallDirectory', destination]));
+  } finally {
+    run('powershell.exe', ['-NoProfile', '-Command', `[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree('${prefix}', $false)`]);
+    removeTemporary(work);
+  }
+});

@@ -6,7 +6,7 @@ import ImageIO
 import CoreGraphics
 import Darwin
 
-let componentVersion = "0.2.0-preview.1"
+let componentVersion = "0.2.0-preview.2"
 let protocolVersion = 1
 let maxImageSide = 8192
 let jobsLock = NSLock()
