@@ -830,24 +830,20 @@ function ensurePdfOcr(doc, index, snap) {
   const jobId = 'ocr-' + st.token + '-' + index;
   const promise = (async () => {
     const hit = await getOcrResult(key).catch(() => null);
-    if (hit && Array.isArray(hit.blocks)) return { blocks: hit.blocks, backend: hit.backend, engine: hit.engine, cached: true };
+    // 缓存原始识别框与识别图像宽度，显示时再换算版式位置；缺图像宽度的记录（换算方式之前的）视为未命中。
+    if (hit && Array.isArray(hit.blocks) && hit.imageWidth > 0) return { blocks: hit.blocks, imageWidth: hit.imageWidth, backend: hit.backend, engine: hit.engine, cached: true };
     const canvas = document.createElement('canvas');
     try {
       await doc.render(index, canvas, OCR_RENDER_SCALE);
       if (doc !== state.pdf) throw new DOMException('Aborted', 'AbortError');
       const res = await recognizeCanvas(canvas, { jobId, languages: params.languages });
-      // 行框换算到页面视口，供双列版式在扫描页上定位译文；缓存只存换算结果，不存原始像素框。
-      const { viewport } = await doc.page(index);
-      const scale = canvas.width / viewport.width;
-      const blocks = linesToBlocks(res.lines).map(({ boxes, ...block }) => {
-        const layoutLines = ocrLayoutLines(boxes, scale, viewport.height);
-        return layoutLines ? { ...block, layoutLines } : block;
-      });
+      const blocks = linesToBlocks(res.lines);
+      const imageWidth = canvas.width;
       if (doc === state.pdf && bookId) {
-        putOcrResult({ key, bookId, page: index, backend: res.backend, engine: res.engine, blocks,
+        putOcrResult({ key, bookId, page: index, backend: res.backend, engine: res.engine, blocks, imageWidth,
           lineCount: res.lines.length, createdAt: Date.now() }).catch(() => {});
       }
-      return { blocks, backend: res.backend, engine: res.engine, fallback: res.fallback };
+      return { blocks, imageWidth, backend: res.backend, engine: res.engine, fallback: res.fallback };
     } finally {
       doc.releaseCanvas(canvas);
     }
@@ -930,7 +926,13 @@ async function handlePdfOcrPage(el, index, doc, refresh) {
   // 版式预览改用识别出的文本块；页面画布仍是这一轮渲染的那张（缩放重画时会重新走到这里）。
   const layout = pdfLayoutPages.get(el);
   if (layout) {
-    const next = { ...layout, blocks: result.blocks };
+    // 识别框（识别图像像素）按识别图像宽 / 视口宽换算成文字层同格式的 layoutLines
+    const scale = result.imageWidth / layout.viewport.width;
+    const blocks = result.blocks.map((block) => {
+      const layoutLines = ocrLayoutLines(block.boxes, scale, layout.viewport.height, block.text);
+      return layoutLines ? { ...block, layoutLines } : block;
+    });
+    const next = { ...layout, blocks, scanned: true };
     pdfLayoutPages.set(el, next);
     if (state.book?.pdfMode === 'pdf-layout' && state.pdfView === 'pdf') updatePdfLayout(el, next, (state.pdfTrans && state.pdfTrans.get(index)) || [], doc);
   }

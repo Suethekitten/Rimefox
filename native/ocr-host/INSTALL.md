@@ -42,6 +42,8 @@ Windows 按 INSTALL.md 的命令加 -NoPrompt；macOS 使用 --extension-id。
 不要修改全局安全设置、伪造浏览器权限或自动安装系统语言包。
 
 检查安装输出和连接器 --diagnose，确认实际 OCR API 状态及识别语言。
+若你运行在桌面应用的内置终端里，安装后按 INSTALL.md「安装后仍显示未检测到本地 OCR 组件」
+检查是否被重定向到该应用的私有目录；是则先卸载，再请我在开始菜单的 PowerShell 中安装。
 回扩展选择系统 OCR、保存，通过真实界面授权连接并重新检测；
 若工具无法操作浏览器，给我明确点击步骤，完成前标记为待验证。
 用我授权使用的非敏感扫描 PDF 验证识别；没有样本时说明尚未验证识别效果。
@@ -95,6 +97,32 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "$env:LOCALAPPDATA
 ```
 
 卸载只删除组件管理的版本和脚本，保留扩展、书库和其他文件。自选安装目录时传相同的 `-InstallDirectory`；默认目录无需此参数。
+
+### 安装后仍显示未检测到本地 OCR 组件
+
+先读浏览器给出的原文：在扩展设置页按 F12，在控制台运行下面一行，看 `message`。
+
+```js
+JSON.stringify((await chrome.runtime.sendMessage({ type: 'ocr:status', refresh: true })).ocr.sources)
+```
+
+`Specified native messaging host not found.` 表示这个浏览器看不到注册项或其指向的清单。浏览器每次连接都会重新读取注册，修好后点「重新检测」即可，不需要重启浏览器。
+
+**由桌面应用里的 Agent 代为安装时最常见。** 部分以 MSIX / 应用商店形式打包的桌面应用（2026-11 在 Claude 桌面应用中实际遇到）会把其内置终端写入 `%LOCALAPPDATA%` 与 HKCU 的内容重定向到应用自己的私有目录 `%LOCALAPPDATA%\Packages\<应用>\LocalCache`。此时安装输出、`--diagnose` 和在该终端里查到的注册表都正常，从该终端启动的浏览器也能连上，只有使用者自己从开始菜单 / 任务栏打开的浏览器始终找不到组件。是否重定向会随应用版本和会话变化，事前检测为“未重定向”也不能排除，必须安装后检查。
+
+在执行安装的同一个终端检查，有输出即说明组件被装进了应用私有目录：
+
+```powershell
+Get-ChildItem "$env:LOCALAPPDATA\Packages\*\LocalCache\Local\Rimefox" -Directory -ErrorAction SilentlyContinue
+```
+
+处理：
+
+1. 在同一个终端运行上方的卸载命令（`$env:LOCALAPPDATA\Rimefox\OCR\uninstall.ps1`），清掉私有目录中的安装与注册；不要直接删除 `Packages` 下的文件。
+2. 请使用者从开始菜单打开普通的 Windows PowerShell（不要用该应用内置的终端面板），在解压目录执行上方的安装命令，传入同样的扩展 ID。
+3. 回扩展点击「重新检测」。
+
+Agent 从自己终端启动的浏览器同样处在重定向视图里，能连上不代表使用者的浏览器可用；以使用者正常打开的浏览器显示就绪为准。
 
 ## macOS
 

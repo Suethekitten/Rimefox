@@ -168,6 +168,14 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 
 完成审计剩余三项：#7 大 PDF 首屏先渲染、目录扫描延后并行、页眉扫描与本页取字并行；#11 PDF 缓存身份按配置修订号记忆；#13 点击补扫只处理可能切换内容的控件并合并连续点击。版本与 CHANGELOG 已统一为 0.16.2，发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.2) 为准。
 
+### 0.17.2（交接：系统 OCR 组件 0.2.0-preview.2）
+
+0.17.1 只改扩展；下列组件改动留给 0.17.2，需要 Windows 构建环境（按 [组件 README](../native/ocr-host/README.md#windows-体验包构建顺序) 的顺序构建、固定 SHA、发布）：
+
+1. **倾斜扫描件的识别框**：Windows 连接器（`native/ocr-host/windows/Program.cs`，取 `line.Words` 的 `BoundingRect` 求并集）没有使用 `OcrResult.TextAngle`。实测约 1° 倾斜的扫描页，长行左端墨迹比框底低 7–14 px、右端比框顶高 11–14 px（识别图 3 倍渲染），框是去倾斜坐标系下的直带。应按 `TextAngle` 绕图像中心把每个单词框旋回原图坐标后再求外接矩形，并加入一张倾斜扫描夹具（真实识别 + 坐标断言）。macOS Vision 也需核对 `boundingBox` 在倾斜文本下是否覆盖墨迹。扩展侧 0.17.1 已用逐级加边距绕开（见 [PDF 交接](PDF-HANDOFF.md#版式译文预览)），修好后可复核这些扫描页覆盖数是否上升、边距是否可收回。
+2. **安装器识别被重定向的安装**：在 MSIX 打包桌面应用（如 Claude 桌面版）的内置终端里运行时，`%LOCALAPPDATA%` 与 HKCU 写入可能被重定向到 `%LOCALAPPDATA%\Packages\<应用>\LocalCache`，使用者的浏览器看不到组件。排查步骤已写进 [INSTALL](../native/ocr-host/INSTALL.md#安装后仍显示未检测到本地-ocr-组件)；安装器应在安装后自检该位置，命中时停止并提示改用开始菜单的 PowerShell，而不是报告成功。
+3. 仓库里的 INSTALL 已比 v0.17.0 发布的组件 ZIP 新（新增上述排查节与接手提示词一行）；0.17.2 重新打包时随组件一起发布，体验包按新版本重组。
+
 ### 下一步
 
 1. 补齐当前 Chrome/Edge 与 Windows/macOS/Linux 的实机矩阵；独立 CI 已接入，结果以对应提交的 Actions 为准，不能代替真实下载与干净机器验收。

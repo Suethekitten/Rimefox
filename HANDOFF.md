@@ -536,6 +536,7 @@ Bilibili: /x/player/(wbi/)v2 轨道元数据      ├─ 每 200ms 按 video.cur
 | 43 | 上标文献引用被当成普通文字（Nature） | 「…diseases1,2.」整句送翻：仅译文把译文写进第一个文本节点、清空链接里的数字，上标和跳转都没了，模型写的数字留在正文里；双语译文里只是普通数字。保留区原来的兜底（整句写进别的节点、隐藏保留元素）对引用也不行：藏了就丢引用，不藏就数字重复 | 上标引用当保留区；带引用的单元走 `injectCited`：仅译文在引用边界创建文本节点（词级 / 句级 / 漏标记恢复），不能安全重建就保持原文报失败；双语放上标副本（见 5.2.1） |
 | 44 | 开关按「内框 = width × height」写 `top: 2px` 和 translate 行程 | 全局 `* { box-sizing: border-box }` 让 1px 描边吃掉内框：透镜上 2px 下 0px、开状态贴住右边框；它又管不到 `::before / ::after`，减少透明时 2px 描边把透镜撑出槽外；开状态填充只到透镜中心，玻璃把断口折射成偏在一边的「小球」（0.10.0） | 设置页和弹窗共用 `ui-tokens.css` 的 `.switch`：只认 `--switch-w / -h / -border / -pad / -knob-w`，填充和透镜用 top / bottom 贴内边缘、border-box，开 / 关只改 `translate`，开状态填充铺到透镜右缘；透镜尺寸改了要同步 `ensureGlassFilter` 的贴图尺寸 |
 | 45 | 图表链接（Fig. 1）被当成普通行内链接（Science） | 引用和 Fig. 1 混排的段落：`hasUnsafeInlineLink` 拒绝整段引用重建（`injectCitedOnly` 返回 false），段落一直是英文；`tryInject` 又把注入失败记成跳过 + 已处理，之后再也不重试；只有图表链接的段落在仅译文下退回双语 | 图表链接是原子（`isXrefEl`），混合段落里普通链接也是原子，`injectMixed` 原地重建；`DT.inject` 给出结果分类，DOM 注入失败不算跳过、页面没变不重发（见 5.2.1） |
+| 46 | 在 MSIX 打包的桌面应用（如 Claude 桌面版）的内置终端里运行 OCR 安装器 | 安装输出、`--diagnose`、终端里查的注册表都正常，Agent 自己启动的 Chrome 也能连上；使用者正常打开的 Chrome 始终「未检测到本地 OCR 组件」（`Specified native messaging host not found.`） | 写入被重定向到 `%LOCALAPPDATA%\Packages\<应用>\LocalCache`，且随应用版本 / 会话变化。按 [INSTALL 的排查](native/ocr-host/INSTALL.md#安装后仍显示未检测到本地-ocr-组件) 安装后检查，同终端卸载，由使用者在开始菜单 PowerShell 安装；不要用 Agent 启动的浏览器当证明 |
 
 ---
 
@@ -887,7 +888,7 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 ## 14. 本版技术记录（0.17.1）
 
 - 版式预览的背景判定：中文较密的段落里非背景像素超过原 28% 上限，被误当复杂背景而整段保留原文。`flatBackground` 保留原规则，另接受「边缘同色、背景过半、其余均为贴近背景的笔画」的区域；笔画半径由调用方按字号像素的 15% 传入（至少 4 px），实心色块与插图仍拒绝。规则与排查入口（`data-layout-skips`）见 [PDF 交接](docs/PDF-HANDOFF.md#版式译文预览)。
-- 扫描页版式：`linesToBlocks` 保留行框，`ocrLayoutLines` 按识别画布宽 / 视口宽换算成文字层同格式的 `layoutLines`，识别完成后刷新版式；OCR 缓存升为 `ocr-v2`，旧记录无位置会重新识别一次。数据流见 [OCR-INTERFACE §6.2](docs/OCR-INTERFACE.md#62-pdf-阅读器)。
+- 扫描页版式：`linesToBlocks` 保留行框，缓存存原始框与识别图像宽度（`ocr-v2`），显示时由 `ocrLayoutLines` 换算并补边、按 `inkEmRatio` 估字号；扫描页颜色容差 ±16、边缘仍 98%，不通过时用 `expandLayoutRect` 逐级加边距。实测样本（约 1° 倾斜的扫描通知）由 1/27 提升到 22/27 处覆盖，无原字残片；倾斜根因在连接器，留给 0.17.2（见 [ROADMAP](docs/ROADMAP.md#0172交接系统-ocr-组件-020-preview2)）。数据流见 [OCR-INTERFACE §6.2](docs/OCR-INTERFACE.md#62-pdf-阅读器)。
 - 「显示原文 / 显示译文」：底色改画在译文覆盖层上，右侧位图保持原页，切换只隐藏覆盖层，不重画、不重新翻译；离开双列版式时复位。
 - 短段落为主的页面（例：段间距 34.8pt × 16、行内 18.1pt × 10）中位行距落在段间距上，整页并成一段；`typicalLineGap` 改取最小一簇间距，占比不足四分之一时仍用中位数，1.5 倍 / 双倍行距不受影响。
 - 单行短段的长译文：原框内最多缩到原字号 80%，之后按 `growLayoutRect` 扩到同色空白再缩，避免缩成极小字。阅读器工具栏按翻译 / 导航 / 页面视图 / 窗口分组，组内全隐藏时整组隐藏（`:has()`，最低 Chrome 114 支持）。

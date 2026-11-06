@@ -469,8 +469,8 @@ test('版面：句末标点 + 右缘短于段宽时分段', async () => {
   assert.deepEqual(out.map((b) => b.text), ['这是第一段的第一行文字比较长第一段到这里结束。', '第二段从这里开始，同样的行距Rimefox sample page continues here.']);
 });
 
-test('版面：文本块保留行框，换算成版式预览坐标后贴合原框', async () => {
-  const { linesToBlocks, ocrLayoutLines } = await import('../lib/ocr/layout.js');
+test('版面：文本块保留行框，换算成版式预览坐标后按 OCR_BOX_PAD 补边贴合原框', async () => {
+  const { linesToBlocks, ocrLayoutLines, OCR_BOX_PAD, inkEmRatio } = await import('../lib/ocr/layout.js');
   const { layoutRect } = await import('../lib/reader/pdf-layout.js');
   const blocks = linesToBlocks([
     { text: '第一段第一行', box: [90, 300, 1200, 60] },
@@ -483,10 +483,18 @@ test('版面：文本块保留行框，换算成版式预览坐标后贴合原�
   const viewport = { width: 595, height: 842 };
   const lines = ocrLayoutLines(blocks[0].boxes, 3, viewport.height);
   const rect = layoutRect({ text: blocks[0].text, layoutLines: lines }, viewport);
+  // 墨迹框（视口单位）：x 30–430，y 100–143.3，行高 20；四周补 pad = 20 × OCR_BOX_PAD
   const near = (a, b) => Math.abs(a - b) < 1e-9;
-  assert.ok(near(rect.x, 30 - 1.5) && near(rect.y, 100 - 1.5), JSON.stringify(rect));
-  assert.ok(near(rect.width, 400 + 3) && near(rect.height, (430 - 300) / 3 + 3), JSON.stringify(rect));
-  assert.ok(near(rect.fontSize, 20 / 1.25));
+  const pad = 20 * OCR_BOX_PAD;
+  assert.ok(near(rect.x, 30 - pad - 1.5) && near(rect.y, 100 - pad - 1.5), JSON.stringify(rect));
+  assert.ok(near(rect.width, 400 + pad * 2 + 3) && near(rect.height, 430 / 3 - 100 + pad * 2 + 3), JSON.stringify(rect));
+  assert.ok(near(rect.fontSize, 20), 'without text the start font is the ink height, not the padded box');
+  // 带文字时按字符种类把墨迹高度换算成字号：中文 0.9，数字 / 大写 0.72，再加下伸部 0.22
+  const cjk = layoutRect({ text: blocks[0].text, layoutLines: ocrLayoutLines(blocks[0].boxes, 3, viewport.height, blocks[0].text) }, viewport);
+  assert.ok(near(cjk.fontSize, 20 / 0.9));
+  assert.equal(inkEmRatio('09:00 - 13:00'), 0.72);
+  assert.equal(inkEmRatio('Dear residents ,'), 0.94);
+  assert.equal(inkEmRatio('none'), 0.5);
   assert.equal(ocrLayoutLines(null, 3, 842), null);
   assert.equal(ocrLayoutLines([[0, 0, 0, 10]], 3, 842), null);
   assert.equal(ocrLayoutLines([[0, 0, 10, 10]], 0, 842), null);

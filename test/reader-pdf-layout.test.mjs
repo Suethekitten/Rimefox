@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { layoutRect, flatBackground, growLayoutRect } from '../lib/reader/pdf-layout.js';
+import { layoutRect, flatBackground, growLayoutRect, expandLayoutRect } from '../lib/reader/pdf-layout.js';
 import { groupParagraphs } from '../lib/reader/pdf-text.js';
 
 test('layout geometry follows a paragraph without crossing columns; legacy blocks unchanged', () => {
@@ -67,4 +67,13 @@ test('short paragraphs may grow into free column space but never into another bl
   assert.equal(growLayoutRect(short, [wide, short, note, next], viewport), null);
   // Nothing to gain: already full column width with the next block right below.
   assert.equal(growLayoutRect(wide, [wide, { x: 36, y: 137, width: 516, height: 10, fontSize: 9 }], viewport), null);
+});
+
+test('scanned-page margins grow evenly but never off the page or into another block', () => {
+  const viewport = { width: 595, height: 842 };
+  const line = { x: 70, y: 186, width: 451, height: 20, fontSize: 10 };
+  const above = { x: 70, y: 150, width: 300, height: 14, fontSize: 10 };
+  assert.deepEqual(expandLayoutRect(line, 5, [above, line], viewport), { x: 65, y: 181, width: 461, height: 30, fontSize: 10 });
+  assert.equal(expandLayoutRect(line, 25, [above, line], viewport), null);
+  assert.equal(expandLayoutRect({ ...line, x: 2 }, 5, [line], viewport), null);
 });

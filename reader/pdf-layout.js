@@ -1,4 +1,4 @@
-import { layoutRect, flatBackground, growLayoutRect } from '../lib/reader/pdf-layout.js';
+import { layoutRect, flatBackground, growLayoutRect, expandLayoutRect } from '../lib/reader/pdf-layout.js';
 
 export function clearPdfLayout(el, doc) {
   const view = el.querySelector('.pdf-layout-view');
@@ -33,11 +33,21 @@ export function updatePdfLayout(el, loaded, texts, doc) {
   for (let i = 0; i < count; i += 1) {
     if (!image) continue;
     if (!texts[i]) { skips.untranslated += 1; continue; }
-    const rect = rects[i];
+    let rect = rects[i];
     if (!rect) { skips.position += 1; continue; }
     // 笔画半宽随字号增长：粗大标题的笔画中心也要能找到附近的背景。
-    const stroke = Math.max(4, Math.ceil(rect.fontSize * sy * 0.15));
-    const color = flatBackground(image, toPixels(rect), { stroke });
+    // 扫描页：纸面噪点放宽颜色容差到 ±16，但边缘仍须 98% 一致——放宽比例会让框边切过倾斜的字，露出原字残片。
+    const check = { stroke: Math.max(4, Math.ceil(rect.fontSize * sy * 0.15)), ...(loaded.scanned ? { tolerance: 16 } : {}) };
+    let color = flatBackground(image, toPixels(rect), check);
+    // OCR 框不随扫描倾斜，长行两端的字会出框：逐级加大四周边距（不碰其他块、不出页面），取第一个边缘干净的框。
+    if (!color && loaded.scanned) {
+      for (const step of [0.25, 0.5, 0.75, 1]) {
+        const wider = expandLayoutRect(rects[i], rects[i].fontSize * step, rects, vp);
+        if (!wider) break;
+        color = flatBackground(image, toPixels(wider), check);
+        if (color) { rect = wider; break; }
+      }
+    }
     if (!color) { skips.background += 1; continue; }
     const text = document.createElement('div'); text.className = 'pdf-layout-translation';
     text.textContent = texts[i]; text.dir = 'auto';
@@ -64,8 +74,8 @@ export function updatePdfLayout(el, loaded, texts, doc) {
     // 扩展区也要通过同一底色检查，最后才继续缩到 8px。避免单行短段的长译文缩成极小字。
     let ok = shrink(Math.max(8, base * 0.8));
     if (!ok) {
-      const grown = growLayoutRect(rect, rects, vp);
-      const same = grown && flatBackground(image, toPixels(grown), { stroke });
+      const grown = growLayoutRect(rect, rects.map((o, k) => (k === i ? null : o)), vp);
+      const same = grown && flatBackground(image, toPixels(grown), check);
       if (same && same.every((v, k) => Math.abs(v - color[k]) <= 10)) { place(grown); font = base; }
       ok = shrink(8);
     }
