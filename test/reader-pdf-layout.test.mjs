@@ -77,3 +77,21 @@ test('scanned-page margins grow evenly but never off the page or into another bl
   assert.equal(expandLayoutRect(line, 25, [above, line], viewport), null);
   assert.equal(expandLayoutRect({ ...line, x: 2 }, 5, [line], viewport), null);
 });
+
+test('padded OCR rects that overlap vertically are split at the middle of the overlap; others untouched', async () => {
+  const { separateLayoutRects } = await import('../lib/reader/pdf-layout.js');
+  const para = { x: 40, y: 100, width: 300, height: 80, fontSize: 18 };
+  const next = { x: 42, y: 176, width: 300, height: 60, fontSize: 18 };
+  const side = { x: 400, y: 100, width: 100, height: 200, fontSize: 12 };
+  const out = separateLayoutRects([para, next, side, null]);
+  assert.ok(out[0].y + out[0].height < out[1].y, 'no vertical overlap after separation');
+  assert.equal(out[0].y, 100);
+  assert.equal(out[0].y + out[0].height, 177.5);
+  assert.equal(out[1].y, 178.5);
+  assert.equal(out[1].y + out[1].height, 236, 'the lower block keeps its bottom edge');
+  assert.deepEqual(out[2], side, 'blocks without horizontal overlap are unchanged');
+  assert.equal(out[3], null);
+  assert.equal(para.height, 80, 'input is not mutated');
+  const apart = [{ x: 0, y: 0, width: 10, height: 10 }, { x: 0, y: 20, width: 10, height: 10 }];
+  assert.deepEqual(separateLayoutRects(apart), apart);
+});

@@ -1,4 +1,4 @@
-import { layoutRect, flatBackground, growLayoutRect, expandLayoutRect } from '../lib/reader/pdf-layout.js';
+import { layoutRect, flatBackground, growLayoutRect, expandLayoutRect, separateLayoutRects } from '../lib/reader/pdf-layout.js';
 
 export function clearPdfLayout(el, doc) {
   const view = el.querySelector('.pdf-layout-view');
@@ -27,9 +27,14 @@ export function updatePdfLayout(el, loaded, texts, doc) {
   // 未替换的原因计数，写在 data-layout-skips 上供诊断：untranslated / position / background / fit
   const skips = { untranslated: 0, position: 0, background: 0, fit: 0 };
   const count = Math.min(loaded.blocks.length, 400);
-  const rects = Array.from({ length: count }, (_, i) => layoutRect(loaded.blocks[i], loaded.viewport));
+  const rects = separateLayoutRects(Array.from({ length: count }, (_, i) => layoutRect(loaded.blocks[i], loaded.viewport)));
   const toPixels = (r) => ({ x: r.x * sx, y: r.y * sy, width: r.width * sx, height: r.height * sy });
   const vp = loaded.viewport;
+  // 两遍放置，保证最终的译文框互不重叠（扫描页曾出现下一块盖住上一段末行，2026-11 Mac 实机验收）：
+  // 第一遍按顺序确定每块的底色框；扫描页需要补边时，只能避开已确定的框和其余块的原框。
+  // 第二遍再缩字 / 向右下扩展，扩展只到下一块「实际使用的框」之上，并且不碰任何已放置的框。
+  const base = rects.slice();
+  const colors = new Array(count).fill(null);
   for (let i = 0; i < count; i += 1) {
     if (!image) continue;
     if (!texts[i]) { skips.untranslated += 1; continue; }
@@ -39,16 +44,24 @@ export function updatePdfLayout(el, loaded, texts, doc) {
     // 扫描页：纸面噪点放宽颜色容差到 ±16，但边缘仍须 98% 一致——放宽比例会让框边切过倾斜的字，露出原字残片。
     const check = { stroke: Math.max(4, Math.ceil(rect.fontSize * sy * 0.15)), ...(loaded.scanned ? { tolerance: 16 } : {}) };
     let color = flatBackground(image, toPixels(rect), check);
-    // OCR 框不随扫描倾斜，长行两端的字会出框：逐级加大四周边距（不碰其他块、不出页面），取第一个边缘干净的框。
+    // OCR 框不随扫描倾斜，长行两端的字会出框：逐级加大四周边距（不碰其他块的实际框、不出页面），取第一个边缘干净的框。
     if (!color && loaded.scanned) {
       for (const step of [0.25, 0.5, 0.75, 1]) {
-        const wider = expandLayoutRect(rects[i], rects[i].fontSize * step, rects, vp);
+        const wider = expandLayoutRect(rects[i], rects[i].fontSize * step, base.map((o, k) => (k === i ? null : o)), vp);
         if (!wider) break;
         color = flatBackground(image, toPixels(wider), check);
         if (color) { rect = wider; break; }
       }
     }
     if (!color) { skips.background += 1; continue; }
+    base[i] = rect;
+    colors[i] = { color, check };
+  }
+  const final = new Array(count).fill(null);
+  for (let i = 0; i < count; i += 1) {
+    if (!colors[i]) continue;
+    const { color, check } = colors[i];
+    const rect = base[i];
     const text = document.createElement('div'); text.className = 'pdf-layout-translation';
     text.textContent = texts[i]; text.dir = 'auto';
     const place = (r) => {
@@ -58,12 +71,13 @@ export function updatePdfLayout(el, loaded, texts, doc) {
       text.style.height = r.height / vp.height * 100 + '%';
     };
     place(rect);
+    let used = rect;
     // 底色画在译文层上而不是改画布：画布保持原页，「显示原文」只需隐藏译文层。
     text.style.backgroundColor = 'rgb(' + color.join(',') + ')';
     text.style.color = color.reduce((a, b) => a + b) > 384 ? '#111' : '#fff';
     view.appendChild(text);
-    const base = Math.max(8, rect.fontSize * scale);
-    let font = base;
+    const base0 = Math.max(8, rect.fontSize * scale);
+    let font = base0;
     const fits = () => text.scrollHeight <= text.clientHeight + 1 && text.scrollWidth <= text.clientWidth + 1;
     const shrink = (min) => {
       text.style.fontSize = font + 'px';
@@ -72,14 +86,16 @@ export function updatePdfLayout(el, loaded, texts, doc) {
     };
     // 先在原框里缩到原字号的 80%；仍放不下时，向右（本栏右缘）和向下（下一段之前）的同色空白扩展，
     // 扩展区也要通过同一底色检查，最后才继续缩到 8px。避免单行短段的长译文缩成极小字。
-    let ok = shrink(Math.max(8, base * 0.8));
+    let ok = shrink(Math.max(8, base0 * 0.8));
     if (!ok) {
-      const grown = growLayoutRect(rect, rects.map((o, k) => (k === i ? null : o)), vp);
+      const others = base.map((o, k) => (k === i ? null : final[k] || o));
+      const grown = growLayoutRect(rect, others, vp);
       const same = grown && flatBackground(image, toPixels(grown), check);
-      if (same && same.every((v, k) => Math.abs(v - color[k]) <= 10)) { place(grown); font = base; }
+      if (same && same.every((v, k) => Math.abs(v - color[k]) <= 10)) { place(grown); used = grown; font = base0; }
       ok = shrink(8);
     }
     if (!ok) { text.remove(); skips.fit += 1; continue; }
+    final[i] = used;
     placed += 1;
   }
   view.dataset.layoutSkips = Object.entries(skips).map(([k, v]) => k + ':' + v).join(',');
