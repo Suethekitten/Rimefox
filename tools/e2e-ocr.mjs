@@ -454,12 +454,18 @@ fs.writeFileSync(modeFile, 'ready');
   // 保存选择，验证随设置页「保存」写入配置
   await pageEval(opt, "const s=document.getElementById('ocrEngine');s.value='off';s.dispatchEvent(new Event('change',{bubbles:true}));return true;");
   await until(() => pageEval(opt, "return !document.getElementById('save').disabled"), 5000);
-  await pageEval(opt, "document.getElementById('save').click(); return true;");
+  // 保存处理先写入存储、再 applyConfig 回填表单：存储里看到新值时上一次保存可能还没走完，
+  // 这时改下拉框会被回填覆盖（设置页已知问题，见 HANDOFF）。像用户一样等「已保存」出现再继续。
+  const saveAndWait = async () => {
+    await pageEval(opt, "document.getElementById('saveResult').textContent=''; document.getElementById('save').click(); return true;");
+    return until(() => pageEval(opt, "return /已保存|Saved/.test(document.getElementById('saveResult').textContent) && document.getElementById('save').disabled"), 5000);
+  };
+  await saveAndWait();
   const saved = await until(() => pageEval(opt, 'return chrome.storage.local.get("config").then((r) => r.config && r.config.ocrEngine === "off")'), 5000);
   check('OCR 选择随「保存」写入配置', !!saved);
   await pageEval(opt, "const s=document.getElementById('ocrEngine'); s.value='system'; s.dispatchEvent(new Event('change',{bubbles:true})); return true;");
   await until(() => pageEval(opt, "return !document.getElementById('save').disabled"), 5000);
-  await pageEval(opt, "document.getElementById('save').click(); return true;");
+  await saveAndWait();
   check('切回系统 OCR 并保存', !!(await until(() => pageEval(opt, 'return chrome.storage.local.get("config").then((r) => r.config && r.config.ocrEngine === "system")'), 5000)));
   await send('Target.closeTarget', { targetId: opt.targetId });
   fs.writeFileSync(modeFile, 'ready');
