@@ -95,3 +95,19 @@ test('padded OCR rects that overlap vertically are split at the middle of the ov
   const apart = [{ x: 0, y: 0, width: 10, height: 10 }, { x: 0, y: 20, width: 10, height: 10 }];
   assert.deepEqual(separateLayoutRects(apart), apart);
 });
+
+test('side-by-side OCR columns with a narrow gutter are not split even though their padding overlaps', async () => {
+  const { separateLayoutRects, layoutRect } = await import('../lib/reader/pdf-layout.js');
+  const { ocrLayoutLines } = await import('../lib/ocr/layout.js');
+  // 双栏扫描页：墨迹栏间只有 8 单位，行高 10，补边后左右两栏的框交叠约 1 单位，上下错开 140
+  const viewport = { width: 600, height: 800 };
+  const column = (x, y) => ({ text: 'x', layoutLines: ocrLayoutLines(Array.from({ length: 20 }, (_, i) => [x, y + i * 14, 252, 10]), 1, 800, 'Text') });
+  const left = layoutRect(column(40, 100), viewport);
+  const right = layoutRect(column(300, 240), viewport);
+  assert.ok(left.x + left.width > right.x, 'fixture: padded columns overlap horizontally');
+  assert.deepEqual(separateLayoutRects([left, right]), [left, right]);
+  // 同一栏里上下相邻、补边重叠的两段仍然分开
+  const below = layoutRect(column(40, 380), viewport);
+  const [a, b] = separateLayoutRects([left, below]);
+  assert.ok(a.y + a.height < b.y);
+});
