@@ -111,7 +111,7 @@ reader/index.html
 - 翻译单元：段落、列表项、引用、图注、简单表格单元格；跳过目录/导航、页眉页脚、页码、`pre/code`、图片 alt。
 - 行内格式 wire：`<fN>…</fN>` 表示可翻译的格式范围，`<kN>…</kN>` 表示不可变的链接/原子。复用 `lib/inline-protocol.js` 的 `INLINE_VERSION / inspect`。
 - 失败/格式缺失：整段降级纯文本并记录诊断；不把标记失真的译文写进缓存。
-- 阅读器排版：不随包分发字体；用户可上传本机 TTF/OTF/WOFF/WOFF2，字体 Blob 只存本机 IndexedDB，通过 FontFace 加载。提供字号、行高、字间距、段间距、页宽、主题和全屏，系统宋体 / 黑体作为回退。
+- 阅读器排版：不随包分发字体；用户可上传本机 TTF/OTF/WOFF/WOFF2，字体 Blob 只存本机 IndexedDB（只保留一份，大小上限见 `READER_LIMITS.maxFontBytes`），通过 FontFace 加载。提供字号、行高、字间距、段间距、页宽、主题和全屏，系统宋体 / 黑体作为回退。
 
 > 参考了 [ColorTxt](https://github.com/ssnangua/ColorTxt)（MPL-2.0，Electron 阅读器）的部分阅读体验（字体/排版、书库/进度、目录、主题、全屏）；**没有复制其代码**，实现基于本仓库现有 reader 架构。
 

@@ -343,8 +343,8 @@ function updateUserFontUi() {
 
 async function handleUserFontFile(file) {
   if (!file) return;
-  if (file.size > 24 * 1024 * 1024) {
-    setStatus('libraryStatus', '字体文件超过 24 MB，未上传。', 'error');
+  if (file.size > READER_LIMITS.maxFontBytes) {
+    setStatus('libraryStatus', '字体文件超过 ' + Math.round(READER_LIMITS.maxFontBytes / 1048576) + ' MB，未上传。', 'error');
     return;
   }
   try {
