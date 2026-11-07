@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { layoutRect, flatBackground, growLayoutRect, expandLayoutRect } from '../lib/reader/pdf-layout.js';
-import { groupParagraphs } from '../lib/reader/pdf-text.js';
+import { groupParagraphs, pageBlocks } from '../lib/reader/pdf-text.js';
 
 test('layout geometry follows a paragraph without crossing columns; legacy blocks unchanged', () => {
   const lines = [{ text: 'First line', y: 100, x0: 10, x1: 80, size: 10 }, { text: 'next line.', y: 88, x0: 10, x1: 70, size: 10 },
@@ -14,6 +14,20 @@ test('layout geometry follows a paragraph without crossing columns; legacy block
   assert.deepEqual(layoutRect(blocks[0], { width: 250, height: 200 }), { x: 8.5, y: 88.5, width: 73, height: 27.5, fontSize: 10 });
   assert.equal(layoutRect({ ...blocks[0], noTranslate: true }, { width: 250, height: 200 }), null);
   assert.equal(layoutRect(blocks[1], { width: 200, height: 200 }), null);
+});
+
+test('mixed text orientations never merge into a horizontal layout block', () => {
+  const viewport = { width: 595, height: 842 };
+  const items = [
+    { str: 'Horizontal caption', transform: [18, 0, 0, 18, 90, 610], width: 130, height: 18 },
+    { str: 'Side heading', transform: [0, 18, -18, 0, 222, 610], width: 100, height: 18 },
+    { str: 'Diagonal note', transform: [8, 6, -6, 8, 110, 390], width: 80, height: 10 }
+  ];
+  const blocks = pageBlocks({ items }, viewport, { captureLayout: true });
+  assert.deepEqual(blocks.map((block) => block.text), items.map((item) => item.str));
+  assert.ok(layoutRect(blocks[0], viewport));
+  assert.equal(layoutRect(blocks[1], viewport), null);
+  assert.equal(layoutRect(blocks[2], viewport), null);
 });
 
 test('layout masking accepts solid light/dark backgrounds, declines gradients and illustrated areas', () => {
