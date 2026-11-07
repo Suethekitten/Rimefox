@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 
 import { makeArea } from './_fake-storage.mjs';
+import { SUBTITLE_BUDGET } from '../lib/subtitle-budget.js';
 
 let pass = 0;
 let fail = 0;
@@ -72,6 +73,67 @@ function sendSub(texts, cacheScope, tabId, url, target) {
 }
 
 console.log('\n[字幕费用边界：身份重放 / 预算]');
+
+const FAULT_SCOPE = 'bilibili|BV1xx411c7mD:1001|en-id:en-US|en-US';
+const CACHED_LINE = 'Cached line after the budget recovers.';
+
+await t('全局账本暂不可读：多个标签页均不发 HTTP，恢复后从已保存的计数继续', async function () {
+  const key = 'subtitle-budget:global';
+  const saved = { requests: 30, chars: 200, at: Date.now(), win: [] };
+  await sessionArea.set({ [key]: saved });
+  const read = sessionArea.get;
+  calls = [];
+  sessionArea.get = async (keys) => {
+    if (keys === key) throw new Error('injected storage failure');
+    return read(keys);
+  };
+  try {
+    const results = await Promise.all([
+      sendSub(['First unpaid line.'], FAULT_SCOPE, 41),
+      sendSub(['Second unpaid line.'], FAULT_SCOPE, 42)
+    ]);
+    for (const result of results) {
+      assert.equal(result.errorCode, 'subtitle_budget_unavailable');
+      assert.deepEqual(result.results, [null]);
+    }
+    assert.equal(calls.length, 0);
+    assert.deepEqual((await read(key))[key], saved);
+  } finally {
+    sessionArea.get = read;
+  }
+
+  const result = await sendSub([CACHED_LINE], FAULT_SCOPE, 41);
+  assert.equal(result.results[0], 'T:' + CACHED_LINE);
+  assert.equal(calls.length, 1);
+  assert.equal((await read(key))[key].requests, saved.requests + 1);
+});
+
+await t('标签页账本暂不可读：缓存照常命中，恢复后已耗尽的额度仍拦截请求', async function () {
+  const tabId = 43;
+  const key = 'subtitle-budget:' + tabId;
+  const saved = { requests: SUBTITLE_BUDGET.tabRequests, chars: 200, at: Date.now(), win: [] };
+  await sessionArea.set({ [key]: saved });
+  const read = sessionArea.get;
+  calls = [];
+  sessionArea.get = async (keys) => {
+    if (keys === key) throw new Error('injected storage failure');
+    return read(keys);
+  };
+  try {
+    const result = await sendSub([CACHED_LINE, 'Uncached line at the limit.'], FAULT_SCOPE, tabId);
+    assert.equal(result.ok, true);
+    assert.equal(result.errorCode, 'subtitle_budget_unavailable');
+    assert.deepEqual(result.results, ['T:' + CACHED_LINE, null]);
+    assert.equal(calls.length, 0);
+    assert.deepEqual((await read(key))[key], saved);
+  } finally {
+    sessionArea.get = read;
+  }
+
+  const result = await sendSub(['Uncached line at the limit.'], FAULT_SCOPE, tabId);
+  assert.equal(result.errorCode, 'subtitle_budget');
+  assert.equal(calls.length, 0);
+});
 
 await t('伪造的 cid 换了 cacheScope：同一段字幕只请求一次', async function () {
   calls = [];

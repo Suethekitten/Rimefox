@@ -309,15 +309,13 @@ function subtitleBudgetFor(slot) {
   if (hit) return hit;
   const key = SUBTITLE_BUDGET_MARK + slot;
   const loading = (async () => {
-    let saved = null;
-    try {
-      const got = await chrome.storage.session.get(key);
-      saved = got && got[key];
-    } catch (err) {
-      saved = null; // 读不到就从零开始：宁可更严格
-    }
-    return createBudgetState(Date.now(), saved);
-  })();
+    const got = await chrome.storage.session.get(key);
+    return createBudgetState(Date.now(), got[key]);
+  })().catch(() => {
+    // 只有成功读取且没有记录时才从零开始。读失败允许下一次请求重读。
+    if (subtitleBudgets.get(slot) === loading) subtitleBudgets.delete(slot);
+    return null;
+  });
   subtitleBudgets.set(slot, loading);
   return loading;
 }
@@ -341,8 +339,9 @@ async function subtitleSpendFor(sender) {
   const slot = subtitleBudgetSlot(sender);
   if (slot === null) return null;
   const tabState = await subtitleBudgetFor(slot);
+  if (!tabState) return null;
   const globalState = await subtitleBudgetFor(SUBTITLE_BUDGET_GLOBAL);
-  if (!tabState || !globalState) return null;
+  if (!globalState) return null;
   let stopped = false;
   const persist = (force) => {
     saveSubtitleBudget(slot, tabState, force);
@@ -613,6 +612,14 @@ async function handleTranslate(msg, sender) {
     return false;
   });
 
+  // 账本暂不可用时，缓存命中和在途结果仍可复用，但不能发出新的字幕请求。
+  const budgetUnavailable = subtitleRequest && !subtitleSpend && todo.length > 0;
+  if (budgetUnavailable) {
+    const err = new ApiError('暂时无法读取字幕翻译额度，请稍后重试。', 0, '');
+    todo.forEach((text) => fill(text, null, err));
+    todo = [];
+  }
+
   // 可选：本地脱敏。映射只活在这个请求里，不落盘、不进缓存、不写日志。
   // 关闭时下面的分支整段跳过，行为与改动前完全一致。
   let privacyRows = null;
@@ -851,6 +858,8 @@ async function handleTranslate(msg, sender) {
 
   // 预算是否用完：由预支器自己记（一次请求里可能有多批、也可能在复核时才撞到上限）。
   const budgetBlocked = !!(subtitleSpend && subtitleSpend.blocked());
+  const budgetErrorCode = budgetBlocked ? 'subtitle_budget' : budgetUnavailable ? 'subtitle_budget_unavailable' : '';
+  const errorCode = authErrorCode(firstError) || budgetErrorCode;
 
   const failed = results.filter((r) => r === null).length;
   // 只报告上下文模式 / 字符数 / 条数，绝不回传上下文正文、页面标题或正文。
@@ -862,12 +871,12 @@ async function handleTranslate(msg, sender) {
         : { mode: 'ai', omitted: 'no-context', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } })
       : { mode: 'off', omitted: '', chars: 0, items: { title: 0, headings: 0, abbreviations: 0, adjacent: 0 } };
   if (results.length && failed === results.length) {
-    return { ok: false, error: describeError(firstError), credentialRevision: cfg.credentialRevision, errorCode: authErrorCode(firstError) || (budgetBlocked ? 'subtitle_budget' : ''), results, alignments, validations, inlineErrors, outputErrors, context: contextReport };
+    return { ok: false, error: describeError(firstError), credentialRevision: cfg.credentialRevision, errorCode, results, alignments, validations, inlineErrors, outputErrors, context: contextReport };
   }
 
   return {
     ok: true,
-    credentialRevision: cfg.credentialRevision, errorCode: authErrorCode(firstError) || (budgetBlocked ? 'subtitle_budget' : ''),
+    credentialRevision: cfg.credentialRevision, errorCode,
     results,
     alignments,
     validations,

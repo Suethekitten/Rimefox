@@ -2022,6 +2022,45 @@ async function bilibiliSubtitleChecks(url, offline) {
   const runtimeReady = await until(async () => swEval(`return await chrome.scripting.executeScript({ target: { tabId: ${JSON.stringify(tabId)} }, world: 'ISOLATED', func: () => !!(window.__DT && window.__DT.subtitleRuntime && window.__DT.subtitleRuntime.instance) }).then((x) => !!(x && x[0] && x[0].result)).catch(() => false)`), 15000, 200);
   check('Bilibili 字幕运行时加载', runtimeReady);
   if (!runtimeReady) return;
+
+  if (offline) {
+    const key = 'subtitle-budget:' + tabId;
+    const previousCount = 7;
+    const request = {
+      type: 'translate',
+      texts: ['A subtitle budget recovery fixture.'],
+      target: 'zh-CN',
+      cacheScope: 'bilibili|BV1xx411c7mD:1001|budget-fixture|en'
+    };
+    const sendSubtitle = () => contentEval(bili, 'window.__DT.send(' + JSON.stringify(request) + ')');
+    await swEval(`
+      const session = chrome.storage.session;
+      const get = session.get;
+      const key = ${JSON.stringify(key)};
+      await session.set({ [key]: { requests: ${previousCount}, chars: 50, at: Date.now(), win: [] } });
+      globalThis.restoreBudgetRead = () => { session.get = get; delete globalThis.restoreBudgetRead; };
+      session.get = async function (keys) {
+        if (keys === key) throw new Error('injected budget read failure');
+        return get.call(this, keys);
+      };
+    `);
+    // systems 每次 HTTP 都记录，包括被拒的思考参数请求。
+    const before = stats.systems.length;
+    try {
+      const blocked = await sendSubtitle();
+      check('字幕账本读取失败时不发 HTTP', blocked?.errorCode === 'subtitle_budget_unavailable' && stats.systems.length === before, stats.systems.length - before);
+    } finally {
+      await swEval('globalThis.restoreBudgetRead();');
+    }
+    const recovered = await sendSubtitle();
+    const sent = stats.systems.length - before;
+    const count = await until(async () => {
+      const saved = await swEval(`return (await chrome.storage.session.get(${JSON.stringify(key)}))[${JSON.stringify(key)}]?.requests;`);
+      return saved === previousCount + sent ? saved : null;
+    }, 5000);
+    check('账本恢复后沿用原计数，字幕请求可重试', recovered?.ok === true && !!recovered.results?.[0] && sent > 0 && count === previousCount + sent, JSON.stringify({ sent, count }));
+  }
+
   const pageBv = (/\/video\/(BV[0-9A-Za-z]+)/.exec(new URL(url).pathname) || [])[1] || 'BV1xx411c7mD';
   let injected = 0;
 
