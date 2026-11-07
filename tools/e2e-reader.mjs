@@ -387,6 +387,13 @@ check('双列切换语言保留版式，译文按新语言更新', !!await until
 await documentMode('original');
 check('TXT 切回原文恢复内容并收起左列', await pageEval("return document.getElementById('sourceContent').hidden && document.getElementById('bookContent').textContent===" + JSON.stringify(txtSource)));
 
+check('中文小说 TXT 导入', !!await importDocument('章节小说.txt', '书名：章节小说\n\n第一章 初见\n　　他说：“第一章就讲过了。”\n第二章 重逢\n　　第二章的正文。\n番外1 后日谈\n　　番外的正文。'));
+check('TXT 按章节标题生成目录', !!await until(() => pageEval("return [...document.querySelectorAll('#tocList a')].map(a=>a.textContent.trim()).join('|')==='章节小说|第一章 初见|第二章 重逢|番外1 后日谈'")),
+  await pageEval("return [...document.querySelectorAll('#tocList a')].map(a=>a.textContent.trim()).join('|')"));
+await pageEval("document.querySelectorAll('#tocList a')[2].click(); return true;");
+check('TXT 目录跳到对应章节', !!await until(() => pageEval("const h=document.querySelector('#bookContent h2');return !!h && h.textContent==='第二章 重逢' && document.getElementById('bookContent').textContent.includes('第二章的正文') && !document.getElementById('bookContent').textContent.includes('番外的正文')")),
+  await pageEval("return document.getElementById('bookContent').textContent.slice(0,80)"));
+
 check('Markdown 导入', !!await importDocument('formatted.md', '# Markdown Document\n\nA **bold** paragraph with `keep_code` and [safe link](https://example.com).\n\n- First list item\n- Second list item\n\n> A quoted paragraph.\n\n```js\nconst keep_code = "unchanged";\n```\n\n| Name | Value |\n| --- | --- |\n| Item | Example |\n\n<script>window.__markdownExecuted=true</script>\n\n![blocked](https://example.com/remote.png)\n\n[Next section](#next-section)\n\n## Next Section\n\nAnother chapter body.'));
 check('Markdown 标题、列表、引用、代码块保留', await pageEval("return !!document.querySelector('#bookContent h1') && !!document.querySelector('#bookContent strong') && document.querySelectorAll('#bookContent li').length===2 && !!document.querySelector('#bookContent blockquote') && !!document.querySelector('#bookContent pre code')"));
 check('Markdown HTML 不执行、不加载远程图片', await pageEval("return !window.__markdownExecuted && !document.querySelector('#bookContent script, #bookContent img') && document.getElementById('bookContent').textContent.includes('<script>')"));

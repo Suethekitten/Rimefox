@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseTextDocument, decodeText, textFormat, TEXT_LIMITS } from '../lib/reader/text.js';
+import { parseTextDocument, decodeText, textFormat, isChapterHeading, TEXT_LIMITS } from '../lib/reader/text.js';
 const bytes = text => new TextEncoder().encode(text);
 test('TXT preserves literal HTML, paragraphs and line breaks; section IDs survive reopening', () => {
   const input = bytes('First line\r\nSecond line\r\n\r\n<script>alert(1)</script> & more');
@@ -48,4 +48,28 @@ test('Markdown tables remain structured and repeated Unicode heading anchors are
   assert.match(doc.sections[0].load().html, /<td><strong>Bold<\/strong><\/td><td><code>safe<\/code><\/td>/);
   assert.equal(doc.resolveHref('#' + encodeURIComponent('中文标题-1'), doc.sections[0].href).sectionId, doc.sections[1].id);
   assert.throws(() => parseTextDocument(bytes('line\n'.repeat(TEXT_LIMITS.lines + 1))), e => e.code === 'too_large');
+});
+
+test('TXT novels get one section and one TOC entry per chapter heading', () => {
+  const input = '书名：示例\n作者：某人\n\n第一卷 风起\n　　开头的一段。\n第一章 初见\n　　他说：“第一章就讲过了。”\n　　第二回合开始\n第二章：重逢\n　　正文。\n\n番外1 后日谈\n　　尾声的话。';
+  const doc = parseTextDocument(bytes(input), { name: '示例.txt' });
+  assert.deepEqual(doc.toc.map(item => item.title), ['示例', '第一卷 风起', '第一章 初见', '第二章：重逢', '番外1 后日谈']);
+  assert.equal(doc.sections.length, 5);
+  assert.match(doc.sections[2].load().html, /^<html><body><h2 id="chapter-2">第一章 初见<\/h2><p>　　他说：“第一章就讲过了。”<br\/>　　第二回合开始<\/p>/);
+  const target = doc.resolveHref(doc.toc[3].href, doc.sections[0].href);
+  assert.equal(target.sectionId, doc.sections[3].id);
+  assert.equal(target.fragment, 'chapter-3');
+  const text = doc.sections.map(s => s.load().html.replace(/<br\/>/g, '\n').replace(/<[^>]*>/g, '')).join('');
+  for (const line of input.split('\n').filter(Boolean)) assert.ok(text.includes(line), line);
+});
+
+test('TXT chapter detection stays off for prose look-alikes and a single heading', () => {
+  for (const line of ['第一章', '第十二回 宝玉挨打', '第3节：方法', '卷二 江湖', '楔子', '序章 雨夜', '番外二', 'Chapter 12: The Return', 'CHAPTER IV', 'Part II', 'Prologue']) assert.ok(isChapterHeading(line), line);
+  for (const line of ['第一章就讲过了。', '第二回合开始', '第一节课结束了', '前言不搭后语', '他翻到了第三章，', 'Chapters are hard', 'Party time', '第一章' + '很'.repeat(60)]) assert.ok(!isChapterHeading(line), line);
+  const single = parseTextDocument(bytes('第一章 只有一处\n正文'), { name: 'one.txt' });
+  assert.equal(single.sections.length, 1);
+  assert.doesNotMatch(single.sections[0].load().html, /<h2/);
+  const escaped = parseTextDocument(bytes('第一章 <b>x</b>\n正文\n第二章 & y\n正文'), { name: 'esc.txt' });
+  assert.match(escaped.sections[0].load().html, /<h2 id="chapter-1">第一章 &lt;b&gt;x&lt;\/b&gt;<\/h2>/);
+  assert.equal(escaped.toc[1].title, '第二章 & y');
 });

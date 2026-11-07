@@ -73,7 +73,7 @@ reader/index.html
 
 ### TXT / Markdown
 
-`lib/reader/text.js` 的 `parseTextDocument` 实现相同接口；支持 `.txt` / `.text` / `.log` / `.md` / `.markdown`。纯文本按空行分段，保留段内换行；Markdown 支持 ATX 标题、强调、列表、引用、围栏代码、简单表格和链接，是常用语法子集，不承诺完整 CommonMark / GFM。标题生成目录，长 TXT 按有界段落分章。
+`lib/reader/text.js` 的 `parseTextDocument` 实现相同接口；支持 `.txt` / `.text` / `.log` / `.md` / `.markdown`。纯文本按空行分段，保留段内换行；整行出现两处以上章节标题（「第X章 / 回 / 节 / 卷 / 话」「卷X」「序章 / 楔子 / 番外」「Chapter N / Part II / Prologue」等，短行且不以句末标点结尾）时按章分节并生成目录，只出现一处则不分章；Markdown 支持 ATX 标题、强调、列表、引用、围栏代码、简单表格和链接，是常用语法子集，不承诺完整 CommonMark / GFM。标题生成目录，长 TXT 按有界段落分章。
 
 - 识别 UTF-8、带 BOM 的 UTF-16 LE/BE；UTF-8 解码失败后尝试 GB18030（覆盖常见 GBK）。没有自动编码判定界面，其他编码请先转成 UTF-8。
 - 上限以 `TEXT_LIMITS` 为准；同时限制文件字节、解码字符、行数和段落数。二进制、空文件和超限文件导入失败，不改已有书库。
