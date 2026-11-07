@@ -3,34 +3,61 @@
 << /Type /Catalog /Pages 2 0 R >>
 endobj
 2 0 obj
-<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+<< /Type /Pages /Kids [5 0 R 7 0 R 9 0 R] /Count 3 >>
 endobj
 3 0 obj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
 endobj
 4 0 obj
-<< /Length 252 >>
+<< /Length 304 >>
 stream
 BT /F1 18 Tf 1 0 0 1 90 610 Tm (Horizontal layout caption) Tj ET
 BT /F1 18 Tf 0 1 -1 0 325 610 Tm (Upward side heading) Tj ET
 BT /F1 18 Tf 0 -1 1 0 430 670 Tm (Downward side heading) Tj ET
 BT /F1 18 Tf 0.8 0.6 -0.6 0.8 110 390 Tm (Diagonal note) Tj ET
+BT /F1 18 Tf 0 -1 1 0 525 460 Tm (Short side) Tj ET
 
 endstream
 endobj
 5 0 obj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
 endobj
+6 0 obj
+<< /Length 131 >>
+stream
+BT /F1 18 Tf 0 1 -1 0 150 360 Tm (Aligned after page rotation) Tj ET
+BT /F1 18 Tf 1 0 0 1 290 660 Tm (Rotated with the page) Tj ET
+
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Rotate 90 /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 117 >>
+stream
+BT /F1 18 Tf 1 0 0 1 100 500 Tm (Collision caption) Tj ET
+BT /F1 18 Tf 0 1 -1 0 165 470 Tm (Collision heading) Tj ET
+
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
+endobj
 xref
-0 6
+0 10
 0000000000 65535 f 
 0000000009 00000 n 
 0000000058 00000 n 
-0000000115 00000 n 
-0000000185 00000 n 
-0000000488 00000 n 
+0000000127 00000 n 
+0000000197 00000 n 
+0000000552 00000 n 
+0000000678 00000 n 
+0000000860 00000 n 
+0000000997 00000 n 
+0000001165 00000 n 
 trailer
-<< /Size 6 /Root 1 0 R >>
+<< /Size 10 /Root 1 0 R >>
 startxref
-614
+1291
 %%EOF

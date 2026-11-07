@@ -97,7 +97,14 @@ fs.writeFileSync(path.join(outDir, 'layout-mixed.pdf'), buildPdf([{ content:
   'BT /F1 18 Tf 1 0 0 1 90 610 Tm (Horizontal layout caption) Tj ET\n' +
   'BT /F1 18 Tf 0 1 -1 0 325 610 Tm (Upward side heading) Tj ET\n' +
   'BT /F1 18 Tf 0 -1 1 0 430 670 Tm (Downward side heading) Tj ET\n' +
-  'BT /F1 18 Tf 0.8 0.6 -0.6 0.8 110 390 Tm (Diagonal note) Tj ET\n'
+  'BT /F1 18 Tf 0.8 0.6 -0.6 0.8 110 390 Tm (Diagonal note) Tj ET\n' +
+  'BT /F1 18 Tf 0 -1 1 0 525 460 Tm (Short side) Tj ET\n'
+}, { rotation: 90, content:
+  'BT /F1 18 Tf 0 1 -1 0 150 360 Tm (Aligned after page rotation) Tj ET\n' +
+  'BT /F1 18 Tf 1 0 0 1 290 660 Tm (Rotated with the page) Tj ET\n'
+}, { content:
+  'BT /F1 18 Tf 1 0 0 1 100 500 Tm (Collision caption) Tj ET\n' +
+  'BT /F1 18 Tf 0 1 -1 0 165 470 Tm (Collision heading) Tj ET\n'
 }]));
 
 const tocRows = ['COASTAL WATERS', 'WEATHER PATTERNS', 'WHAT CAN WE DO?'];

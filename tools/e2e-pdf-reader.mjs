@@ -47,6 +47,20 @@ const HEADED = process.env.RIMEFOX_HEADED === '1';
 const API_PORT = 18700 + Math.floor(Math.random() * 300);
 const API_ORIGIN = 'http://127.0.0.1:' + API_PORT;
 const hits = { requests: 0, targets: [], sent: [] };
+const layoutReplies = {
+  'Horizontal layout caption': '横排译文',
+  'Upward side heading': '向上译文',
+  'Downward side heading': '向下译文',
+  'Diagonal note': '斜排译文',
+  'Short side': '放不下的译文'.repeat(20),
+  'Aligned after page rotation': '随页面转正',
+  'Rotated with the page': '随页面旋转',
+  'Collision caption': '碰撞图注',
+  'Collision heading': '碰撞标题',
+  'COASTAL WATERS': '沿海水域',
+  'WEATHER PATTERNS': '天气形态',
+  'WHAT CAN WE DO?': '我们能做什么'
+};
 let holdRequests = false;
 const held = [];
 const server = http.createServer((req, res) => {
@@ -62,7 +76,8 @@ const server = http.createServer((req, res) => {
         hits.targets.push(french ? 'fr' : 'zh-CN');
         hits.sent.push(...texts.map((text) => JSON.stringify([french ? 'fr' : 'zh-CN', body.model, body.messages[0].content, text])));
         const number = hits.requests;
-        const content = JSON.stringify(texts.map((text, i) => /Layout caption|Text stays inside/.test(text) ? (french ? 'Traduction' : '版式译文') : french
+        const content = JSON.stringify(texts.map((text, i) => Object.hasOwn(layoutReplies, text) ? (french ? 'Traduction' : layoutReplies[text])
+          : /Layout caption|Text stays inside/.test(text) ? (french ? 'Traduction' : '版式译文') : french
           ? 'Traduction française de contrôle ' + number + '-' + i + '. ' + 'Ce texte vérifie la lecture et la mémoire. '.repeat(Math.ceil(String(text).length / 48))
           : '译:这是阅读器回归测试的中文译文，第' + number + '次请求第' + i + '段。' + '用于验证缓存身份的中文译文。'.repeat(Math.ceil(String(text).length / 24))));
         const reply = () => {
@@ -523,6 +538,85 @@ await chooseMode('pdf-layout');
 await until(() => pageEval(page, 'return document.querySelectorAll(".pdf-layout-translation").length===2'));
 await pageEval(page, 'window.__layoutCanvases=Array.from(document.querySelectorAll("canvas"));document.getElementById("backToLibrary").click();return true;');
 check('关书释放原页和译文页画布', await pageEval(page, 'return window.__layoutCanvases.length===2 && window.__layoutCanvases.every(c=>c.width===0)'));
+
+async function openLayoutSample(filename, sourceText) {
+  await pageEval(page, 'document.getElementById("backToLibrary").click();return true;');
+  const { root } = await send('DOM.getDocument', { depth: 0 }, page);
+  const { nodeId } = await send('DOM.querySelector', { nodeId: root.nodeId, selector: '#fileInput' }, page);
+  await send('DOM.setFileInputFiles', { nodeId, files: [path.join(ROOT, 'reader/pdf-samples', filename)] }, page);
+  await pageEval(page, 'document.getElementById("fileInput").dispatchEvent(new Event("change",{bubbles:true}));return true;');
+  await until(() => pageEval(page, 'return document.querySelector(".pdf-page[data-page=\"1\"] .pdf-blocks")?.textContent.includes(' + JSON.stringify(sourceText) + ')'));
+  await chooseMode('pdf-layout');
+}
+
+function layoutState(n) {
+  return pageEval(page, `
+    const view = document.querySelector('.pdf-page[data-page="${n}"] .pdf-layout-view');
+    if (!view) return null;
+    const v = view.getBoundingClientRect();
+    return { skips: view.dataset.layoutSkips, width: v.width, boxes: Array.from(view.querySelectorAll('.pdf-layout-translation'), (el) => {
+      const r = el.getBoundingClientRect();
+      const style = getComputedStyle(el).transform;
+      const matrix = new DOMMatrix(style === 'none' ? undefined : style);
+      const degrees = Math.round(Math.atan2(matrix.b, matrix.a) * 180 / Math.PI);
+      return { text: el.textContent, page: el.matches('.pdf-layout-toc') ? el.lastElementChild.textContent : null,
+        angle: (degrees + 360) % 360, x: (r.x - v.x) / v.width, y: (r.y - v.y) / v.height,
+        inside: r.left >= v.left - 1 && r.top >= v.top - 1 && r.right <= v.right + 1 && r.bottom <= v.bottom + 1,
+        fits: el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1 };
+    }) };
+  `);
+}
+
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, page);
+await openLayoutSample('layout-mixed.pdf', 'Horizontal layout caption');
+const mixed = await until(async () => {
+  const result = await layoutState(1);
+  return result?.boxes.some((box) => box.text === '横排译文') && result;
+});
+check('混排页横排和两种直角旋转都能覆盖', !!mixed && mixed.boxes.length === 3
+  && mixed.boxes.every((box) => box.inside && box.fits
+    && box.angle === { 横排译文: 0, 向上译文: 270, 向下译文: 90 }[box.text]), JSON.stringify(mixed));
+check('斜排和放不下的直角文字保留原样并分类计数', !!mixed
+  && /position:1,background:0,fit:1/.test(mixed.skips), mixed?.skips);
+await send('Emulation.setDeviceMetricsOverride', { width: 1140, height: 900, deviceScaleFactor: 1, mobile: false }, page);
+const resized = await until(async () => {
+  const result = await layoutState(1);
+  return result?.boxes.length === 3 && result.width < (mixed?.width || 0) - 20 && result;
+}, 5000);
+check('缩窄窗口后旋转覆盖层仍贴合原页坐标', !!resized && resized.boxes.every((box) => {
+  const original = mixed.boxes.find((entry) => entry.text === box.text);
+  return box.inside && box.fits && box.angle === original.angle && Math.abs(box.x - original.x) < 0.005
+    && Math.abs(box.y - original.y) < 0.005;
+}), JSON.stringify(resized));
+
+await pageEval(page, 'document.querySelector(\'.pdf-page[data-page="2"]\').scrollIntoView();return true;');
+const turned = await until(async () => {
+  const result = await layoutState(2);
+  return result?.boxes.length && result;
+});
+check('/Rotate 90 只应用一次，与文字旋转分别合成', !!turned && turned.boxes.length === 2
+  && turned.boxes.every((box) => box.inside && box.fits && box.angle === { 随页面转正: 0, 随页面旋转: 90 }[box.text]), JSON.stringify(turned));
+await pageEval(page, 'document.querySelector(\'.pdf-page[data-page="3"]\').scrollIntoView();return true;');
+const collision = await until(async () => {
+  const result = await layoutState(3);
+  return result?.skips.includes('untranslated:0') && result;
+});
+check('旋转覆盖层与原字外框碰撞时保留两块原文', !!collision && !collision.boxes.length
+  && collision.skips.includes('position:2'), JSON.stringify(collision));
+
+const beforeToc = hits.sent.length;
+await openLayoutSample('layout-toc.pdf', 'COASTAL WATERS');
+const tocPreview = await until(async () => {
+  const result = await layoutState(1);
+  return result?.boxes.some((box) => box.page) && result;
+});
+const tocBoxes = tocPreview?.boxes.filter((box) => box.page) || [];
+check('混排目录的译文、章号和右侧页码按行对应', JSON.stringify(tocBoxes.map(({ text, page }) => [text, page]))
+  === JSON.stringify([['04 沿海水域 111', '111'], ['05 天气形态 119', '119'], ['06 我们能做什么 127', '127']])
+  && tocBoxes.every((box) => box.inside && box.fits), JSON.stringify(tocPreview));
+const tocSent = hits.sent.slice(beforeToc).map((entry) => JSON.parse(entry)[3]);
+check('目录章号与页码不发送给翻译服务', ['COASTAL WATERS', 'WEATHER PATTERNS', 'WHAT CAN WE DO?'].every((title) => tocSent.includes(title))
+  && !tocSent.some((source) => /\d/.test(source)), JSON.stringify(tocSent));
 
 // QA E3: actual reader imports a 15000 x 15000 page book and rasterizes it safely.
 await pageEval(page, 'document.getElementById("backToLibrary").click();return true;');

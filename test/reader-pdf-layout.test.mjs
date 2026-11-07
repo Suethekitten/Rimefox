@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { layoutRect, flatBackground, growLayoutRect, expandLayoutRect } from '../lib/reader/pdf-layout.js';
+import { layoutRect, layoutRectsOverlap, flatBackground, growLayoutRect, expandLayoutRect, separateLayoutRects } from '../lib/reader/pdf-layout.js';
 import { groupParagraphs, pageBlocks } from '../lib/reader/pdf-text.js';
 
 test('layout geometry follows a paragraph without crossing columns; legacy blocks unchanged', () => {
@@ -26,8 +26,32 @@ test('mixed text orientations never merge into a horizontal layout block', () =>
   const blocks = pageBlocks({ items }, viewport, { captureLayout: true });
   assert.deepEqual(blocks.map((block) => block.text), items.map((item) => item.str));
   assert.ok(layoutRect(blocks[0], viewport));
-  assert.equal(layoutRect(blocks[1], viewport), null);
-  assert.equal(layoutRect(blocks[2], viewport), null);
+  const side = layoutRect(blocks[1], viewport);
+  assert.equal(side.rotation, 270);
+  assert.ok(layoutRectsOverlap(layoutRect(blocks[0], viewport), side));
+  assert.equal(layoutRect(blocks[2], viewport).blocked, true);
+});
+
+test('quarter turns project PDF text boxes once and keep OCR coordinates in image space', () => {
+  const viewport = { width: 600, height: 800, rotation: 0, transform: [1, 0, 0, -1, 0, 800] };
+  const items = [
+    { str: 'Side', transform: [7e-9, 12, -12, 7e-9, 90, 200], width: 22, height: 12 },
+    { str: 'heading', transform: [0, 12, -12, 0, 90, 225], width: 35, height: 12 },
+    { str: 'Downward heading', transform: [0, -12, 12, 0, 120, 300], width: 70, height: 12 }
+  ];
+  const blocks = pageBlocks({ items }, viewport, { captureLayout: true });
+  assert.deepEqual(blocks.map((block) => block.text), ['Side heading', 'Downward heading']);
+  const [up, down] = blocks.map((block) => layoutRect(block, viewport));
+  assert.deepEqual(up, { x: 76.5, y: 538.5, width: 18, height: 63, fontSize: 12, rotation: 270 });
+  assert.deepEqual(down, { x: 115.5, y: 498.5, width: 18, height: 73, fontSize: 12, rotation: 90 });
+  const turned = { width: 800, height: 600, rotation: 90, transform: [0, 1, 1, 0, 0, 0] };
+  assert.deepEqual(layoutRect(blocks[0], turned), { x: 198.5, y: 76.5, width: 63, height: 18, fontSize: 12 });
+  const ocr = { text: 'OCR line', layoutLines: [{ x0: 10, x1: 50, y: 400, size: 12 }] };
+  assert.deepEqual(layoutRect(ocr, turned), { x: 8.5, y: 186.5, width: 43, height: 18, fontSize: 12 });
+  const overlapping = { ...up, y: 560, rotation: undefined };
+  assert.deepEqual(separateLayoutRects([up, overlapping]), [up, overlapping]);
+  const clipped = { text: 'Clipped side heading', layoutLines: [{ x0: 100, x1: 150, y: -4, size: 12, angle: 90 }] };
+  assert.deepEqual(layoutRect(clipped, viewport), { x: 0, y: 648.5, width: 8.5, height: 53, fontSize: 12, blocked: true, rotation: 270 });
 });
 
 test('TOC captures layout for dot leaders, wrapped titles and offset page numbers', () => {
@@ -35,7 +59,7 @@ test('TOC captures layout for dot leaders, wrapped titles and offset page number
   const item = (str, x, y) => ({ str, transform: [14, 0, 0, 14, x, y], width: str.length * 8, height: 14 });
   const items = [
     item('Contents', 80, 730),
-    item('Windows 10 ......... 005', 100, 680),
+    item('Windows 10 . . . . 005', 100, 680),
     item('06', 100, 644),
     item('Water Resources and', 145, 646),
     item('Coastal Planning', 145, 627),

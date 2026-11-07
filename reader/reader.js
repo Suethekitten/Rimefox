@@ -728,7 +728,7 @@ async function renderPdfPage(el, index, epoch) {
     delete el.dataset.rendered;
   } });
   if (doc !== state.pdf || epoch !== pdfRasterEpoch || !el.isConnected) return;
-  pdfLayoutPages.set(el, { viewport: loaded.viewport, blocks: loaded.blocks, layoutSupported: loaded.layoutSupported });
+  pdfLayoutPages.set(el, { viewport: loaded.viewport, blocks: loaded.blocks });
   el.style.minHeight = '';
   if (result.limited || renderScale < requestedScale) {
     const label = el.querySelector('.pdf-page-label');
