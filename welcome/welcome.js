@@ -16,6 +16,7 @@ const dots = Array.from(document.querySelectorAll('.progress-dots .dot'));
 const prevBtn = document.getElementById('prevBtn');
 const nextBtn = document.getElementById('nextBtn');
 const langToggle = document.getElementById('langToggle');
+const privacyLinks = document.querySelectorAll('[data-privacy-link]');
 const themeToggle = document.getElementById('themeToggle');
 const openSettingsBtn = document.getElementById('openSettings');
 const finishSettingsBtn = document.getElementById('finishSettings');
@@ -58,6 +59,13 @@ function applyLanguage(lang) {
   clearTimeout(state.toastTimer);
   toast.classList.remove('is-on');
   applyI18n(document, state.lang);
+
+  const english = state.lang === 'en';
+  const privacyPath = english ? 'docs/privacy.en.md' : 'PRIVACY.md';
+  for (const link of privacyLinks) {
+    link.href = 'https://github.com/Suethekitten/Rimefox/blob/main/' + privacyPath;
+    link.hreflang = english ? 'en' : 'zh-CN';
+  }
 
   // 语言名本身不翻译；按钮显示「点了会切到哪种语言」
   langToggle.textContent = state.lang === 'en' ? '中文' : 'English';
