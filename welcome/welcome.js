@@ -4,7 +4,7 @@
 // 也不会重新触发 onInstalled。
 import { DEFAULTS, mergeConfig, saveConfig } from '../lib/config.js';
 import { applyI18n, t } from '../lib/i18n.js';
-import { applyUiAppearance, rememberSaved, switchThemeAnimated, watchConfig } from '../lib/ui-appearance.js';
+import { applyUiAppearance, applyUiTheme, rememberSaved, switchThemeAnimated, watchConfig } from '../lib/ui-appearance.js';
 import { hasSavedUiLang, pickWelcomeLang } from '../lib/welcome.js';
 
 const root = document.documentElement;
@@ -40,23 +40,6 @@ function browserLang() {
 }
 
 // ---------------- 主题 ----------------
-function applyTheme(value) {
-  if (value === 'light' || value === 'dark') {
-    root.dataset.theme = value;
-    root.style.colorScheme = value;
-  } else {
-    delete root.dataset.theme;
-    root.style.colorScheme = '';
-  }
-  // 首帧预判用（lib/ui-theme-boot.js）；auto 时清掉缓存，交给系统偏好
-  try {
-    if (value === 'light' || value === 'dark') localStorage.setItem('dt.uiTheme', value);
-    else localStorage.removeItem('dt.uiTheme');
-  } catch (err) {
-    /* 存储不可用就退化为 prefers-color-scheme */
-  }
-}
-
 function currentTheme() {
   if (root.dataset.theme === 'light' || root.dataset.theme === 'dark') return root.dataset.theme;
   return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -205,7 +188,7 @@ function onConfigElsewhere(next) {
   const merged = mergeConfig(DEFAULTS, next || {});
   state.cfg = merged;
   applyUiAppearance(merged);
-  applyTheme(merged.uiTheme || 'auto');
+  applyUiTheme(merged.uiTheme || 'auto');
   updateThemeButton();
   const lang = pickWelcomeLang(next || {}, browserLang());
   if (lang !== state.lang) applyLanguage(lang);
@@ -243,7 +226,7 @@ function bindEvents() {
 
   themeToggle.addEventListener('click', async () => {
     const next = currentTheme() === 'dark' ? 'light' : 'dark';
-    switchThemeAnimated(() => applyTheme(next), themeToggle);
+    switchThemeAnimated(() => applyUiTheme(next), themeToggle);
     updateThemeButton();
     await persist({ uiTheme: next });
   });
@@ -264,7 +247,7 @@ async function init() {
   const { stored, cfg } = await readStoredConfig();
   state.cfg = cfg;
 
-  applyTheme(cfg.uiTheme || 'auto');
+  applyUiTheme(cfg.uiTheme || 'auto');
   applyUiAppearance(cfg);
   const initialLang = pickWelcomeLang(stored, browserLang());
   applyLanguage(initialLang);
