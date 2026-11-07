@@ -889,7 +889,14 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.17.5）
+## 14. 本版技术记录（0.17.6）
+
+- **字幕费用保护**：只有成功读取且没有账本时才从零计量。单标签页或全局账本读取失败时，保留已有缓存和在途结果，拒绝本次新的字幕模型请求。失败的读取 Promise 会从内存中移除，后续请求可以重读；字幕运行时按普通失败退避，额度耗尽时仍走现有暂停机制。
+- **回归**：`test/subtitle-budget-pipeline.test.mjs` 注入单标签页和全局读取故障。真实 Chrome 的 `node tools/e2e-extension.mjs --bilibili-only` 使用假接口，验证故障期间零 HTTP、恢复后沿用原计数。
+- **欢迎页**：文档阅读、密钥和设置步骤按现有产品行为说明，隐私链接随界面语言更新。审计中的内部整理与验证见 [0.17.5 审计记录](docs/archive/2026-11-07-conservative-audit.md)。
+- **原生组件**：沿用 [0.17.5 Windows OCR](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.5) 和 [0.17.2 macOS OCR](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.2) 附件。
+
+### 0.17.5 记录
 
 - **Windows OCR 组件 0.2.0-preview.2**：两处连接器修复进入实际二进制——倾斜扫描件按 `OcrResult.TextAngle` 绕图像中心把每个单词框转回原图坐标再求外接矩形；安装器在 MSIX 重定向的 `%LOCALAPPDATA%` / HKCU 下自检并停止。组件源码提交 `5c909909`，输入摘要 `9ed084b0f6eeb612de31b8a7ed3e5f11223a07e63e0e7d5b01dcf6d715fb71ac`；Windows x64 自包含单文件（未签名），`--diagnose` 报 `0.2.0-preview.2`、`apiStatus: ready`、`en-US` / `zh-Hans-CN`。
 - **组件包**：`tools/package-ocr-preview.mjs --platform windows` 生成 `Rimefox-OCR-0.2.0-preview.2-windows-x64.zip`（36,697,008 字节，SHA-256 `62b86ebcb6314480f131d0a7103d6281c12d4a4e253b5218d35f38f706f7c7db`，解压 93,050,372 字节），`preview.json` 为 `publisherSignature: not-verified`、`dirtyWorktree: false`。

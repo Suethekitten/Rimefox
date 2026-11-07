@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-11-06；最新已发布 GitHub 版本 0.17.4（0.17.5 准备中）。商店页 2026-11-04 核实 Chrome / Edge 均为 **0.12.5**（页面更新日期均为 2026-10-27）。
+最后更新：2026-11-07。GitHub 版本见 [Releases](https://github.com/Suethekitten/Rimefox/releases)。商店页 2026-11-04 核实 Chrome / Edge 均为 **0.12.5**（页面更新日期均为 2026-10-27）。
 
 > 本文只写**通用材料 + Chrome**；Edge 的差异与专属填写内容见 [STORE-EDGE.md](STORE-EDGE.md)。
 > 历史审计（0.8.5 的「差哪 5 项」）已归档到 [archive/STORE-READINESS.md](archive/STORE-READINESS.md)，不再是现状。
@@ -191,7 +191,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | BYOK 无法直接测试 | 最高优先级：准备审核专用、限额、可撤销 Key，通过控制台私密说明交付 |
 | YouTube 非官方接口 | 明示非官方、默认关闭、仅 CC；验证当前可用性，避免品牌背书与「保证全部字幕可用」的承诺 |
 | 隐私政策与实际行为不一致 | 本次已按 0.8.5 代码核对；悬停对照开关、字幕稳定性、仅调试可见的用量统计都没有新增请求接收方或权限，后续改数据流必须同步 PRIVACY.md、privacy.en.md 与本文件 |
-| 版本与仓库差异 | Chrome / Edge 公开页均为 0.12.5（2026-11-04）；GitHub Release 0.17.4（0.17.5 准备中）；商店材料 0.16.4，待按 0.17.4 更新 |
+| 版本与仓库差异 | Chrome / Edge 公开页均为 0.12.5（2026-11-04），GitHub 发布状态见页首链接。商店材料为 0.16.4，待按下次提交版本更新。 |
 
 ## 官方依据（2026-10-18 查询）
 

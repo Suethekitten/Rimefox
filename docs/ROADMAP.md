@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-06；最新发布 0.17.4，0.17.5 待发布，已支持 EPUB / PDF 阅读与翻译。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.17.x 完成 TXT / Markdown / LOG 阅读、PDF 版式翻译预览与系统 OCR 预览；0.18 计划见 [下一小版本交接](NEXT-MINOR-HANDOVER.md)。实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-07。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.17.x 完成 TXT / Markdown / LOG 阅读、PDF 版式翻译预览与系统 OCR 预览，0.18 计划见 [下一小版本交接](NEXT-MINOR-HANDOVER.md)。实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -144,7 +144,7 @@
 | P2-9 | 翻译引擎内部优化（不加请求、不加设置） | 轻量上下文、片段稳定映射、低成本质检、术语一致性：现状、成本、风险和下一步最小任务见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)；不定版本 |
 | P2-10 | 拆 `main.js` | 把纯函数（离屏距离、取批上限、退避时间表）挪到 `core.js`，只动这两个文件 + 自检页；P1-5 的前置（原 HANDOFF §10） |
 | P2-12 | ✅ PDF 表格 / 公式文本清洗（**0.16.0 已完成**） | 表格仅在单栏页且数据行带数字时按单元格拆（不重建合并单元格）；公式残渣换 `[公式]` 占位且公式块不送翻；脚注标记 / 上标编号剥离；目录页不再被当成第二栏。跨页段落合并、表格结构重建与公式识别仍未做，见 [PDF 维护交接](PDF-HANDOFF.md) |
-| P2-11 | PDF 扫描件系统 OCR（**预览已发布**） | 采用用户按需下载并安装的独立本地组件，基础扩展不打包 OCR 引擎和模型；设置页与 PDF 阅读器共用配置入口，无可用 OCR 时提示用户前往设置。首阶段只开放 Windows / macOS 系统 OCR，保留未来 PaddleOCR 和签名分发能力；macOS `0.2.0-preview.2` 随 0.17.2 已发布；Windows `0.2.0-preview.2` 已构建并打包，随 0.17.5 待发布；组件仍未签名；接口见 [OCR-INTERFACE](OCR-INTERFACE.md)，平台交付层级和实机未测项见 [组件 README](../native/ocr-host/README.md) |
+| P2-11 | PDF 扫描件系统 OCR（**预览已发布**） | 采用用户按需下载并安装的独立本地组件，基础扩展不打包 OCR 引擎和模型；设置页与 PDF 阅读器共用配置入口，无可用 OCR 时提示用户前往设置。首阶段只开放 Windows / macOS 系统 OCR，保留未来 PaddleOCR 和签名分发能力。已发布版本见 [0.17.2](#0172macos-系统-ocr-组件) 与 [0.17.5](#0175补丁)，平台交付层级和实机未测项见 [组件 README](../native/ocr-host/README.md)，接口见 [OCR-INTERFACE](OCR-INTERFACE.md)。 |
 
 ### P3 — 明确暂不做
 
@@ -159,7 +159,7 @@
 
 ## 4. 近期安排
 
-0.17.5 已准备：Windows OCR 组件 `0.2.0-preview.2` 已构建并打包，待发布；macOS 组件未签名、未公证。继续执行 [SUPPORT](SUPPORT.md) 的验收矩阵；缺真实环境证据的项目保持待验收。PDF Beta、直播字幕和医学质量提升不作为已兑现的 1.0 承诺。系统 OCR 预览按 P2-11 独立推进。
+继续执行 [SUPPORT](SUPPORT.md) 的验收矩阵，缺真实环境证据的项目保持待验收。PDF Beta、直播字幕和医学质量提升不作为已兑现的 1.0 承诺。系统 OCR 预览按 P2-11 独立推进。
 
 ### 0.15.0（实现与验证）
 
@@ -181,13 +181,13 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 
 完成审计剩余三项：#7 大 PDF 首屏先渲染、目录扫描延后并行、页眉扫描与本页取字并行；#11 PDF 缓存身份按配置修订号记忆；#13 点击补扫只处理可能切换内容的控件并合并连续点击。版本与 CHANGELOG 已统一为 0.16.2，发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.2) 为准。
 
-### 0.17.2（macOS 系统 OCR 组件；Windows 组件修复已构建，待发布）
+### 0.17.2（macOS 系统 OCR 组件）
 
-已完成：macOS 组件 `0.2.0-preview.2` 随 v0.17.2 Release 发布（未签名、未公证，见 [组件 README](../native/ocr-host/README.md#macos-组件随-release-发布)）；扫描页版式译文框不再重叠；下列第 1、2 项的代码与测试已在仓库，Windows 部分由 CI 的 Windows 任务构建与测试（本机无 Windows 环境）。**已完成**：Windows `0.2.0-preview.2` 已在本机构建并打包，`lib/ocr/feature.js` 已指向 v0.17.5 附件（未签名）；待发布后第 1、2 项到达 Windows 用户，第 3 项随之完成。原始交接内容：
+macOS 组件 `0.2.0-preview.2` 随 v0.17.2 Release 发布（未签名、未公证，见 [组件 README](../native/ocr-host/README.md#macos-组件随-release-发布)），扫描页版式译文框不再重叠。以下是当时的 Windows 交接记录，实际交付见 [0.17.5](#0175补丁)。
 
 1. **倾斜扫描件的识别框**：Windows 连接器（`native/ocr-host/windows/Program.cs`，取 `line.Words` 的 `BoundingRect` 求并集）没有使用 `OcrResult.TextAngle`。实测约 1° 倾斜的扫描页，长行左端墨迹比框底低 7–14 px、右端比框顶高 11–14 px（识别图 3 倍渲染），框是去倾斜坐标系下的直带。应按 `TextAngle` 绕图像中心把每个单词框旋回原图坐标后再求外接矩形，并加入一张倾斜扫描夹具（真实识别 + 坐标断言）。macOS Vision 也需核对 `boundingBox` 在倾斜文本下是否覆盖墨迹。扩展侧 0.17.1 已用逐级加边距绕开（见 [PDF 交接](PDF-HANDOFF.md#版式译文预览)），修好后可复核这些扫描页覆盖数是否上升、边距是否可收回。
 2. **安装器识别被重定向的安装**：在 MSIX 打包桌面应用（如 Claude 桌面版）的内置终端里运行时，`%LOCALAPPDATA%` 与 HKCU 写入可能被重定向到 `%LOCALAPPDATA%\Packages\<应用>\LocalCache`，使用者的浏览器看不到组件。排查步骤已写进 [INSTALL](../native/ocr-host/INSTALL.md#安装后仍显示未检测到本地-ocr-组件)；安装器应在安装后自检该位置，命中时停止并提示改用开始菜单的 PowerShell，而不是报告成功。
-3. 仓库里的 INSTALL 已比 v0.17.0 发布的组件 ZIP 新（新增上述排查节与接手提示词一行）；0.17.2 重新打包时随组件一起发布，体验包按新版本重组。
+3. 仓库里的 INSTALL 比 v0.17.0 发布的组件 ZIP 新，包含上述排查说明。Windows 安装说明随 0.17.5 的组件 ZIP 和体验包公开。
 
 ### 0.17.3（补丁）
 
@@ -199,7 +199,11 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 
 ### 0.17.5（补丁）
 
-更新 Windows 系统 OCR 组件到 `0.2.0-preview.2`：倾斜扫描页按 `TextAngle` 修正文字框，长行两端不再被裁掉；安装器识别 MSIX 重定向并提示改用开始菜单的 PowerShell。组件仍未签名；扩展下载元数据指向 v0.17.5，组件 ZIP 与 Windows 体验包随 Release 上传。发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.5) 为准。
+Windows 系统 OCR 组件 `0.2.0-preview.2` 的组件 ZIP、Windows 体验包和校验文件均已随 [v0.17.5 Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.5) 公开。倾斜扫描页按 `TextAngle` 修正文字框，安装器识别 MSIX 重定向并提示改用开始菜单的 PowerShell。组件仍未签名。
+
+### 0.17.6（补丁）
+
+更新欢迎页的配置说明与文档阅读入口，隐私链接随界面语言切换。修复字幕预算账本暂不可读时仍可能发出付费请求的问题。发布状态见 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases)。
 
 ### 0.18.0（PDF 版式预览覆盖）
 
@@ -210,7 +214,7 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 1. 补齐当前 Chrome/Edge 与 Windows/macOS/Linux 的实机矩阵；独立 CI 已接入，结果以对应提交的 Actions 为准，不能代替真实下载与干净机器验收。
 2. 真实 YouTube / B 站的字幕轨、登录态、切视频与双语字幕已于 2026-11-06 复验；关闭翻译后的原生字幕恢复待复验，直播继续标实验。
 3. 使用已配置接口，在用户授权的 ¥10 总预算内记录三协议译文、格式、句子对齐、恢复与请求数；没有可用配置的协议列待验收。医学质量结论需成对盲评。
-4. 商店提交：GitHub Release 已到 0.17.4，两店仍为 0.12.5；按 [STORE.md](STORE.md) 的验收结果上传同版商店包，材料更新不等于已上线。系统 OCR 预览的后续验收见 P2-11；推送与发布仍按 AGENTS.md 请求许可。
+4. 商店提交：按 [STORE.md](STORE.md) 的验收结果上传同版商店包，线上版本见 §4.2。系统 OCR 预览的后续验收见 P2-11，推送与发布按 AGENTS.md 执行。
 
 ### 4.1 0.9.0 计划（2026-10-19 定）
 
@@ -241,11 +245,11 @@ P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB 
 
 ### 4.2 上架进展（2026-11-06 更新）
 
-**两个商店都已上架；据 2026-11-04 公开页核实，两店均为 0.12.5，落后于 GitHub Release（0.17.4）。**
+**两个商店都已上架。以下为 2026-11-04 的公开页核验记录。**
 
 - **Chrome**：线上 **0.12.5**（2026-11-04 核实；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo>
 - **Edge**：线上 **0.12.5**（2026-11-04 核实，与 Chrome 同版）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh>
-- GitHub Release 已发布 **0.17.4**（0.17.5 准备中）；下一次商店更新统一用最新已发布版本的商店包，两边版本号都必须大于 **0.12.5**。
+- 下一次商店更新统一用 [GitHub 最新已发布版本](https://github.com/Suethekitten/Rimefox/releases/latest) 的商店包，提交版本号需高于各自线上版本。
 - 材料、listing 与待办见 [STORE.md](STORE.md)「当前状态」，Edge 差异见 [STORE-EDGE.md](STORE-EDGE.md)。
 
 ---
