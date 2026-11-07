@@ -30,6 +30,35 @@ test('mixed text orientations never merge into a horizontal layout block', () =>
   assert.equal(layoutRect(blocks[2], viewport), null);
 });
 
+test('TOC captures layout for dot leaders, wrapped titles and offset page numbers', () => {
+  const viewport = { width: 595, height: 842 };
+  const item = (str, x, y) => ({ str, transform: [14, 0, 0, 14, x, y], width: str.length * 8, height: 14 });
+  const items = [
+    item('Contents', 80, 730),
+    item('Windows 10 ......... 005', 100, 680),
+    item('06', 100, 644),
+    item('Water Resources and', 145, 646),
+    item('Coastal Planning', 145, 627),
+    item('127', 510, 630),
+    item('07', 100, 596),
+    item('Weather Patterns', 145, 598),
+    item('155', 510, 599),
+    item('08', 100, 570),
+    item('Further Reading', 145, 572),
+    item('180', 510, 571)
+  ];
+  const blocks = pageBlocks({ items }, viewport, { captureLayout: true });
+  const entries = blocks.filter((block) => block.tocPage);
+  assert.deepEqual(entries.map(({ tocTitle, tocPage, tocChapter }) => [tocTitle, tocPage, tocChapter]), [
+    ['Windows 10', '005', undefined],
+    ['Water Resources and Coastal Planning', '127', '06'],
+    ['Weather Patterns', '155', '07'],
+    ['Further Reading', '180', '08']
+  ]);
+  assert.ok(entries.every((block) => layoutRect(block, viewport)));
+  assert.equal(entries[1].layoutLines.length, 4);
+});
+
 test('layout masking accepts solid light/dark backgrounds, declines gradients and illustrated areas', () => {
   const make = (color) => ({ width: 100, height: 50, data: new Uint8ClampedArray(Array.from({ length: 5000 }, () => [...color, 255]).flat()) });
   const rect = { x: 2, y: 2, width: 95, height: 45 };

@@ -100,6 +100,17 @@ fs.writeFileSync(path.join(outDir, 'layout-mixed.pdf'), buildPdf([{ content:
   'BT /F1 18 Tf 0.8 0.6 -0.6 0.8 110 390 Tm (Diagonal note) Tj ET\n'
 }]));
 
+const tocRows = ['COASTAL WATERS', 'WEATHER PATTERNS', 'WHAT CAN WE DO?'];
+fs.writeFileSync(path.join(outDir, 'layout-toc.pdf'), buildPdf([{ content:
+  'BT /F1 18 Tf 0 1 -1 0 62 605 Tm (WHAT CAN WE DO?) Tj ET\n' +
+  tocRows.map((title, i) => {
+    const y = 690 - i * 38;
+    return 'BT /F1 14 Tf 1 0 0 1 104 ' + (y - 2) + ' Tm (0' + (i + 4) + ') Tj ET\n' +
+      'BT /F1 14 Tf 1 0 0 1 145 ' + y + ' Tm (' + title + ') Tj ET\n' +
+      'BT /F1 14 Tf 1 0 0 1 510 ' + (y + 2) + ' Tm (' + (111 + i * 8) + ') Tj ET\n';
+  }).join('')
+}]));
+
 // 中文 CID 字体：Type0 + GBK-EUC-H + Adobe-GB1，故意不带 ToUnicode。
 // 没有 cmaps 时 pdf.js 取不到正确 Unicode（这正是 cmaps 要验证的场景）。
 // <C4E3BAC3CAC0BDE7> = GBK 编码的「你好世界」。

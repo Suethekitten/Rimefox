@@ -63,7 +63,18 @@ export function updatePdfLayout(el, loaded, texts, doc) {
     const { color, check } = colors[i];
     const rect = base[i];
     const text = document.createElement('div'); text.className = 'pdf-layout-translation';
-    text.textContent = texts[i]; text.dir = 'auto';
+    const page = loaded.blocks[i].tocPage;
+    if (page && texts[i].endsWith(' ' + page)) {
+      text.classList.add('pdf-layout-toc');
+      const title = document.createElement('span');
+      title.textContent = texts[i].slice(0, -page.length - 1);
+      title.dir = 'auto';
+      const number = document.createElement('span');
+      number.textContent = page;
+      text.append(title, number);
+    } else {
+      text.textContent = texts[i]; text.dir = 'auto';
+    }
     const place = (r) => {
       text.style.left = r.x / vp.width * 100 + '%';
       text.style.top = r.y / vp.height * 100 + '%';
@@ -89,7 +100,7 @@ export function updatePdfLayout(el, loaded, texts, doc) {
     let ok = shrink(Math.max(8, base0 * 0.8));
     if (!ok) {
       const others = base.map((o, k) => (k === i ? null : final[k] || o));
-      const grown = growLayoutRect(rect, others, vp);
+      const grown = !page && growLayoutRect(rect, others, vp);
       const same = grown && flatBackground(image, toPixels(grown), check);
       if (same && same.every((v, k) => Math.abs(v - color[k]) <= 10)) { place(grown); used = grown; font = base0; }
       ok = shrink(8);
