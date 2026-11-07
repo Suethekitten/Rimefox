@@ -28,6 +28,7 @@ try {
   assert(names.includes('manifest.json')); assert(names.includes('lib/privacy.js'), 'privacy module must be packaged');
   for (const name of ['welcome/index.html', 'welcome/welcome.css', 'welcome/welcome.js', 'lib/welcome.js']) assert(names.includes(name), name + ' must be packaged');
   assert(names.includes('LICENSE')); assert(names.includes('THIRD-PARTY-NOTICES.md')); assert(names.includes('licenses/oneaifw-MIT.txt')); assert(names.includes('licenses/fflate-MIT.txt'));
+  assert(names.includes('reader/vendor/pdfjs/LICENSE')); assert(names.includes('reader/vendor/pdfjs/cmaps/LICENSE'));
   for (const name of ['reader/index.html', 'reader/reader.css', 'reader/reader.js', 'lib/reader/epub.js', 'lib/vendor/fflate.browser.mjs']) assert(names.includes(name), name + ' must be packaged');
   for (const name of ['_locales/zh_CN/messages.json', '_locales/en/messages.json']) assert(names.includes(name), name + ' must be packaged');
   assert(!names.some(n=>/DS_Store|Thumbs|desktop.ini|\.env|debug.log|private.key|\.map$|\/test\/|^tools\/|icons\/(source|preview-|icon512)/.test(n)));

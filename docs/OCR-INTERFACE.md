@@ -175,7 +175,7 @@
 - 状态横幅按**当前下拉框的值**和最近一次 `ocr:status` 结果用 `resolveOcr` 实时计算，所以改选后不保存也能看到该选择是否可用。
 - 需要授权时，在下拉框 `change` 或「授权连接」按钮的用户手势里调用 `requestOcrPermission()`；拒绝不重复弹出。
 - 设置页明确标注预览、实际扩展 ID、组件版本、引擎状态、实际语言标签和语言名称。Windows 未检测到中文时显示手动安装 OCR 语言功能的指引，不自动提权。
-- 安装弹窗说明当前平台、下载 / 解压大小、SHA-256、未签名限制和安装步骤；`verifiedOcrRelease` 只接受本仓库 HTTPS Release 的资产路径与真实构建校验值。平台元数据唯一维护于 `lib/ocr/feature.js`；当前 macOS 与 Windows x64 均已配置组件包（macOS 随 v0.17.2 已发布、Windows 随 v0.17.5 待发布），未配置的平台保持下载禁用，公开状态以对应 Release 为准。完整用户步骤以 INSTALL 为准，不内置下载或自动执行程序。
+- 安装弹窗说明当前平台、下载 / 解压大小、SHA-256、未签名限制和安装步骤；`verifiedOcrRelease` 只接受本仓库 HTTPS Release 的资产路径与真实构建校验值。平台元数据唯一维护于 `lib/ocr/feature.js`；当前 macOS 与 Windows x64 均已配置组件包（macOS 随 [v0.17.2](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.2)、Windows 随 [v0.17.5](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.5) 发布），未配置的平台保持下载禁用，公开状态以对应 Release 为准。完整用户步骤以 INSTALL 为准，不内置下载或自动执行程序。
 - 「重新检测」= `getOcrStatus({ refresh: true })`。界面语言切换后调用 `ocrSettings.render()` 重画动态文案。
 
 区块锚点是 `#sec-ocr`（`OCR_SETTINGS_HASH`），阅读器的「前往设置」按钮打开它。

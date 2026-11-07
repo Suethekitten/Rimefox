@@ -45,6 +45,24 @@
 
 EPUB 是 ZIP 容器；只使用 fflate 的同步解压（`unzipSync`）读取 `mimetype`、`META-INF/container.xml`、OPF、XHTML 和图片。保留上游代码，未修改；解压前由 `lib/reader/epub.js` 限制单条大小、总展开大小和压缩比，并拒绝路径穿越。未使用 fflate 的压缩、Worker、Node 文件系统或网络功能。
 
+## PDF.js
+
+- 项目：PDF.js — <https://github.com/mozilla/pdf.js>（npm 包 `pdfjs-dist`）
+- 版本：`4.10.38`（`legacy/build` 构建，兼容 Chrome / Edge 114）
+- 许可证：Apache License 2.0，Copyright Mozilla Foundation
+- 许可证全文：[reader/vendor/pdfjs/LICENSE](reader/vendor/pdfjs/LICENSE)（与 `pdfjs-dist@4.10.38` 根目录 `LICENSE` 逐字节一致）
+- 实际复用位置：[reader/vendor/pdfjs/](reader/vendor/pdfjs/)
+
+### 实际复用的内容
+
+PDF 阅读器用 `pdf.min.mjs` 与 `pdf.worker.min.mjs` 解析、渲染 PDF 页面并读取文本层。两个文件取自 `pdfjs-dist@4.10.38/legacy/build/`，未修改。未使用 PDF.js 的查看器界面（`web/`）或 Node 构建，也未随包分发标准字体数据（`standard_fonts/`）。
+
+### 随包的 CMap 数据
+
+- 内容：`pdfjs-dist@4.10.38/cmaps/` 的全部 CMap 文件（`.bcmap`，中日韩字符编码），用于正确解码 CJK 编码的 PDF 文字；未修改
+- 来源与许可证：Adobe Systems Incorporated，BSD 3-Clause 风格许可（Copyright 1990-2009）
+- 许可证全文：[reader/vendor/pdfjs/cmaps/LICENSE](reader/vendor/pdfjs/cmaps/LICENSE)（与上游 `cmaps/LICENSE` 逐字节一致）
+
 ## Liquid Glass Slider
 
 - 项目：Liquid Glass Slider — <https://github.com/Saknutella/liquid-glass-slider>
@@ -134,8 +152,8 @@ SOFTWARE.
 
 ## 凛狐自身的第三方依赖
 
-扩展运行时不依赖任何 npm 包、CDN 脚本或远程模型；打包产物只含仓库内的原生 HTML / CSS / JS / PNG。开发期的 Node 只用于本地测试脚本，不进入发布包。
+扩展运行时不从 npm、CDN 或远程地址加载脚本和模型；打包产物只含仓库内文件，随包或改编的第三方代码与数据均已在上文列出。开发期的 Node 只用于本地测试脚本，不进入发布包。
 
 ## 商标
 
-YouTube 是 Google LLC 的商标。凛狐与 YouTube、Google 无关联。
+YouTube 是 Google LLC 的商标，哔哩哔哩是其权利人的商标。凛狐与 YouTube、Google、哔哩哔哩无关联。

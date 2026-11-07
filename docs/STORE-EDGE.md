@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Microsoft Edge 加载项商店上架材料
 
-最后更新：2026-11-06；最新已发布 GitHub 版本 0.17.4。Edge 公开商店页 2026-11-04 核实为 0.12.5（页面更新日期 2026-10-27），下一次版本号需 > 0.12.5；提交状态统一见 STORE.md。
+最后更新：2026-11-07。Edge 线上版本（带核验日期）与提交状态统一见 [STORE.md](STORE.md#当前状态)，GitHub 版本见 [Releases](https://github.com/Suethekitten/Rimefox/releases)；下一次上传的版本号必须大于线上版本。
 
 > **分工**：提交状态、差哪几项、待办清单在 [STORE.md](STORE.md)（唯一主人）。
 > 本文只写 **Edge 与 Chrome 的差异**、Partner Center 的提交流程，以及只给 Edge 控制台用的粘贴文案（≥250 字符描述、search terms、notes for certification）。
@@ -9,7 +9,7 @@
 ## 结论
 
 - **代码不需要为 Edge 改**：MV3、无 `update_url`、无远程代码、无混淆，`lib/config.js` 已经区分 `edge://` 与 `chrome://`，`world: "MAIN"` 和 `minimum_chrome_version` 都是 Edge 支持的字段。
-- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线；0.12.5 已上线（2026-11-04 公开页核实），页面仍使用旧版功能说明，更新文案应采用当前支持范围。
+- **已走通一次**：Partner Center 账号、listing、截图、审核用临时 Key、上传审核都完成了；0.9.6 于 2026-10-20 提交、已上线，之后已有更新上线（当前线上版本见 STORE.md）；2026-11-04 核实时页面仍使用旧版功能说明，更新文案应采用当前支持范围。
 - Edge 注册**免费**（Chrome 收一次性 $5）；后续更新用 **Packages → 上传新包**，版本号必须比线上大。
 
 ## 商店标识
@@ -240,7 +240,7 @@ Notes:
 | 截图（中文行） | 同上 | `docs/screenshots/store-0*.png` 5 张：中文界面 + 英文→中文，`node tools/screenshot-store.mjs --lang zh` 生成（0.16.4 界面） |
 | 小宣传图 | 440×280，可选 | 未做 |
 | 大宣传图 | 1400×560，可选 | 未做 |
-| 扩展包 | zip，manifest 在根 | 0.12.5 的包已上传并过审；下次更新重新 `node tools/package-store.mjs` 出包 |
+| 扩展包 | zip，manifest 在根 | 上一次上传的包已过审（版本见 STORE.md）；下次更新重新 `node tools/package-store.mjs` 出包 |
 
 截图内容为真实扩展界面 + 本地测试接口返回的人工示例译文，未使用真实 Key；上传前自己再确认一遍没有泄露 Key、账号、私人页面。
 
@@ -277,7 +277,7 @@ Notes:
 
 提交状态见 [STORE.md](STORE.md)「当前状态」；Edge 这边只剩：
 
-1. 0.12.5 已上线（2026-11-04 核实）；下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号比线上大（当前线上 0.12.5，目标用最新已发布版本 0.17.4）。
+1. 下一次更新：`node tools/package-store.mjs` 出包（确认 zip 里有 `_locales/`）→ **Packages → 上传新包** → 版本号必须大于 [STORE.md](STORE.md#当前状态) 记录的线上版本，目标用届时最新的 [GitHub Release](https://github.com/Suethekitten/Rimefox/releases)。
 2. 可选：补 440×280 小宣传图、1400×560 大宣传图。
 
 ## 八、官方依据（2026-10-20 查询）

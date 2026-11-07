@@ -94,9 +94,17 @@
 
 完整清单见 [ROADMAP.md 的「已知限制」](docs/ROADMAP.md) 与 [HANDOFF.md 的「已知问题」](HANDOFF.md)。
 
+## 反馈问题
+
+1. 先升级到[最新版本](https://github.com/Suethekitten/Rimefox/releases)，确认问题还在。
+2. 网页翻译出错或错位时，打开「设置 → 高级 → 页面诊断」，选出问题的网页，点「生成诊断」，诊断 JSON 会复制到剪贴板。这一步不发翻译请求。
+3. 到 [Issues](https://github.com/Suethekitten/Rimefox/issues/new/choose) 选「问题反馈」，填写版本、浏览器和复现步骤，并粘贴诊断信息。诊断里有页面地址和部分文字，粘贴前请删去隐私内容。不要贴出 API Key。
+
+安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不要公开提交。
+
 ## 声明
 
-本项目独立开发。第三方来源与许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)，阅读器内置的 PDF.js 许可见[随附许可证](reader/vendor/pdfjs/LICENSE)。YouTube 与哔哩哔哩字幕都是**非官方兼容**功能，与 YouTube、Google、哔哩哔哩无关联。YouTube 是 Google LLC 的商标，哔哩哔哩是其权利人的商标。
+本项目独立开发。第三方来源与许可（含阅读器内置的 PDF.js）统一见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。YouTube 与哔哩哔哩字幕都是**非官方兼容**功能，与 YouTube、Google、哔哩哔哩无关联。YouTube 是 Google LLC 的商标，哔哩哔哩是其权利人的商标。
 
 所有翻译请求只发往**你自己配置的接口**，不经过本项目作者的服务器；API Key 默认仅在本次浏览器会话中保留，也可选择在设备上记住，具体见 [隐私说明](PRIVACY.md#保存在本机的数据)。
 

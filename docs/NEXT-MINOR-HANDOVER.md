@@ -1,6 +1,7 @@
 # 下一小版本交接：0.18.0 PDF 版式预览覆盖
 
-> 编写日期：2026-11-06。基线：**0.17.4 已发布**。Windows OCR `0.2.0-preview.2` 已在本机构建并打包，仍待发布（未签名测试版），与本文的版式预览工作分开。
+> 编写日期：2026-11-06。编写时基线：0.17.4 已发布，Windows OCR `0.2.0-preview.2` 尚未发布。本文以 0.17.4 的代码行为为对照。
+> 当前状态：最新发布版本以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准；Windows OCR `0.2.0-preview.2` 已随 [v0.17.5](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.5) 发布（未签名测试版），与本文的版式预览工作分开。
 > 相关文档：[ROADMAP](ROADMAP.md)、[PDF-HANDOFF](PDF-HANDOFF.md)、[HANDOFF](../HANDOFF.md) §9。
 
 ## 0. 这次要解决什么

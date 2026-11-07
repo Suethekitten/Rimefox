@@ -88,7 +88,8 @@ for (const name of ['reader/index.html', 'reader/reader.css', 'reader/reader.js'
   if (!entries.some((e) => e.name === name)) throw Error(`Missing reader asset: ${name}`);
 }
 // MIT 等许可证要求版权与许可声明随副本分发：商店 ZIP 也是一次分发，缺一个就拒绝出包。
-for (const name of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt', 'licenses/fflate-MIT.txt']) {
+for (const name of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt', 'licenses/fflate-MIT.txt',
+  'reader/vendor/pdfjs/LICENSE', 'reader/vendor/pdfjs/cmaps/LICENSE']) {
   if (!entries.some((e) => e.name === name)) throw Error(`Missing legal file: ${name}`);
 }
 function crc32(data) {

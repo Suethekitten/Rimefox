@@ -56,6 +56,14 @@ Pin Rimefox from your browser’s extensions menu for quick access. To translate
 - EPUB support covers reflowable books without DRM. The [reader guide](docs/READER-ARCHITECTURE.md) describes supported formats, and the [PDF guide](docs/PDF-HANDOFF.md) covers PDF layout and scanning limits.
 - Inline formatting is preserved where it can be mapped reliably. Complex page layouts or links may keep the original text.
 
+## Reporting a problem
+
+1. Update to the [latest release](https://github.com/Suethekitten/Rimefox/releases) and check that the problem still happens.
+2. If a web page is translated incorrectly or the layout breaks, open **Settings → Advanced → Page diagnostics**, choose the affected page, and click **Run diagnostics**. The diagnostic JSON is copied to your clipboard. No translation requests are sent.
+3. Open a [new issue](https://github.com/Suethekitten/Rimefox/issues/new/choose) and choose the bug report form. The form is in Chinese, but you can answer in English. Include the version, browser, steps to reproduce, and the diagnostics. The diagnostics contain the page address and some page text, so remove anything private first. Never include an API key.
+
+Report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
 ## Project documentation
 
 Most technical guides are in Chinese.
@@ -72,6 +80,6 @@ Most technical guides are in Chinese.
 
 ## License and credits
 
-Rimefox is licensed under [MIT](LICENSE). See [third-party notices](THIRD-PARTY-NOTICES.md) and the bundled [PDF.js license](reader/vendor/pdfjs/LICENSE) for third-party licensing. The popup’s glass dock adapts [Sak’s Liquid Glass Slider](https://github.com/Saknutella/liquid-glass-slider).
+Rimefox is licensed under [MIT](LICENSE). Third-party sources and licenses, including the bundled PDF.js, are listed in [third-party notices](THIRD-PARTY-NOTICES.md). The popup’s glass dock adapts [Sak’s Liquid Glass Slider](https://github.com/Saknutella/liquid-glass-slider).
 
 Rimefox is an independent project. Its subtitle integrations are unofficial and are not affiliated with YouTube, Google, or Bilibili.

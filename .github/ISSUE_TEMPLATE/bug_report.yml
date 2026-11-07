@@ -47,7 +47,7 @@ body:
     id: diag
     attributes:
       label: 诊断信息（可选）
-      description: 弹窗底部「诊断」会把 JSON 复制到剪贴板。里面有页面地址和部分文字片段，贴之前请检查并删去隐私内容
+      description: 打开「设置 → 高级 → 页面诊断」，选出问题的网页，点「生成诊断」，JSON 会复制到剪贴板（英文界面：Settings → Advanced → Page diagnostics → Run diagnostics）。不会发翻译请求。里面有页面地址和部分文字片段，贴之前请检查并删去隐私内容
       render: json
   - type: checkboxes
     id: confirm
