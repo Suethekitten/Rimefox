@@ -70,7 +70,7 @@
             </button>
           </li>
         </ol>
-        <p class="rail-note">大约 2 分钟即可完成。<br />你的 Key 只保存在本机。</p>
+        <p class="rail-note">大约 2 分钟即可完成。<br />密钥默认仅在本次浏览器会话有效。</p>
       </aside>
 
       <div class="stage">
@@ -132,8 +132,8 @@
         <!-- ================= 02 功能 ================= -->
         <section class="panel" id="step-features" data-step="1" aria-labelledby="featuresTitle" hidden>
           <span class="eyebrow">主要功能</span>
-          <h2 id="featuresTitle" tabindex="-1">从整页阅读到视频字幕</h2>
-          <p class="lead">五个功能，覆盖日常跨语言阅读的常见场景。</p>
+          <h2 id="featuresTitle" tabindex="-1">翻译网页、文档和视频字幕</h2>
+          <p class="lead">按阅读场景选择整页翻译、划词翻译或双语对照。</p>
 
           <div class="feature-grid">
             <article class="feature wide">
@@ -149,6 +149,18 @@
                 <div class="mini-label tr">译文</div>
                 <span class="mini-line tr w84"></span>
                 <span class="mini-line tr w60"></span>
+              </div>
+            </article>
+
+            <article class="feature wide">
+              <div class="feature-main">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5Z" /><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5M8 7h8M8 11h6" /></svg></span>
+                <h3>文档阅读</h3>
+                <p>从弹窗底部打开「文档阅读」，导入本地文件，按需翻译或切换双列对照。PDF 翻译目前为测试功能。</p>
+              </div>
+              <div class="mini-page">
+                <div class="mini-label">支持的格式</div>
+                <div class="mini-models"><span>EPUB</span><span>PDF</span><span>TXT</span><span>Markdown</span><span>LOG</span></div>
               </div>
             </article>
 
@@ -181,7 +193,7 @@
                 <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5Z" /><path d="m3 13 9 5 9-5M3 18l9 5 9-5" /></svg></span>
                 <h3>多模型 API 支持</h3>
               </div>
-              <p>DeepSeek、智谱 GLM、通义千问、Kimi、硅基流动、OpenRouter、Ollama、Anthropic、Gemini，或任意 OpenAI 兼容网关。</p>
+              <p>支持 OpenAI 兼容接口、Anthropic Claude 和 Google Gemini，也可连接 Ollama 或 LM Studio 等本地服务。</p>
               <div class="mini-models" aria-hidden="true">
                 <span>DeepSeek</span><span>GLM</span><span>Qwen</span><span>Kimi</span><span>Claude</span><span>Gemini</span><span>Ollama</span><span>+</span>
               </div>
@@ -230,11 +242,12 @@
                   <li>硅基流动</li>
                   <li>OpenRouter</li>
                   <li>Ollama</li>
+                  <li>LM Studio</li>
                   <li>Anthropic</li>
                   <li>Gemini</li>
                   <li>自定义 / 兼容网关</li>
                 </ul>
-                <p class="small">也可以填写任意 OpenAI 兼容网关，或本机 Ollama 地址。不确定选哪个？先看服务商是否提供兼容接口、是否支持你需要的语言，以及价格是否合适。</p>
+                <p class="small">也可以填入自定义的 OpenAI 兼容网关。不确定选哪个？先确认服务商支持你需要的语言，以及价格是否合适。</p>
               </div>
             </div>
 
@@ -242,8 +255,8 @@
               <h3>三步完成配置</h3>
               <ol class="setup-steps">
                 <li><span><strong>打开扩展设置</strong><small>点下面的按钮，或从扩展菜单进入设置。</small></span></li>
-                <li><span><strong>选择服务商，填写 API 地址、Key 和模型</strong><small>地址通常以 /v1 结尾；具体以服务商文档为准。</small></span></li>
-                <li><span><strong>点「测试连接」，成功后保存</strong><small>看到连接正常，就可以去翻译网页了。</small></span></li>
+                <li><span><strong>选择服务商，填写密钥并选择模型</strong><small>优先使用预填的 API 地址。可以获取模型列表，也可以手动输入模型名。</small></span></li>
+                <li><span><strong>点「测试连接」</strong><small>扩展会先保存当前表单，再发出一次测试请求。连接正常后就可以去翻译网页了。</small></span></li>
               </ol>
               <button type="button" class="btn primary block" id="openSettings">
                 打开设置
@@ -258,7 +271,8 @@
               <span class="privacy-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /><path d="M12 15v2" /></svg></span>
               <h3>关于隐私</h3>
             </div>
-            <p>API Key 只保存在本机浏览器的 chrome.storage.local 中，只作为认证头发送给你填写的接口。待翻文本会直接发往该接口，不经过作者服务器，也没有遥测。</p>
+            <p>新填的 API Key 默认只在本次浏览器会话有效，关闭浏览器或重新加载扩展后需要重新填写。开启「在此设备上记住密钥」后，密钥会保存在本机的扩展凭据库。</p>
+            <p>待翻文本直接发往你配置的接口，密钥只发给该接口用于认证。凛狐没有作者服务器，也不收集遥测数据。</p>
             <p>可选的本地脱敏默认关闭，开启后会在发请求前把可识别的邮箱、电话、身份证号和银行卡号换成占位符。第三方服务商的数据处理以其隐私政策为准。</p>
             <a class="text-link" href="https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">
               阅读隐私说明
@@ -285,7 +299,7 @@
               <span class="usage-num">02</span>
               <div>
                 <h3>点击工具栏里的凛狐图标</h3>
-                <p>也可以在页面上按 Alt + A（Mac：Option + A）翻译或还原。</p>
+                <p>默认按 Alt + A（Mac：Option + A）可翻译或还原。按键无效时，在设置页的「快捷键」中查看浏览器绑定。</p>
               </div>
             </li>
             <li class="usage-item">
@@ -299,7 +313,7 @@
               <span class="usage-num">04</span>
               <div>
                 <h3>想试字幕就打开 CC</h3>
-                <p>先在设置里开启「视频字幕」，再打开有字幕轨道的 YouTube 或哔哩哔哩视频。</p>
+                <p>在设置页的「划词与字幕」中开启「双语视频字幕」，再到 YouTube 或哔哩哔哩播放器里打开字幕。</p>
               </div>
             </li>
           </ol>
@@ -315,11 +329,11 @@
           <div class="finish-card">
             <div class="finish-copy">
               <h3>准备好了</h3>
-              <p>需要重新查看时，可以在设置页或弹窗里打开「使用指南」。</p>
+              <p>可以随时从设置页侧栏打开「使用指南」。</p>
             </div>
             <div class="actions tight">
               <button type="button" class="btn primary" id="finishSettings">
-                完成引导
+                打开设置
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
               </button>
               <a class="btn" href="https://github.com/Suethekitten/Rimefox/blob/main/README.md" target="_blank" rel="noopener noreferrer">查看详细文档</a>

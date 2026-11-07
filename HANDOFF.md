@@ -34,7 +34,7 @@
 1. 打开 `chrome://extensions/`（Edge：`edge://extensions/`）
 2. 开启开发者模式（Chrome：右上角「开发者模式」；Edge：左下角「开发人员模式」）
 3. 点「加载已解压的扩展程序」（Edge：「加载解压缩的扩展」），选中 `edge-bilingual/` 文件夹
-4. 首次安装会自动打开欢迎页（新手引导），点「打开设置」继续；之后可从设置页侧栏或弹窗底部「指南」重新打开
+4. 首次安装会自动打开欢迎页，点「打开设置」继续。重新打开欢迎页的入口见 [README 快速开始](README.md#快速开始)
 5. 填 API 地址（默认 `https://api.deepseek.com/v1`）、Key、模型名（默认 `deepseek-chat`）
 6. 点「保存」→「测试连接」
 7. 打开任意英文网页 → `Alt+A`（Mac：`Option+A`；或点工具栏图标 →「翻译此页」）

@@ -111,7 +111,7 @@ function goToStep(index, options) {
   revealStep(next);
 
   prevBtn.disabled = next === 0;
-  // 最后一步的操作放在正文里的「完成引导 / 查看详细文档」卡片里，
+  // 最后一步的操作放在正文里的「打开设置 / 查看详细文档」卡片里，
   // 底部分页不再重复一个同样显眼的按钮。
   nextBtn.hidden = next === last;
 
