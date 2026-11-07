@@ -259,6 +259,15 @@ function hostOf(sender) {
   }
 }
 
+// 续翻按顶层标签页记录（含端口），不用缓存所用的发送框架域名。
+function resumeHost(tab) {
+  try {
+    return new URL(tab.url).host;
+  } catch (err) {
+    return '';
+  }
+}
+
 // ---------------- 字幕付费预算 ----------------
 // 按标签页记账，不按页面自报的身份（bvid / cid / id_str / cacheScope）：这些字段页面脚本都能伪造，
 // 内容脚本又跑在网页进程里，无法证明“这条字幕元数据来自播放器”。费用边界只能放在后台。
@@ -1204,12 +1213,7 @@ const ROUTES = {
   'resume:set': async (msg, sender) => {
     const tabId = sender && sender.tab ? sender.tab.id : null;
     if (tabId == null) return { ok: false };
-    let host = '';
-    try {
-      host = new URL(sender.tab.url).host;
-    } catch (err) {
-      host = '';
-    }
+    const host = resumeHost(sender.tab);
     try {
       await chrome.storage.session.set({ ['resume:' + tabId]: { value: !!msg.value, host: host } });
     } catch (err) {
@@ -1220,12 +1224,7 @@ const ROUTES = {
   'resume:get': async (msg, sender) => {
     const tabId = sender && sender.tab ? sender.tab.id : null;
     if (tabId == null) return { ok: true, value: false };
-    let host = '';
-    try {
-      host = new URL(sender.tab.url).host;
-    } catch (err) {
-      host = '';
-    }
+    const host = resumeHost(sender.tab);
     try {
       const got = await chrome.storage.session.get('resume:' + tabId);
       const hit = got['resume:' + tabId];

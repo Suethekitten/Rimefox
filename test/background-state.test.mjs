@@ -40,6 +40,25 @@ const add = (source, target, overwrite = false) => send({ type: 'glossary:add', 
 const translate = text => send({ type: 'translate', target: 'zh-CN', texts: [text] });
 const setSlot = patch => saveConfig({ providerConfig: { __custom__: patch } });
 
+test('translation resume follows the top-level tab host, including its port', async () => {
+  const sender = { url: 'https://frame.invalid/', tab: { id: 34, url: 'https://article.invalid:8443/start' } };
+  const sendResume = (type, value) => new Promise(resolve => listener({ type, value }, sender, resolve));
+
+  assert.deepEqual(await sendResume('resume:set', true), { ok: true });
+  sender.url = 'https://another-frame.invalid/';
+  sender.tab.url = 'https://article.invalid:8443/reload';
+  assert.deepEqual(await sendResume('resume:get'), { ok: true, value: true });
+  sender.tab.url = 'https://article.invalid:8444/';
+  assert.deepEqual(await sendResume('resume:get'), { ok: true, value: false });
+
+  // The browser may omit the tab URL. Preserve the existing hostless fallback.
+  delete sender.tab.url;
+  assert.deepEqual(await sendResume('resume:set', true), { ok: true });
+  sender.tab.url = 'https://article.invalid/';
+  assert.deepEqual(await sendResume('resume:get'), { ok: true, value: true });
+  await session.remove('resume:34');
+});
+
 test('stale PDF configuration identity is rejected before any API request', async () => {
   const { pdfCacheIdentity } = await import('../lib/reader/pdf-cache.js');
   const cfg = await getConfig();
