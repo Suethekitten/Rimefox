@@ -88,6 +88,12 @@
     return out;
   };
 
+  function cueToUnit(cue) {
+    var unit = { start: cue.start, end: cue.end, text: cue.text };
+    if (SOUND_TAG.test(cue.text)) unit.tag = true;
+    return unit;
+  }
+
   // 人工字幕 → 句子：一句被拆在相邻几条里时合并（整句翻译才通顺）。
   // 遇到句末标点、合并后超过 maxChars、或和下一条隔得太久就断开；[Music] 这类单独成句
   subs.sentencesOf = function (cues, opts) {
@@ -246,11 +252,7 @@
   // 按句末标点合并会把十几段拼成一段、显示三十秒，字幕和画面脱节，还会在中文之间插空格：不跨段合并。
   // 同一批请求里相邻几段会一起送翻，模型仍能看到上下文。
   subs.bilibiliUnits = function (json) {
-    return subs.bilibiliCues(json).map(function (cue) {
-      var unit = { start: cue.start, end: cue.end, text: cue.text };
-      if (SOUND_TAG.test(cue.text)) unit.tag = true;
-      return unit;
-    });
+    return subs.bilibiliCues(json).map(cueToUnit);
   };
 
   // 把轨道元数据 + 已解析 body 变成统一时间轴。id 只用于区分轨道，不进入翻译文本。
@@ -283,10 +285,13 @@
     };
   };
 
-  // json3 + 地址 → 显示单位（句子）
+  // json3 + 地址 → 显示单位
   subs.unitsOf = function (json, url) {
     if (subs.isAsr(json, url)) return subs.chunksOf(subs.wordsOf(json));
-    return subs.sentencesOf(subs.cuesOf(json));
+    var cues = subs.cuesOf(json);
+    // 人工中文字幕常省略句末标点，保留每条字幕的原始起止时间。
+    if (/^zh(?:-|$)/.test(langKey(subs.paramsOf(url).lang))) return cues.map(cueToUnit);
+    return subs.sentencesOf(cues);
   };
 
   // 二分查找 ms 时刻正在显示的单位
