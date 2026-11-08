@@ -130,6 +130,20 @@ test('formula-only blocks are not sent to the translation API', async () => {
   assert.deepEqual(out, ['', '中文译文。']);
 });
 
+test('TOC sends only titles and restores source chapter and page numbers even on cache hits', async () => {
+  const f = fixture();
+  const toc = { ...args, page: { pageNo: 2, blocks: [
+    { text: '06 Windows 10 .... 127', tocTitle: 'Windows 10', tocChapter: '06', tocPage: '127' },
+    { text: 'Preface ... 008', tocTitle: 'Preface', tocPage: '008' },
+    { text: '99', noTranslate: true }
+  ] } };
+  const expected = ['06 中文译文。 127', '中文译文。 008', ''];
+  assert.deepEqual(await f.translator.translatePage(toc), expected);
+  assert.deepEqual(f.calls[0].texts, ['Windows 10', 'Preface']);
+  assert.deepEqual(await new PdfTranslator({ cache: f.cache }).translatePage(toc), expected);
+  assert.equal(f.calls.length, 1);
+});
+
 test('a failed second batch keeps and caches the paid first batch; retry only sends the rest (QA G4)', async () => {
   let call = 0;
   const f = fixture((message) => {

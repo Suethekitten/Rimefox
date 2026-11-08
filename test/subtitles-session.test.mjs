@@ -631,5 +631,25 @@ await t('Q. 插播广告的字幕不替换正片轨道（广告播完播放器�
   assert.equal(c.runtime.inspect().track.v, 'B');
 });
 
+await t('R. 无句末标点的 YouTube 人工中文字幕按原始时间逐条显示英文译文', async function () {
+  const c = setup();
+  const source = ['那也许苹果工程师会难过', '但是我得说实话', '这是一台很好的工作电脑'];
+  const translations = ['Apple engineers may be disappointed.', 'But I have to be honest.', 'This is a great computer for work.'];
+  c.state.target = 'en';
+  await c.runtime.process(rawFor('A', 'zh-Hans', source));
+  c.runtime.tick();
+  const request = c.state.requests[0];
+  assert.equal(request.msg.texts.join('|'), source.join('|'), '保留原字幕条目，仍可一起送翻');
+  await resolveReq(request, translations);
+
+  for (let i = 0; i < source.length; i++) {
+    c.state.ms = i * 2000;
+    c.runtime.tick();
+    const overlay = c.runtime.inspect().overlay;
+    assert.equal(overlay._orig.textContent, source[i]);
+    assert.equal(overlay._trans.textContent, translations[i]);
+  }
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exit(1);

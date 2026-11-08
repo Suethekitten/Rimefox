@@ -209,6 +209,9 @@ button { cursor: pointer; }
 .pdf-page .pdf-layout-view canvas { width: 100%; height: auto; }
 #bookContent[data-pdf-layout-original="1"] .pdf-layout-translation { visibility: hidden; }
 .pdf-layout-translation { position: absolute; overflow: hidden; box-sizing: border-box; font-family: Arial, 'Microsoft YaHei', sans-serif; line-height: 1.12; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pdf-layout-toc { display: flex; justify-content: space-between; gap: 0.35em; }
+.pdf-layout-toc span:first-child { min-width: 0; }
+.pdf-layout-toc span:last-child { flex-shrink: 0; }
 .pdf-layout-notice { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.6; color: var(--reader-muted); }
 .pdf-layout-text { grid-column: 1 / -1; min-width: 0; font-size: 13px; }
 .pdf-layout-text summary { cursor: pointer; }
