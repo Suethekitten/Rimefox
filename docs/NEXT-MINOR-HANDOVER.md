@@ -99,15 +99,14 @@
 
 ## 6. 验收
 
-- **已通过**：Node 全量可执行用例、Chrome 离线自检、Chrome PDF 合成样本 E2E，以及 macOS 真实 OCR 和安装器。复测命令见 [PDF 维护交接 §7](PDF-HANDOFF.md#7-测试与调试)。
+- **已通过（2026-11-10，macOS + Chrome）**：Node 全量可执行用例与 Chrome PDF / 阅读器合成样本 E2E，含 §1.4 的提示、原因标注与入口位置，以及 §1.5 的图片页样本 `layout-figure.pdf`。11-07 已通过 Chrome 离线自检与 macOS 真实 OCR、安装器。复测命令见 [PDF 维护交接 §7](PDF-HANDOFF.md#7-测试与调试)。
 - **Edge 未测试**：本机未安装 Edge。接手者在装有 Edge 的环境中设置 `RIMEFOX_BROWSER` 为 Edge 可执行文件，运行 `node tools/e2e-pdf-reader.mjs`。
 - **Windows OCR 未测试**：本轮在 macOS 上开发与验证。接手者在 Windows 上按 [Windows OCR 交接](../native/ocr-host/WINDOWS-HANDOFF.md) 构建并验证系统识别、Native Messaging 通信、安装与卸载，再检查扫描页译文覆盖。
-- **真实 PDF 尚待手动验收**：本地缺少 Nicaragua Azul 第 12 页、p001 和 r002。取到样本后按 §4 核对覆盖位置、旋转方向与标题页码配对，并回归普通横排页。
+- **真实 PDF 尚待手动验收**：本地缺少 Nicaragua Azul 第 12 页、p001 和 r002，也没有真实的图片密集页。取到样本后按 §4 核对覆盖位置、旋转方向与标题页码配对，回归普通横排页；图片页另看边带图注是否被页眉页脚过滤删掉（见 [PDF 维护交接](PDF-HANDOFF.md#版式译文预览)）。
 
 ## 7. 开发交接
 
-接手分支为 `feat/pdf-layout-018`。§1.1–1.3 已实现并通过合成样本回归。当前扩展版本仍为 `0.17.6`。
+§1.1–1.5 已在 `main` 上实现并通过合成样本回归；当前扩展版本仍为 `0.17.6`。
 
-1. 实现 §1.4 的未放置数量与原因提示，在提示旁提供展开完整文字译文的入口，并保留 `data-layout-skips` 诊断计数。
-2. 实现 §1.5 的图片密集页覆盖，用样本验证图注、页码和侧边短文字；复杂背景仍保留原文。
-3. 完成 §6 待验收项，记录实机结果，再按 [AGENTS.md](../AGENTS.md) 的流程合并并准备 0.18.0。
+1. 完成 §6 的 Edge、Windows OCR 与真实 PDF 验收，记录实机结果。
+2. 按 [AGENTS.md](../AGENTS.md) 的流程定 0.18.0 的 CHANGELOG 与 HANDOFF「本版技术记录」，发版。

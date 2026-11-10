@@ -178,3 +178,13 @@ test('side-by-side OCR columns with a narrow gutter are not split even though th
   const [a, b] = separateLayoutRects([left, below]);
   assert.ok(a.y + a.height < b.y);
 });
+
+test('layout notice reports placed, kept-original and pending counts with reasons', async () => {
+  const { layoutNoticeText } = await import('../reader/pdf-layout.js');
+  const none = { untranslated: 0, position: 0, background: 0, fit: 0 };
+  assert.equal(layoutNoticeText({ blocks: 0, placed: 0, skips: none, pending: 0 }), '版式预览：本页没有可定位的文字，原页保留。');
+  assert.equal(layoutNoticeText({ blocks: 3, placed: 0, skips: { ...none, untranslated: 3 }, pending: 3 }), '版式预览：本页译文尚未生成，暂时显示原页。');
+  const mixed = layoutNoticeText({ blocks: 6, placed: 2, skips: { untranslated: 1, position: 0, background: 2, fit: 1 }, pending: 1 });
+  assert.match(mixed, /^版式预览：已替换 2 处，3 处保留原文（背景不是纯色 2 处、译文放不下 1 处），1 处尚未翻译。/);
+  assert.match(layoutNoticeText({ blocks: 2, placed: 2, skips: none, pending: 0 }), /^版式预览：已替换 2 处。只覆盖纯色背景/);
+});

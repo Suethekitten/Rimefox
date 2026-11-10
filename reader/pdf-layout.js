@@ -9,6 +9,21 @@ export function clearPdfLayout(el, doc) {
   el.querySelector('.pdf-layout-notice')?.remove();
   const details = el.querySelector('.pdf-layout-text');
   if (details) { const panel = details.querySelector('.pdf-blocks'); if (panel) el.appendChild(panel); details.remove(); }
+  for (const block of el.querySelectorAll('.pdf-block[data-layout-skip]')) delete block.dataset.layoutSkip;
+}
+
+// 未放入版式的原因（与 data-layout-skips 的键一致）；untranslated 单独说「尚未翻译」。
+const SKIP_LABELS = { position: '无法定位或与其他文字重叠', background: '背景不是纯色', fit: '译文放不下' };
+
+export function layoutNoticeText({ blocks, placed, skips, pending }) {
+  if (!blocks) return '版式预览：本页没有可定位的文字，原页保留。';
+  const unplaced = skips.position + skips.background + skips.fit;
+  if (!placed && !unplaced) return '版式预览：本页译文尚未生成，暂时显示原页。';
+  const reasons = Object.keys(SKIP_LABELS).filter((key) => skips[key]).map((key) => SKIP_LABELS[key] + ' ' + skips[key] + ' 处');
+  return '版式预览：已替换 ' + placed + ' 处'
+    + (unplaced ? '，' + unplaced + ' 处保留原文（' + reasons.join('、') + '）' : '')
+    + (pending ? '，' + pending + ' 处尚未翻译' : '')
+    + '。只覆盖纯色背景上的文字，复杂背景、表格和公式保留原样；字体、颜色可能与原页不同，请核对原页。';
 }
 
 export function updatePdfLayout(el, loaded, texts, doc) {
@@ -36,12 +51,14 @@ export function updatePdfLayout(el, loaded, texts, doc) {
   // 第二遍再缩字 / 向右下扩展，扩展只到下一块「实际使用的框」之上，并且不碰任何已放置的框。
   const base = rects.slice();
   const colors = new Array(count).fill(null);
+  const reasons = new Array(count).fill(null);
   for (let i = 0; i < count; i += 1) {
     if (!texts[i]) { skips.untranslated += 1; continue; }
     let rect = rects[i];
     if (!rect || rect.blocked || rects.some((other) => other && other !== rect
       && (rect.rotation || other.rotation || other.blocked) && layoutRectsOverlap(rect, other))) {
       skips.position += 1;
+      reasons[i] = 'position';
       continue;
     }
     // 笔画半宽随字号增长：粗大标题的笔画中心也要能找到附近的背景。
@@ -57,7 +74,7 @@ export function updatePdfLayout(el, loaded, texts, doc) {
         if (color) { rect = wider; break; }
       }
     }
-    if (!color) { skips.background += 1; continue; }
+    if (!color) { skips.background += 1; reasons[i] = 'background'; continue; }
     base[i] = rect;
     colors[i] = { color, check };
   }
@@ -118,20 +135,29 @@ export function updatePdfLayout(el, loaded, texts, doc) {
       if (same && same.every((v, k) => Math.abs(v - color[k]) <= 10)) { place(grown); used = grown; font = base0; }
       ok = shrink(8);
     }
-    if (!ok) { text.remove(); skips.fit += 1; continue; }
+    if (!ok) { text.remove(); skips.fit += 1; reasons[i] = 'fit'; continue; }
     final[i] = used;
     placed += 1;
   }
   view.dataset.layoutSkips = Object.entries(skips).map(([k, v]) => k + ':' + v).join(',');
+  // 原页未翻译的块里，页码 / 公式这类本来就不送翻的不算「尚未翻译」。
+  let pending = 0;
+  for (let i = 0; i < count; i += 1) if (!texts[i] && !loaded.blocks[i].noTranslate) pending += 1;
+  const unplaced = skips.position + skips.background + skips.fit;
   const note = document.createElement('p'); note.className = 'pdf-layout-notice';
-  note.textContent = !loaded.blocks.length
-    ? '版式预览：没有可定位的正文，原页保留。完整译文可在下方查看。'
-    : '版式预览：已替换 ' + placed + ' 处；仅尝试覆盖纯色文字区，复杂背景可能有误。表格、公式或放不下的文字保留原样，完整译文在下方，请核对原页。字体、颜色可能不同。';
-  el.appendChild(note);
+  note.textContent = layoutNoticeText({ blocks: loaded.blocks.length, placed, skips, pending });
+  // 提示和完整译文放在原页上方：不用滚过整页才找到没放进版式的文字。
+  const label = el.querySelector('.pdf-page-label');
+  if (label) label.after(note); else el.appendChild(note);
   const panel = el.querySelector('.pdf-blocks');
   if (panel) {
+    for (const block of panel.querySelectorAll('.pdf-block')) {
+      const reason = reasons[Number(block.dataset.block)];
+      if (reason) block.dataset.layoutSkip = reason;
+    }
     const details = document.createElement('details'); details.className = 'pdf-layout-text';
-    const summary = document.createElement('summary'); summary.textContent = '完整文字译文';
-    details.appendChild(summary); details.appendChild(panel); el.appendChild(details);
+    const summary = document.createElement('summary');
+    summary.textContent = unplaced ? '查看本页完整译文（含未放入版式的 ' + unplaced + ' 处）' : '查看本页完整译文';
+    details.appendChild(summary); details.appendChild(panel); note.after(details);
   }
 }

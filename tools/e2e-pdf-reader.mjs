@@ -59,7 +59,12 @@ const layoutReplies = {
   'Collision heading': '碰撞标题',
   'COASTAL WATERS': '沿海水域',
   'WEATHER PATTERNS': '天气形态',
-  'WHAT CAN WE DO?': '我们能做什么'
+  'WHAT CAN WE DO?': '我们能做什么',
+  'COASTAL LIFE': '海岸生活',
+  'Harbour': '港口',
+  'Photo: Ana Ruiz': '摄影：安娜',
+  'Figure 3. Boats return to the harbour at dawn.': '图 3：黎明时渔船返港。',
+  'Most of the catch is sold before the market opens. The rest is dried on racks along the shore.': '大部分渔获在开市前售出，其余晾在岸边架子上。'
 };
 let holdRequests = false;
 const held = [];
@@ -515,6 +520,8 @@ const preserved = await pageEval(page, 'const a=document.querySelector(".pdf-pag
 check('原页插图区域逐像素保留，译文没有溢出文字框', preserved && JSON.stringify(preserved.left)===JSON.stringify(preserved.right) && preserved.bounds, JSON.stringify(preserved));
 check('版式与文字双列共用翻译缓存', hits.requests===before);
 check('完整译文可展开查看，预览限制明确显示', await pageEval(page, 'return !!document.querySelector(".pdf-layout-text summary") && document.querySelector(".pdf-layout-notice").textContent.includes("复杂背景")'));
+check('版式提示与完整译文入口在原页上方', await pageEval(page, 'const p=document.querySelector(".pdf-page"),n=p.querySelector(".pdf-layout-notice"),d=p.querySelector(".pdf-layout-text"),v=p.querySelector(".pdf-layout-view"),c=p.querySelector(":scope > canvas");return n.getBoundingClientRect().bottom<=d.getBoundingClientRect().top+1 && d.getBoundingClientRect().bottom<=Math.min(v.getBoundingClientRect().top,c.getBoundingClientRect().top)+1 && n.textContent.startsWith("版式预览：已替换 2 处。")'),
+  await pageEval(page, 'return document.querySelector(".pdf-layout-notice").textContent'));
 const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }, page);
 fs.writeFileSync(path.join(profile, 'pdf-layout.png'), Buffer.from(shot.data, 'base64'));
 console.log('    版式预览截图：' + path.join(profile, 'pdf-layout.png'));
@@ -522,6 +529,8 @@ holdRequests = true;
 await chooseTarget('fr', 'pdf-layout');
 await until(() => held.length > 0, 10000);
 check('版式切语言保留双列并立即移除旧语言覆盖层', await pageEval(page, 'return document.getElementById("modeSelect").value==="pdf-layout" && !document.querySelector(".pdf-layout-translation")'));
+check('新译文到达前提示本页译文尚未生成', await pageEval(page, 'return document.querySelector(".pdf-layout-notice")?.textContent.includes("本页译文尚未生成")'),
+  await pageEval(page, 'return document.querySelector(".pdf-layout-notice")?.textContent'));
 holdRequests = false; for (const reply of held.splice(0)) reply();
 check('版式预览按新目标语言重新翻译', !!await until(() => pageEval(page, 'return document.querySelectorAll(".pdf-layout-translation").length===2 && document.querySelector(".pdf-layout-translation").textContent==="Traduction"')));
 before = hits.requests;
@@ -578,6 +587,13 @@ check('混排页横排和两种直角旋转都能覆盖', !!mixed && mixed.boxes
     && box.angle === { 横排译文: 0, 向上译文: 270, 向下译文: 90 }[box.text]), JSON.stringify(mixed));
 check('斜排和放不下的直角文字保留原样并分类计数', !!mixed
   && /position:1,background:0,fit:1/.test(mixed.skips), mixed?.skips);
+const mixedNotice = await pageEval(page, `
+  const p = document.querySelector('.pdf-page[data-page="1"]');
+  return { notice: p.querySelector('.pdf-layout-notice').textContent, summary: p.querySelector('.pdf-layout-text summary').textContent,
+    tagged: Array.from(p.querySelectorAll('.pdf-layout-text .pdf-block[data-layout-skip]'), (b) => [b.querySelector('.pdf-src').textContent, b.dataset.layoutSkip]) };`);
+check('页面提示写明已替换、保留原文的数量与原因', mixedNotice.notice.startsWith('版式预览：已替换 3 处，2 处保留原文（无法定位或与其他文字重叠 1 处、译文放不下 1 处）。')
+  && mixedNotice.summary === '查看本页完整译文（含未放入版式的 2 处）', JSON.stringify(mixedNotice));
+check('完整译文里标出未放入版式的段落及原因', JSON.stringify(mixedNotice.tagged.sort()) === JSON.stringify([['Diagonal note', 'position'], ['Short side', 'fit']]), JSON.stringify(mixedNotice.tagged));
 await send('Emulation.setDeviceMetricsOverride', { width: 1140, height: 900, deviceScaleFactor: 1, mobile: false }, page);
 const resized = await until(async () => {
   const result = await layoutState(1);
@@ -617,6 +633,20 @@ check('混排目录的译文、章号和右侧页码按行对应', JSON.stringif
 const tocSent = hits.sent.slice(beforeToc).map((entry) => JSON.parse(entry)[3]);
 check('目录章号与页码不发送给翻译服务', ['COASTAL WATERS', 'WEATHER PATTERNS', 'WHAT CAN WE DO?'].every((title) => tocSent.includes(title))
   && !tocSent.some((source) => /\d/.test(source)), JSON.stringify(tocSent));
+
+const beforeFigure = hits.sent.length;
+await openLayoutSample('layout-figure.pdf', 'Figure 3.');
+const figure = await until(async () => {
+  const result = await layoutState(1);
+  return result?.skips.includes('untranslated:0') && result;
+});
+const figureTexts = (figure?.boxes || []).map((box) => box.text + '@' + box.angle).sort();
+check('图片多的页面：图注、短正文、竖排署名和色带栏目名进入版式', JSON.stringify(figureTexts) === JSON.stringify(['大部分渔获在开市前售出，其余晾在岸边架子上。@0', '图 3：黎明时渔船返港。@0', '摄影：安娜@270', '海岸生活@270'].sort())
+  && figure.boxes.every((box) => box.inside && box.fits), JSON.stringify(figure));
+const figureNotice = await pageEval(page, 'const p=document.querySelector(\'.pdf-page[data-page="1"]\');return {notice:p.querySelector(".pdf-layout-notice").textContent,tagged:Array.from(p.querySelectorAll(".pdf-block[data-layout-skip]"),b=>b.querySelector(".pdf-src").textContent+":"+b.dataset.layoutSkip)}');
+check('压在照片上的标签保留原文并注明背景原因', /background:1/.test(figure?.skips || '') && JSON.stringify(figureNotice.tagged) === '["Harbour:background"]'
+  && figureNotice.notice.startsWith('版式预览：已替换 4 处，1 处保留原文（背景不是纯色 1 处）。'), JSON.stringify(figureNotice));
+check('图片页的页码不送翻', !hits.sent.slice(beforeFigure).some((entry) => /^\d+$/.test(JSON.parse(entry)[3])), JSON.stringify(hits.sent.slice(beforeFigure).map((entry) => JSON.parse(entry)[3])));
 
 // QA E3: actual reader imports a 15000 x 15000 page book and rasterizes it safely.
 await pageEval(page, 'document.getElementById("backToLibrary").click();return true;');

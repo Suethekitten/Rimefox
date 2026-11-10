@@ -212,9 +212,17 @@ button { cursor: pointer; }
 .pdf-layout-toc { display: flex; justify-content: space-between; gap: 0.35em; }
 .pdf-layout-toc span:first-child { min-width: 0; }
 .pdf-layout-toc span:last-child { flex-shrink: 0; }
-.pdf-layout-notice { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.6; color: var(--reader-muted); }
-.pdf-layout-text { grid-column: 1 / -1; min-width: 0; font-size: 13px; }
+.pdf-layout-notice { grid-column: 1 / -1; grid-row: 2; margin: 0; font-size: 12px; line-height: 1.6; color: var(--reader-muted); }
+.pdf-layout-text { grid-column: 1 / -1; grid-row: 3; min-width: 0; font-size: 13px; }
 .pdf-layout-text summary { cursor: pointer; }
+/* 版式预览：提示与完整译文在原页上方，两张页图下移到第 4 行。 */
+#bookContent[data-pdf-facsimile="1"] .pdf-page > canvas,
+#bookContent[data-pdf-facsimile="1"] .pdf-page > .pdf-layout-view { grid-row: 4; }
+.pdf-layout-text .pdf-block[data-layout-skip] { border-left: 2px solid var(--reader-line); padding-left: 8px; }
+.pdf-layout-text .pdf-block[data-layout-skip]::before { display: block; font-size: 12px; color: var(--reader-muted); }
+.pdf-layout-text .pdf-block[data-layout-skip="position"]::before { content: '未放入版式：无法定位或与其他文字重叠'; }
+.pdf-layout-text .pdf-block[data-layout-skip="background"]::before { content: '未放入版式：背景不是纯色'; }
+.pdf-layout-text .pdf-block[data-layout-skip="fit"]::before { content: '未放入版式：译文放不下'; }
 #bookContent[data-pdf-facsimile="1"] .pdf-layout-text .pdf-blocks { margin: 10px 0; padding: 0; border: 0; }
 @media (max-width: 760px) {
   .document-columns.parallel-view { min-width: 600px; }

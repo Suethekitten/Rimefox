@@ -118,6 +118,23 @@ fs.writeFileSync(path.join(outDir, 'layout-toc.pdf'), buildPdf([{ content:
   }).join('')
 }]));
 
+// 图片多、正文少：上半页是彩色条纹「照片」，下方白底图注和一段短正文，照片右侧白边有竖排署名，
+// 左侧纯色色带上有竖排栏目名，照片上压一个短标签（复杂背景，应保留原文），底部页码。
+const stripes = Array.from({ length: 12 }, (_, i) => {
+  const c = [[0.85, 0.35, 0.2], [0.2, 0.55, 0.75], [0.95, 0.8, 0.3], [0.3, 0.65, 0.35]][i % 4];
+  return c.join(' ') + ' rg ' + (60 + i * 40) + ' 330 40 430 re f\n';
+}).join('');
+fs.writeFileSync(path.join(outDir, 'layout-figure.pdf'), buildPdf([{ content:
+  '0.1 0.45 0.5 rg 0 0 32 842 re f\n' + stripes + '0 0 0 rg\n' +
+  'BT /F1 14 Tf 0 1 -1 0 22 330 Tm (COASTAL LIFE) Tj ET\n' +
+  'BT /F1 16 Tf 1 0 0 1 250 560 Tm (Harbour) Tj ET\n' +
+  'BT /F1 9 Tf 0 1 -1 0 552 340 Tm (Photo: Ana Ruiz) Tj ET\n' +
+  'BT /F1 10 Tf 1 0 0 1 60 310 Tm (Figure 3. Boats return to the harbour at dawn.) Tj ET\n' +
+  'BT /F1 11 Tf 1 0 0 1 60 260 Tm (Most of the catch is sold before the market opens.) Tj ET\n' +
+  'BT /F1 11 Tf 1 0 0 1 60 245 Tm (The rest is dried on racks along the shore.) Tj ET\n' +
+  'BT /F1 10 Tf 1 0 0 1 290 30 Tm (12) Tj ET\n'
+}]));
+
 // 中文 CID 字体：Type0 + GBK-EUC-H + Adobe-GB1，故意不带 ToUnicode。
 // 没有 cmaps 时 pdf.js 取不到正确 Unicode（这正是 cmaps 要验证的场景）。
 // <C4E3BAC3CAC0BDE7> = GBK 编码的「你好世界」。
