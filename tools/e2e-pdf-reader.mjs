@@ -646,6 +646,24 @@ check('图片多的页面：图注、短正文、竖排署名和色带栏目名�
 const figureNotice = await pageEval(page, 'const p=document.querySelector(\'.pdf-page[data-page="1"]\');return {notice:p.querySelector(".pdf-layout-notice").textContent,tagged:Array.from(p.querySelectorAll(".pdf-block[data-layout-skip]"),b=>b.querySelector(".pdf-src").textContent+":"+b.dataset.layoutSkip)}');
 check('压在照片上的标签保留原文并注明背景原因', /background:1/.test(figure?.skips || '') && JSON.stringify(figureNotice.tagged) === '["Harbour:background"]'
   && figureNotice.notice.startsWith('版式预览：已替换 4 处，1 处保留原文（背景不是纯色 1 处）。'), JSON.stringify(figureNotice));
+const setPdfUiLang = (lang) => pageEval(page, "return chrome.storage.local.get('config').then((r) => chrome.storage.local.set({ config: Object.assign({}, r.config, { uiLang: " + JSON.stringify(lang) + " }) })).then(() => true)");
+await setPdfUiLang('en');
+const englishLayout = await until(() => pageEval(page, `
+  const p = document.querySelector('.pdf-page[data-page="1"]');
+  const notice = p.querySelector('.pdf-layout-notice').textContent;
+  if (!notice.startsWith('Layout preview')) return null;
+  const tagged = p.querySelector('.pdf-block[data-layout-skip]');
+  return { notice, label: p.querySelector('.pdf-page-label').textContent, summary: p.querySelector('.pdf-layout-text summary').textContent,
+    reason: getComputedStyle(tagged, '::before').content, overlay: Array.from(p.querySelectorAll('.pdf-layout-translation'), (el) => el.textContent).sort(),
+    source: tagged.querySelector('.pdf-src').textContent };`));
+check('英文界面：PDF 页标签、版式提示、完整译文入口和原因标注都是英文', !!englishLayout
+  && englishLayout.notice.startsWith('Layout preview: 4 replaced; 1 kept in the original (background is not a solid colour: 1).')
+  && englishLayout.label === 'Page 1 / 1' && englishLayout.summary === 'Show the full translation of this page (including 1 not placed in the layout)'
+  && englishLayout.reason === '"Not in the layout: background is not a solid colour"', JSON.stringify(englishLayout));
+check('英文界面不改写版式译文和原文', !!englishLayout && englishLayout.source === 'Harbour'
+  && JSON.stringify(englishLayout.overlay) === JSON.stringify(['大部分渔获在开市前售出，其余晾在岸边架子上。', '图 3：黎明时渔船返港。', '摄影：安娜', '海岸生活'].sort()), JSON.stringify(englishLayout?.overlay));
+await setPdfUiLang('zh');
+check('切回中文后 PDF 提示恢复中文', !!await until(() => pageEval(page, 'return document.querySelector(\'.pdf-page[data-page="1"] .pdf-layout-notice\').textContent.startsWith("版式预览：已替换 4 处")')));
 check('图片页的页码不送翻', !hits.sent.slice(beforeFigure).some((entry) => /^\d+$/.test(JSON.parse(entry)[3])), JSON.stringify(hits.sent.slice(beforeFigure).map((entry) => JSON.parse(entry)[3])));
 
 // QA E3: actual reader imports a 15000 x 15000 page book and rasterizes it safely.

@@ -423,6 +423,18 @@ check('调高到 2 GB 后可继续导入', !!await importDocument('quota-test.tx
 await send('Page.reload', {}, page); await readerBooted();
 check('重开后保留用户容量设置，不误显示浏览器的 10 GB 配额', await pageEval('return document.getElementById("maxLibraryGb").value==="2" && document.getElementById("libraryUsage").textContent.includes("2.0 GB") && !document.getElementById("libraryUsage").textContent.includes("10 GB")'));
 
+// 界面语言跟随扩展 uiLang：打开着的阅读器就地切换；书的正文 / 目录里恰好是界面词的文字不能被改写。
+const setUiLang = (lang) => pageEval("return chrome.storage.local.get('config').then((r) => chrome.storage.local.set({ config: Object.assign({}, r.config, { uiLang: " + JSON.stringify(lang) + " }) })).then(() => true)");
+await setUiLang('en');
+check('切到英文后书库界面跟着变', !!await until(() => pageEval("return document.documentElement.lang==='en' && document.getElementById('backToLibrary').textContent.trim()==='← Library' && document.querySelector('.library-section h2').textContent==='My books' && document.getElementById('tocToggle').textContent==='Contents' && document.getElementById('settingsToggle').title==='Reading settings'")),
+  await pageEval("return document.getElementById('backToLibrary').textContent + ' | ' + document.querySelector('.library-section h2').textContent"));
+check('英文界面下书卡按钮与进度是英文，书名保持原样', await pageEval("const c=[...document.querySelectorAll('.book-card')].find(c=>c.querySelector('.book-title').textContent==='章节小说');return !!c && c.querySelector('.book-actions button').textContent==='Open' && /^(Not started|Last read)/.test(c.querySelector('.book-progress').textContent)"));
+check('英文界面导入书', !!await importDocument('界面词.txt', '目录\n\n打开\n\n第一章 搜索\n正文写着停止和完成。\n第二章 移除\n继续。'));
+check('书的正文和目录里的界面词不被界面翻译改写', !!await until(() => pageEval("const toc=[...document.querySelectorAll('#tocList a')].map(a=>a.textContent.trim());return document.getElementById('bookContent').textContent.includes('目录打开') && toc.join('|')==='界面词|第一章 搜索|第二章 移除' && document.getElementById('readerTitle').textContent==='界面词' && document.getElementById('translateChapter').textContent==='Translate chapter'")),
+  await pageEval("return [...document.querySelectorAll('#tocList a')].map(a=>a.textContent.trim()).join('|') + ' / ' + document.getElementById('bookContent').textContent.slice(0, 40)"));
+await setUiLang('zh');
+check('切回中文后界面恢复，书的内容不变', !!await until(() => pageEval("return document.documentElement.lang==='zh-CN' && document.getElementById('backToLibrary').textContent.trim()==='← 书库' && document.getElementById('translateChapter').textContent==='翻译本章' && document.getElementById('bookContent').textContent.includes('目录打开')")));
+
 check('阅读器无未捕获异常', exceptions.length === 0, exceptions.join(' | '));
 console.log('\n[阅读器 E2E]');
 console.log(hits.requests + ' 请求 / ' + hits.texts + ' 条；异常 ' + exceptions.length);

@@ -1,6 +1,7 @@
 // 界面语言单测：静态文案映射（纯函数，不依赖浏览器）。
 // 运行：node test/i18n.test.mjs
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { translateText, t as translateFor, applyI18n, UI_LANGS } from '../lib/i18n.js';
 import { sanitizeTranslationCss, ACCENT_PRESETS } from '../lib/appearance.js';
@@ -204,6 +205,30 @@ t('设置页：缓存统计和浏览器快捷键行有英文', () => {
   );
   assert.equal(translateText('浏览器快捷键：⌥A'), 'Browser shortcut: ⌥A');
   assert.match(translateText('已获取 2 个模型。点「选择」挑一个，或直接手填；别忘了保存。'), /^Loaded 2 models\./);
+});
+
+t('文档阅读器：页面里的中文界面文案都有英文', () => {
+  const html = readFileSync(new URL('../reader/index.html', import.meta.url), 'utf8')
+    .replace(/<!--[\s\S]*?-->/g, '').replace(/<script[\s\S]*?<\/script>/g, '');
+  const strings = new Set();
+  for (const m of html.matchAll(/>([^<>]*)</g)) if (/[一-鿿]/.test(m[1])) strings.add(m[1].trim());
+  for (const m of html.matchAll(/\b(?:title|aria-label|placeholder)="([^"]*)"/g)) if (/[一-鿿]/.test(m[1])) strings.add(m[1]);
+  const missing = [...strings].filter((key) => translateText(key) === key);
+  assert.deepEqual(missing, []);
+});
+
+t('文档阅读器：动态提示按模式翻译', () => {
+  assert.equal(translateText('第 3 / 10 页 · OCR 识别文字，可能有误'), 'Page 3 / 10 · OCR text, may contain errors');
+  assert.equal(translateText('上次读到 第 10 节 · 11%'), 'Last read: section 10 · 11%');
+  assert.equal(translateText('本地已用约 38 MB / 书库上限 512 MB'), 'About 38 MB used on this device / library limit 512 MB');
+  assert.equal(translateText('流式双语模式。'), 'Reflow: bilingual mode.');
+  assert.equal(translateText('已切换到某某模式。'), '已切换到某某模式。');
+  assert.equal(translateText('删除《龙族：潮痕》及其全部译文？'), 'Delete “龙族：潮痕” and all of its translations?');
+  assert.match(translateText('版式预览：已替换 3 处，2 处保留原文（背景不是纯色 1 处、译文放不下 1 处），1 处尚未翻译。只覆盖纯色背景上的文字，复杂背景、表格和公式保留原样；字体、颜色可能与原页不同，请核对原页。'),
+    /^Layout preview: 3 replaced; 2 kept in the original \(background is not a solid colour: 1; translation does not fit: 1\); 1 not yet translated\. /);
+  for (const key of ['双列版式（预览）', '已导入。', '这个 PDF 有密码保护，凛狐不会绕过。', '无法解码文档，请另存为 UTF-8 文本后再导入。', '版式预览：本页译文尚未生成，暂时显示原页。']) {
+    assert.notEqual(translateText(key), key, key + ' 没有英文');
+  }
 });
 
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');

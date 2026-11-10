@@ -11,8 +11,8 @@
 <header class="reader-top" data-dt-ui>
   <button id="backToLibrary" class="reader-button" type="button" title="返回书库">← 书库</button>
   <div class="reader-heading">
-    <div id="readerTitle" class="reader-title">凛狐阅读器</div>
-    <div id="readerSubtitle" class="reader-subtitle"></div>
+    <div id="readerTitle" class="reader-title" data-i18n-skip>凛狐阅读器</div>
+    <div id="readerSubtitle" class="reader-subtitle" data-i18n-skip></div>
   </div>
   <div class="reader-actions">
     <!-- 按用途分组：翻译 / 导航 / 页面视图 / 窗口；组内没有可见按钮时整组隐藏（见 reader.css .reader-group） -->
@@ -74,9 +74,9 @@
     <div class="pdf-nav" hidden>
       <div class="pdf-nav-row"><input id="pdfJumpInput" type="number" min="1" placeholder="页码"><button id="pdfJumpGo" class="reader-button" type="button">跳页</button></div>
       <div class="pdf-nav-row"><input id="pdfSearchInput" type="search" placeholder="搜索全文"><button id="pdfSearchGo" class="reader-button" type="button">搜索</button></div>
-      <div id="pdfSearchResults" class="pdf-search-results"></div>
+      <div id="pdfSearchResults" class="pdf-search-results" data-i18n-skip></div>
     </div>
-    <div id="tocList" class="toc-list"></div>
+    <div id="tocList" class="toc-list" data-i18n-skip></div>
   </aside>
   <section id="readerScroll" class="reader-scroll">
     <div id="readerStatus" class="reader-status" role="status"></div>
@@ -90,15 +90,15 @@
       <button id="pdfTranslateStop" class="reader-button" type="button" hidden>停止</button>
     </div>
     <div id="documentColumns" class="document-columns">
-      <article id="sourceContent" class="reader-content source-content" data-dt-ui aria-label="原文" hidden></article>
-      <article id="bookContent" class="reader-content"></article>
+      <article id="sourceContent" class="reader-content source-content" data-dt-ui aria-label="原文" data-i18n-skip hidden></article>
+      <article id="bookContent" class="reader-content" data-i18n-skip></article>
     </div>
   </section>
 </main>
 
 <aside id="footnotePanel" class="footnote-panel" data-dt-ui hidden>
   <div class="toc-head"><strong>脚注</strong><button id="footnoteClose" class="reader-button" type="button">×</button></div>
-  <div id="footnoteBody" class="footnote-body"></div>
+  <div id="footnoteBody" class="footnote-body" data-i18n-skip></div>
 </aside>
 
 <dialog id="settingsDialog" class="settings-dialog" data-dt-ui>

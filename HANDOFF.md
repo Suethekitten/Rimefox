@@ -270,7 +270,7 @@ lib/
 
 `reader/index.html` 是扩展页，不是 content script；它通过文件选择 / 拖拽读取本地 EPUB，用 `lib/reader/epub.js` 解 ZIP + OPF/spine/nav，用 `lib/reader/sanitize.js` 按 allowlist 构造 DOM。翻译不复制引擎：阅读器直接调用 `content/core.js` / `units.js` / `direction.js` / `dom.js` 的 `DT.collect` 与 `DT.inject`，只自己实现按书 / 章节的队列与 IndexedDB 缓存。
 
-- `reader/index.html` 加载 classic `content/*.js`、`lib/inline-protocol.js`，再加载 `reader.js`（module）。UI 元素必须带 `data-dt-ui`，否则 `dom.js` 会把阅读器按钮当正文。阅读器不内置字体；用户可上传本机 TTF/OTF/WOFF/WOFF2，字体只存本机 IndexedDB 并由 FontFace 加载，系统宋体 / 黑体作为回退；另提供字号、行高、字距、段距、页宽、主题和全屏。
+- `reader/index.html` 加载 classic `content/*.js`、`lib/inline-protocol.js`，再加载 `reader.js`（module）。UI 元素必须带 `data-dt-ui`，否则 `dom.js` 会把阅读器按钮当正文。阅读器不内置字体；用户可上传本机 TTF/OTF/WOFF/WOFF2，字体只存本机 IndexedDB 并由 FontFace 加载，系统宋体 / 黑体作为回退；另提供字号、行高、字距、段距、页宽、主题和全屏。界面语言跟随 `config.uiLang`，设置页切换后经 storage 变化就地重翻（`applyUiLang`）；书的正文、原文栏、目录、脚注、搜索结果、书名和目标语言选项标 `data-i18n-skip`，不进界面词典，其中夹带的界面文字（PDF 页标签、版式提示、OCR 提示、PDF 页码目录）标 `data-i18n`；`confirm()`、动态 `title` 用 `t()`，CSS 生成的文字按 `html[lang="en"]` 另写一份。新增阅读器文案时在 `lib/i18n.js` 补英文，`test/i18n.test.mjs` 会检查 `reader/index.html` 的覆盖。
 - 自动翻译只处理当前视口 + 后 2 屏；「翻译本章」才遍历当前 section。background `translate` 用 `noCache: true`，译文写 reader IndexedDB，不污染 512 KB 全局缓存。
 - 书库、进度、删除、缓存 key、PDF 预留和错误码见 [docs/READER-ARCHITECTURE.md](docs/READER-ARCHITECTURE.md)；该文档是唯一契约，其他文档只链接。
 - 测试：`test/reader-contract.test.mjs`（静态契约）、`test/reader-smoke.html`（真实 Chrome 的解析/清洗冒烟）、`tools/e2e-reader.mjs`（真实扩展 + 假 API + 合成 EPUB）。

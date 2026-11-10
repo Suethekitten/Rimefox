@@ -223,6 +223,11 @@ button { cursor: pointer; }
 .pdf-layout-text .pdf-block[data-layout-skip="position"]::before { content: '未放入版式：无法定位或与其他文字重叠'; }
 .pdf-layout-text .pdf-block[data-layout-skip="background"]::before { content: '未放入版式：背景不是纯色'; }
 .pdf-layout-text .pdf-block[data-layout-skip="fit"]::before { content: '未放入版式：译文放不下'; }
+/* 英文界面（lib/i18n.js 把 <html lang> 设为 en）：CSS 生成的文字跟着换。 */
+html[lang="en"] #bookContent[data-pdf-layout="parallel"] .pdf-blocks::before { content: 'Translation'; }
+html[lang="en"] .pdf-layout-text .pdf-block[data-layout-skip="position"]::before { content: 'Not in the layout: cannot be located or overlaps other text'; }
+html[lang="en"] .pdf-layout-text .pdf-block[data-layout-skip="background"]::before { content: 'Not in the layout: background is not a solid colour'; }
+html[lang="en"] .pdf-layout-text .pdf-block[data-layout-skip="fit"]::before { content: 'Not in the layout: translation does not fit'; }
 #bookContent[data-pdf-facsimile="1"] .pdf-layout-text .pdf-blocks { margin: 10px 0; padding: 0; border: 0; }
 @media (max-width: 760px) {
   .document-columns.parallel-view { min-width: 600px; }

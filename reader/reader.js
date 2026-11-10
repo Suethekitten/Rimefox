@@ -20,6 +20,7 @@ import { ocrNotice } from '../lib/ocr/status.js';
 import { getOcrStatus, openOcrSettings, recognizeCanvas, cancelOcr } from '../lib/ocr/page.js';
 import { ocrCacheKey } from '../lib/ocr/cache-key.js';
 import { linesToBlocks, ocrLayoutLines } from '../lib/ocr/layout.js';
+import { applyI18n, t } from '../lib/i18n.js';
 
 const PDF_TRANS_MAX = 24;
 let pdfViewEpoch = 0;
@@ -163,6 +164,7 @@ async function loadConfig() {
     && state.pdfIdentity && state.pdfIdentity !== identity;
   const wasPaused = state.config && state.config.authPaused;
   state.config = config;
+  applyUiLang();
   if (config && config.authPaused) {
     if (doc) cancelPdfTranslations(false);
     if (translator) translator.stop();
@@ -187,6 +189,19 @@ async function loadConfig() {
   return state.config;
 }
 
+// 界面语言跟随扩展的 uiLang；设置页里切换后经 storage 变化重拉配置，这里就地重翻界面。
+// 书的正文、目录、书名等在 data-i18n-skip 区域里不受影响（见 lib/i18n.js）。
+let appliedUiLang = null;
+function applyUiLang() {
+  const lang = state.config && state.config.uiLang === 'en' ? 'en' : 'zh';
+  if (lang === appliedUiLang) return;
+  appliedUiLang = lang;
+  applyI18n(document, lang);
+  if (!state.book) $('readerTitle').textContent = t('凛狐阅读器');
+  // 原文栏是书的内容区（不进界面词典），它的 aria-label 同时是双列时的栏标题，单独设置。
+  $('sourceContent').setAttribute('aria-label', t('原文'));
+}
+
 // 阅读器自己的翻译配置：目标语言来自 reader settings，不跟随网页翻译的全局设置。
 function readerConfig() {
   const base = state.config || {};
@@ -205,6 +220,7 @@ function renderTargetSelect() {
   for (const language of languages) {
     const option = document.createElement('option');
     option.value = language.value;
+    option.dataset.i18nSkip = '';
     option.textContent = language.label;
     select.appendChild(option);
   }
@@ -212,6 +228,7 @@ function renderTargetSelect() {
   if (wanted && !Array.from(select.options).some((option) => option.value === wanted)) {
     const option = document.createElement('option');
     option.value = wanted;
+    option.dataset.i18nSkip = '';
     option.textContent = wanted;
     select.appendChild(option);
   }
@@ -418,9 +435,11 @@ async function renderLibrary() {
     body.className = 'book-body';
     const title = document.createElement('div');
     title.className = 'book-title';
+    title.dataset.i18nSkip = '';
     title.textContent = book.title || 'Untitled';
     const author = document.createElement('div');
     author.className = 'book-author';
+    author.dataset.i18nSkip = '';
     author.textContent = (book.authors || []).join(' · ') || book.language || '';
     const progress = document.createElement('div');
     progress.className = 'book-progress';
@@ -438,7 +457,7 @@ async function renderLibrary() {
     del.type = 'button';
     del.textContent = '删除';
     del.addEventListener('click', async () => {
-      if (!confirm('删除《' + (book.title || 'Untitled') + '》及其全部译文？')) return;
+      if (!confirm(t('删除《' + (book.title || 'Untitled') + '》及其全部译文？'))) return;
       await deleteBook(book.id);
       if (state.book && state.book.id === book.id) closeReader();
       await renderLibrary();
@@ -739,6 +758,7 @@ async function renderPdfPage(el, index, epoch) {
   } else {
     const note = document.createElement('p');
     note.className = 'pdf-empty-text';
+    note.dataset.i18n = '';
     note.textContent = loaded.hasTextLayer ? '本页有文字层，但没有可翻译的正文。' : '本页没有可提取的文字（可能是扫描页）。';
     el.appendChild(note);
     if (OCR_UI_ENABLED && !loaded.hasTextLayer) handlePdfOcrPage(el, index, doc).catch(() => {});
@@ -865,6 +885,7 @@ function showPdfOcrNotice(el, index, doc, status) {
   if (notice.kind === 'none') return;
   const box = document.createElement('div');
   box.className = 'pdf-ocr-notice';
+  box.dataset.i18n = '';
   box.dataset.ocrStatus = status;
   const text = document.createElement('span');
   text.textContent = notice.text;
@@ -896,6 +917,7 @@ async function handlePdfOcrPage(el, index, doc, refresh) {
   if (!pdfOcrResult(doc, index)) {
     progress = document.createElement('p');
     progress.className = 'pdf-ocr-progress';
+    progress.dataset.i18n = '';
     progress.textContent = '正在本机识别本页文字…';
     el.appendChild(progress);
   }
@@ -1171,6 +1193,7 @@ function buildPdfFlow() {
     section.dataset.loaded = '0';
     const label = document.createElement('div');
     label.className = 'pdf-flow-label';
+    label.dataset.i18n = '';
     label.textContent = '第 ' + i + ' 页';
     section.appendChild(label);
     flow.appendChild(section);
@@ -1463,13 +1486,14 @@ async function openPdfBook(record, seq, signal) {
     pageEl.style.setProperty('--pdf-ratio', ratio.toFixed(4));
     const label = document.createElement('div');
     label.className = 'pdf-page-label';
+    label.dataset.i18n = '';
     label.textContent = '第 ' + i + ' / ' + doc.numPages + ' 页';
     pageEl.appendChild(label);
     wrap.appendChild(pageEl);
   }
   $('tocList').textContent = '';
   const tocWrap = document.createElement('div');
-  setReaderHeader({ title: 'PDF · ' + doc.numPages + ' 页' });
+  setReaderHeader({ title: t('PDF · ' + doc.numPages + ' 页') });
   // 不用 IntersectionObserver：后台标签页里它不回调，PDF 会一直空白。
   // 改成按 getBoundingClientRect 判断可视范围，滚动 / 窗口尺寸变化时补渲染。
   state.pdfObserver = null;
@@ -1487,6 +1511,7 @@ async function openPdfBook(record, seq, signal) {
   if (toc.entries.length) {
     const hint = document.createElement('div');
     hint.className = 'toc-hint';
+    hint.dataset.i18n = '';
     hint.textContent = toc.source === 'outline' ? '目录来自 PDF 书签' : '目录来自书内目录页（页码为书内页码）';
     tocWrap.appendChild(hint);
     for (const entry of toc.entries) {
@@ -1509,6 +1534,7 @@ async function openPdfBook(record, seq, signal) {
       row.className = 'toc-item';
       const a = document.createElement('a');
       a.href = '#';
+      a.dataset.i18n = '';
       a.textContent = '第 ' + i + ' 页';
       a.addEventListener('click', (event) => { event.preventDefault(); jumpToPdfPage(i); });
       row.appendChild(a);
@@ -1575,6 +1601,7 @@ function renderVisiblePdfPages() {
         if (!note) {
           note = document.createElement('p');
           note.className = 'pdf-empty-text pdf-render-failed';
+          note.dataset.i18n = '';
           el.appendChild(note);
         }
         note.textContent = '本页渲染失败，点击重试。';
@@ -1631,7 +1658,7 @@ function closeReader() {
   $('libraryView').hidden = false;
   $('tocPanel').hidden = true;
   $('footnotePanel').hidden = true;
-  $('readerTitle').textContent = '凛狐阅读器';
+  $('readerTitle').textContent = t('凛狐阅读器');
   $('readerSubtitle').textContent = '';
   $('modeSelect').disabled = true;
   $('targetSelect').disabled = true;
@@ -1642,7 +1669,7 @@ function closeReader() {
 }
 
 function setReaderHeader(section) {
-  $('readerTitle').textContent = (state.book && state.book.title) || '凛狐阅读器';
+  $('readerTitle').textContent = (state.book && state.book.title) || t('凛狐阅读器');
   const author = state.book && state.book.authors && state.book.authors.length ? state.book.authors.join(' · ') : '';
   const secTitle = section && section.title ? ' · ' + section.title : '';
   $('readerSubtitle').textContent = author + secTitle;
@@ -1970,7 +1997,7 @@ function bindEvents() {
     }
     if (!translator || !state.section) return;
     const stats = translator.chapterStats();
-    if ((stats.units > 400 || stats.chars > 50000) && !confirm('本章约 ' + stats.units + ' 段 / ' + stats.chars + ' 字，会分批发送翻译请求。继续？')) return;
+    if ((stats.units > 400 || stats.chars > 50000) && !confirm(t('本章约 ' + stats.units + ' 段 / ' + stats.chars + ' 字，会分批发送翻译请求。继续？'))) return;
     if (state.mode === 'original') await changeMode('bilingual');
     await translator.translateChapter();
   });
@@ -2016,7 +2043,7 @@ function bindEvents() {
   }, { passive: false });
   document.addEventListener('fullscreenchange', () => {
     $('fullscreenToggle').textContent = document.fullscreenElement ? '⤡' : '⛶';
-    $('fullscreenToggle').title = document.fullscreenElement ? '退出全屏' : '全屏阅读';
+    $('fullscreenToggle').title = t(document.fullscreenElement ? '退出全屏' : '全屏阅读');
   });
   $('fontSize').addEventListener('input', () => saveSettings({ fontSize: Number($('fontSize').value) }));
   $('lineHeight').addEventListener('input', () => saveSettings({ lineHeight: Number($('lineHeight').value) }));

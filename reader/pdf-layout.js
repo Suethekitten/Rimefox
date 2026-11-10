@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n.js';
 import { layoutRect, layoutRectsOverlap, flatBackground, growLayoutRect, expandLayoutRect, separateLayoutRects } from '../lib/reader/pdf-layout.js';
 
 export function clearPdfLayout(el, doc) {
@@ -31,7 +32,7 @@ export function updatePdfLayout(el, loaded, texts, doc) {
   const source = el.querySelector(':scope > canvas');
   if (!source?.width) return;
   const view = document.createElement('div'); view.className = 'pdf-layout-view';
-  view.setAttribute('aria-label', '保留版式的译文页（预览）');
+  view.setAttribute('aria-label', t('保留版式的译文页（预览）'));
   const canvas = document.createElement('canvas'); view.appendChild(canvas); el.appendChild(view);
   doc.copyCanvas(source, canvas, () => { view.remove(); if (view.dataset.disposing !== '1') delete el.dataset.rendered; });
   const width = view.getBoundingClientRect().width;
@@ -144,7 +145,7 @@ export function updatePdfLayout(el, loaded, texts, doc) {
   let pending = 0;
   for (let i = 0; i < count; i += 1) if (!texts[i] && !loaded.blocks[i].noTranslate) pending += 1;
   const unplaced = skips.position + skips.background + skips.fit;
-  const note = document.createElement('p'); note.className = 'pdf-layout-notice';
+  const note = document.createElement('p'); note.className = 'pdf-layout-notice'; note.dataset.i18n = '';
   note.textContent = layoutNoticeText({ blocks: loaded.blocks.length, placed, skips, pending });
   // 提示和完整译文放在原页上方：不用滚过整页才找到没放进版式的文字。
   const label = el.querySelector('.pdf-page-label');
@@ -156,7 +157,7 @@ export function updatePdfLayout(el, loaded, texts, doc) {
       if (reason) block.dataset.layoutSkip = reason;
     }
     const details = document.createElement('details'); details.className = 'pdf-layout-text';
-    const summary = document.createElement('summary');
+    const summary = document.createElement('summary'); summary.dataset.i18n = '';
     summary.textContent = unplaced ? '查看本页完整译文（含未放入版式的 ' + unplaced + ' 处）' : '查看本页完整译文';
     details.appendChild(summary); details.appendChild(panel); note.after(details);
   }
