@@ -99,14 +99,14 @@
 
 ## 6. 验收
 
-- **已通过（2026-11-10，macOS + Chrome）**：Node 全量可执行用例与 Chrome PDF / 阅读器合成样本 E2E，含 §1.4 的提示、原因标注与入口位置，以及 §1.5 的图片页样本 `layout-figure.pdf`。11-07 已通过 Chrome 离线自检与 macOS 真实 OCR、安装器。复测命令见 [PDF 维护交接 §7](PDF-HANDOFF.md#7-测试与调试)。
-- **Edge 未测试**：本机未安装 Edge。接手者在装有 Edge 的环境中设置 `RIMEFOX_BROWSER` 为 Edge 可执行文件，运行 `node tools/e2e-pdf-reader.mjs`。
-- **Windows OCR 未测试**：本轮在 macOS 上开发与验证。接手者在 Windows 上按 [Windows OCR 交接](../native/ocr-host/WINDOWS-HANDOFF.md) 构建并验证系统识别、Native Messaging 通信、安装与卸载，再检查扫描页译文覆盖。
+- **已通过（macOS + Chrome，2026-11-10）**：Node 全量可执行用例、离线自检与 Chrome PDF / 阅读器合成样本 E2E，含 §1.4 的提示、原因标注与入口位置，以及 §1.5 的图片页样本 `layout-figure.pdf`。复测命令见 [PDF 维护交接 §7](PDF-HANDOFF.md#7-测试与调试)。
+- **Edge 已由 CI 覆盖**：Checks 的 browser 任务在 Ubuntu / macOS / Windows 上用 Edge 跑离线自检、`e2e-reader` 与 `e2e-pdf-reader`，提交 `dcf3e54` 全部通过。本机没有 Edge，未做人工目视。
+- **Windows OCR 部分覆盖**：System OCR preview checks 在 Windows 上构建宿主、跑倾斜扫描识别与安装器集成，`dcf3e54` 通过。浏览器经 Native Messaging 连宿主、再检查扫描页译文覆盖的端到端仍未在 Windows 上跑，按 [Windows OCR 交接](../native/ocr-host/WINDOWS-HANDOFF.md) 验证。0.18.0 没有改动 OCR 组件。
 - **真实 PDF 尚待手动验收**：本地缺少 Nicaragua Azul 第 12 页、p001 和 r002，也没有真实的图片密集页。取到样本后按 §4 核对覆盖位置、旋转方向与标题页码配对，回归普通横排页；图片页另看边带图注是否被页眉页脚过滤删掉（见 [PDF 维护交接](PDF-HANDOFF.md#版式译文预览)）。
 
 ## 7. 开发交接
 
-§1.1–1.5 已在 `main` 上实现并通过合成样本回归；当前扩展版本仍为 `0.17.6`。
+§1.1–1.5 已实现并通过合成样本回归，随 0.18.0 发布（发布状态见 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases)）。
 
-1. 完成 §6 的 Edge、Windows OCR 与真实 PDF 验收，记录实机结果。
-2. 按 [AGENTS.md](../AGENTS.md) 的流程定 0.18.0 的 CHANGELOG 与 HANDOFF「本版技术记录」，发版。
+1. 完成 §6 剩余的真实 PDF 与 Windows 端到端验收，记录实机结果；发现问题按补丁版本修。
+2. 验收结束后把本文移入 [archive/](archive/README.md) 并登记。

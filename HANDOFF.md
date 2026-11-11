@@ -889,12 +889,24 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.17.6）
+## 14. 本版技术记录（0.18.0）
+
+- **PDF 版式预览改为按块判定**：`pageBlocks` 的每个块带自己的定位行与方向，`layoutRect` 把文字坐标投影到实际视口并给出旋转框；一处旋转或斜排文字只影响它自己，页面 `/Rotate` 与文字旋转分别合成。90°／270° 的块按框中心旋转覆盖层，旋转框与其他块外框相交时两边都保留原文；斜排、原生竖排保留原文。实现与限制见 [PDF 维护交接](docs/PDF-HANDOFF.md#版式译文预览)。
+- **目录页**：无点线目录靠目录标题，或「左侧章号 + 标题 + 右侧对齐页码」的连续条目识别；条目只送标题，章号和页码从原文拼回，右栏页码单独右对齐。目录条目的缓存原文从整条变成标题，升级后这些条目首次翻译不命中旧缓存。
+- **未放入版式的提示**：`reader/pdf-layout.js` 的 `layoutNoticeText` 生成「已替换 / 保留原文（原因）/ 尚未翻译」，`noTranslate` 的页码和公式不计入；提示和「查看本页完整译文」在页标题下、两张页图上方（`reader.css` 把版式模式的页图放到网格第 4 行），未放入的段落带 `data-layout-skip`。`data-layout-skips` 计数不变。
+- **图片多的页面**：识别逻辑未改；新增合成样本 `layout-figure.pdf` 固定现有行为（图注、短正文、竖排署名、纯色色带栏目名进入版式，压在图上的文字因背景检查保留原文，纯数字页码不送翻）。`dropMarginLines` 对上下 6% 边带小字的过滤未放宽，原因见 PDF 维护交接。
+- **TXT 分章**：`lib/reader/text.js` 的 `isChapterHeading` 识别整行章节标题，`plainTextBlocks` 在命中两处以上时把标题输出为 `h2` 块并进目录。书库里的 TXT 每次打开都重新解析，带章节标题的旧书分节会变：已存的阅读进度可能落到别处，这些书的译文缓存（键含节）需要重新请求。
+- **阅读器界面语言**：`applyUiLang` 在读到配置后调用 `applyI18n`；`lib/i18n.js` 增加「跳过区域里的界面岛」（`data-i18n-skip` 内只翻 `data-i18n`），观察器对新增节点和文字变化用同一规则；模式替换允许函数。约定见 §4.6。
+- **字体上限**：`READER_LIMITS.maxFontBytes`（64 MB），提示文字随常量显示。
+- **YouTube 人工中文字幕**：`subs.unitsOf` 对 `zh*` 轨道不再按句末标点合并，每条字幕保留原始起止时间（中文人工字幕常省略句末标点，合并后一条显示几十秒）。自动字幕和其他语言不变。
+- **验证**：macOS + Chrome 157 本机跑 Node 全量用例、离线自检、`e2e-reader`、`e2e-pdf-reader`、`e2e-extension`、`e2e-session-keys`、`e2e-options-save`。CI（提交 `dcf3e54`）的 browser 任务在 Ubuntu / macOS / Windows 的 Chrome 与 Edge 上跑了自检、阅读器与 PDF E2E，全部通过；System OCR preview checks 通过（macOS 两种架构含 Chrome / Edge OCR E2E，Windows 构建、倾斜识别与安装器）。**未验收**：真实 PDF（交接里点名的样本不在本机）；Windows 上浏览器与 OCR 宿主的端到端（CI 只跑宿主与安装器）。
+- **原生组件**：沿用 [0.17.5 Windows OCR](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.5) 和 [0.17.2 macOS OCR](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.2) 附件，本版没有改动组件。
+
+### 0.17.6 记录
 
 - **字幕费用保护**：只有成功读取且没有账本时才从零计量。单标签页或全局账本读取失败时，保留已有缓存和在途结果，拒绝本次新的字幕模型请求。失败的读取 Promise 会从内存中移除，后续请求可以重读；字幕运行时按普通失败退避，额度耗尽时仍走现有暂停机制。
 - **回归**：`test/subtitle-budget-pipeline.test.mjs` 注入单标签页和全局读取故障。真实 Chrome 的 `node tools/e2e-extension.mjs --bilibili-only` 使用假接口，验证故障期间零 HTTP、恢复后沿用原计数。
 - **欢迎页**：文档阅读、密钥和设置步骤按现有产品行为说明，隐私链接随界面语言更新。审计中的内部整理与验证见 [0.17.5 审计记录](docs/archive/2026-11-07-conservative-audit.md)。
-- **原生组件**：沿用 [0.17.5 Windows OCR](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.5) 和 [0.17.2 macOS OCR](https://github.com/Suethekitten/Rimefox/releases/tag/v0.17.2) 附件。
 
 ### 0.17.5 记录
 
