@@ -182,7 +182,7 @@ Translate web pages, selected text, text in a webpage text box, popup text and Y
 
 本扩展采用 BYOK：你需要自行配置 API 地址、API Key 和模型，服务商可能收取费用。支持 DeepSeek 等 OpenAI 兼容接口以及 Anthropic、Gemini 协议，没有内置免费翻译额度。作者不运营翻译服务器，不使用分析或遥测；待翻文本、自定义提示词及命中术语直接发给你配置的接口。设置与缓存保存在本机。
 
-EPUB 阅读器支持本地无 DRM、可重排的 EPUB 2/3；PDF 阅读与文本翻译为 Beta，图片 OCR 暂不支持，直播字幕为实验功能。源码、问题反馈与隐私政策见 https://github.com/Suethekitten/Rimefox 。
+文档阅读器支持本地无 DRM、可重排的 EPUB 2/3 和 TXT / Markdown；PDF 阅读与翻译为 Beta。扫描版 PDF 可选用系统 OCR 预览，需另装本机组件并授权，图像只在本机识别，默认不启用。直播字幕为实验功能。源码、问题反馈与隐私政策见 https://github.com/Suethekitten/Rimefox 。
 ```
 
 ### Store listing：English Description
@@ -194,7 +194,7 @@ Use a glossary to pin down terminology and custom prompts to shape the wording. 
 
 Bring your own key: configure an endpoint, key and model from your chosen provider. Provider charges may apply and no free quota is bundled. Rimefox supports OpenAI-compatible endpoints such as DeepSeek, plus Anthropic and Gemini protocols. The author operates no translation server and uses no analytics or telemetry; text to translate, custom prompts and matching glossary terms go directly to the endpoint you configure. Settings and caches stay on your device.
 
-PDF reading and text translation are in Beta; image OCR is not supported and live captions remain experimental. A local EPUB reader supports DRM-free, reflowable EPUB 2/3 files you import yourself. Source, support and privacy policy: https://github.com/Suethekitten/Rimefox
+A local document reader supports DRM-free, reflowable EPUB 2/3 and TXT / Markdown files you import yourself; PDF reading and translation are in Beta. Scanned PDFs can optionally use a system OCR preview that needs a separately installed local component and your permission, with images recognized on your device only. Live captions remain experimental. Source, support and privacy policy: https://github.com/Suethekitten/Rimefox
 ```
 
 ### Search terms（≤7 个词/短语，每个 ≤30 字符）

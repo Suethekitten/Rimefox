@@ -1,6 +1,6 @@
 # 凛狐 Rimefox：Chrome Web Store 上架材料
 
-最后更新：2026-11-07。GitHub 版本见 [Releases](https://github.com/Suethekitten/Rimefox/releases)。商店页 2026-11-04 核实 Chrome / Edge 均为 **0.12.5**（页面更新日期均为 2026-10-27）。
+最后更新：2026-11-11。GitHub 版本见 [Releases](https://github.com/Suethekitten/Rimefox/releases)。商店页 2026-11-04 核实 Chrome / Edge 均为 **0.12.5**（页面更新日期均为 2026-10-27）。
 
 > 本文只写**通用材料 + Chrome**；Edge 的差异与专属填写内容见 [STORE-EDGE.md](STORE-EDGE.md)。
 > 历史审计（0.8.5 的「差哪 5 项」）已归档到 [archive/STORE-READINESS.md](archive/STORE-READINESS.md)，不再是现状。
@@ -15,7 +15,7 @@
 | 提交状态（Chrome） | **0.12.5 已上线**（2026-11-04 公开页核实；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo> |
 | Chrome 更新负责人 | 协助者（商店提供方 APXS 的账号）；出包与商店文案交给他上传 |
 
-两个商店都落后于 GitHub Release。下一次更新应使用完成验收后的同一版本商店包、说明、截图与中英文隐私政策；Chrome / Edge 版本号都必须大于上表核实的线上版本。商店材料仍对应 0.16.4，下一轮需按 0.17.x 界面重拍并出同版包，尚未上传或提交审核，不能把材料更新当成已上线。
+两个商店都落后于 GitHub Release。下一次更新应使用完成验收后的同一版本商店包、说明、截图与中英文隐私政策；Chrome / Edge 版本号都必须大于上表核实的线上版本。截图仍是 0.16.4 的界面，下一轮按要提交的版本（计划 0.18.0）重拍并出同版包；下文的说明、单一用途、权限和审核步骤已按 0.18.0 的功能核对（2026-11-11），尚未上传或提交审核，不能把材料更新当成已上线。
 
 1.0 支持范围以 [SUPPORT](SUPPORT.md) 为准：PDF 标注 Beta，直播字幕标注实验，医学模式不宣传已证明的质量提升。OCR 为可选本地组件预览，不随扩展包分发，不作为基础功能卖点。最新中英文截图及生成依据见 [screenshots/README](screenshots/README.md)。
 
@@ -40,10 +40,10 @@ node tools/package-store.mjs
 
 脚本输出 `dist/Rimefox-v<manifest版本>-store.zip`，并打印每个文件。收录范围：
 
-- 运行时：`manifest.json`、`background.js`、`lib/`、`content/`、`options/`、`popup/`、`welcome/`、`icons/`
-- 许可：`LICENSE`、`THIRD-PARTY-NOTICES.md`、`licenses/`
+- 运行时：`manifest.json`、`background.js`、`lib/`、`content/`、`options/`、`popup/`、`reader/`、`welcome/`、`icons/`、`_locales/`
+- 许可：`LICENSE`、`THIRD-PARTY-NOTICES.md`、`licenses/`，以及 `reader/vendor/pdfjs/` 下 PDF.js 与 CMap 的许可证
 
-校验：DT.VERSION 与 manifest 一致、四种 PNG 图标尺寸、manifest 运行时引用、欢迎页三个入口文件（`welcome/index.html`、`welcome/welcome.css`、`welcome/welcome.js`）、三份许可文件必须在包内；拒绝符号链接；排除开发文件；固定 ZIP 时间戳。`dist` 不进入运行包。
+校验：DT.VERSION 与 manifest 一致、四种 PNG 图标尺寸、manifest 运行时引用、欢迎页三个入口文件（`welcome/index.html`、`welcome/welcome.css`、`welcome/welcome.js`）、阅读器入口文件、各许可文件必须在包内；拒绝符号链接；排除开发文件；固定 ZIP 时间戳。`dist` 不进入运行包。
 
 验证命令：
 
@@ -79,7 +79,7 @@ node test/package-store.test.mjs
 
 本扩展采用 BYOK：你需要自行配置 API 地址、API Key 和模型，服务商可能收取费用。支持 DeepSeek 等 OpenAI 兼容接口以及 Anthropic、Gemini 协议，没有内置免费翻译额度。作者不运营翻译服务器，不使用分析或遥测。待翻文本、自定义提示词及命中术语直接发给你配置的接口；Key 用于该接口认证。本机保存设置与缓存，第三方处理以其隐私政策为准。
 
-视频字幕翻译默认关闭，仅支持站点可用的官方字幕轨（YouTube CC / B 站人工或 AI 字幕），不支持画面硬字幕。此功能非官方，与 Google、YouTube 或哔哩哔哩无关联，平台更新可能导致失效。EPUB 阅读器支持用户本地导入的无 DRM、可重排 EPUB 2/3；PDF 阅读与文本翻译为 Beta；固定版式 EPUB、漫画和图片 OCR 暂不支持。直播字幕为实验功能。
+视频字幕翻译默认关闭，仅支持站点可用的官方字幕轨（YouTube CC / B 站人工或 AI 字幕），不支持画面硬字幕。此功能非官方，与 Google、YouTube 或哔哩哔哩无关联，平台更新可能导致失效。文档阅读器支持用户本地导入的无 DRM、可重排 EPUB 2/3，以及 TXT / Markdown 文档；PDF 阅读与翻译为 Beta，含保留版式的译文预览。扫描版 PDF 可选用系统 OCR 预览：需要用户另行安装本机组件并授权，页面图像只在本机识别，默认不启用。固定版式 EPUB 和漫画暂不支持。直播字幕为实验功能。
 
 源码与支持：<https://github.com/Suethekitten/Rimefox> 。隐私政策：<https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> 。
 
@@ -89,7 +89,7 @@ Read webpages with original text and translation together, hover a translated se
 
 Bring your own API key: configure an endpoint, key and model from your chosen provider. Provider charges may apply; no free translation quota is bundled. Rimefox supports OpenAI-compatible endpoints such as DeepSeek, plus Anthropic and Gemini protocols. The author operates no translation server and uses no analytics or telemetry. Text to translate, custom prompts and matching glossary terms go directly to your configured endpoint, with your key used for authentication. Settings and caches are stored locally; providers process requests under their own policies.
 
-Video caption translation is disabled by default and requires an official subtitle track exposed by the site (YouTube CC, or Bilibili manual/AI subtitles). It cannot translate captions burned into video. This unofficial feature is not affiliated with Google, YouTube or Bilibili and may stop working after platform changes. The EPUB reader supports locally imported, DRM-free, reflowable EPUB 2/3; PDF reading and text translation are in Beta. Fixed-layout EPUB, comics and image OCR are not supported. Live captions remain experimental.
+Video caption translation is disabled by default and requires an official subtitle track exposed by the site (YouTube CC, or Bilibili manual/AI subtitles). It cannot translate captions burned into video. This unofficial feature is not affiliated with Google, YouTube or Bilibili and may stop working after platform changes. The document reader supports locally imported, DRM-free, reflowable EPUB 2/3 and TXT / Markdown files; PDF reading and translation are in Beta, including a layout-preserving translation preview. Scanned PDFs can optionally use a system OCR preview: it requires a separately installed local component and your permission, page images are recognized on your device only, and it is off by default. Fixed-layout EPUB and comics are not supported. Live captions remain experimental.
 
 Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: <https://github.com/Suethekitten/Rimefox/blob/main/PRIVACY.md> .
 
@@ -99,13 +99,13 @@ Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: 
 
 单一用途（建议原文）：
 
-> Translate web pages, selected text, popup text and YouTube / Bilibili video captions using a translation API endpoint and API key configured by the user. Glossary, prompts, display options and optional local privacy masking support this single purpose.
+> Translate web pages, selected text, popup text, YouTube / Bilibili video captions and documents the user imports locally (EPUB / PDF / TXT / Markdown) using a translation API endpoint and API key configured by the user. Glossary, prompts, display options, the local document reader and optional local privacy masking support this single purpose.
 
 不要以「作者没有服务器」为由勾选「完全不收集 / 传输数据」。按当前问卷对 collection / transmission 的定义，以代码真实行为申报：
 
 | 类别 | 建议 | 依据 |
 |---|---|---|
-| Website content | 是 | 待翻页面文本、选中文字、弹窗输入、启用后的字幕；不传视频或音频 |
+| Website content | 是 | 待翻页面文本、选中文字、弹窗输入、启用后的字幕，以及用户导入文档中送翻的段落；不传视频或音频。文档原文件、OCR 用的页面图像只留在本机 |
 | Authentication information | 是 | 用户填写的 API Key 保存在本机，并作为认证头发送给其配置的接口 |
 | Personally identifiable information | 是（保守） | 页面正文可能包含姓名、邮箱、电话等；隐私政策已披露，且默认不保证自动过滤。若控制台定义只统计开发者主动收集，再按控制台说明调整 |
 | Health / financial / payment / personal communications | 否 | 不专门请求这些类别；页面正文已归入 Website content / PII，不得承诺自动过滤 |
@@ -135,6 +135,7 @@ Source and support: <https://github.com/Suethekitten/Rimefox> . Privacy policy: 
 | `activeTab` | 用户点击扩展 / 快捷键时临时获得当前页访问权；用于站点访问权限被设为「点击时」的场景 | Grants temporary access when the user invokes the extension, so fallback injection also works when site access is set to "on click". |
 | `scripting` | 页面在安装 / 更新扩展前已打开时，补注入**包内**内容脚本与样式 | Re-injects the extension's own bundled content scripts into already-open tabs after install or update. Never loads remote code. |
 | `contextMenus` | 划词翻译右键菜单 | Adds a context-menu item for translating the user's selected text. |
+| `optional_permissions: nativeMessaging` | 可选的扫描 PDF 系统 OCR 预览：用户在设置页点击授权后，才与用户自己安装的本机 OCR 连接器通信；未授权时不请求、不启动宿主 | Optional, requested only after a user click in Settings. Lets the reader send scanned PDF page images to a local OCR helper the user installed themselves (Windows OCR / Apple Vision). Images stay on the device; nothing is downloaded or executed by the extension. |
 | `host_permissions: <all_urls>` | 在用户打开的任意网页运行内容脚本读取待翻正文；向用户填写的任意 API 地址发请求 | Reads page text only when the user translates, and sends it only to the endpoint the user configures. No background browsing, no history collection, no ad or analytics use. Broad host access is required because the user can choose any page and any API endpoint. |
 | `all_frames: true` | iframe 内的正文、选区和嵌入播放器 | The content script runs in subframes so embedded text and selections can be translated. Translation is initiated by the user, or by the optional auto-translate setting the user enables. |
 | YouTube / Bilibili 页面脚本（`world: MAIN`） | 只在 manifest 列出的 YouTube / youtube-nocookie 域和哔哩哔哩视频页读取播放器已加载的字幕；无扩展 API Key | Reads subtitle data already loaded by the player on the listed YouTube and Bilibili video pages. No key or extension API is exposed to the page. |
@@ -157,6 +158,8 @@ Optional privacy masking: open Settings → Privacy, enable `AI privacy masking`
 
 Video captions are off by default. First confirm no translation API request for captions with that setting off (the local caption hook can still run). Enable subtitle translation, open a YouTube video with an available CC track or a Bilibili video with an official subtitle track, enable captions, and verify bilingual captions. Seek, change video or part, then disable the feature. No track and hardcoded subtitles are unsupported, not test failures. Also check mobile YouTube, youtube-nocookie embeds and Bilibili locale-prefixed URLs where accessible.
 
+Document reader: from the popup choose Documents, import a small DRM-free EPUB, a TXT file and a text PDF. Check the table of contents, Bilingual mode and, for the PDF, the side-by-side layout preview with its notice above the page. Files stay in the extension's local storage; only paragraphs being translated go to the configured endpoint. The system OCR preview for scanned PDFs is optional, off by default, and needs a separately installed local component plus the optional nativeMessaging permission; it is not required for review, and without it scanned pages simply show a notice.
+
 Open accounts.google.com and both Chrome Web Store URL patterns; confirm automatic general content scripts are absent. Browser-internal pages and the store are not translation targets. Report errors without sharing private page content or keys.
 
 ## 素材清单
@@ -175,7 +178,7 @@ Open accounts.google.com and both Chrome Web Store URL patterns; confirm automat
 | 事项 | 说明 |
 |---|---|
 | 开发者账号 | 已完成（Chrome）；后续保持 2FA |
-| 商店包上传 | 两店线上版本见[当前状态](#当前状态)；商店材料仍为 0.16.4，下一轮按届时最新的 [GitHub Release](https://github.com/Suethekitten/Rimefox/releases) 出同版包，尚未上传 |
+| 商店包上传 | 两店线上版本见[当前状态](#当前状态)；下一轮按届时最新的 [GitHub Release](https://github.com/Suethekitten/Rimefox/releases)（计划 0.18.0）用 `node tools/package-store.mjs` 从该版本标签出包，尚未上传 |
 | 截图 / 宣传图 | 中英文各 5 张仍为 0.16.4（真实扩展 + 本地假接口）；下一轮上架前按要提交的版本重拍并核对版本 |
 | 审核专用 API Key | 首次审核已通过；后续更新沿用同一个限额、可撤销的 Key |
 | 隐私政策 URL | 已可用：GitHub `blob` 页面公开无需登录；如果希望更正式，可部署静态页面 |
