@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-11。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.17.x 完成 TXT / Markdown / LOG 阅读、PDF 版式翻译预览与系统 OCR 预览，0.18.0 扩大版式预览覆盖，范围与待验收项见 [0.18 交接](NEXT-MINOR-HANDOVER.md)。实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-12。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.17.x 完成 TXT / Markdown / LOG 阅读、PDF 版式翻译预览与系统 OCR 预览，0.18.0 扩大版式预览覆盖，范围与待验收项见 [0.18 交接](NEXT-MINOR-HANDOVER.md)。实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
 
 ---
 
@@ -99,6 +99,7 @@
 | 0.17.5 | Windows 系统 OCR 组件更新到 `0.2.0-preview.2`：倾斜扫描文字框修正、MSIX 重定向安装检查 |
 | 0.17.6 | 欢迎页配置说明与文档阅读入口更新；字幕额度暂不可读时暂停新的付费请求 |
 | 0.18.0 | PDF 版式预览按块覆盖（目录页、侧边竖排标题、未放置原因提示）；TXT 按章节分章；阅读器英文界面；字体上限 64 MB |
+| 0.18.1 | PDF 版式预览向上滚动不再被扯回；链接之间夹着引用的段落可在仅译文模式下换序显示 |
 
 > 排期拍板（2026-10）：PDF 翻译（P1-4）不进 0.10.0，改为独立项目推进（0.10.0 实际发布液态玻璃）；行内标签保真（P1-2）顺延到 0.12.0。
 >
@@ -211,6 +212,10 @@ Windows 系统 OCR 组件 `0.2.0-preview.2` 的组件 ZIP、Windows 体验包和
 ### 0.18.0（PDF 版式预览覆盖）
 
 PDF「双列版式（预览）」从页级判断改成块级支持：横排目录条目翻译并保留页码，90°／270° 旋转标题按原方向放置，页面上方说明未放置的数量与原因并提供完整译文入口。同版还有 TXT 按章节分章、阅读器英文界面、字体上限 64 MB 和 YouTube 人工中文字幕时间轴修复。真实 PDF 样本与 Windows 上浏览器到 OCR 宿主的端到端仍待验收，见 [0.18 交接](NEXT-MINOR-HANDOVER.md#6-验收)。发布状态见 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases)。
+
+### 0.18.1（补丁）
+
+修复版式预览向上滚动回弹（[Issue #18](https://github.com/Suethekitten/Rimefox/issues/18)）：没有页图的页不再按整页宽占位，渲染与回收期间页高保持不变。仅译文模式下，链接之间夹着文献引用的段落可以在引用隔开的各段内调换链接顺序。发布状态见 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases)。
 
 ### 下一步
 

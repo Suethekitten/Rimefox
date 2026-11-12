@@ -889,7 +889,15 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.18.0）
+## 14. 本版技术记录（0.18.1）
+
+- **版式预览向上滚动回弹（[Issue #18](https://github.com/Suethekitten/Rimefox/issues/18)）**：原因是没有页图的页（未渲染或画布被回收）按整页宽乘比例占位，约为渲染后的两倍高；上方的页重渲染时缩回去，下面的内容被整体上移。修法三层：`reader.css` 用两个伪元素让未渲染页按「提示 + 入口两行 + 半宽页图」占位；`holdPdfPageHeight` 在排队渲染和两张画布各自被回收时把页高写成固定 `height`，`renderPdfPage` 在同一步里放开并补上文本块与版式层；`keepPdfScroll` 对页顶在视口上方的页，按高度差补偿滚动位置（提示折行、译文晚到、OCR 结果）。提示与「查看本页完整译文」固定行高、无外边距，不再跟随段间距 / 行高设置。细节见 [PDF 维护交接](docs/PDF-HANDOFF.md#版式译文预览)。
+- **链接段内换序**：`content/dom.js` 的 `reorderPlan` 以非链接原子（引用 / notranslate 等）为界把链接分段，链接只在自己那一段里换序，每段各有边界，没换序的段不移动节点；链接越过非链接原子、非链接原子换位仍返回空计划并走安全失败。比 0.18.0 更严的一处：「引用、链接、链接」里引用被挪到末尾时，以前会给出计划，现在拒绝。契约见 [翻译引擎交接 §3.6](docs/TRANSLATION-ENGINE-HANDOFF.md)。
+- **测试**：`tools/e2e-pdf-reader.mjs` 新增样本 `layout-scroll.pdf`（10 页同尺寸，像素比 2 让预算只留约 4 页），检查回收后向上滚、三种状态页高一致、跳到后面再向上滚；`tools/e2e-link-order.mjs` 新增冻结的 en.wikipedia「Corruption in South Africa」第三段（control / reorder / cross），`ar-reorder` 由预期失败改为预期成功；`selftest/link-order.js` 增加分段直测。
+- **验证**：macOS + Chrome 本机跑 Node 全量用例、离线自检、`e2e-extension`、`e2e-inline-layout`、`e2e-link-order`、`e2e-reader`、`e2e-pdf-reader`。**未验收**：Windows / Edge 上用真实多页 PDF 复核滚动；真实模型在维基百科页面上的换序。
+- **原生组件**：沿用 0.17.5 Windows OCR 和 0.17.2 macOS OCR 附件，本版没有改动组件。
+
+### 0.18.0 记录
 
 - **PDF 版式预览改为按块判定**：`pageBlocks` 的每个块带自己的定位行与方向，`layoutRect` 把文字坐标投影到实际视口并给出旋转框；一处旋转或斜排文字只影响它自己，页面 `/Rotate` 与文字旋转分别合成。90°／270° 的块按框中心旋转覆盖层，旋转框与其他块外框相交时两边都保留原文；斜排、原生竖排保留原文。实现与限制见 [PDF 维护交接](docs/PDF-HANDOFF.md#版式译文预览)。
 - **目录页**：无点线目录靠目录标题，或「左侧章号 + 标题 + 右侧对齐页码」的连续条目识别；条目只送标题，章号和页码从原文拼回，右栏页码单独右对齐。目录条目的缓存原文从整条变成标题，升级后这些条目首次翻译不命中旧缓存。
