@@ -173,8 +173,15 @@ try {
     { name: 'en-reorder-dual', page: 'wiki-ai-p1-events.html', reply: 'order-reorder.json', mode: 'dual' },
     { name: 'ar-control', page: 'wiki-ar-p1.html', reply: 'ar-control.json', mode: 'translation' },
     { name: 'ar-control-dual', page: 'wiki-ar-p1.html', reply: 'ar-control.json', mode: 'dual' },
-    { name: 'ar-reorder', page: 'wiki-ar-p1.html', reply: 'ar-reorder.json', mode: 'translation', fail: 'unsupported-inline-order', switchMode: true },
-    { name: 'ar-reorder-dual', page: 'wiki-ar-p1.html', reply: 'ar-reorder.json', mode: 'dual' }
+    // 一个链接在 [4] 与 [5] 之间的链接段里换位：0.18.0 及以前因为两侧都有引用被整段拒绝，现在按段内重排。
+    { name: 'ar-reorder', page: 'wiki-ar-p1.html', reply: 'ar-reorder.json', mode: 'translation', reorder: true, switchMode: true },
+    { name: 'ar-reorder-dual', page: 'wiki-ar-p1.html', reply: 'ar-reorder.json', mode: 'dual' },
+    // 文献引用把链接隔成几段：链接只在自己那一段里换序（South Africa 第三段：链接 [5] 链接 链接 [6] 链接）。
+    { name: 'za-control', page: 'wiki-za-p3-events.html', reply: 'za-control.json', mode: 'translation', el: 'mwIg' },
+    { name: 'za-reorder', page: 'wiki-za-p3-events.html', reply: 'za-reorder.json', mode: 'translation', el: 'mwIg', reorder: true, switchMode: true },
+    { name: 'za-reorder-dual', page: 'wiki-za-p3-events.html', reply: 'za-reorder.json', mode: 'dual', el: 'mwIg' },
+    // 链接越过文献引用换到另一段：仍然拒绝，整段保留原文；切双语 / 切回 / 重新翻译走缓存的失败路径。
+    { name: 'za-cross', page: 'wiki-za-p3-events.html', reply: 'za-cross.json', mode: 'translation', el: 'mwIg', fail: 'unsupported-inline-order', switchMode: true }
   ]) {
     replies = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'replies', scenario.reply), 'utf8')).exact;
     const record = { ...scenario, replies, startRequest: requests.length };
@@ -185,7 +192,7 @@ try {
     const session = await attach(targetId);
     await until(() => evaluate(session, 'document.readyState === "complete" && document.documentElement.hasAttribute("data-dt")'), 'content script ' + scenario.name);
     await evaluate(session, `(function(){
-      var el=document.getElementById(${JSON.stringify(scenario.name.startsWith('ar-') ? 'mwBg' : 'mwDQ')});
+      var el=document.getElementById(${JSON.stringify(scenario.el || (scenario.name.startsWith('ar-') ? 'mwBg' : 'mwDQ'))});
       function nodes(){var w=document.createTreeWalker(el,NodeFilter.SHOW_ALL),out=[];for(var n=w.nextNode();n;n=w.nextNode())out.push(n);return out;}
       var links=Array.prototype.slice.call(el.querySelectorAll('a'));
       window.__linkOrderSource={el:el,html:el.outerHTML,nodes:nodes(),currentNodes:nodes,links:links,attrs:links.map(function(a){return Array.prototype.map.call(a.attributes,function(v){return[v.name,v.value];});})};

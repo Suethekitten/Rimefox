@@ -3428,47 +3428,54 @@
     return marks.order || [];
   }
 
-  // 有限的“原链接节点重排”：只处理同一父元素下的普通正文链接，且链接是一段连续区；
-  // 非链接原子只能在它前面或后面（常见结构：p 里若干 <a>，末尾一个文献引用）。链接仍是原来的 DOM 节点，只改变同一父级内的
-  // childNodes 顺序；事件、href、title、id 都不重建。其他结构继续走安全失败，不能猜。
+  // 有限的“原链接节点重排”：只处理同一父元素下的普通正文链接。非链接原子（文献引用 / notranslate 等）
+  // 把段落里的链接隔成几段，链接只能在自己那一段里换序，不能越过非链接原子；常见结构：
+  // p 里「链接 [5] 链接 链接 [6] 链接」，译文把中间两个链接对调。链接仍是原来的 DOM 节点，只改变同一父级内的
+  // childNodes 顺序；事件、href、title、id 都不重建。没有换序的段不移动节点。其他结构继续走安全失败，不能猜。
   function reorderPlan(unit, marks, order, area, multi) {
     if (multi || area !== 'content' || !unit.inlineResult || !unit.keep || unit.keep.length < 2) return null;
     if (unit.el && unit.el.isContentEditable) return null;
     if (unit.el && unit.el.closest && unit.el.closest('[contenteditable]')) return null;
     if (unit.el && unit.el.closest && unit.el.closest('[data-reactroot],[data-reactid]')) return null;
     var keep = unit.keep;
-    var links = [];
-    var nonlinks = [];
     var i;
+    // 源顺序：segments[n] 是第 n 个非链接原子之前的那段链接；next 是这段后面的非链接原子（没有则 -1）。
+    var segments = [];
+    var segOf = [];
+    var nonlinks = [];
+    var current = { links: [], next: -1 };
+    var linkCount = 0;
     for (i = 0; i < keep.length; i += 1) {
-      if (keep[i].kind === 'link') links.push(i);
-      else nonlinks.push(i);
-    }
-    if (links.length < 2) return null;
-    var linkFirst = links[0];
-    var linkLast = links[links.length - 1];
-    // 源链接必须是一段连续的正文链接区；引用 / notranslate 等只能在它前面或后面。
-    for (i = 0; i < nonlinks.length; i += 1) {
-      if (nonlinks[i] > linkFirst && nonlinks[i] < linkLast) return null;
-    }
-    // 目标顺序里链接也必须是一段连续区，非链接原子相对顺序不变。
-    var targetLinks = [];
-    var targetNon = [];
-    var targetLinkFirst = -1;
-    var targetLinkLast = -1;
-    for (i = 0; i < order.length; i += 1) {
-      var index = order[i];
-      if (keep[index].kind === 'link') {
-        if (targetLinkFirst < 0) targetLinkFirst = i;
-        targetLinkLast = i;
-        targetLinks.push(index);
+      if (keep[i].kind === 'link') {
+        current.links.push(i);
+        segOf[i] = segments.length;
+        linkCount += 1;
       } else {
-        targetNon.push(index);
-        if (targetLinkFirst >= 0 && i < targetLinkLast) return null;
+        nonlinks.push(i);
+        current.next = i;
+        segments.push(current);
+        current = { links: [], next: -1 };
       }
     }
-    if (targetLinks.length !== links.length || targetNon.length !== nonlinks.length) return null;
-    if (targetNon.join(',') !== nonlinks.join(',')) return null;
+    segments.push(current);
+    if (linkCount < 2) return null;
+    // 目标顺序：非链接原子的先后不变，每个链接仍落在原来那一段里。
+    var targets = segments.map(function () { return []; });
+    var seen = 0;
+    var passed = 0;
+    for (i = 0; i < order.length; i += 1) {
+      var index = order[i];
+      if (!keep[index]) return null;
+      if (keep[index].kind === 'link') {
+        if (segOf[index] !== passed) return null;
+        targets[passed].push(index);
+        seen += 1;
+      } else {
+        if (index !== nonlinks[passed]) return null;
+        passed += 1;
+      }
+    }
+    if (seen !== linkCount || passed !== nonlinks.length) return null;
     // 目标标记位置必须随目标 token 顺序单调。
     var prev = -1;
     for (i = 0; i < order.length; i += 1) {
@@ -3476,28 +3483,33 @@
       if (!(at >= 0) || at < prev) return null;
       prev = at;
     }
-    for (i = 0; i < links.length; i += 1) {
-      var el = keep[links[i]].el;
-      if (!el || tagOf(el) !== 'A' || el.parentNode !== unit.el) return null;
-      if (el.isContentEditable) return null;
-      if (el.querySelector && el.querySelector('a,button,input,textarea,select,[contenteditable]')) return null;
-    }
-    // 链接块后面第一个非链接原子是稳定边界。没有后缀原子时，以源里最后一个链接原来的下一个兄弟为边界，
-    // 不能追加到父级末尾：共享 <br><br> 容器的末尾在后面段落之后，整段 <p> 末尾的 <br> / 图标也会被挪到链接前面。
-    var boundary = null;
-    for (i = 0; i < nonlinks.length; i += 1) {
-      if (nonlinks[i] > linkLast) {
-        boundary = keep[nonlinks[i]].el;
-        if (!boundary || boundary.parentNode !== unit.el) return null;
-        break;
+    var moved = [];
+    var boundaryOf = [];
+    for (var s = 0; s < segments.length; s += 1) {
+      var source = segments[s].links;
+      var target = targets[s];
+      if (target.length !== source.length) return null;
+      var same = true;
+      for (i = 0; i < source.length; i += 1) if (source[i] !== target[i]) { same = false; break; }
+      if (same) continue;
+      for (i = 0; i < source.length; i += 1) {
+        var el = keep[source[i]].el;
+        if (!el || tagOf(el) !== 'A' || el.parentNode !== unit.el) return null;
+        if (el.isContentEditable) return null;
+        if (el.querySelector && el.querySelector('a,button,input,textarea,select,[contenteditable]')) return null;
+      }
+      // 这一段后面的非链接原子是稳定边界。没有后缀原子时，以源里这段最后一个链接原来的下一个兄弟为边界，
+      // 不能追加到父级末尾：共享 <br><br> 容器的末尾在后面段落之后，整段 <p> 末尾的 <br> / 图标也会被挪到链接前面。
+      var boundary = segments[s].next >= 0 ? keep[segments[s].next].el : keep[source[source.length - 1]].el.nextSibling;
+      if (segments[s].next >= 0 && !boundary) return null;
+      if (boundary && boundary.parentNode !== unit.el) return null;
+      for (i = 0; i < target.length; i += 1) {
+        moved.push(target[i]);
+        boundaryOf[target[i]] = boundary;
       }
     }
-    if (!boundary) boundary = keep[linkLast].el.nextSibling;
-    if (boundary && boundary.parentNode !== unit.el) return null;
-    var same = true;
-    for (i = 0; i < links.length; i += 1) if (links[i] !== targetLinks[i]) { same = false; break; }
-    if (same) return null;
-    return { links: targetLinks, boundary: boundary };
+    if (!moved.length) return null;
+    return { links: moved, boundaryOf: boundaryOf };
   }
 
   // 一行里各原子的落点（行内偏移，按页面顺序单调不减）。
@@ -3791,7 +3803,7 @@
     var saved = [];
     if (reorder) {
       order.forEach(function (index) {
-        if (keep[index].kind === 'link') moveNode(keep[index].el, unit.el, reorder.boundary || null, ops);
+        if (reorder.links.indexOf(index) >= 0) moveNode(keep[index].el, unit.el, reorder.boundaryOf[index] || null, ops);
       });
     }
     // 先计划、再写入。多个原子共享同一包装时，固定的 before 让外移后的文字仍按页面顺序追加。

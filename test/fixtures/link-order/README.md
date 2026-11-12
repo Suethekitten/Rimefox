@@ -15,3 +15,8 @@ checks visible text and href correspondence, failure state, event/node identity,
 cache reuse on mode changes, dynamic replacement, and exact restoration. No paid
 API or external page is used. Output JSON and screenshots go to a temporary
 directory, or the directory supplied with `--out`.
+
+`wiki-za-p3-events.html` and `za-*.json` were added for 0.18.1: the third lead paragraph of
+the English Wikipedia article "Corruption in South Africa" (link, [5], link, link, [6], link),
+frozen from the page HTML on 2026-11-12. `za-reorder` swaps the two links between [5] and [6];
+`za-cross` moves a link across a citation and must still be refused.

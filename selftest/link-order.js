@@ -120,6 +120,15 @@
       record('cite:hard-line-swap', citationLines, function (u) { return '第一项实验观察' + atom(u, 1) + '支持此解释。\n第二项实验观察' + atom(u, 0) + '同样支持此解释。'; }, { fail: true });
       var mixed = 'The article describes <a href="/alpha">alpha</a> in the experimental findings<sup class="reference"><a href="#cite_note-1">[1]</a></sup> before reaching its conclusion.';
       record('mixed:link-cite-swap', mixed, function (u) { return '文献' + atom(u, 1) + '在结论前描述' + atom(u, 0, '甲') + '的实验发现。'; }, { fail: true });
+      // 文献引用把链接隔成几段：链接只在自己那一段里换序，不越过引用；没换序的段不移动节点。
+      var segmented = 'A scandal involving <a href="/gupta">the family</a> resurfaced in public.<sup class="reference"><a href="#cite_note-5">[5]</a></sup> Complaints include <a href="/award">awarding contracts</a> based on <a href="/nepotism">nepotism</a> and other favours.<sup class="reference"><a href="#cite_note-6">[6]</a></sup> The <a href="/zondo">commission</a> was created later.';
+      record('segments:control', segmented, function (u) { return '涉及' + atom(u, 0, '该家族') + '的丑闻再次曝光。' + atom(u, 1) + '指控包括在' + atom(u, 2, '授予合同') + '时讲' + atom(u, 3, '裙带关系') + '等。' + atom(u, 4) + '后来成立了' + atom(u, 5, '委员会') + '。'; }, { noWarning: true });
+      record('segments:swap-between-citations', segmented, function (u) { return '涉及' + atom(u, 0, '该家族') + '的丑闻再次曝光。' + atom(u, 1) + '指控包括基于' + atom(u, 3, '裙带关系') + atom(u, 2, '授予合同') + '等。' + atom(u, 4) + '后来成立了' + atom(u, 5, '委员会') + '。'; }, { reorder: true,
+        inspect: function (p, links) { return links[0].previousSibling !== links[2] && links[3].nextElementSibling === links[2] && links[2].nextElementSibling === p.querySelectorAll('sup')[1]; } });
+      record('segments:link-crosses-citation', segmented, function (u) { return '丑闻再次曝光。' + atom(u, 1) + '指控包括基于' + atom(u, 3, '裙带关系') + atom(u, 2, '授予合同') + '，涉及' + atom(u, 0, '该家族') + '等。' + atom(u, 4) + '后来成立了' + atom(u, 5, '委员会') + '。'; }, { fail: true });
+      record('segments:citation-moves-past-links', 'The experimental findings<sup class="reference"><a href="#cite_note-1">[1]</a></sup> compare <a href="/alpha">alpha</a> with <a href="/beta">beta</a> in detail today.', function (u) { return '实验发现详细比较了' + atom(u, 2, '乙') + '与' + atom(u, 1, '甲') + '。' + atom(u, 0); }, { fail: true });
+      record('segments:wrapped-link-in-unmoved-segment', 'The book <i><a href="/title">Long Walk</a></i> appeared first.<sup class="reference"><a href="#cite_note-1">[1]</a></sup> It compares <a href="/alpha">alpha</a> with <a href="/beta">beta</a> in detail.', function (u) { return '《' + atom(u, 0, '漫漫长路') + '》最先出版。' + atom(u, 1) + '它详细比较了' + atom(u, 3, '乙') + '与' + atom(u, 2, '甲') + '。'; }, { reorder: true,
+        inspect: function (p, links) { return links[0].parentNode.tagName === 'I' && links[0].parentNode.parentNode === p; } });
       var categories = [
         ['protect', '<span class="notranslate">LocalSecret</span>'],
         ['mention', '<a href="/profile/alice" class="mention">@alice</a>'],
