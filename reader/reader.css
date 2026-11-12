@@ -212,9 +212,17 @@ button { cursor: pointer; }
 .pdf-layout-toc { display: flex; justify-content: space-between; gap: 0.35em; }
 .pdf-layout-toc span:first-child { min-width: 0; }
 .pdf-layout-toc span:last-child { flex-shrink: 0; }
-.pdf-layout-notice { grid-column: 1 / -1; grid-row: 2; margin: 0; font-size: 12px; line-height: 1.6; color: var(--reader-muted); }
+/* 提示和入口是界面行：不跟随正文的段间距 / 行高设置，高度固定，未渲染页的占位才能算准。 */
+#bookContent .pdf-layout-notice { grid-column: 1 / -1; grid-row: 2; margin: 0; font-size: 12px; line-height: 1.6; color: var(--reader-muted); }
 .pdf-layout-text { grid-column: 1 / -1; grid-row: 3; min-width: 0; font-size: 13px; }
-.pdf-layout-text summary { cursor: pointer; }
+.pdf-layout-text summary { cursor: pointer; line-height: 1.75; }
+/* 版式预览里还没渲染的页：按渲染后的结构占位（提示 + 完整译文入口两行，再加半宽页图），不再用整页宽算高度。
+   渲染前后高度一致，视口上方的页重新渲染时才不会把下面的内容推走（Issue #18）。 */
+#bookContent[data-pdf-facsimile="1"] .pdf-page:not([data-rendered="1"]) { aspect-ratio: auto; }
+#bookContent[data-pdf-facsimile="1"] .pdf-page:not([data-rendered="1"])::before { content: ''; grid-column: 1; grid-row: 4; aspect-ratio: 1 / var(--pdf-ratio, 1.414); }
+#bookContent[data-pdf-facsimile="1"] .pdf-page:not([data-rendered="1"])::after { content: ''; grid-column: 1 / -1; grid-row: 2 / span 2; height: calc(12px * 1.6 + 12px + 13px * 1.75); }
+/* 文本块面板在版式预览里只出现在「查看本页完整译文」里；直接挂在页上的（渲染中 / 已回收）不显示。 */
+#bookContent[data-pdf-facsimile="1"] .pdf-page > .pdf-blocks { display: none; }
 /* 版式预览：提示与完整译文在原页上方，两张页图下移到第 4 行。 */
 #bookContent[data-pdf-facsimile="1"] .pdf-page > canvas,
 #bookContent[data-pdf-facsimile="1"] .pdf-page > .pdf-layout-view { grid-row: 4; }

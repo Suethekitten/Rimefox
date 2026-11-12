@@ -135,6 +135,13 @@ fs.writeFileSync(path.join(outDir, 'layout-figure.pdf'), buildPdf([{ content:
   'BT /F1 10 Tf 1 0 0 1 290 30 Tm (12) Tj ET\n'
 }]));
 
+// 10 页同尺寸竖版正文：版式预览滚动回归（Issue #18）。页数要多到画布预算留不住全部页，
+// 且每页同为竖版，未渲染页的占位高度才和真实书籍一样按竖版比例算。
+fs.writeFileSync(path.join(outDir, 'layout-scroll.pdf'), buildPdf(Array.from({ length: 10 }, (_, i) => ({
+  content: 'BT /F1 16 Tf 1 0 0 1 60 760 Tm (Scroll sample heading ' + (i + 1) + ') Tj ET\n' +
+    textBlock(prose.map((line) => 'Leaf ' + (i + 1) + ': ' + line), 60, 700, 16)
+}))));
+
 // 中文 CID 字体：Type0 + GBK-EUC-H + Adobe-GB1，故意不带 ToUnicode。
 // 没有 cmaps 时 pdf.js 取不到正确 Unicode（这正是 cmaps 要验证的场景）。
 // <C4E3BAC3CAC0BDE7> = GBK 编码的「你好世界」。

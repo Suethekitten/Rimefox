@@ -702,6 +702,7 @@ function setPdfZoom(value) {
     if (blocks) blocks.remove();
     delete el.dataset.rendered;
     el.style.minHeight = '';
+    el.style.height = '';
   }
   renderVisiblePdfPages();
 }
@@ -709,6 +710,25 @@ function setPdfZoom(value) {
 function applyPdfZoom(delta) {
   if (!state.pdf) return;
   setPdfZoom(state.pdfZoom + delta);
+}
+
+// 版式预览（Issue #18）：一页的两张页图在渲染 / 回收之间进出时锁住这一页的高度。
+// 视口上方的页高一变，下面的内容就被整体推走，向上滚动时表现为被往下扯回。
+function holdPdfPageHeight(el) {
+  if (state.book?.pdfMode === 'pdf-layout') el.style.height = el.getBoundingClientRect().height + 'px';
+}
+
+// 这一页从视口上方开始时，它自己的高度变化（提示折行、译文到达后重排）按差值把滚动位置补回来，
+// 屏幕上已经看到的内容留在原地。页顶在视口内的页不补偿：那是正常的向下展开。
+function keepPdfScroll(el, mutate) {
+  if (state.book?.pdfMode !== 'pdf-layout' || !el || !el.isConnected) return mutate();
+  const before = el.getBoundingClientRect();
+  const result = mutate();
+  if (before.top < 0 && el.isConnected) {
+    const delta = el.getBoundingClientRect().bottom - before.bottom;
+    if (Math.abs(delta) >= 1) window.scrollBy(0, delta);
+  }
+  return result;
 }
 
 async function renderPdfPage(el, index, epoch) {
@@ -740,7 +760,8 @@ async function renderPdfPage(el, index, epoch) {
   el.dataset.rendered = '1';
   const result = await doc.render(index, canvas, renderScale, { onEvict() {
     // Keep the layout stable while an offscreen bitmap is released.
-    el.style.minHeight = el.offsetHeight + 'px';
+    if (state.book?.pdfMode === 'pdf-layout') holdPdfPageHeight(el);
+    else el.style.minHeight = el.offsetHeight + 'px';
     clearPdfLayout(el, doc);
     pdfLayoutPages.delete(el);
     canvas.remove();
@@ -748,22 +769,26 @@ async function renderPdfPage(el, index, epoch) {
   } });
   if (doc !== state.pdf || epoch !== pdfRasterEpoch || !el.isConnected) return;
   pdfLayoutPages.set(el, { viewport: loaded.viewport, blocks: loaded.blocks });
-  el.style.minHeight = '';
-  if (result.limited || renderScale < requestedScale) {
-    const label = el.querySelector('.pdf-page-label');
-    if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 页面较大，已降低预览分辨率';
-  }
-  if (loaded.blocks.length) {
-    appendPdfBlocks(el, index, loaded.blocks, doc);
-  } else {
-    const note = document.createElement('p');
-    note.className = 'pdf-empty-text';
-    note.dataset.i18n = '';
-    note.textContent = loaded.hasTextLayer ? '本页有文字层，但没有可翻译的正文。' : '本页没有可提取的文字（可能是扫描页）。';
-    el.appendChild(note);
-    if (OCR_UI_ENABLED && !loaded.hasTextLayer) handlePdfOcrPage(el, index, doc).catch(() => {});
-    if (state.book.pdfMode === 'pdf-layout') updatePdfLayout(el, loaded, [], doc);
-  }
+  // 放开高度锁、补上文本块和版式层在同一步里完成，中间不留给浏览器一次只有半截内容的布局。
+  keepPdfScroll(el, () => {
+    el.style.minHeight = '';
+    el.style.height = '';
+    if (result.limited || renderScale < requestedScale) {
+      const label = el.querySelector('.pdf-page-label');
+      if (label) label.textContent = '第 ' + index + ' / ' + doc.numPages + ' 页 · 页面较大，已降低预览分辨率';
+    }
+    if (loaded.blocks.length) {
+      appendPdfBlocks(el, index, loaded.blocks, doc);
+    } else {
+      const note = document.createElement('p');
+      note.className = 'pdf-empty-text';
+      note.dataset.i18n = '';
+      note.textContent = loaded.hasTextLayer ? '本页有文字层，但没有可翻译的正文。' : '本页没有可提取的文字（可能是扫描页）。';
+      el.appendChild(note);
+      if (OCR_UI_ENABLED && !loaded.hasTextLayer) handlePdfOcrPage(el, index, doc).catch(() => {});
+      if (state.book.pdfMode === 'pdf-layout') updatePdfLayout(el, loaded, [], doc);
+    }
+  });
 }
 
 // 原版视图的文本块面板：文字层与 OCR 结果共用。
@@ -944,6 +969,10 @@ async function handlePdfOcrPage(el, index, doc, refresh) {
     return;
   }
   if (empty) empty.remove();
+  keepPdfScroll(el, () => applyPdfOcrBlocks(el, index, doc, result));
+}
+
+function applyPdfOcrBlocks(el, index, doc, result) {
   appendPdfBlocks(el, index, result.blocks, doc, { ocr: true });
   // 版式预览改用识别出的文本块；页面画布仍是这一轮渲染的那张（缩放重画时会重新走到这里）。
   const layout = pdfLayoutPages.get(el);
@@ -984,7 +1013,7 @@ function applyPdfTranslations(index) {
   const el = document.querySelector('.pdf-page[data-page="' + index + '"]');
   applyPdfTranslationsTo(el, texts);
   applyPdfTranslationsTo(document.querySelector('#pdfFlow .pdf-flow-page[data-page="' + index + '"]'), texts);
-  if (el && state.book?.pdfMode === 'pdf-layout' && pdfLayoutPages.has(el)) updatePdfLayout(el, pdfLayoutPages.get(el), texts, state.pdf);
+  if (el && state.book?.pdfMode === 'pdf-layout' && pdfLayoutPages.has(el)) keepPdfScroll(el, () => updatePdfLayout(el, pdfLayoutPages.get(el), texts, state.pdf));
 }
 
 function visibleFlowPageIndexes() {
@@ -1590,6 +1619,7 @@ function renderVisiblePdfPages() {
   for (const el of pages) {
     if (el.dataset.rendered === '1') continue;
     // 一页一页排队：pdf.js 的 render task 并发容易互相拖慢
+    holdPdfPageHeight(el);
     el.dataset.rendered = '1';
     const epoch = pdfRasterEpoch;
     pdfRenderQueue = pdfRenderQueue
@@ -1597,6 +1627,7 @@ function renderVisiblePdfPages() {
       .catch((err) => {
         if (!el.isConnected || epoch !== pdfRasterEpoch || err.name === 'AbortError' || err.name === 'RenderingCancelledException') return;
         delete el.dataset.rendered;
+        el.style.height = '';
         let note = el.querySelector('.pdf-render-failed');
         if (!note) {
           note = document.createElement('p');
@@ -2085,7 +2116,11 @@ function bindEvents() {
     clearTimeout(pdfLayoutResizeTimer);
     if (state.book?.pdfMode === 'pdf-layout') pdfLayoutResizeTimer = setTimeout(() => {
       if (!state.pdf || state.book?.pdfMode !== 'pdf-layout') return;
-      for (const el of document.querySelectorAll('.pdf-page')) if (pdfLayoutPages.has(el)) updatePdfLayout(el, pdfLayoutPages.get(el), state.pdfTrans.get(Number(el.dataset.page)) || [], state.pdf);
+      for (const el of document.querySelectorAll('.pdf-page')) {
+        if (pdfLayoutPages.has(el)) updatePdfLayout(el, pdfLayoutPages.get(el), state.pdfTrans.get(Number(el.dataset.page)) || [], state.pdf);
+        // 宽度变了，已回收页锁住的旧高度不再准确：退回按比例计算的占位高度。
+        else if (el.dataset.rendered !== '1') el.style.height = '';
+      }
     }, 150);
   }, { passive: true });
   // pdf.js 的 render 靠 rAF 推进；标签页切到后台会暂停，回来时必须补渲染

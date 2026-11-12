@@ -34,7 +34,14 @@ export function updatePdfLayout(el, loaded, texts, doc) {
   const view = document.createElement('div'); view.className = 'pdf-layout-view';
   view.setAttribute('aria-label', t('保留版式的译文页（预览）'));
   const canvas = document.createElement('canvas'); view.appendChild(canvas); el.appendChild(view);
-  doc.copyCanvas(source, canvas, () => { view.remove(); if (view.dataset.disposing !== '1') delete el.dataset.rendered; });
+  doc.copyCanvas(source, canvas, () => {
+    if (view.dataset.disposing !== '1') {
+      // 译文页的画布被单独回收：先锁住页高，再让这一页回到「待渲染」，否则占位规则会改变高度（Issue #18）。
+      if (el.isConnected) el.style.height = el.getBoundingClientRect().height + 'px';
+      delete el.dataset.rendered;
+    }
+    view.remove();
+  });
   const width = view.getBoundingClientRect().width;
   const scale = width / loaded.viewport.width;
   const sx = source.width / loaded.viewport.width, sy = source.height / loaded.viewport.height;

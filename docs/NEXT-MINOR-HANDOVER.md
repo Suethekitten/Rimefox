@@ -103,7 +103,7 @@
 - **Edge 已由 CI 覆盖**：Checks 的 browser 任务在 Ubuntu / macOS / Windows 上用 Edge 跑离线自检、`e2e-reader` 与 `e2e-pdf-reader`，提交 `dcf3e54` 全部通过。本机没有 Edge，未做人工目视。
 - **Windows OCR 端到端已通过（用户本机，2026-11-12）**：组件 `0.2.0-preview.2` 在 Windows 上连接浏览器，打开 `ocr-scan.pdf`（2 页纯图片、无文字层），系统 OCR 识别中英文后翻成德文，版式预览覆盖 5 处。此前只有 CI 的宿主构建、倾斜识别与安装器覆盖，这条补上了浏览器经 Native Messaging 连宿主再覆盖译文的完整链路。0.18.0 没有改动 OCR 组件。
 - **真实 PDF 部分通过（用户本机，2026-11-12）**：Nicaragua Azul 第 6、7 页简体中文版式预览分别覆盖 12 处和 11 处，位置与页码正常。第 12 页（竖排标题 + 目录条目）由协作者继续验收；p001 / r002 目录页与真实图片密集页仍待测，取到样本后按 §4 核对。
-- **本轮验收发现的问题**：版式预览 + 已翻译时向上滚动会被向下扯回，已登记 [Issue #18](https://github.com/Suethekitten/Rimefox/issues/18)，按 0.18.1 补丁修复；不计入通过项。
+- **本轮验收发现的问题**：版式预览 + 已翻译时向上滚动会被向下扯回，已登记 [Issue #18](https://github.com/Suethekitten/Rimefox/issues/18)；修复已在 `main`（原因与做法见 [PDF 维护交接](PDF-HANDOFF.md#版式译文预览)），随 0.18.1 发布，待在 Windows / Edge 和 Nicaragua Azul 上复核；不计入通过项。
 
 ## 7. 开发交接
 

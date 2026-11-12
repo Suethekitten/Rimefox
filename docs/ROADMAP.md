@@ -130,7 +130,7 @@
 | P1-5 | **划词快捷键** | 小 | 低 | 监听在 `main.js`，等 P2-10 拆完再和整页翻译统一成「有选区就划词、没选区就整页」的自适应键（原 HANDOFF §10） |
 | P1-6 | **对齐实测** | 中 | 中 | 用真实模型统计 `align` 遵守率、悬停命中率、请求 / Token 变化、弱模型降级率；结论决定 P2-9 做什么（原 HANDOFF §10）。已有 2026-11-04 真实模型小样本验收（DeepSeek / Gemini，结构化对齐均回退段落），完整统计仍待做，见 [验收记录](archive/2026-11-04-real-model-acceptance.json) |
 | P1-7 | ✅ **医学专业模式**（0.11.0） | — | 中 | 全局 `medicalMode` + 100 条审核词库 + 医学规则 / 术语注入 + 缓存隔离；真实模型质量仍需抽样验收。实现与限制见 [PROFESSIONAL-TRANSLATION.md](PROFESSIONAL-TRANSLATION.md)，数据审计见 [MEDICAL-DATA-AUDIT.md](MEDICAL-DATA-AUDIT.md) |
-| P1-10 | **PDF 版式预览向上滚动回弹** | — | 中 | 版式预览 + 已翻译时向上滚动会被向下扯回；画布回收后的重渲染和提示行插入改变页高。已确认（0.18.0），见 [Issue #18](https://github.com/Suethekitten/Rimefox/issues/18)，按 0.18.1 补丁修复 |
+| P1-10 | **PDF 版式预览向上滚动回弹** | — | 中 | 版式预览 + 已翻译时向上滚动会被向下扯回：未渲染 / 已回收的页按整页宽占位，约为渲染后的两倍高，重渲染时缩回去。已在 `main` 修复（占位与渲染后等高、渲染期间锁住页高、视口上方的高度变化补偿滚动），随 0.18.1 发布，见 [Issue #18](https://github.com/Suethekitten/Rimefox/issues/18) 与 [PDF 维护交接](PDF-HANDOFF.md#版式译文预览) |
 
 ### P2 — 可配置性
 

@@ -666,6 +666,61 @@ await setPdfUiLang('zh');
 check('切回中文后 PDF 提示恢复中文', !!await until(() => pageEval(page, 'return document.querySelector(\'.pdf-page[data-page="1"] .pdf-layout-notice\').textContent.startsWith("版式预览：已替换 4 处")')));
 check('图片页的页码不送翻', !hits.sent.slice(beforeFigure).some((entry) => /^\d+$/.test(JSON.parse(entry)[3])), JSON.stringify(hits.sent.slice(beforeFigure).map((entry) => JSON.parse(entry)[3])));
 
+// Issue #18：版式预览里向上滚动，上方被回收的页重新渲染时不能把视口往下扯。
+// 逐步向下滚到最后一页（前面的页画布被回收），再逐步向上滚：每一步里，视口中部那一页的位移必须等于滚动量。
+// 像素比 2：每页两张画布更大，16M 像素预算只留得住约 4 页，和报告里的环境一致。
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false }, page);
+await openLayoutSample('layout-scroll.pdf', 'Scroll sample heading 1');
+await until(() => pageEval(page, 'return document.querySelectorAll(".pdf-page").length===10 && !!document.querySelector(\'.pdf-page[data-page="1"] .pdf-layout-view canvas\')?.width'));
+const SCROLL_PROBE = `
+  const settle = async () => { let last = -1, same = 0; for (let i = 0; i < 40 && same < 4; i++) { await new Promise((r) => setTimeout(r, 120)); const h = document.documentElement.scrollHeight + ':' + document.querySelectorAll('.pdf-layout-view canvas').length; same = h === last ? same + 1 : 0; last = h; } };
+  const pages = () => Array.from(document.querySelectorAll('.pdf-page'));
+  const heightOf = (n) => Math.round(document.querySelector('.pdf-page[data-page="' + n + '"]').getBoundingClientRect().height);
+  const step = 300;
+  // 逐步向上滚到顶：视口 70% 处那一页每一步的位移必须等于滚动量。
+  const scrollUp = async () => {
+    const up = [];
+    for (let i = 0; i < 80 && window.scrollY > 0; i++) {
+      const line = window.innerHeight * 0.7;
+      const ref = pages().find((el) => el.getBoundingClientRect().bottom > line);
+      if (!ref) break;
+      const top = ref.getBoundingClientRect().top, wanted = Math.min(step, window.scrollY);
+      window.scrollBy(0, -step);
+      await settle();
+      up.push({ page: Number(ref.dataset.page), moved: Math.round(ref.getBoundingClientRect().top - top), wanted: wanted });
+    }
+    return { steps: up.length, jumps: up.filter((one) => Math.abs(one.moved - one.wanted) > 3), endY: Math.round(window.scrollY) };
+  };
+`;
+// 第一段：从头向下滚到底（前面的页被回收），再向上滚回顶。
+const scrollProbe = await pageEval(page, `return (async () => {` + SCROLL_PROBE + `
+  await settle();
+  const placeholder = heightOf(10), rendered1 = heightOf(1);
+  for (let i = 0; i < 80 && window.scrollY + window.innerHeight < document.documentElement.scrollHeight - 2; i++) { window.scrollBy(0, step); await settle(); }
+  const evicted = pages().filter((el) => !el.querySelector(':scope > canvas')).map((el) => Number(el.dataset.page));
+  const evictedHeight = heightOf(1), rendered10 = heightOf(10), panelShown = pages().some((el) => { const b = el.querySelector(':scope > .pdf-blocks'); return !!b && b.getClientRects().length > 0; });
+  const up = await scrollUp();
+  return Object.assign(up, { evicted, placeholder, rendered10, rendered1, evictedHeight, rerendered1: heightOf(1), panelShown });
+})();`);
+check('版式预览：向上滚动时上方页面重渲染不把视口扯回', !!scrollProbe && scrollProbe.evicted.length >= 3 && scrollProbe.steps > 5 && scrollProbe.jumps.length === 0 && scrollProbe.endY === 0,
+  JSON.stringify(scrollProbe));
+check('版式预览：未渲染、已回收和渲染后的页高一致', !!scrollProbe && Math.abs(scrollProbe.placeholder - scrollProbe.rendered10) <= 2
+  && scrollProbe.evictedHeight === scrollProbe.rendered1 && Math.abs(scrollProbe.rerendered1 - scrollProbe.rendered1) <= 2 && !scrollProbe.panelShown,
+  JSON.stringify(scrollProbe));
+// 第二段：重新打开后直接跳到后面的页，再向上滚过从没渲染过的页（续读后往回翻的情形）。
+await openLayoutSample('layout-scroll.pdf', 'Scroll sample heading 1');
+await until(() => pageEval(page, 'return document.querySelectorAll(".pdf-page").length===10 && !!document.querySelector(\'.pdf-page[data-page="1"] .pdf-layout-view canvas\')?.width'));
+const deepProbe = await pageEval(page, `return (async () => {` + SCROLL_PROBE + `
+  await settle();
+  document.querySelector('.pdf-page[data-page="9"]').scrollIntoView({ block: 'start', behavior: 'instant' });
+  await settle();
+  const never = pages().filter((el) => el.dataset.rendered !== '1' && !el.style.height).map((el) => Number(el.dataset.page));
+  return Object.assign(await scrollUp(), { never });
+})();`);
+check('版式预览：跳到后面再向上滚过未渲染的页也不回弹', !!deepProbe && deepProbe.never.length >= 3 && deepProbe.steps > 5 && deepProbe.jumps.length === 0 && deepProbe.endY === 0,
+  JSON.stringify(deepProbe));
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, page);
+
 // QA E3: actual reader imports a 15000 x 15000 page book and rasterizes it safely.
 await pageEval(page, 'document.getElementById("backToLibrary").click();return true;');
 const hugeDoc = await send('DOM.getDocument', { depth: 0, pierce: true }, page);
