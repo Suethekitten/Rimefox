@@ -213,7 +213,7 @@ translation, translate, bilingual, DeepSeek, OpenAI, YouTube captions, Bilibili 
 ### Notes for certification（英文，直接贴进控制台）
 
 ```
-Rimefox is a bring-your-own-key translation extension. It ships no translation service of its own and no demo content: translation requires an API endpoint and key supplied by the user, so please use the temporary reviewer key below.
+Rimefox is a bring-your-own-key extension. It ships no translation service or demo content: translation needs an API endpoint and key supplied by the user, so please use the temporary reviewer key below.
 
 Credentials (rate-limited, revoked after review):
   Endpoint: https://api.deepseek.com/v1
@@ -221,21 +221,20 @@ Credentials (rate-limited, revoked after review):
   API key: <PASTE_TEMPORARY_KEY_HERE>
 
 Test steps:
-1. Install the extension. A welcome page opens on first run; close it.
-2. Click the toolbar icon -> Settings (or right-click the icon -> Options).
-3. Choose provider "DeepSeek" (or "OpenAI compatible"), paste the endpoint, key and model above, click Save, then "Test connection". It should report success.
-4. Open any English article, for example https://en.wikipedia.org/wiki/Translation
-5. Click the toolbar icon -> Translate (or press Alt+A). Paragraphs are translated and shown alternately with the original.
-6. Hover a translated sentence: the matching source sentence is highlighted. Use the on-page dock to switch between bilingual and translation-only view, then restore the original page.
-7. Select a phrase and use the context menu "Translate selection".
-8. Settings -> Subtitles: enable subtitle translation, then open a YouTube video that offers a CC track or a Bilibili video with an official subtitle track. The feature is off by default and this is an optional, unofficial feature.
-9. Settings -> Privacy: "AI privacy masking" is off by default; when enabled, it masks emails/phones/IDs/card numbers locally before sending.
+1. Install. A welcome page opens; close it.
+2. Toolbar icon -> Settings. Choose "DeepSeek" (or "OpenAI compatible"), paste the endpoint, key and model, Save, then "Test connection".
+3. Open https://en.wikipedia.org/wiki/Translation, click the toolbar icon -> Translate (or Alt+A). Paragraphs appear bilingually.
+4. Hover a translation to see its source; the on-page dock switches between bilingual, translation-only and original.
+5. Select a phrase and use the context menu "Translate selection".
+6. Settings -> Subtitles: enable, then open a YouTube video with a CC track or a Bilibili video with an official subtitle track. Optional and unofficial.
+7. Settings -> Privacy: "AI privacy masking" is off by default; when enabled it masks emails, phones, IDs and card numbers locally.
+8. Toolbar icon -> Reader (文档阅读): import a DRM-free EPUB, TXT, Markdown or LOG file and translate it. PDF: open a PDF and choose layout preview (Beta). OCR for scanned PDFs is optional and needs a separately installed local component, so it is not required for review.
 
 Notes:
-- All JavaScript and CSS are packaged in the extension; no remote code is loaded or executed. API responses are parsed as JSON or text only.
-- The broad host permission is needed because both the pages and the API endpoint are chosen by the user. The extension does not read browsing history, does not run on unopened sites, and shows no ads.
-- New API keys default to session storage; users can choose device persistence. Both areas are restricted to trusted extension contexts. Keys are sent only as authentication headers to the configured endpoint; retention and migration details are in the linked privacy policy.
-- If the temporary key cannot be used, the settings UI can still be inspected, but live translation cannot be verified.
+- All JavaScript and CSS are packaged; no remote code. API responses are parsed as JSON or text only.
+- The broad host permission is needed because the user chooses both pages and the API endpoint; the extension reads no browsing history and shows no ads.
+- API keys default to session storage, may be saved on device, are restricted to trusted extension contexts, and are sent only as authentication headers to the configured endpoint.
+- Without the temporary key, settings can still be inspected but live translation cannot be verified.
 ```
 
 ## 四、素材
