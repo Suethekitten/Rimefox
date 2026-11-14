@@ -179,23 +179,29 @@ Translate web pages, selected text, text in a webpage text box, popup text and Y
 ```
 凛狐 Rimefox 让你用自己的 API 做整页双语对照翻译：原文和译文逐段交错显示，鼠标停在译文上可以看到对应的原句（长段落以可展开的节选显示），也可以切换成仅译文模式。支持动态内容补翻、划词翻译、弹窗随手翻译、输入框翻译（快捷键或右键菜单，翻完可 Ctrl+Z 还原），以及可选的 YouTube / 哔哩哔哩双语字幕（默认关闭，仅支持站点提供的官方字幕轨，不支持画面硬字幕）。
 
-用术语表固定常用词的译法，用自定义提示词调整表达；界面支持中文和英文，主题支持浅色和深色，悬浮入口可以拖动并吸附到页面边缘。可选的「AI 隐私保护翻译」会在发请求前于本地把邮箱、电话、身份证号、银行卡号等可识别信息换成占位符，译文回来后再还原；该功能默认关闭，不保证识别全部敏感信息。
+用术语表固定常用词的译法，用自定义提示词调整表达，也可以添加自定义目标语言；阿拉伯语、希伯来语等 RTL 语言会按正确方向排版。界面支持中文和英文，主题支持浅色和深色，悬浮入口可以拖动并吸附到页面边缘。可选的「AI 隐私保护翻译」会在发请求前于本地把邮箱、电话、身份证号、银行卡号等可识别信息换成占位符，译文回来后再还原；该功能默认关闭，不保证识别全部敏感信息。
 
 本扩展采用 BYOK：你需要自行配置 API 地址、API Key 和模型，服务商可能收取费用。支持 DeepSeek 等 OpenAI 兼容接口以及 Anthropic、Gemini 协议，没有内置免费翻译额度。作者不运营翻译服务器，不使用分析或遥测；待翻文本、自定义提示词及命中术语直接发给你配置的接口。设置与缓存保存在本机。
 
-文档阅读器支持本地无 DRM、可重排的 EPUB 2/3 和 TXT / Markdown；PDF 阅读与翻译为 Beta。扫描版 PDF 可选用系统 OCR 预览，需另装本机组件并授权，图像只在本机识别，默认不启用。直播字幕为实验功能。源码、问题反馈与隐私政策见 https://github.com/Suethekitten/Rimefox 。
+新增本地文档阅读器：可导入无 DRM、可重排的 EPUB 2/3，以及 TXT、Markdown、LOG 文件；PDF 阅读与保留版式的翻译为 Beta。扫描版 PDF 可选用系统 OCR 预览，需要另装本机组件并授权；扫描图只在本机识别，不会上传。文档、阅读进度和 OCR 结果都保存在本机。直播字幕为实验功能。
+
+PDF 版式预览和 OCR 属于预览功能，可能不完整。YouTube / 哔哩哔哩字幕翻译为非官方功能，与 Google、YouTube、哔哩哔哩无关联，平台更新可能导致失效。源码、问题反馈与隐私政策见 https://github.com/Suethekitten/Rimefox 。
 ```
 
 ### Store listing：English Description
 
 ```
-Rimefox translates web pages with your own API key. Original and translated paragraphs are shown together, so you can read the source and the translation side by side. Hover a translated sentence to see the matching source (long paragraphs show an expandable excerpt), or switch to translation-only view. It also handles dynamic pages that load more content, selected text, text you type in the popup, text in a webpage text box (shortcut or context menu, with Ctrl+Z to undo), and optional bilingual YouTube / Bilibili video captions (off by default, official subtitle tracks only, captions burned into the video are not supported).
+Rimefox translates whole pages bilingually with your own API: source and translation appear paragraph by paragraph. In bilingual mode, hovering the translation highlights the matching source sentence; in translation-only mode, a popover shows the source, with expandable excerpts for long paragraphs. It also supports dynamic pages, selection translation, quick translation from the popup, input-field translation (hotkey or context menu, undo with Ctrl+Z), and optional bilingual YouTube / Bilibili captions (off by default, only available official tracks, no burned-in subtitles).
 
-Use a glossary to pin down terminology and custom prompts to shape the wording. The interface is available in Chinese and English, with light and dark themes; the on-page dock can be dragged and snaps to the page edge. The optional "AI privacy masking" feature replaces reliably detectable email addresses, phone numbers, ID card numbers and bank card numbers with placeholders before a request and restores them afterwards; it is off by default and does not guarantee that all sensitive data is detected.
+Pin terminology with the glossary, adjust tone with a custom prompt, and add custom target languages with proper RTL layout for Arabic and Hebrew. The interface ships in Chinese and English, with light and dark themes; the floating ball can be dragged and snaps to the page edge.
 
-Bring your own key: configure an endpoint, key and model from your chosen provider. Provider charges may apply and no free quota is bundled. Rimefox supports OpenAI-compatible endpoints such as DeepSeek, plus Anthropic and Gemini protocols. The author operates no translation server and uses no analytics or telemetry; text to translate, custom prompts and matching glossary terms go directly to the endpoint you configure. Settings and caches stay on your device.
+Optional AI privacy-protected translation replaces detectable emails, phone numbers, ID numbers and bank card numbers with placeholders locally before sending, then restores them after the reply. It is off by default and cannot detect every sensitive value.
 
-A local document reader supports DRM-free, reflowable EPUB 2/3 and TXT / Markdown files you import yourself; PDF reading and translation are in Beta. Scanned PDFs can optionally use a system OCR preview that needs a separately installed local component and your permission, with images recognized on your device only. Live captions remain experimental. Source, support and privacy policy: https://github.com/Suethekitten/Rimefox
+Rimefox is BYOK: configure your own API endpoint, API key and model; providers may charge you. OpenAI-compatible APIs, plus Anthropic and Gemini protocols, are supported; there is no built-in free quota. The author runs no translation server and uses no analytics or telemetry. Text to translate, custom prompts and matched glossary terms are sent directly to the endpoint you configure. Settings and cache stay on your device; the cache may contain source and translated text.
+
+A local document reader supports DRM-free, reflowable EPUB 2/3, TXT, Markdown and LOG files you import yourself. PDF reading and layout-preserving translation are in Beta. Scanned PDFs can optionally use a local system OCR preview that requires a separately installed component and your permission; images are recognized on your device and are not uploaded. Reader files, progress and OCR results stay on your device. Live captions remain experimental.
+
+PDF layout preview and OCR are preview features and may be incomplete. YouTube / Bilibili caption translation is unofficial and not affiliated with Google, YouTube or Bilibili; platform changes may break it. Source code, issues and privacy policy: https://github.com/Suethekitten/Rimefox
 ```
 
 ### Search terms（≤7 个词/短语，每个 ≤30 字符）
