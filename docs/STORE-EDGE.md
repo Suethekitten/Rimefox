@@ -150,6 +150,7 @@ Translate web pages, selected text, text in a webpage text box, popup text and Y
 | `activeTab` | Grants temporary access to the current page when the user invokes the extension, so fallback script injection works even when site access is set to "on click". |
 | `scripting` | Re-injects the extension's own bundled content scripts into tabs that were already open when the extension was installed or updated. Never loads remote code. |
 | `contextMenus` | Adds context-menu items for translating selected text and the content of a text box. |
+| `nativeMessaging` (optional) | Only requested after the user opts in to the optional local OCR preview. It connects to a separately installed OCR component on the user's own machine so scanned PDF pages can be recognized locally; no page or scan data is sent by the component. Declining it leaves OCR off and does not affect translation. |
 | Host permission `<all_urls>` | Runs the content script on pages the user chooses to translate and sends requests to any API endpoint the user configures. The extension cannot be limited to a fixed site list because both the pages and the endpoint are chosen by the user. It does not collect browsing history, does not run in the background on unopened sites, and shows no ads. |
 
 ### Data usage
