@@ -41,6 +41,11 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: 24
+      - name: Install CJK fonts for PDF export checks
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
       - run: node tools/checks.mjs browser
   translation:
     runs-on: ubuntu-24.04

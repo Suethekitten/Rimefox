@@ -16,6 +16,7 @@ on:
       - lib/ocr/**
       - tools/*ocr*
       - .github/workflows/release.yml
+      - .github/workflows/checks.yml
       # 测试 / 自检改动也要重新校验：0.9.4 的教训是自检用例只在 CI 上失败
       - selftest/**
       - test/**
