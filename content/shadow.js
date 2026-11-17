@@ -21,6 +21,7 @@
   var stylePromise = null;
   var cssText = '';
   var sharedSheet = null;
+  var siteComponents = false;
   var MAX_ROOTS = 160;
   var stats = {
     discovered: 0,
@@ -172,9 +173,23 @@
     return String((el && (el.localName || el.tagName)) || '').toLowerCase();
   }
 
+  function rootOf(host) {
+    if (host.shadowRoot) return host.shadowRoot;
+    if (siteComponents && localName(host).indexOf('-') >= 0 &&
+        typeof chrome !== 'undefined' && chrome.dom && chrome.dom.openOrClosedShadowRoot) {
+      try { return chrome.dom.openOrClosedShadowRoot(host); }
+      catch (err) { return null; }
+    }
+    return null;
+  }
+
+  function slotChanged() {
+    if (S.active() && changeHandler) changeHandler();
+  }
+
   function adopt(host, root) {
     if (!isElement(host)) return null;
-    if (!root) root = host.shadowRoot;
+    if (!root) root = rootOf(host);
     if (!root) return null;
     var old = hostRecords.get(host);
     if (old && old.root === root) return old;
@@ -202,6 +217,7 @@
       var record = records[i];
       var target = record.target;
       if (target && DT.isOwnNode && DT.isOwnNode(target)) continue;
+      if (record.type === 'attributes' && DT.isPanelMutation && DT.isPanelMutation(record)) return true;
       if (record.type === 'characterData') {
         if (DT.isOwnWrite && DT.isOwnWrite(target)) continue;
         return true;
@@ -246,8 +262,12 @@
       rec.observer.observe(root, {
         childList: true,
         subtree: true,
-        characterData: true
+        characterData: true,
+        attributes: true,
+        attributeFilter: DT.panelAttributes || ['open', 'hidden']
       });
+      root.addEventListener('slotchange', slotChanged);
+      root.addEventListener('toggle', slotChanged, true);
       stats.observers += 1;
     } catch (err) {
       log('shadow observe failed', err && err.message ? err.message : err);
@@ -260,6 +280,8 @@
     try {
       if (rec.observer) {
         rec.observer.disconnect();
+        rec.root.removeEventListener('slotchange', slotChanged);
+        rec.root.removeEventListener('toggle', slotChanged, true);
         stats.observers = Math.max(0, stats.observers - 1);
       }
     } catch (err) {
@@ -274,7 +296,7 @@
       var host = rec.host;
       var alive = false;
       try {
-        alive = !!host && host.isConnected && host.shadowRoot === rec.root;
+        alive = !!host && host.isConnected && rootOf(host) === rec.root;
       } catch (err) {
         alive = false;
       }
@@ -308,7 +330,7 @@
       var again = [];
       pending.forEach(function (one) {
         if (!one.host || !one.host.isConnected) return;
-        if (one.host.shadowRoot) {
+        if (rootOf(one.host)) {
           S.adopt(one.host);
           if (ADAPTER && ADAPTER.afterAdopt) ADAPTER.afterAdopt(one.host);
           if (changeHandler) changeHandler();
@@ -325,26 +347,25 @@
 
   S.adopt = function (host) {
     if (!S.active() || !isElement(host)) return null;
-    if (!host.shadowRoot) return null;
-    var rec = adopt(host, host.shadowRoot);
-    if (rec && ADAPTER && ADAPTER.shouldObserve && ADAPTER.shouldObserve(host, host.shadowRoot)) {
-      S.observe(host.shadowRoot, host);
-    }
+    var root = rootOf(host);
+    if (!root) return null;
+    var rec = adopt(host, root);
+    if (rec && ADAPTER && ADAPTER.shouldObserve && ADAPTER.shouldObserve(host, root)) S.observe(root, host);
     return rec;
   };
 
-  // auto 模式：普通收集走到 host 时进入它的 open shadow root；
-  // targets 模式返回 null，由适配器只收集指定内容根。
+  S.isBoundary = function (host) {
+    return (MODE === 'auto' || siteComponents) && isElement(host) && !S.skip(host) && !!rootOf(host);
+  };
+
   S.enter = function (host) {
-    if (!S.active() || MODE !== 'auto') return null;
-    if (!isElement(host) || !host.shadowRoot) return null;
+    if ((MODE !== 'auto' && !siteComponents) || !isElement(host)) return null;
     if (ADAPTER && ADAPTER.allowHost && !ADAPTER.allowHost(host)) return null;
-    var rec = adopt(host, host.shadowRoot);
+    var root = rootOf(host);
+    var rec = root && adopt(host, root);
     if (!rec) return null;
-    if (!ADAPTER || !ADAPTER.shouldObserve || ADAPTER.shouldObserve(host, host.shadowRoot)) {
-      S.observe(host.shadowRoot, host);
-    }
-    return host.shadowRoot;
+    if (siteComponents || !ADAPTER || !ADAPTER.shouldObserve || ADAPTER.shouldObserve(host, root)) S.observe(root, host);
+    return root;
   };
 
   S.skip = function (el) {
@@ -395,10 +416,10 @@
   S.all = function (selector) {
     var out = [];
     var seen = new Set();
-    var roots = 0;
+    var visited = new Set();
     function visit(root) {
-      if (!root || roots >= 500) return;
-      roots += 1;
+      if (!root || visited.has(root) || visited.size >= 500) return;
+      visited.add(root);
       try {
         var list = root.querySelectorAll(selector);
         for (var i = 0; i < list.length; i += 1) {
@@ -421,6 +442,8 @@
       }
     }
     visit(document);
+    // Closed roots are not discoverable through querySelectorAll on their host.
+    records.forEach(function (rec) { visit(rec.root); });
     return out;
   };
 
@@ -439,7 +462,7 @@
       }
       if (!candidate && localName(el).indexOf('-') >= 0) candidate = true;
       if (!candidate) continue;
-      if (el.shadowRoot) {
+      if (rootOf(el)) {
         S.adopt(el);
         if (ADAPTER && ADAPTER.afterAdopt) ADAPTER.afterAdopt(el);
         if (changeHandler) changeHandler();
@@ -482,8 +505,12 @@
     stats.targets = 0;
   };
 
+  S.setSiteComponents = function (enabled) {
+    siteComponents = enabled === true;
+  };
+
   S.active = function () {
-    return MODE !== 'off';
+    return MODE !== 'off' || siteComponents;
   };
 
   S.mode = function () {

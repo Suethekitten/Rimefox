@@ -26,6 +26,10 @@
       <button id="translateChapter" class="reader-button" type="button" disabled title="翻译当前章节">翻译本章</button>
       <button id="pdfLayoutOriginal" class="reader-button" type="button" title="在译文页和原页之间切换" aria-pressed="false" hidden>显示原文</button>
     </div>
+    <div class="reader-group" role="group" aria-label="PDF">
+      <button id="pdfEditOpen" class="reader-button" type="button" hidden>编辑本页译文</button>
+      <button id="pdfExportOpen" class="reader-button" type="button" hidden>导出 PDF</button>
+    </div>
     <div class="reader-group" role="group" aria-label="导航">
       <button id="tocToggle" class="reader-button" type="button" disabled title="目录">目录</button>
     </div>
@@ -145,6 +149,49 @@
   </form>
 </dialog>
 
+<dialog id="pdfEditDialog" class="settings-dialog pdf-workspace" aria-labelledby="pdfEditTitle">
+  <div class="pdf-workspace-heading">
+    <h2 id="pdfEditTitle">编辑本页译文</h2>
+    <p id="pdfEditPage" class="muted" data-i18n-skip></p>
+  </div>
+  <p id="pdfEditStatus" class="muted" role="status" data-i18n-skip></p>
+  <div id="pdfEditFields" class="pdf-edit-fields" data-i18n-skip></div>
+  <div class="pdf-workspace-actions">
+    <button id="pdfEditClose" class="reader-button" type="button">取消</button>
+    <button id="pdfEditSave" class="reader-button" type="button">保存译文</button>
+  </div>
+</dialog>
+
+<dialog id="pdfExportDialog" class="settings-dialog pdf-workspace" aria-labelledby="pdfExportTitle">
+  <div class="pdf-workspace-heading">
+    <h2 id="pdfExportTitle">导出 PDF</h2>
+  </div>
+  <div class="pdf-export-options">
+    <label for="pdfExportRange">原 PDF 页码</label>
+    <div class="pdf-workspace-actions">
+      <input id="pdfExportRange" class="reader-control" placeholder="例如 2-5" aria-describedby="pdfExportStatus">
+      <button id="pdfExportAll" class="reader-button" type="button" data-i18n-skip>全部页</button>
+    </div>
+    <label for="pdfExportFormat">导出格式</label>
+    <select id="pdfExportFormat" class="reader-control">
+      <option value="layout">保留原版式</option>
+      <option value="text">可搜索译文（重排）</option>
+    </select>
+    <label class="pdf-export-check">
+      <input id="pdfExportTranslate" type="checkbox">
+      补译缺失段落（会调用当前翻译服务）
+    </label>
+  </div>
+  <p id="pdfExportStatus" class="muted" role="status" data-i18n-skip></p>
+  <ul id="pdfExportReview" class="pdf-export-review" data-i18n-skip></ul>
+  <div class="pdf-workspace-actions">
+    <button id="pdfExportClose" class="reader-button" type="button">关闭</button>
+    <button id="pdfExportPrepare" class="reader-button" type="button">检查导出内容</button>
+    <button id="pdfExportPrint" class="reader-button" type="button" hidden>打开打印窗口</button>
+  </div>
+</dialog>
+
+<div id="pdfPrintOutput" aria-hidden="true" data-i18n-skip></div>
 <div id="readerToast" class="reader-toast" data-dt-ui role="status" aria-live="polite"></div>
 <script src="../lib/inline-protocol.js"></script>
 <script src="../content/core.js"></script>

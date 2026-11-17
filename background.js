@@ -16,7 +16,7 @@ import { reviewHighRisk } from './lib/professional/review.js';
 import { aiContextPrompt, aiContextForTexts, aiContextFingerprintData, aiContextStats } from './lib/ai-context.js';
 import * as cache from './lib/cache.js';
 import { accentHex, isDefaultAccent, sanitizeTranslationCss, typographyVars } from './lib/appearance.js';
-import { resolveSiteRule, hostListed } from './lib/site-rules.js';
+import { matchesUrl, resolveSiteRule, hostListed } from './lib/site-rules.js';
 import { providerById } from './lib/providers.js';
 import { maskTexts, restoreText, optionsFromConfig } from './lib/privacy.js';
 import { openWelcomePage, shouldOpenWelcome } from './lib/welcome.js';
@@ -1109,12 +1109,44 @@ async function trustedConfig(msg, sender) {
   return { ok: true, config: msg.type === 'config:save' ? await saveConfig(msg.patch) : await getConfig() };
 }
 
+function subtitleLayoutKey(sender) {
+  const url = new URL(sender.url || 'about:blank');
+  if (!['https:', 'http:'].includes(url.protocol) || ![
+    'www.youtube.com', 'm.youtube.com', 'www.youtube-nocookie.com', 'www.bilibili.com'
+  ].includes(url.hostname)) return '';
+  return 'subtitle-layout:' + url.hostname;
+}
+
+function validSubtitleLayout(value) {
+  return value && ['x', 'bottom', 'width', 'size'].every((key) => Number.isFinite(value[key])) &&
+    value.x >= 0 && value.x <= 100 && value.bottom >= 0 && value.bottom <= 100 &&
+    value.width >= 35 && value.width <= 96 && value.size >= 12 && value.size <= 52;
+}
+
 const ROUTES = {
   'config:trustedGet': trustedConfig,
   'config:save': trustedConfig,
   'config:recoveryInfo': trustedConfig,
   'config:restoreMigration': trustedConfig,
   translate: handleTranslate,
+  'subtitle:layout:get': async (_msg, sender) => {
+    const key = subtitleLayoutKey(sender);
+    if (!key || sender.tab?.id == null) return { ok: false };
+    const value = (await chrome.storage.local.get(key))[key];
+    return { ok: true, layout: validSubtitleLayout(value) ? value : null };
+  },
+  'subtitle:layout:set': async (msg, sender) => {
+    const key = subtitleLayoutKey(sender);
+    if (!key || sender.tab?.id == null) return { ok: false };
+    const layout = msg.layout;
+    if (layout === null) await chrome.storage.local.remove(key);
+    else {
+      if (!validSubtitleLayout(layout)) return { ok: false };
+      const { x, bottom, width, size } = layout;
+      await chrome.storage.local.set({ [key]: { x, bottom, width, size } });
+    }
+    return { ok: true };
+  },
   'subtitle:fetch': handleSubtitleFetch,
   test: handleTest,
   'ocr:status': handleOcr,
@@ -1123,6 +1155,24 @@ const ROUTES = {
   ensure: async (msg) => {
     const ok = await ensureInjected(msg.tabId);
     return { ok: ok };
+  },
+  'frames:get': async (_msg, sender) => {
+    const tabId = sender.tab?.id;
+    if (tabId == null || !(sender.frameId > 0) || !/^https?:\/\//i.test(sender.url || '')) return { ok: false };
+    const cfg = await getConfig();
+    const patterns = resolveSiteRule(sender.tab.url || '', cfg.siteRules)?.frameMatches || [];
+    if (!patterns.some((pattern) => matchesUrl(pattern, sender.url))) {
+      // Only this publisher's documents can enter an allowed path via SPA navigation.
+      const configured = patterns.some((pattern) => matchesUrl(pattern.split('/')[0], sender.url));
+      return { ok: true, configured };
+    }
+    const state = await chrome.tabs.sendMessage(tabId, { type: 'dt:frameSnapshot' }, { frameId: 0 }).catch(() => null);
+    return { ok: true, configured: true, state };
+  },
+  'frames:changed': async (_msg, sender) => {
+    if (sender.tab?.id == null || sender.frameId !== 0) return { ok: false };
+    await chrome.tabs.sendMessage(sender.tab.id, { type: 'dt:framesChanged' }).catch(() => {});
+    return { ok: true };
   },
   // 只给内容脚本用：去掉 API Key，换成 hasKey。
   // 内容脚本跑在网页的渲染进程里，渲染进程一旦被攻破，它手里的东西都可能被读走。

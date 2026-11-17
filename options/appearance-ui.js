@@ -198,7 +198,7 @@ export function parseSiteRulesText(text) {
   const result = normalizeSiteRules(data);
   // 选择器语法只有浏览器能判断：逐个试一遍，写错的提示出来（网页里也会单独忽略它）
   result.rules.forEach((rule, i) => {
-    rule.textSelectors.concat(rule.excludeSelectors).forEach((sel) => {
+    rule.textSelectors.concat(rule.excludeSelectors, rule.supplementSelectors || []).forEach((sel) => {
       try {
         document.createDocumentFragment().querySelector(sel);
       } catch (err) {

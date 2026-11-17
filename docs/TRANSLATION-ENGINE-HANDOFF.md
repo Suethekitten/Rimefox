@@ -37,7 +37,7 @@
 ```
 content script（网页里，classic script，ES5）                          service worker（background.js，ESM）
 ──────────────────────────────────────────                        ────────────────────────────────────
-dom.js   DT.collectAll(accept)
+dom.js   await DT.collectPage(accept, { cancelled, onYield })
          walk()：容器下钻 / 段落整体 → addParagraphs()
            tokensOf / ownTokens → units.textMap(tokens)
            units.paragraphsOf() 按排版语义切段（空行 / 单 <br>+全角缩进 / 块级边界）
@@ -68,6 +68,10 @@ hover.js unitOfNode(文本节点 / <br> / 译文节点) → unit
          unit.align（模型）→ units.alignLocal（本地）→ 两边 ≥2 行且行数相同 → 行级 → 段落级
 还原     DT.restore()：逆序回放事务；releaseReplaced / refreshStale 按段落撤销
 ```
+
+网页扫描按节点数或时间片让出主线程，在同一遍历位置继续。页面地址或翻译代际变化时丢弃这轮收集；分片期间修改过的段落会在送翻前过滤，并由增量扫描补译。阅读器和离线自检仍可同步调用同一套遍历规则。
+
+原生 `toggle`、可见性属性与弹窗或侧栏的样式变更走同一条防抖补扫。用户规则的 `supplementSelectors` 额外登记正文采集根，与正文共享遍历去重并尊重排除规则。
 
 ### 1.1 模块职责
 

@@ -2,7 +2,7 @@
 
 > 给后续 Agent / 协作者。先读 [AGENTS.md](../AGENTS.md)、[HANDOFF.md](../HANDOFF.md) 和
 > [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 本文只讲 **开放 Shadow DOM 的收集、监听、样式、悬停和还原**；翻译请求、缓存、句子对齐仍是原引擎，不改。
+> 本文记录组件和嵌入文档如何接入网页翻译管线。
 
 ---
 
@@ -58,8 +58,9 @@ DT.shadow.diagnostics()        // roots / observers / targets / pending / capped
 - **targets**：普通 walk 不进入评论组件，适配器只返回明确的内容根（B 站用这种），避免把昵称、时间、按钮当正文。
 
 `content/shadow.js` 自己不默认全站启用。只有：
-1. B 站适配器在 `*.bilibili.com` 启用 targets；或
-2. 页面显式带 `data-dt-shadow-auto`（离线夹具）启用 auto。
+1. B 站适配器在 `*.bilibili.com` 使用 targets。
+2. 站点规则设置 `translateComponents: true` 时遍历组件根，包括 Chromium 扩展 API 可读取的自定义元素封闭根。
+3. 离线夹具可通过 `data-dt-shadow-auto` 遍历开放根。
 
 ### `walk()` 的变化
 
@@ -190,15 +191,32 @@ B 站当前自定义元素在插入时已经能访问 open root。
 
 ---
 
+## 站点规则示例
+
+在「外观与兼容性 → 站点规则」可按主页面配置补译区域、组件及嵌入文档。选择器排除规则优先于补译规则；嵌入文档随主页面翻译、切换显示和还原，导航后重建文档自己的翻译状态。
+
+```json
+[
+  {
+    "matches": ["docs.example.com/manual/*"],
+    "supplementSelectors": ["dialog", ".reader-sidebar"],
+    "translateComponents": true,
+    "frameMatches": ["viewer.example.com/document/*"]
+  }
+]
+```
+
+使用 `node tools/e2e-extension.mjs --document-translation-only` 验证浮层、插槽、封闭组件、跨域 iframe 及导航期间的在途回包。
+
 ## F. 已知限制
 
 | 限制 | 现状 / 原因 |
 |---|---|
-| closed Shadow Root | 无法访问，安全跳过 |
+| 封闭 Shadow Root | 在配置了组件翻译的站点支持自定义元素的封闭根 |
 | ShadowRoot 直接文本子节点 | 不收集（需要 Element 作为单元宿主）；B 站 / 夹具正文都在元素里 |
 | slot 里的直接文本 | 只遍历 assigned 的 **Element**；直接文本节点不收集 |
 | 嵌套 slot / fallback | 走 `assignedNodes({flatten:true})`，fallback 文本未覆盖 |
-| iframe 内评论区 | 内容脚本在 iframe 只加载配置，不装整页管线；未开启 iframe 评论翻译 |
+| 嵌入文档 | 只翻译主页面站点规则的 `frameMatches` 匹配的 HTTP(S) 文档 |
 | 自定义 CSS | 只作用于 document，不进 shadow root |
 | B 站登录态滚动 / 楼中楼 | 实站未登录只显示首屏，未做登录态验证；离线夹具覆盖动态行为 |
 | 评论正文被站点改写 | 没有 per-thread observer；靠 click / scroll / URL 补扫 |

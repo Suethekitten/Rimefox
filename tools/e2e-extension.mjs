@@ -47,6 +47,7 @@ const LANGUAGE_ONLY = flag('--language-only');
 const STYLE_PERSIST_ONLY = flag('--style-persist-only');
 const MEDICAL_ONLY = flag('--medical-only');
 const SELFTEST_ONLY = flag('--selftest-only');
+const DOCUMENT_ONLY = flag('--document-translation-only');
 const GLOSSARY_ONLY = flag('--glossary-only');
 const SCIENCE_LIVE = flag('--science-live');
 const DUAL_LIVE = flag('--dual-live')
@@ -338,6 +339,42 @@ const PAGES = {
 <script>window.originalInlineLink=document.querySelector('#inline-valid a');window.inlineClicks=0;originalInlineLink.addEventListener('click',function(e){e.preventDefault();window.inlineClicks++;});window.inlineSource=document.body.innerHTML;</script>
 </body></html>`,
   '/shadow-bili.html': SHADOW_BILI_PAGE,
+  '/document-workspace.html': `<!doctype html><html lang="en"><body>
+<style>.sidebar.is-closed {display:none}</style>
+<main><p id="article">The main workspace paragraph remains independently translatable.</p>
+<x-doc id="component"><span id="assigned" slot="caption">A slotted caption appears exactly once.</span></x-doc>
+<button id="keyboard" type="button">Open dialog with keyboard</button>
+<dialog id="keyboardPanel"><p>Keyboard modal body is visible after opening.</p></dialog>
+<dialog id="attrPanel"><p>Attribute modal body is visible after opening.</p></dialog>
+<div id="popoverPanel" popover><p>Native popover copy should appear only when shown.</p></div>
+<aside class="sidebar is-closed" id="sidebar"><p>This stored sidebar becomes visible on demand.</p></aside>
+</main>
+<aside id="supplement"><p id="extra">This supplemental side label is outside the main area.</p>
+<div class="skip"><p id="exclude">A private excluded phrase should stay original.</p></div></aside>
+<aside><p id="unselected">An unrelated area outside the translation region.</p></aside>
+<iframe id="allowed" src="http://localhost:${PORT}/embed-allowed-a.html"></iframe>
+<iframe id="denied" src="http://127.0.0.1:${PORT}/embed-denied.html"></iframe>
+<script>
+customElements.define('x-doc', class extends HTMLElement {
+  constructor() {
+    super();
+    const root = this.attachShadow({mode:'closed'});
+    root.innerHTML = '<p id="componentText">Read the <a href="#reference">component document link</a> for more information.</p><slot name="caption"></slot>';
+    window.closedFixtureRoot = root;
+    window.componentLink = root.querySelector('a');
+    window.componentOriginal = window.componentLink.textContent;
+    window.componentClicks = 0;
+    window.componentLink.addEventListener('click', (event) => { event.preventDefault(); window.componentClicks++; });
+  }
+});
+document.getElementById('keyboard').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') { event.preventDefault(); document.getElementById('keyboardPanel').showModal(); }
+});
+</script></body></html>`,
+  '/embed-allowed-a.html': '<!doctype html><html lang="en"><body><p id="frameText">Embedded document A introduces the reference guide.</p></body></html>',
+  '/embed-allowed-late.html': '<!doctype html><html lang="en"><body><p id="frameText">The delayed embedded document must never appear in its successor.</p></body></html>',
+  '/embed-allowed-b.html': '<!doctype html><html lang="en"><body><p id="frameText">Embedded document B replaces the previous document.</p></body></html>',
+  '/embed-denied.html': '<!doctype html><html lang="en"><body><p id="frameText">Unselected embedded document stays in its original language.</p></body></html>',
   '/shadow-auto.html': SHADOW_AUTO_PAGE,
   [NATURE_PATH]: `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Nature citations</title>
 <style>.fx-nature sup{position:relative;top:-.375em;font-size:.75em;line-height:0;vertical-align:baseline}</style></head><body>
@@ -463,6 +500,7 @@ function targetCodeOf(system) {
   return 'zh-CN';
 }
 
+let delayedFrameReply = null;
 const server = http.createServer((req, res) => {
   const route = req.url.split('?')[0];
   if (req.method === 'GET' && PAGES[route]) {
@@ -593,8 +631,12 @@ const server = http.createServer((req, res) => {
           })
         );
       }
-      res.writeHead(200, headers);
-      res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
+      const answer = () => {
+        res.writeHead(200, headers);
+        res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
+      };
+      if (texts.some((one) => String(one).includes('delayed embedded document'))) delayedFrameReply = answer;
+      else answer();
     });
     return;
   }
@@ -887,6 +929,90 @@ async function contentEval(tab, expression) {
     return r.result.value;
   }
   throw new Error('找不到内容脚本的执行环境');
+}
+
+async function documentTranslationChecks() {
+  console.log('\n[浮层、组件与嵌入文档]');
+  const previous = await readConfig();
+  const before = stats.sent.length;
+  await patchConfig({ targetLang: 'zh-CN', mode: 'dual', lazy: false, translateOnLoad: false, siteRules: [{
+    matches: ['127.0.0.1:' + PORT + '/document-workspace.html'],
+    textSelectors: ['main'],
+    supplementSelectors: ['#supplement', '#exclude'],
+    excludeSelectors: ['.skip'],
+    translateComponents: true,
+    frameMatches: ['localhost:' + PORT + '/embed-allowed-*']
+  }] });
+  const tab = await openTab(ORIGIN + '/document-workspace.html');
+  const frames = () => swEval(`return (await chrome.scripting.executeScript({
+    target: {tabId:${tab.tabId}, allFrames:true}, world: 'MAIN',
+    func: () => ({path:location.pathname, mode:document.documentElement.getAttribute('data-dt-mode'),
+      text:document.querySelector('#frameText')?.textContent, dual:document.querySelector('#frameText [data-dt-target]')?.textContent,
+      replaced: !!document.querySelector('#frameText[data-dt-replaced]')})
+  })).map(x=>x.result);`);
+  const view = () => pageEval(tab, `const el=id=>document.getElementById(id);
+    const translated=id=>!!el(id)?.querySelector('[data-dt-target]');
+    return { main:translated('article'), panel:translated('keyboardPanel'), attr:translated('attrPanel'), side:translated('sidebar'), pop:translated('popoverPanel'),
+      extra:translated('extra'), excluded:translated('exclude'), unselected:translated('unselected'),
+      closed:closedFixtureRoot.querySelectorAll('[data-dt-target]').length,
+      slotted:el('assigned').querySelectorAll('[data-dt-target]').length,
+      sameLink:componentLink===closedFixtureRoot.querySelector('a'), clicked:componentClicks, link:componentLink.textContent };`);
+  try {
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+    const initial = await until(async () => {
+      const v = await view();
+      return v.main && v.extra && v.closed && v.slotted ? v : null;
+    }, 12000);
+    check('主文、补译区域、封闭组件与插槽都正确翻译', !!initial && initial.slotted === 1 && initial.sameLink, JSON.stringify(initial || await view()));
+    check('排除规则优先，隐藏浮层和未选择区域不送翻', !!initial && !initial.excluded && !initial.unselected && !initial.panel &&
+      !initial.attr && !initial.side && !initial.pop && !stats.sent.slice(before).some(x=>/private excluded|unrelated area|visible after opening|stored sidebar|Native popover copy/.test(x)));
+    const allowed = await until(async () => (await frames()).find(x=>x.path==='/embed-allowed-a.html' && x.dual), 10000);
+    check('匹配的跨域 iframe 自动随主页面翻译，其他嵌入页维持原文', !!allowed && !(await frames()).find(x=>x.path==='/embed-denied.html')?.dual, JSON.stringify(await frames()));
+
+    await keyAt(tab, '#keyboard', 'Enter');
+    const keyboard = await until(async () => (await view()).panel, 9000);
+    await pageEval(tab, "document.getElementById('keyboardPanel').close(); document.getElementById('attrPanel').setAttribute('open',''); document.getElementById('sidebar').classList.remove('is-closed'); document.getElementById('popoverPanel').showPopover();");
+    const visible = await until(async () => {const v=await view();return v.attr && v.side && v.pop ? v : null;}, 9000);
+    check('按键、open 属性、class 与原生 popover 的打开都会补译', !!keyboard && !!visible, JSON.stringify(visible || await view()));
+    const afterOpening = stats.sent.length;
+    await pageEval(tab, "document.getElementById('attrPanel').removeAttribute('open'); document.getElementById('sidebar').classList.add('is-closed');");
+    await sleep(800);
+    await pageEval(tab, "document.getElementById('attrPanel').setAttribute('open',''); document.getElementById('sidebar').classList.remove('is-closed'); componentLink.click();");
+    await sleep(900);
+    check('反复开关复用译文，闭合组件原链仍响应', stats.sent.length === afterOpening && (await view()).clicked === 1);
+
+    await pageEval(tab, `document.getElementById('allowed').src = 'http://localhost:${PORT}/embed-allowed-late.html';`);
+    const held = await until(() => !!delayedFrameReply, 10000);
+    await pageEval(tab, `document.getElementById('allowed').src = 'http://localhost:${PORT}/embed-allowed-b.html';`);
+    const b = await until(async () => (await frames()).find(x=>x.path==='/embed-allowed-b.html' && x.dual), 10000);
+    if (delayedFrameReply) { delayedFrameReply(); delayedFrameReply = null; }
+    await sleep(500);
+    const current = (await frames()).find(x=>x.path === '/embed-allowed-b.html');
+    check('导航后旧文档的迟到译文不会写进新 iframe', !!held && !!b && current?.dual === b.dual && !/delayed/.test(current.text));
+
+    await tabMsg(tab.tabId, { type: 'dt:setMode', mode: 'translation' });
+    check('嵌入文档跟随主页面切成仅译文', !!await until(async () => (await frames()).some(x=>x.path === '/embed-allowed-b.html' && x.mode === 'translation' && x.replaced), 10000));
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+    const restored = await until(async () => {
+      const row = (await frames()).find(x=>x.path === '/embed-allowed-b.html');
+      const v = await view();
+      return row && !row.replaced && !row.dual && !v.closed && !v.slotted && v.sameLink && v.link === 'component document link';
+    }, 9000);
+    check('关闭后 iframe 和组件都精确还原原文及原链接', !!restored);
+
+    await patchConfig({ mode: 'dual', siteRules: [{
+      matches: ['127.0.0.1:' + PORT + '/document-workspace.html'], supplementSelectors: ['#supplement'], excludeSelectors: ['.skip']
+    }] });
+    await tabMsg(tab.tabId, { type: 'dt:setMode', mode: 'dual' });
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+    const unrestricted = await until(async () => { const v=await view(); return v.main && v.extra && v.unselected ? v : null; }, 9000);
+    check('补译选择器可独立使用，全页其它可见区域仍然翻译', !!unrestricted && !unrestricted.excluded, JSON.stringify(unrestricted || await view()));
+    await tabMsg(tab.tabId, { type: 'dt:toggle' });
+  } finally {
+    if (delayedFrameReply) { delayedFrameReply(); delayedFrameReply = null; }
+    await send('Target.closeTarget', {targetId:tab.targetId}).catch(() => {});
+    await patchConfig({ siteRules: previous.siteRules || [], lazy: previous.lazy, mode: previous.mode, targetLang: previous.targetLang });
+  }
 }
 
 // ---------------- 普通文章页 ----------------
@@ -2002,6 +2128,9 @@ async function glossaryNotesChecks(o) {
 // offline=true：视频页、播放器元数据、字幕 CDN 全部由 CDP 拦截给出，不访问真实网站。
 // 两种模式都不绕过来源层：元数据由页面主环境发出协议相对地址的 XHR（和真实播放器写法一样），
 // 经 content/bilibili-hook.js → postMessage → accept / take → 后台 subtitle:fetch → 运行时。
+const BILI_OFFLINE_URL = 'https://www.bilibili.com/video/av170001/';
+const BILI_OFFLINE_BVID = 'BV17x411w7KC';
+
 async function bilibiliSubtitleChecks(url, offline) {
   console.log('\n[Bilibili 字幕 E2E' + (offline ? '（离线假页面）' : '') + ']');
   await patchConfig({ subtitleTranslate: true, targetLang: 'zh-CN', debug: VERBOSE });
@@ -2030,7 +2159,7 @@ async function bilibiliSubtitleChecks(url, offline) {
       type: 'translate',
       texts: ['A subtitle budget recovery fixture.'],
       target: 'zh-CN',
-      cacheScope: 'bilibili|BV1xx411c7mD:1001|budget-fixture|en'
+      cacheScope: 'bilibili|' + BILI_OFFLINE_BVID + ':1001|budget-fixture|en'
     };
     const sendSubtitle = () => contentEval(bili, 'window.__DT.send(' + JSON.stringify(request) + ')');
     await swEval(`
@@ -2061,7 +2190,8 @@ async function bilibiliSubtitleChecks(url, offline) {
     check('账本恢复后沿用原计数，字幕请求可重试', recovered?.ok === true && !!recovered.results?.[0] && sent > 0 && count === previousCount + sent, JSON.stringify({ sent, count }));
   }
 
-  const pageBv = (/\/video\/(BV[0-9A-Za-z]+)/.exec(new URL(url).pathname) || [])[1] || 'BV1xx411c7mD';
+  const pageBv = offline ? BILI_OFFLINE_BVID
+    : (/\/video\/(BV[0-9A-Za-z]+)/.exec(new URL(url).pathname) || [])[1] || 'BV1xx411c7mD';
   let injected = 0;
 
   // 和真实播放器一样请求元数据：协议相对地址 + 凭据的 XHR，由页面主环境的钩子转给扩展。
@@ -2129,6 +2259,85 @@ async function bilibiliSubtitleChecks(url, offline) {
   check('Bilibili 字幕 CDN 请求走了后台白名单取文本', biliMock.fulfilled > 0, '拦截 ' + biliMock.fulfilled + ' 次');
   check('Bilibili 字幕送翻（当前窗口的小批）', stats.texts > 0, '送翻 ' + stats.texts + ' 条');
   if (!shown) return;
+
+  if (offline) {
+    const readKey = () => contentEval(bili, 'window.__DT.subtitleSource.videoKey()');
+    const key = await readKey();
+    const beforeAlias = stats.texts;
+    const aliases = ['/video/' + BILI_OFFLINE_BVID + '/', new URL(BILI_OFFLINE_URL).pathname];
+    let same = true;
+    for (const pathname of aliases) {
+      await pageEval(bili, 'history.replaceState({}, "", ' + JSON.stringify(pathname) + '); return true;');
+      // 跨过至少一轮字幕 tick，确保没有重新建立会话或收起叠层。
+      await sleep(350);
+      const overlay = await biliOverlay();
+      same = same && await readKey() === key && overlay.on && overlay.trans === shown.trans && overlay.count === 1;
+    }
+    check('同一视频 av 与 BV 地址往返使用相同轨道且不重新请求翻译',
+      key === BILI_OFFLINE_BVID + ':1001' && same && stats.texts === beforeAlias,
+      JSON.stringify({ key, same, newTexts: stats.texts - beforeAlias }));
+  }
+
+  if (offline) {
+    const layoutButton = '.rimefox-subs-layout > button';
+    const renderedSize = () => pageEval(bili, "return document.querySelector('.rimefox-subs > div:nth-child(2)')?.style.fontSize");
+    const layoutRow = () => swEval("return (await chrome.storage.local.get('subtitle-layout:www.bilibili.com'))['subtitle-layout:www.bilibili.com'];");
+    const count = stats.texts;
+    await clickAt(bili, layoutButton);
+    const anchor = await pageEval(bili, `
+      const fields = document.querySelectorAll('.rimefox-subs-layout-form input');
+      fields[2].value = 65;
+      fields[2].dispatchEvent(new Event('input', {bubbles:true}));
+      const preview = document.querySelector('.rimefox-subs-layout-preview');
+      const rect = preview?.getBoundingClientRect();
+      if (!rect || !rect.width) return null;
+      const x = Math.round(rect.x + rect.width / 2), y = Math.round(rect.y + rect.height / 2);
+      return { x, y, hit:document.elementFromPoint(x,y)?.className, bottom:Number(fields[1].value) };`);
+    if (anchor) {
+      const point = { x: anchor.x, y: anchor.y, pointerType: 'mouse' };
+      await send('Input.dispatchMouseEvent', { type:'mouseMoved', ...point }, bili.s);
+      await send('Input.dispatchMouseEvent', { type:'mousePressed', button:'left', buttons:1, clickCount:1, ...point }, bili.s);
+      const next = { ...point, x: anchor.x + 65, y: anchor.y - 40 };
+      await send('Input.dispatchMouseEvent', { type:'mouseMoved', button:'left', buttons:1, ...next }, bili.s);
+      await sleep(50);
+      await send('Input.dispatchMouseEvent', { type:'mouseReleased', button:'left', buttons:0, clickCount:1, ...next }, bili.s);
+    }
+    await pageEval(bili, `
+      const fields = document.querySelectorAll('.rimefox-subs-layout-form input');
+      if (fields.length !== 4) return false;
+      fields[3].value = 26;
+      fields[3].dispatchEvent(new Event('input', {bubbles:true}));
+      return true;`);
+    await clickAt(bili, '.rimefox-subs-layout-actions button:last-child');
+    const layout = await until(layoutRow, 5000);
+    const size = await until(async () => await renderedSize() === '26px', 5000);
+    check('字幕布局拖动、宽度与字号按站点保存，编辑没有发出翻译请求',
+      !!anchor && !!layout && layout.bottom > anchor.bottom && layout.x > 50 && layout.width === 65 && layout.size === 26 && size && stats.texts === count,
+      JSON.stringify({ anchor, layout, size, extraTexts: stats.texts - count }));
+
+    const enter = await send('Runtime.evaluate', { expression: 'document.querySelector("#bilibili-player").requestFullscreen().then(() => true, () => false)',
+      userGesture: true, awaitPromise: true, returnByValue: true }, bili.s);
+    const fullscreen = await until(() => pageEval(bili, `
+      const player = document.fullscreenElement;
+      const overlay = player?.querySelector('.rimefox-subs');
+      const bounds = player?.getBoundingClientRect();
+      const text = overlay?.getBoundingClientRect();
+      return !!(bounds && text && text.right <= bounds.right + 1 && text.left >= bounds.left - 1 && text.top >= bounds.top - 1);
+    `), 5000);
+    if (enter.result.value) await pageEval(bili, 'return document.exitFullscreen();');
+    check('全屏时字幕留在播放器内，布局与译文继续使用', enter.result.value && fullscreen && stats.texts === count);
+
+    await send('Page.reload', {}, bili.s);
+    await until(() => pageEval(bili, "return !!document.querySelector('#bilibili-player video') && document.readyState === 'complete'"), 10000);
+    await until(() => contentEval(bili, '!!window.__DT.subtitleRuntime?.instance'), 10000);
+    await injectBiliTrack({ cid: 1001, text: 'Hello from Bilibili.' });
+    const reloaded = await until(async () => (await biliOverlay()).on && await renderedSize() === '26px', 10000);
+    check('刷新后读取本网站的字幕布局', !!reloaded);
+    await clickAt(bili, layoutButton);
+    await clickAt(bili, '.rimefox-subs-layout-actions button:first-child');
+    const reset = await until(async () => !(await layoutRow()) && await renderedSize() !== '26px', 5000);
+    check('恢复默认清除本站布局，字幕仍正常显示', !!reset && (await biliOverlay()).on);
+  }
 
   await patchConfig({ subtitleTranslate: false });
   const restored = await until(async () => {
@@ -2922,7 +3131,7 @@ async function controlChecks() {
     '(function () { try { return (window.__DT.collect(document.body) || []).map(function (u) { return u.text; }); } catch (err) { return []; } })()'
   );
   await tabMsg(faq.tabId, { type: 'dt:toggle' });
-  const faqReady = await until(() => pageEval(faq, "return document.querySelectorAll('[data-dt-target]').length >= 4"), 20000);
+  const faqReady = await until(() => pageEval(faq, "return !!document.querySelector('#fmq [data-dt-target]')"), 20000);
   await settled(faq);
   const faqText = await pageEval(
     faq,
@@ -3636,6 +3845,8 @@ try {
     await chosunLiveChecks(CHOSUN_LIVE);
   } else if (SCIENCE_LIVE) {
     await scienceLiveChecks();
+  } else if (DOCUMENT_ONLY) {
+    await documentTranslationChecks();
   } else if (SELFTEST_ONLY) {
     await selftestChecks();
   } else if (GLOSSARY_ONLY) {
@@ -3658,13 +3869,14 @@ try {
   } else if (STYLE_PERSIST_ONLY) {
     await stylePersistenceChecks();
   } else if (BILIBILI_ONLY) {
-    await bilibiliSubtitleChecks('https://www.bilibili.com/video/BV1xx411c7mD/', true);
+    await bilibiliSubtitleChecks(BILI_OFFLINE_URL, true);
   } else if (BILIBILI_LIVE) {
     await liveBilibiliChecks(BILIBILI_LIVE);
   } else if (LIVE_AOZORA) {
     await liveAozoraChecks(LIVE_AOZORA);
   } else if (!flag('--youtube-only')) {
     await articleChecks();
+    await documentTranslationChecks();
     await paragraphChecks();
     await citationChecks();
     await scienceLiveChecks(ORIGIN + '/science-cite.html');
@@ -3697,7 +3909,7 @@ try {
     await popupLocaleChecks();
     await medicalChecks();
     await shadowChecks();
-    await bilibiliSubtitleChecks('https://www.bilibili.com/video/BV1xx411c7mD/', true);
+    await bilibiliSubtitleChecks(BILI_OFFLINE_URL, true);
   }
   if (YOUTUBE) await youtubeChecks(YOUTUBE);
   if (BILIBILI_SUBTITLES) await bilibiliSubtitleChecks(BILIBILI_SUBTITLES);

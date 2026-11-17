@@ -28,6 +28,7 @@ try {
   assert(names.includes('manifest.json')); assert(names.includes('lib/privacy.js'), 'privacy module must be packaged');
   for (const name of ['welcome/index.html', 'welcome/welcome.css', 'welcome/welcome.js', 'lib/welcome.js']) assert(names.includes(name), name + ' must be packaged');
   assert(names.includes('LICENSE')); assert(names.includes('THIRD-PARTY-NOTICES.md')); assert(names.includes('licenses/oneaifw-MIT.txt')); assert(names.includes('licenses/fflate-MIT.txt'));
+  assert(names.includes('licenses/bilibili-thread-ripper-MIT.txt'));
   assert(names.includes('reader/vendor/pdfjs/LICENSE')); assert(names.includes('reader/vendor/pdfjs/cmaps/LICENSE'));
   for (const name of ['reader/index.html', 'reader/reader.css', 'reader/reader.js', 'lib/reader/epub.js', 'lib/vendor/fflate.browser.mjs']) assert(names.includes(name), name + ' must be packaged');
   for (const name of ['_locales/zh_CN/messages.json', '_locales/en/messages.json']) assert(names.includes(name), name + ' must be packaged');
@@ -67,7 +68,7 @@ try {
   const relNames=zipNames(rel);
   assert(relNames.length>0 && relNames.every(n=>n.startsWith('Rimefox/')), 'Release 包的文件都要在 Rimefox/ 文件夹里');
   assert.deepEqual(relNames.map(n=>n.slice('Rimefox/'.length)), names, 'Release 包与商店包的文件集合必须一致');
-  for (const legal of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt', 'manifest.json']) assert(relNames.includes('Rimefox/'+legal), legal + ' must be in the release zip');
+  for (const legal of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/oneaifw-MIT.txt', 'licenses/bilibili-thread-ripper-MIT.txt', 'manifest.json']) assert(relNames.includes('Rimefox/'+legal), legal + ' must be in the release zip');
   assert(!relNames.some(n=>/^Rimefox\/(?:test|selftest|docs|tools|dist)\//.test(n) || /^Rimefox\/(?:README|HANDOFF|CHANGELOG|AGENTS|PRIVACY|STORE-READINESS)\.md$|^Rimefox\/package\.json$|^Rimefox\/\.git/.test(n)), 'Release 包不能带测试 / 开发文档 / 商店截图：' + relNames.join(','));
   const storeAgain=await readFile(resolve(temp,`dist/Rimefox-v${m.version}-store.zip`));
   assert.deepEqual(zipNames(storeAgain), names, '打 Release 包不能改动商店包');

@@ -117,6 +117,7 @@ async function boot({ iframe = false, resume = false, translateOnLoad = false, c
   DT.refreshStale = () => 0;
   DT.collectAll = () => [];
   DT.lastCollectFull = false;
+  DT.collectPage = async (accept) => ({ units: DT.collectAll(accept), full: DT.lastCollectFull });
   vm.runInContext(fs.readFileSync(new URL('content/main.js', root), 'utf8'), sandbox, { filename: 'main.js' });
   await flush();
   return {
@@ -169,7 +170,7 @@ await t('iframe：标签页记忆和「打开网页自动翻译」都不会让�
   const { sent } = await boot({ iframe: true, resume: true, translateOnLoad: true });
   assert.equal(types(sent).includes('resume:get'), false, '不用再问后台');
   assert.equal(enabledBy(sent), false, 'iframe 不该自动开启');
-  assert.deepEqual(types(sent), ['config:get']);
+  assert.deepEqual(types(sent), ['config:get', 'frames:get']);
 });
 
 console.log('\n[配置广播：显示方式 / 目标语言]');

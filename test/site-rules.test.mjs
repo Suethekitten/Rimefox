@@ -66,6 +66,20 @@ t('用户规则优先：mode 取第一个写了的，选择器取并集，内置
   assert.equal(resolveSiteRule('https://unrelated.example/', user), null);
 });
 
+t('补译区域、组件和嵌入页规则可叠加并拒绝错误格式', () => {
+  const { rules, errors } = normalizeSiteRules([
+    { matches: ['docs.example.com'], supplementSelectors: ['dialog', '.side'], translateComponents: true,
+      frameMatches: ['embed.example.com/doc/*', 'https://invalid.example'] },
+    { matches: ['docs.example.com'], supplementSelectors: ['.side', 'aside'], translateComponents: 'yes' }
+  ]);
+  assert.equal(errors.length, 2);
+  const rule = resolveSiteRule('https://docs.example.com/', rules);
+  assert.deepEqual(rule.supplementSelectors, ['dialog', '.side', 'aside']);
+  assert.deepEqual(rule.frameMatches, ['embed.example.com/doc/*']);
+  assert.equal(rule.translateComponents, true);
+  assert.equal(resolveSiteRule('https://news.example.com/', rules), null);
+});
+
 t('内置规则本身是合法规则', () => {
   assert.deepEqual(normalizeSiteRules(BUILTIN_SITE_RULES).errors, []);
 });

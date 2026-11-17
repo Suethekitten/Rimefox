@@ -17,19 +17,39 @@
     return /(^|\.)bilibili\.com$/i.test(String(host || ''));
   }
 
+  // Adapted from Bilibili-thread-ripper (MIT). See licenses/bilibili-thread-ripper-MIT.txt.
+  function avToBv(aid) {
+    if (!/^\d{1,16}$/.test(aid)) return '';
+    var number = BigInt(aid);
+    var limit = 1n << 51n;
+    if (number < 1n || number >= limit) return '';
+    var table = 'FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf';
+    var chars = ['B', 'V', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0'];
+    var value = (limit | number) ^ 23442827791579n;
+    for (var index = chars.length - 1; value > 0n; index -= 1) {
+      chars[index] = table[Number(value % 58n)];
+      value /= 58n;
+    }
+    var swap = chars[3];
+    chars[3] = chars[9];
+    chars[9] = swap;
+    swap = chars[4];
+    chars[4] = chars[7];
+    chars[7] = swap;
+    return chars.join('');
+  }
+
   function pageInfo(loc) {
     var path = String((loc && loc.pathname) || '');
     var search = String((loc && loc.search) || '');
-    var bv = /\/video\/(BV[0-9A-Za-z]+)/i.exec(path);
-    var av = /\/video\/av(\d+)/i.exec(path);
+    var id = /\/video\/(BV[0-9A-Za-z]+|av\d+)(?:\/|$)/i.exec(path);
     var p = /[?&]p=(\d+)/.exec(search);
-    return {
-      bvid: bv ? bv[1] : '',
-      aid: av ? av[1] : '',
-      page: p ? Number(p[1]) : 1,
-      hasP: !!p,
-      videoPage: !!(bv || av)
-    };
+    var bvid = '';
+    if (id) {
+      // 只归一化 BV 前缀，编号本身区分大小写。
+      bvid = /^av/i.test(id[1]) ? avToBv(id[1].slice(2)) : 'BV' + id[1].slice(2);
+    }
+    return { bvid: bvid, page: p ? Number(p[1]) : 1 };
   }
 
   function activeLanIn(doc) {
@@ -89,25 +109,16 @@
     }
 
     function pageMatches(meta) {
-      var p = page();
-      if (!meta) return false;
-      if (p.bvid) return meta.bvid === p.bvid;
-      if (p.aid) return String(meta.aid || '') === p.aid;
-      return false; // 非 /video/ 页面不接管
+      return !!meta && meta.bvid === page().bvid;
     }
 
     function currentCid() {
-      var p = page();
-      if (!lastMeta || !pageMatches(lastMeta)) return '';
-      if (p.bvid && lastMeta.bvid !== p.bvid) return '';
-      return lastMeta.cid;
+      return pageMatches(lastMeta) ? lastMeta.cid : '';
     }
 
     function videoKey() {
-      var p = page();
-      if (!p.bvid) return '';
-      var cid = currentCid();
-      return cid ? p.bvid + ':' + cid : p.bvid;
+      var bvid = page().bvid;
+      return lastMeta && lastMeta.bvid === bvid ? bvid + ':' + lastMeta.cid : bvid;
     }
 
     // 只接受 code=0、bvid/cid 合法、subtitle.subtitles 是数组的回包。
@@ -127,7 +138,6 @@
       var d = json.data;
       var bvid = String(d.bvid || '');
       var cid = String(d.cid || '');
-      var aid = String(d.aid || '');
       if (!/^BV[0-9A-Za-z]+$/.test(bvid) || !/^\d+$/.test(cid)) return null;
       var sub = d.subtitle && typeof d.subtitle === 'object' ? d.subtitle : null;
       var rawTracks = sub && Array.isArray(sub.subtitles) ? sub.subtitles : [];
@@ -145,7 +155,6 @@
       return {
         bvid: bvid,
         cid: cid,
-        aid: aid,
         page: isFinite(pageNo) && pageNo > 0 ? pageNo : page().page,
         tracks: tracks,
         selectedLan: String((sub && sub.lan) || ''),
@@ -294,8 +303,7 @@
     function matches(track) {
       if (!track) return false;
       var p = page();
-      if (p.bvid && track.bvid && track.bvid !== p.bvid) return false;
-      if (p.aid && track.aid && String(track.aid) !== p.aid) return false;
+      if (!p.bvid || track.bvid !== p.bvid) return false;
       // 分 P：地址栏没有 ?p 时按第 1 P 算（B 站默认页）。旧 P 轨道不能在新页上继续显示，
       // 也不等播放器 / 地址栏谁先更新——这是 QA 的 V10。
       if (track.page && Number(track.page) !== p.page) return false;
@@ -307,7 +315,7 @@
         var want = lan ? trackFor(lastMeta, lan) : null;
         if (lan && (!want || String(want.lan || '') !== track.rawLang)) return false;
       }
-      return !!(p.videoPage);
+      return true;
     }
 
     return {

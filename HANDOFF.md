@@ -478,7 +478,8 @@ Bilibili: /x/player/(wbi/)v2 轨道元数据      ├─ 每 200ms 按 video.cur
 - **统一格式**：`{ platform, videoKey, trackKey, lang, kind, units: [{start,end,text}] }`。运行时不再解析 json3，也不认识 B 站 body；所有平台差异在 `DT.subtitleSource`。
 - **YouTube**：`subtitles-source.js` 把 hook 的 json3 解析成统一轨道；地址带 `tlang` 时去掉后同源再取原文；CC 开关看 `.ytp-subtitles-button[aria-pressed]`；播广告时 `blocked()` 交还原生（V9：`adShowing()` 以前调用不存在的 `player()`，在 `p.v` 与当前视频不一致时抛 ReferenceError，整条回包被丢掉；现在改调 `playerView()`）；
 - **Bilibili**：`bilibili-hook.js` 只观察播放器自己的 `/x/player/(wbi/)v2` 回包，带 bvid / cid / 官方字幕轨（含时限签名 `subtitle_url`），留最近几份供扩展晚启动时 replay。请求地址先按页面解析成绝对地址再比对主机和路径：真实播放器写的是协议相对地址 `//api.bilibili.com/x/player/wbi/v2`，`fetch` 也可能收到 URL / Request 对象。`bilibili-subtitles-source.js` 只接受 bvid 与当前页面对得上的回包，按播放器 `.bpx-player-ctrl-subtitle-language-item.bpx-state-active[data-lan]` 选轨；没有 active 类时只认元数据 `selectedLan` 或唯一轨道，并要求原生字幕层在显示（所以原生字幕用 `opacity:0` 收起，不用 `display:none`）。当前选中语言对应的不是这条轨道（换了语言、新轨道还没取到或取不到）时 `matches()` 立即让位；取字幕失败按 3 s / 10 s / 30 s 退避重试，播放器新回包（新签名地址）立即重试；字幕每段保留为独立显示单位，不跨段合并。`subtitle_url` 必须命中 `lib/subtitle-source.js` 的 HTTPS 官方 CDN 白名单，由后台 `subtitle:fetch` 取文本（无 Cookie、跟随跳转但最终地址仍须在白名单、流式读并在 2 MB 停）。
-- **视频身份**：YouTube 用 `v`；Bilibili 用 `bvid + cid + 轨道 ID + 语言`。分 P 只改 cid 也会换 track；换 BV 时 URL 未更新前旧回包不能接管；旧请求晚归由 `processSeq` / `gen` / `source.matches()` 丢弃。`?p=` 不是身份的一部分，cid 才是；但地址栏没有 `?p` 时按第 1 P 算，旧 P 轨道立即失效（V10）。回包 `seq` 必须是递增且不超过上次 200 的跳跃（V11），轨道 `id_str` 只认字符串 / 数字、对象一律退回 `id`（V12），避免页面伪造把来源层锁死或把两条轨道撞成同一个键。
+- **视频身份**：YouTube 用 `v`；Bilibili 用 `bvid + cid + 轨道 ID + 语言`。旧 `av` 地址在来源层本地转换为 BV 号，保留编号大小写，与 BV 地址共用轨道身份。分 P 只改 cid 也会换 track；换 BV 时 URL 未更新前旧回包不能接管；旧请求晚归由 `processSeq` / `gen` / `source.matches()` 丢弃。`?p=` 不是身份的一部分，cid 才是；但地址栏没有 `?p` 时按第 1 P 算，旧 P 轨道立即失效（V10）。回包 `seq` 必须是递增且不超过上次 200 的跳跃（V11），轨道 `id_str` 只认字符串 / 数字、对象一律退回 `id`（V12），避免页面伪造把来源层锁死或把两条轨道撞成同一个键。
+- **字幕布局**：叠层出现后可在播放器右上角打开编辑器。位置与宽度用播放器百分比表示，字号用像素表示。拖动和滑杆先更新独立预览，保存后后台按播放器主机名写入本机设置，恢复默认删除该站布局。显示范围在播放器大小变化时重新约束，轨道与翻译任务由原运行时管理。
 - **会话状态**：track 带 `identity / target / targetCode / style / intensity` 与 `gen / inflight / pending`。目标语言或风格变化只 `invalidate()` 译文与在途请求，原始轨道保留；目标语言 = 字幕语言、关 CC 或关闭字幕翻译只 `render(null)`，交还原生字幕。
 - **缓存身份**：字幕请求带 `cacheScope`，但它只用来标识「这是字幕请求」；后台按**发送方标签页 URL** 认场景（Bilibili / YouTube），不按消息内容认。**Bilibili** 的缓存身份固定为 `subtitle-v1:content`，平台 / 视频 / cid / 轨道 / 源语言都不进键——同一段字幕文字（伪造的 cid / id_str 轮换、切 P 失败、播放器重拉）命中同一份缓存，不会再付一次钱；视频身份只用于显示与 `source.matches()`。**YouTube 本次不改契约**，仍是 `platform|video|track|lang`。这也不等于「重放永远零费用」：关浏览器（字幕缓存只在内存 / session）、缓存淘汰、目标语言 / 风格 / 模型 / 提示词配置变化、上一次失败后的重试，都会重新产生请求——它只保证「同一配置下的同一段文字，不会因为身份被换而重复付费」。目标语言、风格、模型、接口、术语和提示词仍由原有基础键负责，显示模式不参与。带 `subtitle-v1:` 的条目只进内存层和 session 层（`lib/cache.js` 的 `memoryOnly`），不写 `chrome.storage.local`，磁盘里不留观看记录；读到旧版本写进磁盘的字幕条目会删掉。
 - **费用边界**（V8，只对 Bilibili 生效）：第一道闸是 0.13.1 的 `captionsOn` —— 原生字幕层不可见（关了 CC）时不接管、不产生请求；被伪造数据接管时，才由下面的内容键 + 预算兜底。字幕付费预算由后台按**标签页**记，跨标签页另有一份总量（`lib/subtitle-budget.js`）。计数在**每次实际 HTTP 发送前预留**、发送后按实际次数回填（一次 `chat` 最多 2 次，只有思考参数回退时才用到第 2 次），整批原文再按字符数记一笔——请求次数和字符数都不直接等于费用，但两个都卡。默认阈值是**保守估计、不是实测基线**：5 分钟滑窗 90 次 HTTP / 9 万字符，单标签页 2400 次 / 200 万字符，跨标签页每窗口 360 次 / 36 万字符、总量 6000 次 / 500 万字符。账本（含窗口）串行写 `chrome.storage.session`，service worker 被回收后限额不会从零开始；并发消息按 slot 缓存同一份状态的 Promise，不会各建一份。bvid / cid / id_str / cacheScope 都来自网页、页面脚本可以伪造，不能作为费用边界，也不参与预算键。超限时整批按失败落地并返回 `errorCode: 'subtitle_budget'`，`content/subtitles.js` 收到后把该轨道标成 `blocked`、停止自动翻译并给一次提示，换视频 / 刷新后新轨道恢复。**目前没有「手动继续」**；以后要加，确认必须放在扩展自己的弹窗里，页面内消息或 `continue: true` 一律不能解除后台限额——字幕叠层是普通 DOM + `pointer-events:none`，不是安全边界。回归见 `test/subtitle-budget.test.mjs`（纯函数）与 `test/subtitle-budget-pipeline.test.mjs`（真实 background + 假 fetch）。
@@ -889,13 +890,13 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 
 ---
 
-## 14. 本版技术记录（0.18.1）
+## 14. 本版技术记录（0.19.0）
 
-- **版式预览向上滚动回弹（[Issue #18](https://github.com/Suethekitten/Rimefox/issues/18)）**：原因是没有页图的页（未渲染或画布被回收）按整页宽乘比例占位，约为渲染后的两倍高；上方的页重渲染时缩回去，下面的内容被整体上移。修法三层：`reader.css` 用两个伪元素让未渲染页按「提示 + 入口两行 + 半宽页图」占位；`holdPdfPageHeight` 在排队渲染和两张画布各自被回收时把页高写成固定 `height`，`renderPdfPage` 在同一步里放开并补上文本块与版式层；`keepPdfScroll` 对页顶在视口上方的页，按高度差补偿滚动位置（提示折行、译文晚到、OCR 结果）。提示与「查看本页完整译文」固定行高、无外边距，不再跟随段间距 / 行高设置。细节见 [PDF 维护交接](docs/PDF-HANDOFF.md#版式译文预览)。
-- **链接段内换序**：`content/dom.js` 的 `reorderPlan` 以非链接原子（引用 / notranslate 等）为界把链接分段，链接只在自己那一段里换序，每段各有边界，没换序的段不移动节点；链接越过非链接原子、非链接原子换位仍返回空计划并走安全失败。比 0.18.0 更严的一处：「引用、链接、链接」里引用被挪到末尾时，以前会给出计划，现在拒绝。契约见 [翻译引擎交接 §3.6](docs/TRANSLATION-ENGINE-HANDOFF.md)。
-- **测试**：`tools/e2e-pdf-reader.mjs` 新增样本 `layout-scroll.pdf`（10 页同尺寸，像素比 2 让预算只留约 4 页），检查回收后向上滚、三种状态页高一致、跳到后面再向上滚；`tools/e2e-link-order.mjs` 新增冻结的 en.wikipedia「Corruption in South Africa」第三段（control / reorder / cross），`ar-reorder` 由预期失败改为预期成功；`selftest/link-order.js` 增加分段直测。
-- **验证**：macOS + Chrome 本机跑 Node 全量用例、离线自检、`e2e-extension`、`e2e-inline-layout`、`e2e-link-order`、`e2e-reader`、`e2e-pdf-reader`。**未验收**：Windows / Edge 上用真实多页 PDF 复核滚动；真实模型在维基百科页面上的换序。
-- **原生组件**：沿用 0.17.5 Windows OCR 和 0.17.2 macOS OCR 附件，本版没有改动组件。
+- **PDF 校订与导出**。校订独立保存于阅读器本地库，按原文段落定位，阅读、版式预览与打印共用校订后的译文。导出默认复用已保存的译文，可选择补译并检查原文回退。两种排版与数据边界见 [PDF 维护交接](docs/PDF-HANDOFF.md#编辑和导出译文)。
+- **网页扫描与浮层**。网页采集使用可恢复的遍历位置分片推进，浮层打开后走现有增量队列。同步收集入口继续用于阅读器和自检。见 [翻译引擎交接](docs/TRANSLATION-ENGINE-HANDOFF.md)。
+- **站点补译范围**。补译选择器与排除规则一起应用。组件与 HTTP(S) 嵌入文档按主页面的站点规则开启，切换显示模式与还原由主页面同步到嵌入文档。见 [站点规则示例](docs/SHADOW-DOM-ADAPTER.md#站点规则示例)。
+- **字幕布局与 B 站身份**。字幕布局按播放器所在主机保存，位置与宽度按播放器比例记录，字号使用像素。调布局不触发翻译。B 站将 av 与 BV 统一到同一视频身份，并保留分 P 的 cid。复用算法的出处和许可见 [第三方声明](THIRD-PARTY-NOTICES.md#bilibili-thread-ripper)。
+- **验证**。Node 单测、DOM 自检、假服务的 Chrome 网页和 PDF 回归覆盖浮层、封闭组件、跨域嵌入页导航、字幕编辑以及校订后导出的实际 PDF。YouTube 在线视频用假翻译接口核对了字幕显示、布局入口和缓存。OCR 宿主版本沿用此前的预览版。
 
 ### 0.18.0 记录
 

@@ -413,3 +413,29 @@ html[data-dt-night="on"] [style*="background-image"],
 html[data-dt-night="on"] body > [data-dt-ui] {
   filter: invert(1) hue-rotate(180deg);
 }
+
+/* Video caption placement and its preview stay inside the fullscreen player. */
+.rimefox-subs-layout {
+  position: absolute; z-index: 60; top: 10px; right: 12px;
+  color: white; font: 13px/1.35 system-ui, sans-serif; text-align: left;
+}
+.rimefox-subs-layout button {
+  color: white; background: #262626; border: 1px solid #858585; border-radius: 5px;
+  padding: 4px 8px; font: inherit; cursor: pointer;
+}
+.rimefox-subs-layout > button { opacity: .8; }
+.rimefox-subs-layout button:hover, .rimefox-subs-layout button:focus-visible { opacity: 1; }
+.rimefox-subs-layout-form {
+  position: absolute; top: calc(100% + 5px); right: 0; padding: 9px;
+  width: min(220px, 65vw); background: #202020; border: 1px solid #707070; border-radius: 7px;
+}
+.rimefox-subs-layout-form label { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; }
+.rimefox-subs-layout-form input { width: 55%; margin: 0; }
+.rimefox-subs-layout-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
+.rimefox-subs-layout-preview {
+  position: absolute; z-index: 45; transform: translateX(-50%);
+  text-align: center; padding: 5px; border: 1px dashed white; border-radius: 4px;
+  color: white; background: rgb(0 0 0 / 72%); cursor: move; touch-action: none; user-select: none;
+}
+.rimefox-subs-layout-form[hidden], .rimefox-subs-layout-preview[hidden] { display: none !important; }
+.rimefox-subs-layout.is-editing ~ .rimefox-subs, .rimefox-subs:has(~ .rimefox-subs-layout.is-editing) { visibility: hidden; }

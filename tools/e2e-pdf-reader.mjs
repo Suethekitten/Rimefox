@@ -545,6 +545,58 @@ await chooseMode('pdf-parallel');
 check('可切回文字双列且没有残留版式画布', await pageEval(page, 'return !document.querySelector(".pdf-layout-view,.pdf-layout-text") && !!document.querySelector(".pdf-page > .pdf-blocks")'));
 await chooseMode('pdf-layout');
 await until(() => pageEval(page, 'return document.querySelectorAll(".pdf-layout-translation").length===2'));
+// Edit a translated paragraph, then prepare both outputs through the public reader controls.
+before = hits.requests;
+await pageEval(page, 'document.getElementById("pdfEditOpen").click(); return true;');
+check('PDF 编辑器加载本页译文', !!await until(() => pageEval(page, 'return document.querySelector("#pdfEditFields textarea")?.value === "版式译文"')));
+await pageEval(page, 'document.querySelector("#pdfEditFields textarea").value="校订译文"; document.getElementById("pdfEditSave").click(); return true;');
+check('手动译文同步到版式预览且不请求翻译接口', !!await until(() => pageEval(page, 'return !document.getElementById("pdfEditDialog").open && document.querySelector(".pdf-layout-translation")?.textContent==="校订译文"')) && hits.requests === before);
+await pageEval(page, 'document.getElementById("pdfEditOpen").click(); return true;');
+check('重新打开编辑器能从书库读到手动译文', !!await until(() => pageEval(page, 'return document.querySelector("#pdfEditFields textarea")?.value === "校订译文"')));
+await pageEval(page, 'document.getElementById("pdfEditClose").click(); document.getElementById("pdfExportOpen").click(); return true;');
+await pageEval(page, 'document.getElementById("pdfExportRange").value="2-1"; document.getElementById("pdfExportPrepare").click(); return true;');
+check('导出拒绝倒序页码', await pageEval(page, 'return document.getElementById("pdfExportPrint").hidden && document.getElementById("pdfExportStatus").textContent.includes("有效页码")'));
+await pageEval(page, 'document.getElementById("pdfExportRange").value="1"; return true;');
+for (const format of ['layout', 'text']) {
+  await pageEval(page, `
+    document.getElementById("pdfExportFormat").value = ${JSON.stringify(format)};
+    document.getElementById("pdfExportPrepare").click();
+    return true;`);
+  const ready = await until(() => pageEval(page, 'return !document.getElementById("pdfExportPrint").hidden'), 6000);
+  check('PDF ' + format + ' 导出准备显示校订译文', ready && await pageEval(page, 'return document.getElementById("pdfPrintOutput").textContent.includes("校订译文")'),
+    await pageEval(page, 'return document.getElementById("pdfExportStatus").textContent'));
+  if (!ready) continue;
+  check('导出按钮调用浏览器打印并隔离阅读器 UI', await pageEval(page, `
+    const original = window.print;
+    let reached = false;
+    try {
+      window.print = () => { reached = document.body.classList.contains("pdf-printing") && !document.getElementById("pdfExportDialog").open; };
+      document.getElementById("pdfExportPrint").click();
+      return reached && document.getElementById("pdfExportDialog").open;
+    } finally { window.print = original; }`));
+  await pageEval(page, 'document.getElementById("pdfExportDialog").close(); document.body.classList.add("pdf-printing"); return true;');
+  const pdf = await send('Page.printToPDF', { preferCSSPageSize: true, printBackground: true }, page);
+  const extracted = await evaluate(page, `(async () => {
+    const { getDocument, GlobalWorkerOptions } = await import("./vendor/pdfjs/pdf.min.mjs");
+    GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("reader/vendor/pdfjs/pdf.worker.min.mjs");
+    const loader = getDocument({ data: Uint8Array.from(atob(${JSON.stringify(pdf.data)}), c => c.charCodeAt(0)),
+      standardFontDataUrl: chrome.runtime.getURL("reader/vendor/pdfjs/") });
+    try {
+      const document = await loader.promise;
+      const first = await document.getPage(1);
+      const text = (await first.getTextContent()).items.map(item => item.str).join("");
+      return { pages: document.numPages, text };
+    } finally { await loader.destroy(); }
+  })()`);
+  check('实际生成的 ' + format + ' PDF 可重开，含校订译文且没有空白页', extracted.pages === 1 && extracted.text.normalize('NFKC').includes('校订译文'), JSON.stringify(extracted));
+  if (process.env.RIMEFOX_PDF_EXPORT_EVIDENCE) fs.writeFileSync(path.join(process.env.RIMEFOX_PDF_EXPORT_EVIDENCE, 'pdf-' + format + '.pdf'), Buffer.from(pdf.data, 'base64'));
+  await pageEval(page, 'document.body.classList.remove("pdf-printing"); document.getElementById("pdfExportDialog").showModal(); return true;');
+}
+check('默认导出不发送翻译请求', hits.requests === before);
+await pageEval(page, 'document.getElementById("pdfExportClose").click(); document.getElementById("pdfEditOpen").click(); return true;');
+await until(() => pageEval(page, 'return !!document.querySelector("#pdfEditFields button")'));
+await pageEval(page, 'document.querySelector("#pdfEditFields button")?.click(); document.getElementById("pdfEditSave").click(); return true;');
+check('恢复机器译文后原缓存继续可用', !!await until(() => pageEval(page, 'return !document.getElementById("pdfEditDialog").open && document.querySelector(".pdf-layout-translation")?.textContent==="版式译文"')) && hits.requests === before);
 await pageEval(page, 'window.__layoutCanvases=Array.from(document.querySelectorAll("canvas"));document.getElementById("backToLibrary").click();return true;');
 check('关书释放原页和译文页画布', await pageEval(page, 'return window.__layoutCanvases.length===2 && window.__layoutCanvases.every(c=>c.width===0)'));
 

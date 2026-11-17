@@ -8,6 +8,13 @@
   if (DT.__booted) return;
   DT.__booted = true;
 
+  var embedded = window.top !== window;
+  var frameState = null;
+  var frameSync = 0;
+  var frameUrl = '';
+  var framePublished = '';
+  var scanningStarted = false;
+
   var observer = null;
   var chromeObserver = null;
   var debounceTimer = 0;
@@ -455,9 +462,14 @@
         }
         // 站点规则可以固定这个网站的显示方式 / 译文样式
         var site = res.config.page && res.config.page.site;
-        var mode = (site && site.mode) || res.config.mode || 'dual';
-        var incomingTarget = res.config.targetLang || 'zh-CN';
-        var incomingInfo = res.config.activeLanguage || null;
+        var prevSite = prevConfig.page && prevConfig.page.site;
+        if (DT.shadow && DT.shadow.setSiteComponents) DT.shadow.setSiteComponents(site && site.translateComponents);
+        if (['textSelectors', 'excludeSelectors', 'supplementSelectors', 'translateComponents'].some(function (key) {
+          return JSON.stringify((site && site[key]) || null) !== JSON.stringify((prevSite && prevSite[key]) || null);
+        })) rebuild = true;
+        var mode = (embedded && frameState && frameState.mode) || (site && site.mode) || res.config.mode || 'dual';
+        var incomingTarget = (embedded && frameState && frameState.target) || res.config.targetLang || 'zh-CN';
+        var incomingInfo = (embedded && frameState && frameState.langInfo) || res.config.activeLanguage || null;
         if (mode !== cfgMode) {
           cfgMode = mode;
           if (DT.state.mode !== mode) {
@@ -546,6 +558,7 @@
     // 翻译中换了显示方式 / 目标语言：已注入的译文是按旧设置写的，整页重建（注入策略跟模式走）。
     // 删除在用语言进入 pending 时先不重建，等用户明确重译。
     if (rebuild && DT.state.enabled && !DT.state.targetPending) startOver();
+    publishFrameState();
     return DT.state.config;
   }
 
@@ -649,7 +662,7 @@
   // opts: { reset: 是否清零统计, silent: 是否不弹提示 }
   async function translatePage(opts) {
     var options = opts || {};
-    if (running || !DT.state.enabled || (DT.state.config && DT.state.config.authPaused)) return;
+    if ((embedded && frameUrl !== location.href) || running || !DT.state.enabled || (DT.state.config && DT.state.config.authPaused)) return;
     pruneOrderFailures();
     // 配置目标已回退但页面还是旧目标译文：暂停动态补翻，避免两种目标语言混排；
     // 明确点「重新翻译」或「开始翻译」后 applyConfigTarget() 会清掉这个标记。
@@ -669,7 +682,7 @@
     var progressed = false; // 本轮是否有单元完成或失败
 
     function cancelled() {
-      return myRun !== runId || !!(DT.state.config && DT.state.config.authPaused);
+      return (embedded && frameUrl !== location.href) || myRun !== runId || !!(DT.state.config && DT.state.config.authPaused);
     }
 
     function wantRetry(ms) {
@@ -735,7 +748,9 @@
       var deferred = 0; // 离屏幕太远、留到滚过去再翻的单元数
       var pageStyle = DT.state.style || 'plain';
       var pageIntensity = DT.normalizeIntensity(DT.state.intensity || 'standard');
-      var queue = DT.collectAll(function (unit) {
+      var scanUrl = location.href;
+      var scanYielded = false;
+      var collected = await DT.collectPage(function (unit) {
         var priorOrderFailure = unitState(renderFails, unit);
         if (priorOrderFailure && priorOrderFailure.code === 'unsupported-inline-order' &&
             (priorOrderFailure.text !== unit.text || priorOrderFailure.stamp !== (DT.unitStamp ? DT.unitStamp(unit) : ''))) {
@@ -769,8 +784,21 @@
           }
         }
         return true;
-      });
-      collectedFull = DT.lastCollectFull;
+      }, { cancelled: function () { return cancelled() || location.href !== scanUrl; }, onYield: function () {
+        scanYielded = true;
+        lastBeat = Date.now();
+      } });
+      if (cancelled()) return;
+      if (!collected) { dirty = true; return; }
+      var queue = collected.units;
+      collectedFull = collected.full;
+      if (scanYielded) {
+        queue = queue.filter(function (unit) {
+          if (unit.el.isConnected && !DT.sourceChanged(unit)) return true;
+          dirty = true;
+          return false;
+        });
+      }
 
       if (!queue.length) {
         if (!options.silent) DT.toast('没有需要翻译的段落（可能已是目标语言）');
@@ -1322,6 +1350,7 @@
     applySelectedStyle(cfg);
     DT.state.enabled = true;
     DT.send({ type: 'resume:set', value: true }).catch(function () {});
+    publishFrameState();
     detectForeignTranslator();
     DT.state.total = 0;
     DT.state.translated = 0;
@@ -1355,7 +1384,8 @@
     // 页面恢复原文后不再声称猫娘；selectedStyle 保留，下一次明确翻译继续用。
     DT.state.style = 'plain';
     DT.state.intensity = 'standard';
-    DT.send({ type: 'resume:set', value: false }).catch(function () {});
+    if (!embedded) DT.send({ type: 'resume:set', value: false }).catch(function () {});
+    publishFrameState();
     DT.restore();
     renderedContextScopes = [];
     DT.state.renderedProfessional = undefined;
@@ -1370,7 +1400,7 @@
     failureLog = [];
     resetFailures();
     applyChrome();
-    DT.toast('已还原原文');
+    if (!embedded) DT.toast('已还原原文');
     return summarize();
   }
 
@@ -1559,6 +1589,7 @@
   }
 
   function noteContextMutation(record) {
+    if (contextDirty) return;
     var target = record.target && (record.target.nodeType === 1 ? record.target : record.target.parentElement);
     if (target && target.closest && target.closest('title,h1,h2,h3')) {
       contextDirty = true;
@@ -1580,6 +1611,8 @@
   function startObserver() {
     if (observer) return;
     observer = new MutationObserver(function (records) {
+      if (!DT.state.enabled && embedded) return;
+      var rescan = false;
       for (var i = 0; i < records.length; i += 1) {
         var record = records[i];
         var target = record.target;
@@ -1590,26 +1623,28 @@
         // 忽略我们自己造成的变更：每插一批译文都会触发一次，
         // 不过滤的话每轮翻译结束后都要白跑一遍整页扫描
         if (target && target.nodeType === 1 && target.closest && target.closest('[data-dt-ui]')) continue;
+        if (record.type === 'attributes' && DT.isPanelMutation && DT.isPanelMutation(record)) rescan = true;
         if (record.type === 'childList' && ((record.addedNodes && record.addedNodes.length) || (record.removedNodes && record.removedNodes.length))) {
           cleanupDuplicateTargets(record.addedNodes || []);
           if (!hasForeignNodes(record.addedNodes || []) && !hasForeignNodes(record.removedNodes || [])) continue;
           noteContextMutation(record);
-          scheduleIncremental();
-          return;
+          rescan = true;
         }
         if (record.type === 'characterData') {
           if (DT.isOwnWrite(target)) continue; // 仅译文模式原地替换文本
           noteContextMutation(record);
-          scheduleIncremental();
-          return;
+          rescan = true;
         }
       }
+      if (rescan) scheduleIncremental();
     });
     try {
       observer.observe(document.documentElement, {
         childList: true,
         subtree: true,
-        characterData: true
+        characterData: true,
+        attributes: true,
+        attributeFilter: DT.panelAttributes || ['open', 'hidden']
       });
     } catch (err) {
       DT.log('observer failed', err);
@@ -1622,7 +1657,7 @@
       if (location.href === lastUrl) return;
       lastUrl = location.href;
       // 站点规则可以按路径写：换了网址重新取一次（外观 / 规则跟着新网址走）
-      loadConfig();
+      loadConfig().then(function () { if (embedded) syncFrame(); });
       if (!DT.state.enabled) return;
       // SPA 路由切换 / 打开弹层时 URL 会变。
       // 这里不再整页清空重翻（那样会闪一下），只把"源文本确实变了"的元素撤掉，
@@ -1664,6 +1699,7 @@
     DT.state.lastOutputError = '';
     DT.state.lastError = '';
     applyChrome();
+    publishFrameState();
     if (DT.state.enabled) translatePage({ reset: true, silent: true });
   }
 
@@ -1765,9 +1801,69 @@
     status: summarize
   };
 
+  function frameSnapshot() {
+    var s = DT.state;
+    return {
+      enabled: s.enabled && !s.targetPending && !!(s.config && s.config.hasKey && !s.config.authPaused),
+      mode: s.mode, target: s.target, langInfo: s.langInfo || null,
+      style: s.style || 'plain', intensity: s.intensity || 'standard'
+    };
+  }
+
+  function publishFrameState() {
+    if (embedded) return;
+    var site = DT.state.config && DT.state.config.page && DT.state.config.page.site;
+    var patterns = site && site.frameMatches;
+    var signature = patterns && patterns.length ? JSON.stringify([location.href, patterns, frameSnapshot()]) : '';
+    if (signature === framePublished) return;
+    framePublished = signature;
+    DT.send({ type: 'frames:changed' }, 5000).catch(function () {});
+  }
+
+  async function syncFrame() {
+    var seq = ++frameSync;
+    var url = location.href;
+    // The service worker checks both this frame URL and the top-level site rule.
+    var res = await DT.send({ type: 'frames:get' }, 5000).catch(function () { return null; });
+    if (seq !== frameSync || url !== location.href || !res || !res.ok) return;
+    if (res.configured) watchUrl();
+    var next = res.state;
+    if (!next || !next.enabled) {
+      frameState = null;
+      frameUrl = '';
+      if (DT.state.enabled) disable();
+      return;
+    }
+    if (DT.state.enabled && frameUrl === url && JSON.stringify(next) === JSON.stringify(frameState)) {
+      scheduleIncremental();
+      return;
+    }
+    frameUrl = url;
+    frameState = next;
+    DT.state.enabled = true;
+    DT.state.mode = next.mode;
+    DT.state.target = next.target;
+    DT.state.langInfo = next.langInfo;
+    DT.state.targetCode = (next.langInfo && next.langInfo.code) || '';
+    DT.state.targetPending = false;
+    DT.state.style = next.style;
+    DT.state.intensity = next.intensity;
+    startScanning();
+    startOver('embedded-document');
+  }
+
   // ---------------- 消息 ----------------
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || !msg.type) return false;
+    if (msg.type === 'dt:frameSnapshot' && !embedded) {
+      sendResponse(frameSnapshot());
+      return false;
+    }
+    if (msg.type === 'dt:framesChanged' && embedded) {
+      syncFrame();
+      return false;
+    }
+    if (embedded && msg.type !== 'dt:configChanged') return false;
 
     if (msg.type === 'dt:toggle') {
       // 浏览器快捷键刚和页面内快捷键一起触发过：忽略这一次（弹窗按钮不带 source，不受影响）
@@ -1936,6 +2032,7 @@
         DT.state.outputFailed = 0;
         DT.state.lastOutputError = '';
         scheduleIncremental();
+        if (embedded) syncFrame();
       });
       return false;
     }
@@ -1963,32 +2060,36 @@
   window.addEventListener('pageshow', function (event) {
     if (!event.persisted) return;
     cancelRun();
-    if (DT.state.enabled) scheduleIncremental();
+    if (embedded) syncFrame();
+    else if (DT.state.enabled) scheduleIncremental();
   });
 
-  // ---------------- 启动 ----------------
-  (async function boot() {
-    await loadConfig();
-    // iframe 只保留配置（划词 / 输入框 / 外观模块要用），不装观察器、快捷键、
-    // 定时器和滚动监听：嵌入广告 / 评论区不需要这些，否则每个子框架都在空转。
-    if (window.top !== window) {
-      DT.log('content script ready (iframe)', DT.VERSION);
-      return;
-    }
-    if (DT.shadow && DT.shadow.setChangeHandler) {
-      DT.shadow.setChangeHandler(scheduleIncremental);
-    }
+  function startScanning() {
+    if (scanningStarted) return;
+    scanningStarted = true;
+    if (DT.shadow && DT.shadow.setChangeHandler) DT.shadow.setChangeHandler(scheduleIncremental);
     startObserver();
     bindHoverRescan();
-    bindHotkey();
-    bindInputHotkey();
     bindClickRescan();
+    document.addEventListener('toggle', scheduleIncremental, true);
     // 滚动 / 改窗口大小后，待翻队列按新的可视区重新排序。
     // 用捕获阶段：很多站点是页面里某个容器在滚，scroll 事件不冒泡
     document.addEventListener('scroll', onViewChange, { capture: true, passive: true });
     window.addEventListener('resize', onViewChange, { passive: true });
     watchUrl();
     startWatchdog();
+  }
+
+  // ---------------- 启动 ----------------
+  (async function boot() {
+    await loadConfig();
+    if (embedded) {
+      await syncFrame();
+      return;
+    }
+    startScanning();
+    bindHotkey();
+    bindInputHotkey();
 
     // 有些站点（Aeon 的 Next.js hydration）会把 data-dt 从 <html> 上删掉；
     // 监听属性变化并补回，另外在 load 后和两个延迟点再对一次，覆盖慢 hydration。
@@ -2005,7 +2106,6 @@
     setTimeout(keepChromeState, 1200);
     setTimeout(keepChromeState, 4000);
 
-    // 自动开始翻译只在顶层页面（上面的 iframe 提前返回已经保证）
     // 同一个标签页里"刚才正在翻译"：刷新 / 返回后自动接着翻
     var resume = null;
     try {

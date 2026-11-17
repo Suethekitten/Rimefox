@@ -202,6 +202,29 @@
     return snap;
   }
 
+  var PANEL_SELECTOR = 'dialog,details,[popover],[role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"],[role="tabpanel"],[aria-modal],aside';
+  DT.panelAttributes = ['open', 'hidden', 'popover', 'aria-hidden', 'aria-expanded', 'class', 'style'];
+  DT.isPanelMutation = function (record) {
+    var el = record.target;
+    if (!el || !el.matches || (el.closest && el.closest('[data-dt-ui]')) || DT.isOwnNode(el)) return false;
+    var name = record.attributeName;
+    if (name === 'open' || name === 'hidden' || name === 'popover') return true;
+    return el.matches(PANEL_SELECTOR) || separateRegion(el) ||
+      /(?:^|[\s_-])(?:sidebar|drawer|modal|popover|panel)(?:$|[\s_-])/i.test(el.id + ' ' + el.className);
+  };
+
+  function separateRegion(el) {
+    return !!((siteSupplement && el.matches(siteSupplement)) || (DT.shadow && DT.shadow.isBoundary && DT.shadow.isBoundary(el)));
+  }
+
+  function closedPanelContent(el) {
+    var parent = el.parentElement;
+    var details = parent && parent.closest && parent.closest('details:not([open])');
+    if (!details) return false;
+    var summary = el.closest('summary');
+    return !summary || summary.parentElement !== details || summary !== details.querySelector('summary');
+  }
+
   // recheck：walk() 自己要重新检查的已翻译元素（有渲染记录、但源文本变了 / 只翻了直接文本），
   // 这时 data-dt-src 不算跳过理由。父级判断子元素时不传：已翻译的子元素仍不能被拼进父级再翻一遍。
   function isSkipped(el, recheck) {
@@ -218,7 +241,7 @@
     // 但内容明明还在屏幕上——跳过就会导致"点开一张图，整页译文消失"。
     if (el.getAttribute('contenteditable') === '' || el.getAttribute('contenteditable') === 'true') return true;
     if (el.isContentEditable) return true;
-    if (el.hidden) return true;
+    if (el.hidden || closedPanelContent(el)) return true;
     var cls = el.className;
     if (typeof cls === 'string' && /(^|\s)(notranslate|no-translate)(\s|$)/.test(cls)) return true;
     var cs = styleOf(el);
@@ -250,7 +273,7 @@
         if (kid.nodeType === 3) {
           if (kid.nodeValue && !(ownNodes.has(kid) && DT.isOwnWrite(kid))) out.push({ node: kid, keep: keep });
         } else if (kid.nodeType === 1) {
-          if (kid.hasAttribute('data-dt-target')) continue;
+          if (kid.hasAttribute('data-dt-target') || separateRegion(kid) || kid.matches(PANEL_SELECTOR) || closedPanelContent(kid)) continue;
           if (kid.hasAttribute('data-dt-ui') || kid.hasAttribute('data-dt-dir') || kid.hasAttribute('data-dt-format')) continue;
           var tag = tagOf(kid);
           if (NON_TEXT_TAGS[tag]) continue;
@@ -1295,6 +1318,7 @@
     if (kid.hidden) return false;
     var cs = styleOf(kid);
     if (cs && cs.display === 'none') return false;
+    if (separateRegion(kid) || kid.matches(PANEL_SELECTOR)) return true;
     if (isStructural(kid) && (!PHRASING_TAGS[tag] || kid.querySelector(BLOCK_SELECTOR))) return true;
     if (CONTENT_TAGS[tagOf(parent)]) return false;
     return !!(kid.matches(CONTROL_SELECTOR) || kid.querySelector(CONTROL_SELECTOR));
@@ -1368,7 +1392,7 @@
     for (var i = 0; i < kids.length; i += 1) {
       if (isSkipped(kids[i])) continue;
       usable += 1;
-      if (isStructural(kids[i])) structural += 1;
+      if (isStructural(kids[i]) || separateRegion(kids[i]) || kids[i].matches(PANEL_SELECTOR)) structural += 1;
     }
     if (!usable) return false;
 
@@ -1895,23 +1919,15 @@
     // 「See <a>很长的链接</a>.」、「<span>Hello</span> <span>World</span>」仍是一句
     var breaks = own && el.children.length ? flowBreaks(el) : [];
 
-    // 开放 Shadow DOM：宿主自己的 light DOM 不再当正文扫，改走 shadow root；
-    // slot 只走 assignedNodes，避免 light DOM 与分发后的内容被翻译两次。
-    // closed root 没有 shadowRoot，按普通元素处理（安全跳过）。
+    // 组件根与 light DOM 分开遍历。slot 按实际分发顺序收集，用 walkSeen 避免重复。
     if (DT.shadow && DT.shadow.active()) {
       if (DT.shadow.skip(el)) return;
       var shadowRoot = DT.shadow.enter(el);
       if (shadowRoot) {
-        var shadowKids = shadowRoot.children;
-        for (var si = 0; si < shadowKids.length; si += 1) walk(shadowKids[si], out);
-        return;
+        return { nodes: shadowRoot.children };
       }
       if (DT.shadow.isSlot(el)) {
-        var assigned = DT.shadow.assigned(el);
-        for (var ai = 0; ai < assigned.length; ai += 1) {
-          if (assigned[ai] && assigned[ai].nodeType === 1) walk(assigned[ai], out);
-        }
-        return;
+        return { nodes: DT.shadow.assigned(el) };
       }
     }
 
@@ -1921,8 +1937,7 @@
     if (!own && !breaks.length) {
       var wrappedControl = soleControlRoot(el);
       if (wrappedControl) {
-        walk(wrappedControl, out);
-        return;
+        return { nodes: [wrappedControl] };
       }
     }
 
@@ -1946,14 +1961,11 @@
     //    放在「子元素全被跳过」之前：块级子元素翻完（打了 data-dt-src）以后照样是打断文字流的子块，
     //    不能下一轮变成 own 单元 —— 那样会撤掉第一段译文、新单元又因为旧译文节点注入失败，每轮重发同一段
     if (breaks.length) {
-      settleForm(el, 'partial', new Set(breaks));
+      var boundaries = new Set(breaks);
+      settleForm(el, 'partial', boundaries);
       addParagraphs(out, el, flowTokens(el, breaks), false, true);
-      var kids2 = el.children;
-      for (var bi = 0; bi < kids2.length; bi += 1) {
-        // 打断文字流的子块各自下钻；已翻过的行内子元素（以前单独成段）由它自己重新检查
-        if (breaks.indexOf(kids2[bi]) >= 0 || kids2[bi].hasAttribute('data-dt-src')) walk(kids2[bi], out);
-      }
-      return;
+      // 打断文字流的子块各自下钻；曾单独成段的行内子元素也要重新检查。
+      return { nodes: el.children, include: function (child) { return boundaries.has(child) || child.hasAttribute('data-dt-src'); } };
     }
 
     // 3) 子元素全被跳过（已翻译 / 不可见 / notranslate）：父级只翻自己的直接文本，
@@ -1964,11 +1976,7 @@
         settleForm(el, 'own', ownExcluded(el));
         addParagraphs(out, el, ownTokens(el), true);
       } else if (known) releaseRecords(el, isDual); // 自己的字没了（站点删了 / 子元素藏起来了）
-      var done = el.children;
-      for (var d = 0; d < done.length; d += 1) {
-        if (done[d].hasAttribute('data-dt-src')) walk(done[d], out);
-      }
-      return;
+      return { nodes: el.children, include: function (child) { return child.hasAttribute('data-dt-src'); } };
     }
 
     // 4) 有直接文本（段落），或不该继续拆分 → 整段按段落切分
@@ -1976,11 +1984,7 @@
       // 兜底防线：如果这棵子树里已经有我们注入的译文，说明这里被翻过，
       // 再整块翻一次就会把内容翻第二遍。这时只往下处理"还没翻"的子节点。
       if (!own && el.querySelector && el.querySelector('[data-dt-src]')) {
-        var inner = el.children;
-        for (var k = 0; k < inner.length; k += 1) {
-          walk(inner[k], out);
-        }
-        return;
+        return { nodes: el.children };
       }
       settleForm(el, 'whole', null);
       addParagraphs(out, el, tokensOf(el), false);
@@ -1992,10 +1996,47 @@
     if (known) releaseRecords(el);
     el.__dtForm = '';
     el.__dtScope = null;
-    var kids = el.children;
-    for (var i = 0; i < kids.length; i += 1) {
-      walk(kids[i], out);
+    return { nodes: el.children };
+  }
+
+  // 用父级迭代位置继续深度优先遍历，避免一次把宽容器的所有子节点压进栈。
+  function createWalk(root, seen) {
+    return {
+      stack: [{ nodes: root.nodeType === 11 ? root.children || [] : [root], index: 0 }],
+      seen: seen || new WeakSet()
+    };
+  }
+
+  function advanceWalk(cursor, out, accept, shouldYield) {
+    collectAccept = accept || null;
+    scanStyles = new WeakMap();
+    citeMemo = new WeakMap();
+    walkSeen = cursor.seen;
+    var stack = cursor.stack;
+    try {
+      while (stack.length && out.length < MAX_UNITS) {
+        var frame = stack[stack.length - 1];
+        if (frame.index >= frame.nodes.length) {
+          stack.pop();
+        } else {
+          var el = frame.nodes[frame.index++];
+          if ((!shouldYield || el.isConnected) && (!frame.include || frame.include(el))) {
+            var next = walk(el, out);
+            if (next) { next.index = 0; stack.push(next); }
+          }
+        }
+        if (shouldYield && shouldYield()) break;
+      }
+    } catch (err) {
+      stack.length = 0;
+      DT.log('collect error', err);
+    } finally {
+      collectAccept = null;
+      scanStyles = null;
+      citeMemo = null;
+      walkSeen = null;
     }
+    return !stack.length || out.length >= MAX_UNITS;
   }
 
   // 对外：收集页面上所有待翻译单元。
@@ -2008,6 +2049,7 @@
   // 选择器逐个试一遍，写错的单独丢掉，不能让一条坏选择器把整页翻译弄挂
   var siteExclude = '';
   var siteText = '';
+  var siteSupplement = '';
   function validSelectors(list) {
     return (list || []).filter(function (sel) {
       try {
@@ -2022,6 +2064,7 @@
   DT.setSiteRule = function (rule) {
     siteExclude = rule ? validSelectors(rule.excludeSelectors).join(',') : '';
     siteText = rule ? validSelectors(rule.textSelectors).join(',') : '';
+    siteSupplement = rule ? validSelectors(rule.supplementSelectors).join(',') : '';
   };
 
   // 要从哪些根开始收：有 textSelectors 就只收这些区域（嵌套的只留最外层），否则整个 body
@@ -2039,29 +2082,64 @@
     });
   };
 
-  // 按站点规则的根逐个收集；任何一个根收满了上限都算本轮收满。
-  // 所有根共用同一个输出数组：以前每个根 concat 一次，匹配上千个根时是 O(n²)。
-  DT.collectAll = function (accept) {
-    var out = [];
-    var full = false;
+  function pageRoots() {
     if (DT.shadow && DT.shadow.prune) DT.shadow.prune();
     var roots = DT.collectRoots();
-    // 适配器指定的 Shadow DOM 内容根（Bilibili 只收评论正文，不扫整个组件树）。
-    // 普通网站 / 未启用 Shadow DOM 时这里是空数组，不增加开销。
-    if (DT.shadow && DT.shadow.active && DT.shadow.active()) {
-      var extra = DT.shadow.collectTargets ? DT.shadow.collectTargets() : [];
-      if (extra && extra.length) roots = roots.concat(extra);
+    if (siteSupplement && document.body) {
+      var supplementRoots = Array.prototype.filter.call(document.body.querySelectorAll(siteSupplement), function (el) {
+        for (var parent = el; parent && parent !== document.documentElement; parent = parent.parentElement) {
+          if (isSkipped(parent, true)) return false;
+        }
+        return true;
+      });
+      roots = roots.concat(supplementRoots);
     }
-    for (var i = 0; i < roots.length; i += 1) {
-      if (out.length >= MAX_UNITS) {
-        full = true;
-        break;
-      }
-      DT.collect(roots[i], accept, out);
-      if (DT.lastCollectFull) full = true;
+    // 适配器只附加明确选中的内容根，例如 B 站评论正文。
+    if (DT.shadow && DT.shadow.active && DT.shadow.active() && DT.shadow.collectTargets) {
+      roots = roots.concat(DT.shadow.collectTargets() || []);
     }
-    if (out.length >= MAX_UNITS) full = true;
-    DT.lastCollectFull = full;
+    return roots;
+  }
+
+  async function collectInSlices(roots, accept, options) {
+    var out = [];
+    var seen = new WeakSet();
+    var deadline = performance.now() + 8;
+    var steps = 0;
+    function shouldYield() {
+      // 时间检查的频率与节点开销无关，跳过大量隐藏节点时也会让出主线程。
+      steps += 1;
+      return steps >= 128 || performance.now() >= deadline;
+    }
+    for (var i = 0; i < roots.length && out.length < MAX_UNITS; i += 1) {
+      var cursor = createWalk(roots[i], seen);
+      var done = false;
+      do {
+        if (options.cancelled()) return null;
+        done = advanceWalk(cursor, out, accept, shouldYield);
+        if (out.length < MAX_UNITS && (!done || i + 1 < roots.length) && (steps >= 128 || performance.now() >= deadline)) {
+          options.onYield();
+          await new Promise(function (resolve) { setTimeout(resolve, 0); });
+          deadline = performance.now() + 8;
+          steps = 0;
+        }
+      } while (!done);
+    }
+    if (options.cancelled()) return null;
+    return { units: out, full: out.length >= MAX_UNITS };
+  }
+
+  // 阅读器、自检保留同步入口。网页翻译用同一套遍历规则渐进采集。
+  DT.collectPage = function (accept, options) {
+    return collectInSlices(pageRoots(), accept, options);
+  };
+
+  DT.collectAll = function (accept) {
+    var roots = pageRoots();
+    var out = [];
+    var seen = new WeakSet();
+    for (var i = 0; i < roots.length && out.length < MAX_UNITS; i += 1) advanceWalk(createWalk(roots[i], seen), out, accept);
+    DT.lastCollectFull = out.length >= MAX_UNITS;
     return out;
   };
 
@@ -2069,28 +2147,7 @@
     var out = sharedOut || [];
     var before = out.length;
     var start = root || document.body;
-    DT.lastCollectFull = false;
-    if (!start) return out;
-    collectAccept = accept || null;
-    scanStyles = new WeakMap();
-    citeMemo = new WeakMap();
-    walkSeen = new WeakSet();
-    try {
-      if (start.nodeType === 11) {
-        // ShadowRoot 是 DocumentFragment，不能直接交给只认 Element 的 walk。
-        var fragKids = start.children || [];
-        for (var fi = 0; fi < fragKids.length; fi += 1) walk(fragKids[fi], out);
-      } else {
-        walk(start, out);
-      }
-    } catch (err) {
-      DT.log('collect error', err);
-    } finally {
-      collectAccept = null;
-      scanStyles = null;
-      citeMemo = null;
-      walkSeen = null;
-    }
+    if (start) advanceWalk(createWalk(start), out, accept);
     DT.lastCollectFull = out.length >= MAX_UNITS;
     DT.log('collect units:', out.length - before);
     return out;

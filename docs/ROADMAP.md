@@ -1,7 +1,7 @@
 # 路线图
 
 > 记录「接下来做什么、为什么这样排」。架构与坑位见 [../HANDOFF.md](../HANDOFF.md)，翻译引擎的实现细节见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)。
-> 最近更新：2026-11-12。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。0.17.x 完成 TXT / Markdown / LOG 阅读、PDF 版式翻译预览与系统 OCR 预览，0.18.0 扩大版式预览覆盖，范围与待验收项见 [0.18 交接](NEXT-MINOR-HANDOVER.md)。实际发布状态以 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases) 为准，下一步见 §4。
+> 最近更新：2026-11-17。阅读器契约见 [READER-ARCHITECTURE.md](READER-ARCHITECTURE.md)，PDF 维护见 [PDF-HANDOFF.md](PDF-HANDOFF.md)。[0.19.0 更新内容](../CHANGELOG.md#0190--pdf-校订与导出字幕布局和网页补译)的发布状态见 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases)，下一步见 §4。
 
 ---
 
@@ -116,37 +116,37 @@
 | P0-1 | ✅ **表单 / 菜单 / 对话框被整块替换** | 0.7.2：`textOf` 跳过隐藏子树、含控件的容器强制下钻、替换时跳过隐藏节点；新增 2 条自检 | 已完成 |
 | P0-2 | ✅ **商店包补 MIT 署名** | 0.7.1 补丁：allowlist 加入 `LICENSE` / `THIRD-PARTY-NOTICES.md` / `licenses/`，出包时缺一个直接报错，测试同步 | 已完成 |
 | P0-3 | ✅ **公开仓库安全设置** | 2026-10-22 开启：Private vulnerability reporting、Secret Protection（secret scanning）、Push protection、Dependency graph + Dependabot alerts / security updates | 已完成 |
-| P0-4 | ✅ **PDF 切换目标语言后复用旧译文** | 本地修复与真实 Chrome 回归已完成；边界见 [PDF 维护交接](PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复)，发布状态见 §4 | 已完成，纳入 0.15.0 |
+| P0-4 | ✅ **PDF 切换目标语言后复用旧译文** | 本地修复与真实 Chrome 回归已完成，边界见 [PDF 维护交接](PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复) | 已完成，纳入 0.15.0 |
 
 ### P1 — 功能缺口
 
 | # | 任务 | 预估 | 风险 | 说明 |
 |---|---|---|---|---|
-| P1-1 | ✅ **输入框翻译**（0.9.0） | 250 行 | 中 | `Alt+I` / 右键菜单翻译输入框并回填；必须处理 IME 组合态，不打断输入；目标语言默认跟随页面语言、默认不进缓存（0.9.0，见 4.1） |
+| P1-1 | ✅ **输入框翻译**（0.9.0） | 250 行 | 中 | `Alt+I` / 右键菜单翻译输入框并回填；必须处理 IME 组合态，不打断输入；目标语言默认跟随页面语言、默认不进缓存 |
 | P1-2 | ✅ **行内标签保真**（0.12.0） | — | 中高 | 复用混合原子与渲染事务，有限语义格式随译文重排；保护内容使用空占位符；严格校验与离线回归。复杂结构的保守限制见 §7 |
-| P1-9 | ✅ **仅译文链接语序重排**（0.12.3） | — | 高 | 同父平坦普通链接用事务移动原 A，保留 href/事件/恢复；嵌套、交错引用、多行和框架根仍安全失败。边界见 HANDOFF §14 与引擎 §3.6 |
+| P1-9 | ✅ **仅译文链接语序重排**（0.12.3） | — | 高 | 同父平坦普通链接可换序，0.18.1 支持同一引用分隔段内换序。边界见 [翻译引擎交接 §3.6](TRANSLATION-ENGINE-HANDOFF.md#36-原子顺序与渲染成功契约) |
 | P1-8 | ✅ **自定义目标语言 / 趣味风格 / AI 精翻**（0.12.0） | — | 中高 | 自定义语言与 BCP 47 分离、RTL / 无代码降级；风格与强度只在下一次明确翻译生效；AI 上下文并入正常请求、隐私 fail-closed、标题变化不整页重翻 |
-| P1-3 | ✅ **术语表一键收录**（0.9.0） | 120 行 | 低 | 划词气泡里加「加入术语表」，省得去设置页手填；前提是缓存键只算命中的术语，否则每收录一条全站重翻（0.9.0，见 4.1） |
+| P1-3 | ✅ **术语表一键收录**（0.9.0） | 120 行 | 低 | 划词气泡里加「加入术语表」，省得去设置页手填；前提是缓存键只算命中的术语，否则每收录一条全站重翻 |
 | P1-4 | ✅ **PDF 翻译（0.14.0）** | — | 中高 | 扩展内置阅读页 + pdf.js：导入、目录三档、双栏/页眉处理、缩放、三种译文模式、按页缓存；扫描件 OCR 另按 P2-11 以可选本地组件预览推进（Windows / macOS 系统 OCR 已于 0.17.x 发布）。2026-10-21 曾定为独立项目，2026-11-01 起随 0.14.0 并入本仓库 |
-| P1-5 | **划词快捷键** | 小 | 低 | 监听在 `main.js`，等 P2-10 拆完再和整页翻译统一成「有选区就划词、没选区就整页」的自适应键（原 HANDOFF §10） |
+| P1-5 | ✅ **划词快捷键**（0.5.4） | — | 低 | 开启划词翻译时，同一个翻译快捷键有选区就划词，没有选区就切换整页翻译 |
 | P1-6 | **对齐实测** | 中 | 中 | 用真实模型统计 `align` 遵守率、悬停命中率、请求 / Token 变化、弱模型降级率；结论决定 P2-9 做什么（原 HANDOFF §10）。已有 2026-11-04 真实模型小样本验收（DeepSeek / Gemini，结构化对齐均回退段落），完整统计仍待做，见 [验收记录](archive/2026-11-04-real-model-acceptance.json) |
 | P1-7 | ✅ **医学专业模式**（0.11.0） | — | 中 | 全局 `medicalMode` + 100 条审核词库 + 医学规则 / 术语注入 + 缓存隔离；真实模型质量仍需抽样验收。实现与限制见 [PROFESSIONAL-TRANSLATION.md](PROFESSIONAL-TRANSLATION.md)，数据审计见 [MEDICAL-DATA-AUDIT.md](MEDICAL-DATA-AUDIT.md) |
-| P1-10 | **PDF 版式预览向上滚动回弹** | — | 中 | 版式预览 + 已翻译时向上滚动会被向下扯回：未渲染 / 已回收的页按整页宽占位，约为渲染后的两倍高，重渲染时缩回去。已在 `main` 修复（占位与渲染后等高、渲染期间锁住页高、视口上方的高度变化补偿滚动），随 0.18.1 发布，见 [Issue #18](https://github.com/Suethekitten/Rimefox/issues/18) 与 [PDF 维护交接](PDF-HANDOFF.md#版式译文预览) |
+| P1-10 | ✅ **PDF 版式预览向上滚动回弹**（0.18.1） | — | 中 | [Issue #18](https://github.com/Suethekitten/Rimefox/issues/18) 已修复。Windows / Edge 上的真实 PDF 滚动仍待复验，见 [0.18 验收记录](NEXT-MINOR-HANDOVER.md#6-验收) |
 
 ### P2 — 可配置性
 
 | # | 任务 | 说明 |
 |---|---|---|
-| P2-1 | ✅ 会话级 Key 存储（**0.15.0 已完成**） | 新 Key 默认仅存会话，可选择设备记忆；旧 Key 保留原策略并提供迁移选择；配套鉴权暂停与配置同步。当前状态见 §4，技术契约见 [HANDOFF §4.7](../HANDOFF.md#47-配置会话凭据与鉴权暂停0150) |
-| P2-2 | 站点规则进阶 | 每站点目标语言、按路径匹配、一键导入社区规则 |
+| P2-1 | ✅ 会话级 Key 存储（**0.15.0 已完成**） | 新 Key 默认仅存会话，可选择设备记忆；旧 Key 保留原策略并提供迁移选择；配套鉴权暂停与配置同步。技术契约见 [HANDOFF §4.7](../HANDOFF.md#47-配置会话凭据与鉴权暂停0150) |
+| P2-2 | 站点规则进阶 | 已支持按路径匹配。每站点目标语言、一键导入社区规则待做 |
 | P2-3 | 自定义提示词按站点 | 现在只有全局追加，后续支持站点覆盖 |
 | P2-4 | 隐私脱敏扩展 | 地址、护照号、英文人名（默认仍关闭，先解决误伤） |
 | P2-5 | 夜间模式自动识别 | 识别自带深色主题的站点，避免二次反色 |
 | P2-6 | 悬浮入口增强 | 快捷键、按域名隐藏（位置记忆已于 0.9.4 完成） |
 | P2-7 | OpenAI Responses 协议 | `/v1/responses`；只有遇到只开该协议的接口才做 |
 | P2-8 | 更多界面语言 | 目前中英文；有需求再加 |
-| P2-9 | 翻译引擎内部优化（不加请求、不加设置） | 轻量上下文、片段稳定映射、低成本质检、术语一致性：现状、成本、风险和下一步最小任务见 [TRANSLATION-ENGINE-HANDOFF.md](TRANSLATION-ENGINE-HANDOFF.md)；不定版本 |
-| P2-10 | 拆 `main.js` | 把纯函数（离屏距离、取批上限、退避时间表）挪到 `core.js`，只动这两个文件 + 自检页；P1-5 的前置（原 HANDOFF §10） |
+| P2-9 | 翻译引擎内部优化（不加请求、不加设置） | 轻量上下文、片段稳定映射、低成本质检、术语一致性均为候选方向。等 P1-6 实测再选具体任务，现有边界见 [翻译引擎交接](TRANSLATION-ENGINE-HANDOFF.md#6-请求缓存与性能) |
+| P2-10 | ✅ 调度纯函数拆分 | 离屏距离、取批上限与失败退避已由 [core.js](../content/core.js) 提供，`main.js` 负责调度 |
 | P2-12 | ✅ PDF 表格 / 公式文本清洗（**0.16.0 已完成**） | 表格仅在单栏页且数据行带数字时按单元格拆（不重建合并单元格）；公式残渣换 `[公式]` 占位且公式块不送翻；脚注标记 / 上标编号剥离；目录页不再被当成第二栏。跨页段落合并、表格结构重建与公式识别仍未做，见 [PDF 维护交接](PDF-HANDOFF.md) |
 | P2-11 | PDF 扫描件系统 OCR（**预览已发布**） | 采用用户按需下载并安装的独立本地组件，基础扩展不打包 OCR 引擎和模型；设置页与 PDF 阅读器共用配置入口，无可用 OCR 时提示用户前往设置。首阶段只开放 Windows / macOS 系统 OCR，保留未来 PaddleOCR 和签名分发能力。已发布版本见 [0.17.2](#0172macos-系统-ocr-组件) 与 [0.17.5](#0175补丁)，平台交付层级和实机未测项见 [组件 README](../native/ocr-host/README.md)，接口见 [OCR-INTERFACE](OCR-INTERFACE.md)。 |
 
@@ -164,26 +164,6 @@
 ## 4. 近期安排
 
 继续执行 [SUPPORT](SUPPORT.md) 的验收矩阵，缺真实环境证据的项目保持待验收。PDF Beta、直播字幕和医学质量提升不作为已兑现的 1.0 承诺。系统 OCR 预览按 P2-11 独立推进。
-
-### 0.15.0（实现与验证）
-
-P2-1 的会话 Key、可选设备记忆、旧用户迁移选择、鉴权失败全局暂停与配置广播合并已完成；同时纳入此前拟作 0.14.2 的 P0-4 PDF 缓存与任务生命周期修复。三处版本号及 CHANGELOG 已统一为 0.15.0，用户已明确授权推送；实际发布结果以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.15.0) 和 [Actions](https://github.com/Suethekitten/Rimefox/actions/workflows/release.yml) 为准。
-
-实现契约只在 [HANDOFF §4.7](../HANDOFF.md#47-配置会话凭据与鉴权暂停0150) 与 [PDF-HANDOFF](PDF-HANDOFF.md#pdf-译文缓存与任务生命周期0142-本地修复) 维护；完成范围、验证命令和未测边界见 [0.15 归档](archive/2026-11-01-session-keys-0.15.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
-
-### 0.16.0（实现与验证）
-
-P2-12 的表格 / 公式 / 脚注 / 目录 / 多栏排序、阅读器 IndexedDB v4 文件拆分、版式切换与滚动渲染稳定性、页面与译文缓存上限，以及配置导入清 Key 与明文 HTTP 警告均已完成。三处版本号与 CHANGELOG 已统一为 0.16.0；推送与发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.0) 和 [Actions](https://github.com/Suethekitten/Rimefox/actions/workflows/release.yml) 为准。
-
-实现契约见 [HANDOFF](../HANDOFF.md) 与 [PDF-HANDOFF](PDF-HANDOFF.md)；完成范围与未测边界见 [0.16 归档](archive/2026-11-02-pdf-quality-0.16.0.md)。提交与发布规则见 [AGENTS.md](../AGENTS.md)。
-
-### 0.16.1（补丁）
-
-修复 0.16.0 审计中第一批高风险项：PDF 搜索切换书籍串台 / 关书报错、并发打开覆盖、重新导入被书库上限误拦、IndexedDB 升级 blocked、PDF 失败页重试与显式重译清退避、流式滚动全页扫描与快速滑过排队、切换目标语言保持流式版式并自动重译、EPUB 切语言清缓存、字幕预算写队列清理、站点规则 O(n²)、字幕关闭空转查询。旧库迁移 / 删书 / 重复导入 / 目标语言自动重译已补 E2E；版本与 CHANGELOG 已统一为 0.16.1，发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.1) 为准。
-
-### 0.16.2（补丁）
-
-完成审计剩余三项：#7 大 PDF 首屏先渲染、目录扫描延后并行、页眉扫描与本页取字并行；#11 PDF 缓存身份按配置修订号记忆；#13 点击补扫只处理可能切换内容的控件并合并连续点击。版本与 CHANGELOG 已统一为 0.16.2，发布状态以 [Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.16.2) 为准。
 
 ### 0.17.2（macOS 系统 OCR 组件）
 
@@ -211,73 +191,36 @@ Windows 系统 OCR 组件 `0.2.0-preview.2` 的组件 ZIP、Windows 体验包和
 
 ### 0.18.0（PDF 版式预览覆盖）
 
-PDF「双列版式（预览）」从页级判断改成块级支持：横排目录条目翻译并保留页码，90°／270° 旋转标题按原方向放置，页面上方说明未放置的数量与原因并提供完整译文入口。同版还有 TXT 按章节分章、阅读器英文界面、字体上限 64 MB 和 YouTube 人工中文字幕时间轴修复。真实 PDF 样本与 Windows 上浏览器到 OCR 宿主的端到端仍待验收，见 [0.18 交接](NEXT-MINOR-HANDOVER.md#6-验收)。发布状态见 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases)。
+PDF「双列版式（预览）」从页级判断改成块级支持：横排目录条目翻译并保留页码，90°／270° 旋转标题按原方向放置，页面上方说明未放置的数量与原因并提供完整译文入口。同版还有 TXT 按章节分章、阅读器英文界面、字体上限 64 MB 和 YouTube 人工中文字幕时间轴修复。Windows 上浏览器到 OCR 宿主的端到端已通过一次真机验收，真实 PDF 已部分通过。剩余目录页和图片密集页仍待验收，见 [0.18 交接](NEXT-MINOR-HANDOVER.md#6-验收)。发布记录见 [v0.18.0 Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.18.0)。
 
 ### 0.18.1（补丁）
 
-修复版式预览向上滚动回弹（[Issue #18](https://github.com/Suethekitten/Rimefox/issues/18)）：没有页图的页不再按整页宽占位，渲染与回收期间页高保持不变。仅译文模式下，链接之间夹着文献引用的段落可以在引用隔开的各段内调换链接顺序。发布状态见 [GitHub Releases](https://github.com/Suethekitten/Rimefox/releases)。
+版式预览按实际版式预留页高，修复向上滚动回弹。仅译文模式支持在引用分隔的各段内调换普通链接顺序。已随 [v0.18.1 Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.18.1) 发布。Windows / Edge 上真实多页 PDF 的滚动、维基百科在线页面的真实模型换序仍待复验，见 [0.18.1 技术记录](https://github.com/Suethekitten/Rimefox/blob/v0.18.1/HANDOFF.md#14-本版技术记录0181)。
 
 ### 下一步
 
-1. 补齐当前 Chrome/Edge 与 Windows/macOS/Linux 的实机矩阵；独立 CI 已接入，结果以对应提交的 Actions 为准，不能代替真实下载与干净机器验收。
-2. 真实 YouTube / B 站的字幕轨、登录态、切视频与双语字幕已于 2026-11-06 复验；关闭翻译后的原生字幕恢复待复验，直播继续标实验。
-3. 使用已配置接口，在用户授权的 ¥10 总预算内记录三协议译文、格式、句子对齐、恢复与请求数；没有可用配置的协议列待验收。医学质量结论需成对盲评。
-4. 商店提交：按 [STORE.md](STORE.md) 的验收结果上传同版商店包，线上版本见 §4.2。系统 OCR 预览的后续验收见 P2-11，推送与发布按 AGENTS.md 执行。
+近期开发以桌面 Chrome 和 Edge 为主。Android Edge 适配列入后续待办，版本待定。真机验证先覆盖弹窗窄屏布局、软键盘下的随手翻译、首次配置和整页翻译，再评估长按划词与点按查看原文。手机上的图片 OCR 另行评估可用后端。
 
-### 4.1 0.9.0 计划（2026-10-19 定）
+1. 按 [SUPPORT](SUPPORT.md) 补齐桌面 Chrome / Edge 与 Windows / macOS / Linux 的实机矩阵，重点验收真实下载和干净机器安装。系统 OCR 的平台待验收项见 [组件 README](../native/ocr-host/README.md#当前交付层级)。
+2. 真实 YouTube / B 站的字幕轨、登录态、切视频与双语字幕已于 2026-11-06 复验。关闭翻译后的[原生字幕恢复](VIDEO-SUBTITLES.md#原生字幕恢复)待真实页面复验，直播继续标实验。
+3. 使用已配置接口，在用户授权的 ¥10 总预算内记录三协议译文、格式、句子对齐、恢复与请求数。当前只有 [DeepSeek / Gemini 小样本记录](archive/2026-11-04-real-model-acceptance.json)，Anthropic 仍待可用配置，医学质量仍待成对盲评。
 
-加新功能，按版本号规则升中间位。按下面的顺序做，每一步都配离线测试；发版前按 AGENTS.md 跑全部检查，并在真实页面过一遍（设置页、YouTube 字幕、普通文章页、带输入框的页面）。
+### 4.1 历史记录
 
-| 步骤 | 内容 | 验收 |
-|---|---|---|
-| 0 | 补 0.8.9 的尾巴（不发版）：YouTube 真实页面与 Edge 各过一遍（字幕代码没改，但会走新的在途去重和分段缓存）；把 0.8.9 用过的真实浏览器端到端脚本（Chrome + CDP 加载工作树 + 本地假模型接口）收进 `tools/` | YouTube 双语字幕、Edge 上翻译 / 还原正常；脚本在本机可重复运行、全部通过 |
-| 1 | 缓存键里的术语指纹只算这段原文命中的术语，没命中的段落仍是 `none`（以前是整张术语表的指纹，加一条术语全站缓存失效） | 加一条术语后，只有含这个词的段落缓存不命中，其它段落照常命中、不发请求 |
-| 2 | 术语表一键收录（P1-3）：划词气泡里加「加入术语表」，弹两栏小表单（原文 = 选中的文字，译法预填刚才的译文，可以改） | 收录后同一页再翻含这个词的段落用新译法；同名原文先问是否覆盖；内容脚本只能经后台路由写这一项 |
-| 3 | 输入框翻译（P1-1）：`Alt+I`（设置页可改）+ 右键菜单在可编辑区域加「凛狐：翻译输入框内容」；有选区只翻选区，否则翻整个框 | textarea、contenteditable 富文本编辑器、React 受控输入框各测一次；撤销能回到原文；失败时原文不丢；拼字中不触发 |
-| 4 | 振假名：切分时跳过 `<rt>` / `<rp>`（HANDOFF 已知问题 11） | 新增自检；Pixiv 注音页实测读音不再混进原文 |
+- 0.9.0 的原始步骤、取舍与当时的验收结果见 [Git 中的路线图快照](https://github.com/Suethekitten/Rimefox/blob/65a566bd39169321fd54573cdb8d1ceed4c26cfd/docs/ROADMAP.md#41-090-计划2026-10-19-定)。
+- 0.15.0 与并入该版的 PDF 修复见 [会话密钥归档](archive/2026-11-01-session-keys-0.15.0.md)和 [PDF 缓存归档](archive/2026-11-01-pdf-cache-0.14.2.md)。
+- 0.16.0 见 [PDF 质量归档](archive/2026-11-02-pdf-quality-0.16.0.md)。两次补丁的完整记录见 Git 中的 [0.16.1](https://github.com/Suethekitten/Rimefox/blob/65a566bd39169321fd54573cdb8d1ceed4c26cfd/docs/ROADMAP.md#0161补丁)和 [0.16.2](https://github.com/Suethekitten/Rimefox/blob/65a566bd39169321fd54573cdb8d1ceed4c26cfd/docs/ROADMAP.md#0162补丁)快照。
 
-已定的取舍：
+### 4.2 上架进展
 
-- **输入框翻译的目标语言**：新增设置 `inputTargetLang`，默认「跟随页面语言」（页面的 `<html lang>` 对得上支持的语言就用它），认不出来时用英文。
-- **输入框翻译默认不进缓存**：输入框里多半是草稿或私信，后台 `translate` 消息加 `noCache` 标记，不写内存 / 会话 / 磁盘三层缓存；可选的本地隐私脱敏照常生效。
-- **不处理的输入框**：密码框，以及带银行卡等 `autocomplete` 标记的字段。回填用可撤销的方式写入，并让 React 等受控输入框收到改动。
-- **缓存键改动可以接受**：已有术语表的用户升级后，没命中术语的段落会一次性缓存不命中、重翻一次；没有术语表的用户不受影响。
-- **收录写配置走后台**：新增 `glossary:add` 路由，只接受两个不超过 200 字的字符串，复用现有的清洗 / 去重；保存走已经排队的 `saveConfig`。
-
-进度（2026-10-19）：步骤 0–4 已随 0.9.0 发布。当时的检查：Node 单测 21 个文件全绿、自检页 141/141、真实浏览器 e2e 34/34（新增「加入术语表」「输入框翻译」「自检页」三节）；YouTube 真实页与 Edge 当时没跑。
-
-明确不进 0.9.0：
-
-- 行内标签保真（P1-2）、PDF（P1-4）：0.9.0 当时按原计划放 0.10.0；其中 PDF 已于 2026-10-21 改为独立推进（见 §4）；普通段落里 `notranslate` 文字被送翻 / 改写，和 P1-2 的占位符一起做。
-- 界面文案改成按键名组织的语言包：暂缓；0.9.0 新增的界面文字照现有方式同时补中英文。
-
-### 4.2 上架进展（2026-11-06 更新）
-
-**两个商店都已上架。以下为 2026-11-04 的公开页核验记录。**
-
-- **Chrome**：线上 **0.12.5**（2026-11-04 核实；提供方 APXS）。商店页：<https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo>
-- **Edge**：线上 **0.12.5**（2026-11-04 核实，与 Chrome 同版）。商店页：<https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh>
-- 下一次商店更新统一用 [GitHub 最新已发布版本](https://github.com/Suethekitten/Rimefox/releases/latest) 的商店包，提交版本号需高于各自线上版本。
-- 材料、listing 与待办见 [STORE.md](STORE.md)「当前状态」，Edge 差异见 [STORE-EDGE.md](STORE-EDGE.md)。
+2026-11-17 核实，[Chrome Web Store](https://chromewebstore.google.com/detail/gbaoafaogljdolpkppocfaeldejampeo) 和 [Edge 加载项商店](https://microsoftedge.microsoft.com/addons/detail/pampbegmmdpmjplkfddajfegbeknmelh) 均已上线 **0.18.1**。下次更新时验收同版的[商店包](STORE.md#商店包)与[材料](STORE.md#素材清单)，Edge 提交流程见 [STORE-EDGE.md](STORE-EDGE.md)。
 
 ---
 
-### 4.3 视频字幕 V8–V15（维护计划，2026-10-29）
+### 4.3 视频字幕待办
 
-0.12.6 独立 QA 里未处理的 V8–V15 纳入维护计划。**V8 花的是用户自己的 API 费用，作为 0.13 的发布门槛**；V8–V14 已随 0.13.2 发布，V15 仍待办。
-
-| ID | 问题 | 状态 |
-|---|---|---|
-| V8 | 页面脚本轮换 cid / `id_str` 可让付费请求放大 | ✅ 已随 0.13.2 发布：Bilibili 字幕缓存身份只按文本，后台按标签页记付费预算 |
-| V9 | YouTube `adShowing()` 调用不存在的 `player()` | ✅ 已随 0.13.2 发布 |
-| V10 | `?p` 消失 / 新回包先于地址栏时短暂显示旧轨道 | ✅ 已随 0.13.2 发布：没有 `?p` 按第 1 P 算，旧 P 轨道立即失效 |
-| V11 | 伪造高 `seq` 锁死来源层（之后真回包全丢） | ✅ 已随 0.13.2 发布：`seq` 跳跃超过 200 直接忽略 |
-| V12 | 对象 `id_str` 冻结去重键 | ✅ 已随 0.13.2 发布：只认字符串 / 数字，对象退回 `id` |
-| V13 | 2 MB 先读后判（内存放大） | ✅ 已随 0.13.2 发布：后台流式读，超限即停 |
-| V14 | CDN 跳转一律拒绝（302 即取不到字幕） | ✅ 已随 0.13.2 发布：跟随跳转，最终地址仍过白名单 |
-| V15 | 钩子可被页面识别 | 待办（加固项） |
-
-> 原始记录见 [archive/2026-10-27-bilibili-subtitles-qa-0.12.6.md](archive/2026-10-27-bilibili-subtitles-qa-0.12.6.md)；实现与边界见 HANDOFF §5.4「费用边界」、§9 第 19 条。
+- V15：评估如何降低页面脚本识别字幕钩子的可能性。原始验收记录见 [字幕 QA 归档](archive/2026-10-27-bilibili-subtitles-qa-0.12.6.md)。
+- V8–V14 已随 [v0.13.2 Release](https://github.com/Suethekitten/Rimefox/releases/tag/v0.13.2) 发布，逐项处理结果见 [Git 中的维护记录](https://github.com/Suethekitten/Rimefox/blob/65a566bd39169321fd54573cdb8d1ceed4c26cfd/docs/ROADMAP.md#43-视频字幕-v8v15维护计划2026-10-29)。
 
 ## 5. 版本与发布节奏
 
@@ -313,7 +256,7 @@ PDF「双列版式（预览）」从页级判断改成块级支持：横排目�
 | 翻译缓存 | 短文本会写本机磁盘，与是否开启隐私保护无关（PRIVACY.md 已披露） | 缓存要跨标签页 / 跨进程共享，只能落 storage |
 | 隐私脱敏 | 只覆盖可可靠识别的类型；姓名 / 英文名默认不做 | 误判的代价高于漏判，宁可不做 |
 | 行内格式 | 模型未给出可靠格式对应时显示普通译文；结构错误时保留原文 | 不按字符长度或原文词序猜测强调范围 |
-| 复杂链接 | 包在斜体 / 粗体 / 代码等里的链接原地翻译；同父平坦普通链接可在仅译文安全重排；需要重排的嵌套、交错引用或多行等无法证明安全时保留原文并建议切双语 | 保住原节点、事件和恢复，禁止把错乱句子报告成功 |
+| 复杂链接 | 包在斜体 / 粗体 / 代码等里的链接可原地翻译。同父平坦普通链接可在引用等保留内容分隔的段内换序。需要跨段、嵌套或多行重排时保留原文，可切换到双语查看译文 | 保住原节点、事件和恢复，禁止把错乱句子报告成功 |
 | 阿拉伯语维基百科 | 0.12.3 下部分段落无法翻译；0.12.4 修复了已证实的包装链接原因，真实页面尚未复核 | 需要稳定复现后再修；技术线索见 [../HANDOFF.md](../HANDOFF.md) §9 第 18 条 |
 | YouTube 直播 CC 字幕 | 有反馈直播里不翻译；未在真实直播验证 | 直播的轮询 / 追加格式和点播不同，需要单独回归；线索见 [../HANDOFF.md](../HANDOFF.md) §9 第 20 条 |
 | 跨设备 | 配置不云同步，需要导出 / 导入 | 没有作者服务器，也没有账号体系 |

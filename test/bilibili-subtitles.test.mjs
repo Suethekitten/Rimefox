@@ -390,6 +390,56 @@ await t('语言前缀 URL（/zh-Hans/video/）仍能匹配当前视频', async f
   eq(source.videoKey(), 'BV1xx411c7mD:1001');
 });
 
+await t('旧 av 链接和 BV 链接共用身份；分 P 和晚到回包依旧隔离', async function () {
+  const location = { hostname: 'www.bilibili.com', pathname: '/zh-Hans/video/av170001/', search: '' };
+  const bvid = 'BV17x411w7KC';
+  let fetched = 0;
+  const source = createBiliSource({
+    doc: makeDoc({ lan: 'ai-zh' }),
+    location: location,
+    send: async function () { fetched += 1; return { ok: true, text: bodyOf([[1, 2, 'x']]) }; }
+  });
+  const meta = (bv, cid, page, seq) => {
+    const message = messageFor({ bvid: bv, cid: cid, page: page }, seq);
+    const payload = JSON.parse(message.body);
+    delete payload.data.aid;
+    message.body = JSON.stringify(payload);
+    return message;
+  };
+  assert.equal(source.videoKey(), bvid, '回包前也能识别旧链接');
+  source.accept(meta(bvid, 1001, 1, 1));
+  const p1 = await source.resolve(source.take());
+  assert.equal(p1.videoKey, bvid + ':1001');
+  assert.equal(source.matches(p1), true);
+
+  location.pathname = '/video/bv17x411w7KC/';
+  assert.equal(source.videoKey(), p1.videoKey);
+  assert.equal(source.matches(p1), true);
+  assert.equal(source.take(), null, '同一轨道没有再发出');
+  location.pathname = '/video/BV17X411w7KC/';
+  assert.equal(source.matches(p1), false, 'BV 正文区分大小写');
+
+  location.pathname = '/video/av170001/';
+  location.search = '?p=2';
+  assert.equal(source.matches(p1), false, '地址栏先切 P 时旧轨道立即让位');
+  source.accept(meta(bvid, 1002, 2, 3));
+  const p2 = await source.resolve(source.take());
+  assert.equal(source.videoKey(), bvid + ':1002');
+  assert.equal(source.matches(p2), true);
+  assert.equal(source.accept(meta(bvid, 1001, 1, 2)), false, '晚到的 P1 回包不能恢复旧轨道');
+  assert.equal(source.currentCid(), '1002');
+
+  location.pathname = '/video/av170002/';
+  assert.equal(source.matches(p2), false);
+  assert.equal(source.take(), null, '另一个 av 视频不能消费之前的回包');
+  for (const bad of ['av0', 'av2251799813685248', 'av170001extra']) {
+    location.pathname = '/video/' + bad + '/';
+    assert.equal(source.videoKey(), '');
+    assert.equal(source.take(), null);
+  }
+  assert.equal(fetched, 2);
+});
+
 await t('分 P URL 的 p 号与轨道不一致时，旧 P 轨道立即失效', async function () {
   const state = { lan: 'ai-zh' };
   const doc = makeDoc(state);

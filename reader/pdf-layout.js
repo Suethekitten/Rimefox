@@ -42,6 +42,34 @@ export function updatePdfLayout(el, loaded, texts, doc) {
     }
     view.remove();
   });
+  const { placed, skips, reasons } = placePdfLayout(view, source, loaded, texts);
+  view.dataset.layoutSkips = Object.entries(skips).map(([k, v]) => k + ':' + v).join(',');
+  const count = Math.min(loaded.blocks.length, 400);
+  // 原页未翻译的块里，页码 / 公式这类本来就不送翻的不算「尚未翻译」。
+  let pending = 0;
+  for (let i = 0; i < count; i += 1) if (!texts[i] && !loaded.blocks[i].noTranslate) pending += 1;
+  const unplaced = skips.position + skips.background + skips.fit;
+  const note = document.createElement('p'); note.className = 'pdf-layout-notice'; note.dataset.i18n = '';
+  note.textContent = layoutNoticeText({ blocks: loaded.blocks.length, placed, skips, pending });
+  // 提示和完整译文放在原页上方：不用滚过整页才找到没放进版式的文字。
+  const label = el.querySelector('.pdf-page-label');
+  if (label) label.after(note); else el.appendChild(note);
+  const panel = el.querySelector('.pdf-blocks');
+  if (panel) {
+    for (const block of panel.querySelectorAll('.pdf-block')) {
+      const reason = reasons[Number(block.dataset.block)];
+      if (reason) block.dataset.layoutSkip = reason;
+    }
+    const details = document.createElement('details'); details.className = 'pdf-layout-text';
+    const summary = document.createElement('summary'); summary.dataset.i18n = '';
+    summary.textContent = unplaced ? '查看本页完整译文（含未放入版式的 ' + unplaced + ' 处）' : '查看本页完整译文';
+    details.appendChild(summary); details.appendChild(panel); note.after(details);
+  }
+}
+
+
+// Export measures the same overlay at its print width, with its own source bitmap.
+export function placePdfLayout(view, source, loaded, texts) {
   const width = view.getBoundingClientRect().width;
   const scale = width / loaded.viewport.width;
   const sx = source.width / loaded.viewport.width, sy = source.height / loaded.viewport.height;
@@ -147,25 +175,8 @@ export function updatePdfLayout(el, loaded, texts, doc) {
     final[i] = used;
     placed += 1;
   }
-  view.dataset.layoutSkips = Object.entries(skips).map(([k, v]) => k + ':' + v).join(',');
-  // 原页未翻译的块里，页码 / 公式这类本来就不送翻的不算「尚未翻译」。
-  let pending = 0;
-  for (let i = 0; i < count; i += 1) if (!texts[i] && !loaded.blocks[i].noTranslate) pending += 1;
-  const unplaced = skips.position + skips.background + skips.fit;
-  const note = document.createElement('p'); note.className = 'pdf-layout-notice'; note.dataset.i18n = '';
-  note.textContent = layoutNoticeText({ blocks: loaded.blocks.length, placed, skips, pending });
-  // 提示和完整译文放在原页上方：不用滚过整页才找到没放进版式的文字。
-  const label = el.querySelector('.pdf-page-label');
-  if (label) label.after(note); else el.appendChild(note);
-  const panel = el.querySelector('.pdf-blocks');
-  if (panel) {
-    for (const block of panel.querySelectorAll('.pdf-block')) {
-      const reason = reasons[Number(block.dataset.block)];
-      if (reason) block.dataset.layoutSkip = reason;
-    }
-    const details = document.createElement('details'); details.className = 'pdf-layout-text';
-    const summary = document.createElement('summary'); summary.dataset.i18n = '';
-    summary.textContent = unplaced ? '查看本页完整译文（含未放入版式的 ' + unplaced + ' 处）' : '查看本页完整译文';
-    details.appendChild(summary); details.appendChild(panel); note.after(details);
+  for (let i = count; i < loaded.blocks.length; i += 1) {
+    if (texts[i]) { skips.position += 1; reasons[i] = 'position'; }
   }
+  return { placed, skips, reasons };
 }

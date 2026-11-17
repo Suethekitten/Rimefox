@@ -45,6 +45,13 @@
 
 EPUB 是 ZIP 容器；只使用 fflate 的同步解压（`unzipSync`）读取 `mimetype`、`META-INF/container.xml`、OPF、XHTML 和图片。保留上游代码，未修改；解压前由 `lib/reader/epub.js` 限制单条大小、总展开大小和压缩比，并拒绝路径穿越。未使用 fflate 的压缩、Worker、Node 文件系统或网络功能。
 
+## Bilibili-thread-ripper
+
+- 项目：[Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)
+- 许可证：MIT，Copyright (c) 2026 Bilibili-thread-ripper contributors
+- 许可证全文：[licenses/bilibili-thread-ripper-MIT.txt](licenses/bilibili-thread-ripper-MIT.txt)
+- 复用 [`src/bilibili-site.js`](https://github.com/MrTangLuyao/Bilibili-thread-ripper/blob/main/src/bilibili-site.js) 的 `avToBv()`，适配为 [B 站字幕来源层](content/bilibili-subtitles-source.js) 内的本地编号转换。
+
 ## PDF.js
 
 - 项目：PDF.js — <https://github.com/mozilla/pdf.js>（npm 包 `pdfjs-dist`）

@@ -295,3 +295,45 @@ html[lang="en"] .pdf-layout-text .pdf-block[data-layout-skip="fit"]::before { co
 .pdf-search-results { display: flex; flex-direction: column; max-height: 220px; overflow: auto; }
 .pdf-search-hit { display: block; padding: 4px 2px; font-size: 12px; line-height: 1.5; color: var(--reader-muted); text-decoration: none; border-bottom: 1px dashed var(--reader-line); }
 .pdf-search-hit:hover { color: var(--reader-ink); }
+
+
+.pdf-workspace { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 40px); }
+.pdf-workspace-heading h2 { margin: 0; font-size: 1.2rem; }
+.pdf-workspace-heading p { margin: 4px 0 0; }
+.pdf-edit-fields, .pdf-export-review { max-height: min(52vh, 520px); overflow: auto; }
+.pdf-edit-row { border-top: 1px solid var(--reader-line); padding: 12px 3px; }
+.pdf-edit-row label { display: grid; gap: 6px; }
+.pdf-edit-row textarea {
+  width: 100%; min-height: 4em; resize: vertical; font: inherit; padding: 8px;
+  background: var(--reader-bg); color: var(--reader-ink); border: 1px solid var(--reader-line); border-radius: 8px;
+}
+.pdf-edit-row button { margin-top: 6px; }
+.pdf-edit-source { margin: 0 0 8px; color: var(--reader-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pdf-workspace-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pdf-workspace > .pdf-workspace-actions { justify-content: flex-end; margin-top: 14px; }
+.pdf-export-options { display: grid; gap: 8px; margin: 14px 0; }
+.pdf-export-options select { justify-self: start; }
+.pdf-export-check { display: flex; gap: 6px; align-items: baseline; }
+#pdfExportRange { width: 8em; }
+.pdf-export-review { padding-inline-start: 22px; }
+.pdf-export-review:empty { display: none; }
+.pdf-export-review li { margin-bottom: 6px; }
+.pdf-export-review button { margin-inline-start: 8px; }
+
+#pdfPrintOutput { position: absolute; inset: 0 auto auto -10000px; width: 190mm; visibility: hidden; pointer-events: none; }
+.pdf-print-layout { margin-inline: auto; }
+.pdf-print-layout > img { display: block; width: 100%; height: 100%; object-fit: fill; }
+@page rimefox-pdf { size: A4; margin: 10mm; }
+@media print {
+  body.pdf-printing { background: white; color: black; color-scheme: light; }
+  body.pdf-printing > :not(#pdfPrintOutput) { display: none !important; }
+  body.pdf-printing #pdfPrintOutput {
+    position: static; width: auto; visibility: visible; page: rimefox-pdf;
+    print-color-adjust: exact; -webkit-print-color-adjust: exact;
+  }
+  .pdf-print-sheet { break-inside: avoid; }
+  #pdfPrintOutput > section + section { break-before: page; }
+  .pdf-print-text { font: 11pt/1.5 var(--reader-serif); overflow-wrap: anywhere; }
+  .pdf-print-text > p { margin: 0 0 .8em; white-space: pre-wrap; orphans: 2; widows: 2; }
+  .pdf-print-page-number { font: 10pt/1.4 var(--reader-sans); color: #595959; margin: 0 0 12pt; break-after: avoid; }
+}

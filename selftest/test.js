@@ -5201,6 +5201,48 @@
       });
   });
 
+  checkAsync('大页面分片扫描：定时器可运行、段落顺序一致、取消后不再采集', async function () {
+    var root = document.createElement('article');
+    root.id = 'fixture-sliced-scan';
+    for (var i = 0; i < 360; i += 1) {
+      var row = document.createElement('p');
+      row.append('Paragraph ' + i + ' with ', document.createElement('strong'), ' intact formatting.');
+      row.querySelector('strong').textContent = 'nested text';
+      root.appendChild(row);
+    }
+    document.body.appendChild(root);
+    DT.setSiteRule({ textSelectors: ['#fixture-sliced-scan'] });
+    try {
+      var original = DT.collectAll().map(function (u) { return u.text; });
+      var timerRan = false;
+      var ticks = 0;
+      var timer = setTimeout(function () { timerRan = true; }, 0);
+      var sliced = await DT.collectPage(null, {
+        cancelled: function () { return false; },
+        onYield: function () { ticks += 1; }
+      });
+      clearTimeout(timer);
+      if (!timerRan || ticks < 2 || original.length !== 360) return '遍历没有分片或夹具缺段落';
+      var order = eq(sliced.units.map(function (u) { return u.text; }), original);
+      if (order !== true) return order;
+      var cancelled = false;
+      var accepted = 0;
+      var firstSlice = 0;
+      var stopped = await DT.collectPage(function () { accepted += 1; return true; }, {
+        cancelled: function () { return cancelled; },
+        onYield: function () {
+          firstSlice = accepted;
+          setTimeout(function () { cancelled = true; }, 0);
+        }
+      });
+      return stopped === null && firstSlice > 0 && firstSlice < original.length && accepted === firstSlice
+        ? true : '取消后继续收集';
+    } finally {
+      DT.setSiteRule(null);
+      root.remove();
+    }
+  });
+
   // ---------------- 渲染（等排队的异步用例逐个跑完） ----------------
   asyncChecks
     .reduce(function (chain, next) {

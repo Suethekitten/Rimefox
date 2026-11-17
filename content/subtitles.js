@@ -19,6 +19,194 @@
   var OVERLAY_CLASS = 'rimefox-subs';
   var ACTIVE_CLASS = 'rimefox-subs-on';
 
+  function createLayout() {
+    var player, toolbar, trigger, form, preview, resize;
+    var saved = null;
+    var draft = null;
+    var reading = null;
+    var saving = false;
+    var fields = {};
+    var drag = null;
+    var status;
+    function label(zh, en) { return DT.uiText(zh, en); }
+    function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+
+    function place(node, layout) {
+      var width = layout.width;
+      node.style.left = clamp(layout.x, width / 2, 100 - width / 2) + '%';
+      node.style.width = width + '%';
+      node.style.maxWidth = 'none';
+      var height = player.clientHeight || 360;
+      var maxBottom = Math.max(0, 100 - (node.offsetHeight + 4) / height * 100);
+      node.style.bottom = clamp(layout.bottom, 0, maxBottom) + '%';
+    }
+
+    function refreshPreview() {
+      if (!draft || !preview) return;
+      preview.style.fontSize = draft.size + 'px';
+      place(preview, draft);
+      Object.keys(fields).forEach(function (key) { fields[key].value = draft[key]; });
+    }
+
+    function closeEditor() {
+      draft = null;
+      drag = null;
+      if (resize) { resize.disconnect(); resize = null; }
+      if (form) form.hidden = true;
+      if (preview) preview.hidden = true;
+      if (toolbar) toolbar.classList.remove('is-editing');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    }
+
+    function mount(next) {
+      if (player === next && toolbar && toolbar.isConnected) return;
+      closeEditor();
+      if (toolbar) toolbar.remove();
+      if (preview) preview.remove();
+      player = next;
+      toolbar = form = preview = trigger = null;
+      if (!next) return;
+      fields = {};
+      toolbar = document.createElement('div');
+      toolbar.className = 'rimefox-subs-layout';
+      toolbar.setAttribute('data-dt-ui', '1');
+      trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.textContent = label('字幕布局', 'Caption layout');
+      trigger.setAttribute('aria-expanded', 'false');
+      toolbar.appendChild(trigger);
+      form = document.createElement('div');
+      form.className = 'rimefox-subs-layout-form';
+      form.hidden = true;
+      function range(key, name, min, max) {
+        var row = document.createElement('label');
+        row.textContent = name;
+        var input = document.createElement('input');
+        input.type = 'range';
+        input.min = min;
+        input.max = max;
+        input.addEventListener('input', function () {
+          if (!draft || saving) return;
+          draft[key] = Number(input.value);
+          refreshPreview();
+        });
+        fields[key] = input;
+        row.appendChild(input);
+        form.appendChild(row);
+      }
+      range('x', label('水平位置', 'Horizontal position'), 0, 100);
+      range('bottom', label('底部距离', 'Bottom offset'), 0, 100);
+      range('width', label('宽度', 'Width'), 35, 96);
+      range('size', label('字号', 'Font size'), 12, 52);
+      var actions = document.createElement('div');
+      actions.className = 'rimefox-subs-layout-actions';
+      function action(name, handler) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = name;
+        button.addEventListener('click', handler);
+        actions.appendChild(button);
+      }
+      async function save(layout) {
+        if (saving || !draft) return;
+        saving = true;
+        var editingForm = form;
+        try {
+          var reply = await DT.send({ type: 'subtitle:layout:set', layout: layout });
+          if (!reply || !reply.ok) throw new Error('save');
+          saved = layout;
+          if (form === editingForm) { closeEditor(); trigger.focus(); }
+        } catch (err) {
+          if (form === editingForm) status.textContent = label('字幕布局保存失败。', 'Could not save caption layout.');
+        } finally {
+          saving = false;
+        }
+      }
+      action(label('恢复默认', 'Reset'), function () { save(null); });
+      action(label('取消', 'Cancel'), function () {
+        if (!saving) { closeEditor(); trigger.focus(); }
+      });
+      action(label('保存', 'Save'), function () { save(Object.assign({}, draft)); });
+      form.appendChild(actions);
+      status = document.createElement('div');
+      status.setAttribute('role', 'status');
+      form.appendChild(status);
+      toolbar.appendChild(form);
+      player.appendChild(toolbar);
+
+      preview = document.createElement('div');
+      preview.className = 'rimefox-subs-layout-preview';
+      preview.textContent = label('拖动调整字幕位置', 'Drag to position captions');
+      preview.hidden = true;
+      preview.setAttribute('data-dt-ui', '1');
+      preview.addEventListener('pointerdown', function (event) {
+        if (!draft || saving || !event.isPrimary || event.button !== 0) return;
+        var rect = preview.getBoundingClientRect();
+        drag = { id: event.pointerId, dx: event.clientX - (rect.left + rect.width / 2), dy: event.clientY - rect.bottom };
+        preview.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      preview.addEventListener('pointermove', function (event) {
+        if (!drag || !draft || event.pointerId !== drag.id || saving) return;
+        var rect = player.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        draft.x = Math.round(clamp((event.clientX - drag.dx - rect.left) / rect.width * 100, draft.width / 2, 100 - draft.width / 2));
+        draft.bottom = Math.round(clamp((rect.bottom - event.clientY + drag.dy) / rect.height * 100, 0,
+          Math.max(0, (rect.height - preview.offsetHeight - 4) / rect.height * 100)));
+        refreshPreview();
+      });
+      preview.addEventListener('lostpointercapture', function () { drag = null; });
+      player.appendChild(preview);
+      toolbar.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && draft && !saving) {
+          closeEditor();
+          trigger.focus();
+          event.stopPropagation();
+        }
+      });
+      if (!reading) {
+        reading = DT.send({ type: 'subtitle:layout:get' }).then(function (reply) {
+          if (reply && reply.ok) saved = reply.layout;
+        }).catch(function () {});
+      }
+      trigger.addEventListener('click', async function () {
+        var owner = toolbar;
+        await reading;
+        if (toolbar !== owner || !toolbar || saving) return;
+        if (draft) { closeEditor(); return; }
+        var height = player.clientHeight || 360;
+        draft = Object.assign({}, saved || { x: 50, bottom: Math.round(Math.max(56, height * 0.1) / height * 100), width: 86, size: clamp(Math.round(height * 0.036), 13, 32) });
+        status.textContent = '';
+        form.hidden = preview.hidden = false;
+        toolbar.classList.add('is-editing');
+        trigger.setAttribute('aria-expanded', 'true');
+        refreshPreview();
+        if (typeof ResizeObserver === 'function') {
+          resize = new ResizeObserver(refreshPreview);
+          resize.observe(player);
+        }
+        fields.x.focus();
+      });
+    }
+
+    return {
+      update: function (next) { if (player && player !== next) mount(null); },
+      apply: function (next, overlay, size, bottom) {
+        mount(next);
+        if (saved) {
+          place(overlay, saved);
+          size = saved.size;
+        } else {
+          overlay.style.left = '50%';
+          overlay.style.width = 'max-content';
+          overlay.style.maxWidth = '86%';
+          overlay.style.bottom = bottom + 'px';
+        }
+        return size;
+      }
+    };
+  }
+
   // 运行时工厂：把 DOM、配置、发送、计时都从参数注入，Node 测试可以用假实现控制 Promise 顺序。
   // 返回的对象只暴露 tick / process / reset / inspect；真实页面在文件末尾自动创建并每 200ms 调用 tick。
   function createRuntime(env) {
@@ -400,7 +588,8 @@
       var bottom = src.overlayBottom
         ? src.overlayBottom(h, autohide)
         : Math.round(autohide ? h * 0.04 : Math.max(56, h * 0.1));
-      overlay.style.bottom = bottom + 'px';
+      if (env.layout) size = env.layout.apply(player, overlay, size, bottom);
+      else overlay.style.bottom = bottom + 'px';
       overlay._trans.style.fontSize = size + 'px';
       overlay._orig.style.fontSize = Math.round(size * 0.82) + 'px';
 
@@ -436,12 +625,14 @@
       // 关掉字幕翻译：交还原生字幕，不再发请求（pump 只在开启时调度）；
       // 原始轨道留着，同一个视频重新打开时直接接着翻
       if (!env.enabled()) {
+        if (env.layout) env.layout.update(null);
         render(null);
         return;
       }
 
       var view = playerView();
       var player = view && view.player;
+      if (env.layout) env.layout.update(player);
       // 播广告时交还原生显示、不调度翻译：时间轴是广告的，正片的句子对不上
       if (blocked(player)) {
         render(null);
@@ -564,6 +755,7 @@
   var runtime = createRuntime({
     doc: document,
     source: source,
+    layout: createLayout(),
     enabled: enabled,
     target: target,
     targetCode: targetCode,
