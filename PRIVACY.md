@@ -75,7 +75,7 @@ YouTube 与哔哩哔哩页面脚本会在本地观察播放器加载的字幕元
 | 外观、站点规则、夜间模式网站名单、译文自定义 CSS | `chrome.storage.local` | 仅本机使用，不随翻译请求发送；强调色等外观也在扩展页面 localStorage 缓存以避免闪白 |
 | API Key | 默认 `chrome.storage.session`；选择「在此设备上记住密钥」后为扩展源的 IndexedDB 凭据库 | 默认在关闭浏览器或重载扩展后失效；设备凭据不再写入 `chrome.storage.local`，网页内容脚本不能访问扩展源的数据库。旧用户首次升级时，原有 local / 配置中的 Key 经可恢复日志迁入凭据库并清理旧副本；迁移执行之前仍适用旧版本的访问边界，不能撤回此前已泄露的副本，也不承诺擦除存储引擎的磁盘残留。会话区仍限制为可信扩展页面和后台可读；内容脚本只知道 hasKey 与暂停状态 |
 | 鉴权暂停与凭据修订号 | 暂停在 `chrome.storage.session`，随机修订号随对应 Key 保存 | 后台回收后仍保留；配置广播不包含 Key 或 Key 的散列 |
-| 翻译缓存（会话） | `chrome.storage.session` | 翻过的原文和译文，关闭浏览器即清空；视频字幕译文按视频 / 分 P / 字幕轨隔离，只放在这一层 |
+| 翻译缓存（会话） | `chrome.storage.session` | 翻过的原文和译文，关闭浏览器即清空；视频字幕译文哔哩哔哩按字幕内容隔离、YouTube 按视频与轨道隔离，仍仅在会话内、不落盘 |
 | 翻译缓存（磁盘） | `chrome.storage.local` | 只存短文本（原文 + 译文 ≤ 160 字符），上限 512 KB；按网站域名和模型分开存；不存视频字幕，也不含视频标识 |
 | EPUB / PDF / TXT / Markdown / LOG 原文件、封面、进度、OCR 识别结果和译文 | 扩展页 IndexedDB (`rimefox-reader`) | 只在本机；容量与用户控制见 [阅读器存储约定](docs/READER-ARCHITECTURE.md#6-indexeddb-schema)；删除文档一并删除，清除译文保留 OCR 结果；不进入全局翻译缓存 |
 | 用户上传的阅读字体 | 扩展页 IndexedDB (`rimefox-reader` 的 `fonts`) | 只在本机，不上传；可在阅读设置里移除，移除即删除 Blob |
