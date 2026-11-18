@@ -945,6 +945,7 @@ async function ensureInjected(tabId, frameId = 0) {
         return /^(https?:|file:)$/.test(u.protocol) &&
           u.hostname !== 'accounts.google.com' &&
           u.hostname !== 'chromewebstore.google.com' &&
+          u.hostname !== 'microsoftedge.microsoft.com' &&
           !(u.hostname === 'chrome.google.com' && u.pathname.startsWith('/webstore/'));
       }
     });

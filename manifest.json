@@ -3,7 +3,7 @@
   "default_locale": "zh_CN",
   "name": "__MSG_extensionName__",
   "short_name": "凛狐",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "114",
   "permissions": [
@@ -52,7 +52,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "exclude_matches": ["*://chromewebstore.google.com/*", "*://chrome.google.com/webstore/*", "*://accounts.google.com/*"],
+      "exclude_matches": ["*://chromewebstore.google.com/*", "*://chrome.google.com/webstore/*", "*://accounts.google.com/*", "*://microsoftedge.microsoft.com/*"],
       "js": [
         "content/core.js",
         "lib/inline-protocol.js",
