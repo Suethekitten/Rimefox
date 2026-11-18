@@ -51,6 +51,18 @@
     return cfg().selectionTranslate !== false;
   }
 
+  // ---------------- 合成事件守卫（审计 P1-1） ----------------
+  // 气泡 / 小按钮 / 术语表单都在 light DOM：网页脚本能用 dispatchEvent 伪造点击、
+  // 直接发起付费翻译或往术语表投毒。只认浏览器生成的用户手势（isTrusted=true），
+  // 伪造事件一律静默忽略（同 main.js 快捷键守卫的口径）。
+  // 唯一例外：pill 的 Enter/Space 由真按键守卫后，自己同步派发一条合成 click，
+  // 用 keyboardTarget 只放行这条 click 的原目标——页面脚本伪造不了这个闭包变量。
+  var keyboardTarget = null;
+  function trustedEvent(event) {
+    if (event && event.isTrusted) return true;
+    return !!(keyboardTarget && event && event.target === keyboardTarget);
+  }
+
   // ---------------- 配色 ----------------
   // 气泡和小按钮放在网页里（不在 Shadow DOM 里），只能用行内样式；
   // 深色网页（深色适配 / 夜间模式开着）换一套深色玻璃。强调色跟随 --dt-accent
@@ -127,9 +139,15 @@
       el.style.color = (bubble._pal || paletteOf()).muted;
     });
     el.addEventListener('keydown', function (event) {
+      if (!event.isTrusted) return; // 合成按键不能激活胶囊
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        el.click();
+        keyboardTarget = el;
+        try {
+          el.click();
+        } finally {
+          keyboardTarget = null;
+        }
       }
     });
     return el;
@@ -188,6 +206,7 @@
     var copy = pill('M9 9h11v11H9zM5 15V4h11', DT.uiText('复制', 'Copy'));
     copy.addEventListener('click', function (event) {
       event.stopPropagation();
+      if (!trustedEvent(event)) return;
       var text = bubble._textEl.textContent || '';
       if (!text) return;
       try {
@@ -209,6 +228,7 @@
     var pin = pill('M9 3h6l-1 6 3 3H7l3-3-1-6zM12 15v6', DT.uiText('置顶', 'Pin'));
     pin.addEventListener('click', function (event) {
       event.stopPropagation(); // 别触发气泡的「点击复制」
+      if (!trustedEvent(event)) return;
       if (DT.pip) DT.pip.open();
     });
     bubble._pinEl = pin;
@@ -217,6 +237,7 @@
     var addTerm = pill('M12 5v14M5 12h14', DT.uiText('加入术语表', 'Add to glossary'));
     addTerm.addEventListener('click', function (event) {
       event.stopPropagation(); // 别触发气泡的「点击复制」
+      if (!trustedEvent(event)) return;
       openTermForm();
     });
     bubble._addEl = addTerm;
@@ -234,7 +255,8 @@
     bubble.addEventListener('mousedown', function (event) {
       event.stopPropagation();
     });
-    bubble.addEventListener('click', function () {
+    bubble.addEventListener('click', function (event) {
+      if (!trustedEvent(event)) return;
       if (bubble.dataset.state !== 'done') return;
       var text = bubble._textEl.textContent || '';
       if (!text) return;
@@ -353,6 +375,7 @@
         input.style.boxShadow = 'none';
       });
       input.addEventListener('keydown', function (event) {
+        if (!event.isTrusted) return; // 合成 Enter 不能保存术语
         event.stopPropagation(); // 别让页面快捷键抢走 Enter / Esc
         if (event.key === 'Enter') {
           event.preventDefault();
@@ -394,10 +417,12 @@
 
     save.addEventListener('click', function (event) {
       event.stopPropagation();
+      if (!trustedEvent(event)) return; // 合成点击不能写术语表
       saveTerm(false);
     });
     overwrite.addEventListener('click', function (event) {
       event.stopPropagation();
+      if (!trustedEvent(event)) return; // 合成点击不能覆盖术语
       saveTerm(true);
     });
     cancel.addEventListener('click', function (event) {
@@ -607,6 +632,7 @@
     });
     btn.addEventListener('click', function (event) {
       event.stopPropagation();
+      if (!trustedEvent(event)) return; // 合成点击不能发起付费翻译
       var info = currentSelection();
       hideButton();
       if (info) run(info);
@@ -721,6 +747,7 @@
   document.addEventListener(
     'mouseup',
     function (event) {
+      if (!event.isTrusted) return; // 合成 mouseup 不触发划词（含「选中即翻」的付费路径）
       var target = event.target;
       if (target && target.closest && target.closest('[data-dt-ui]')) return;
       var point = { x: event.clientX, y: event.clientY };
