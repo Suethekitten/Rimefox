@@ -109,6 +109,23 @@ t('toGlossaryCsv：分类列往返一致', () => {
   assert.deepEqual(parseGlossaryCsv(csv), list);
 });
 
+t('toGlossaryCsv：以 = + - @ 开头的单元格加 \' 前缀转义（公式注入）', () => {
+  const list = [
+    { source: '=cmd', target: '命令' },
+    { source: '+1', target: '加一' },
+    { source: '-2', target: '减二' },
+    { source: '@SUM(a)', target: '求和' },
+    { source: '=a,b', target: '带逗号' }
+  ];
+  const csv = toGlossaryCsv(list);
+  assert.match(csv, /^'=cmd,命令,,\n/m);
+  assert.match(csv, /^'\+1,加一,,\n/m);
+  assert.match(csv, /^'-2,减二,,\n/m);
+  assert.match(csv, /^'@SUM\(a\),求和,,\n/m);
+  assert.match(csv, /"'=a,b",带逗号,,\n/);
+  assert.doesNotMatch(csv, /\n[=+\-@]/);
+});
+
 t('matchGlossary：英文按词边界（cat 不命中 category）', () => {
   const hits = matchGlossary([{ source: 'cat', target: '猫' }], ['category', 'a cat here']);
   assert.equal(hits.length, 1);
