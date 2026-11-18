@@ -895,9 +895,9 @@ copy(JSON.stringify(__DT.inspectTextStyle('异常中文', 20), null, 2))
 - **划词合成事件守卫（审计 P1-1）**。`content/selection.js` 的全部用户手势入口统一加 `isTrusted` 守卫：「译」小按钮 click、document mouseup（含「选中即翻」的付费路径）、气泡本体的点击复制、复制 / 置顶 / 加术语三个胶囊、术语表单 input 的 Enter、保存 / 覆盖按钮。合成事件一律静默忽略，口径与 main.js 快捷键守卫（QA F5）一致。胶囊 Enter/Space 的无障碍路径：keydown 先过真按键守卫，再自己派发合成 click，用闭包变量 `keyboardTarget` 只放行这条 click 的原目标——页面脚本伪造不了闭包，把合成事件重定向到别的元素不通过。closed shadow 重构与普通 translate 路径的预算闸门本轮不做，另行排期。回归：`test/selection-gesture.test.mjs` 在假页面逐入口断言合成 mouseup / 合成 click「译」/ 合成点击胶囊 / 改写 input `.value` 后合成保存与覆盖 / 合成 Enter 全部不产生 `translate` 或 `glossary:add`，真手势路径不回归坏。
 - **Edge 商店域排除（P2-1）**。`manifest.json` 的 `exclude_matches` 与 `background.js` `ensureInjected` 的域判定两处一致补 `*://microsoftedge.microsoft.com/*`；注入清单一致性测试只对文件列表，不涉及域名。
 - **PRIVACY 字幕缓存措辞对齐（P2-2）**。改为「哔哩哔哩按字幕内容（内容键 `subtitle-v1:content`）、YouTube 按视频与轨道，仍仅在会话内、不落盘」，`PRIVACY.md` 与 `docs/privacy.en.md` 同步，实现不动。
-- **EPUB 外链修复（P2-3）**。`lib/reader/sanitize.js` 的 `link()` 对带 scheme 的 href（https / mailto 等）直接走外链分支（原 href + `target="_blank"` + `rel`）；此前 `resolveHref` 把 host 段当路径拼出非空 `sectionHref`，外链落成 `href="#"`。txt / markdown 的 textAnchor 锚点路径不变。`test/reader-smoke.html` 补 https 与 mailto 两条断言。
+- **EPUB 外链修复（P2-3）**。`lib/reader/sanitize.js` 的 `link()` 对带 scheme 的 href（https / mailto 等）直接走外链分支（原 href + `target="_blank"` + `rel`）；此前 `resolveHref` 把 host 段当路径拼出非空 `sectionHref`，外链落成 `href="#"`。txt / markdown 的 textAnchor 锚点路径不变。`test/reader-smoke.html` 补 https 与 mailto 两条断言。**验收后加固（`ff0fef4`）**：外链 scheme 收成 `http/https/mailto` 白名单——原实现放行除 `javascript:`/`data:` 外任意 scheme，恶意 EPUB 可借自定义协议链接在点击时唤起本机 handler；白名单外回落内部 inert 分支（`href="#"`），smoke 补「未知 scheme 保持 inert」断言。
 - **术语表 CSV 公式转义（P2-4）**。`lib/glossary.js` 的 `csvCell` 对以 `= + - @` 开头的单元格加 `'` 前缀；`test/glossary.test.mjs` 断言转义生效。导入端不剥 `'`（本轮只做导出侧，往返原样保留前缀）。
-- **验证**。`for f in test/*.test.mjs` 全绿（新增 selection-gesture 7 条）；离线自检 270/270（两种动画偏好）；`test/reader-smoke.html` 无头 Chrome 全过。未验收：真实浏览器里的划词真人路径（维护者 UAT 后再发）。
+- **验证**。`for f in test/*.test.mjs` 全绿（新增 selection-gesture 7 条）；离线自检 270/270（两种动画偏好）；`test/reader-smoke.html` 无头 Chrome 全过。scheme 白名单加固后复跑：单测 241 过 0 失败、自检双模式 270/270、smoke PASS（含未知 scheme 断言）。CI `2e8c18c` 的 macos 偶发误报经 re-run（attempt 2）转绿。未验收：真实浏览器里的划词真人路径（维护者 UAT 后再发）。
 
 ### 0.19.0 记录
 
