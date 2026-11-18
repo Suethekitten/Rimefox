@@ -13,7 +13,7 @@ try {
   files['META-INF/container.xml'] = enc('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
   files['OEBPS/content.opf'] = enc('<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Smoke Book</dc:title><dc:creator>Author</dc:creator><dc:language>en</dc:language><dc:identifier id="id">urn:test</dc:identifier></metadata><manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="pic" href="pic.png" media-type="image/png"/></manifest><spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/></spine></package>');
   files['OEBPS/toc.ncx'] = enc('<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap><navPoint id="n1"><navLabel><text>Chapter One</text></navLabel><content src="ch1.xhtml"/><navPoint id="n2"><navLabel><text>Chapter Two</text></navLabel><content src="ch2.xhtml"/></navPoint></navPoint></navMap></ncx>');
-  files['OEBPS/ch1.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="top">Chapter One</h1><p>Hello <b>bold</b> <a href="ch2.xhtml#note">next</a>.</p><p>See <a href="https://example.com/docs?a=1#top">docs</a> <a href="mailto:hi@example.com">mail</a>.</p><p><img src="pic.png" alt="dot"/></p><script>alert(1)<\/script><p>Safe <em>text</em>.</p></body></html>');
+  files['OEBPS/ch1.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="top">Chapter One</h1><p>Hello <b>bold</b> <a href="ch2.xhtml#note">next</a>.</p><p>See <a href="https://example.com/docs?a=1#top">docs</a> <a href="mailto:hi@example.com">mail</a> <a href="customproto:payload">proto</a>.</p><p><img src="pic.png" alt="dot"/></p><script>alert(1)<\/script><p>Safe <em>text</em>.</p></body></html>');
   files['OEBPS/ch2.xhtml'] = enc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="note">Chapter Two</h1><p>Second.</p></body></html>');
   files['OEBPS/pic.png'] = png;
   const zipped = zipSync(files);
@@ -41,6 +41,8 @@ try {
   ok('epub external https kept + new tab', !!ext && ext.getAttribute('target') === '_blank' && ext.getAttribute('rel') === 'noopener noreferrer' && !ext.hasAttribute('data-reader-target'), ext && ext.outerHTML);
   const mail = links.find((one) => one.getAttribute('href') === 'mailto:hi@example.com');
   ok('epub external mailto kept + new tab', !!mail && mail.getAttribute('target') === '_blank' && !mail.hasAttribute('data-reader-target'), mail && mail.outerHTML);
+  const proto = links.find((one) => one.textContent === 'proto');
+  ok('epub unknown scheme stays inert', !!proto && proto.getAttribute('href') === '#' && proto.getAttribute('target') !== '_blank', proto && proto.outerHTML);
   ok('chapter2 load', book.sections[1].load().html.includes('Chapter Two'));
   const base = {};
   for (const key of Object.keys(files)) base[key] = files[key];
