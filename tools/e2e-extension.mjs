@@ -1065,23 +1065,29 @@ async function articleChecks() {
     const list = cfg && Array.isArray(cfg.glossary) ? cfg.glossary : [];
     return list.find((one) => one.source === 'Rebranded term' && one.target === target) || null;
   };
-  const fillTermForm = (target) =>
-    pageEval(
-      a,
-      `const bubble = Array.from(document.querySelectorAll('[data-dt-ui]')).find((n) => n.textContent.includes('Glossary term goes here.'));
-      if (!bubble) return 'no-bubble';
-      const add = bubble.querySelector('span[aria-label="加入术语表"]');
-      if (!add) return 'no-button';
-      add.click();
-      const inputs = Array.from(bubble.querySelectorAll('input'));
-      if (inputs.length < 2) return 'no-form';
-      inputs[0].value = 'Rebranded term';
-      inputs[1].value = ` + JSON.stringify(target) + `;
-      const save = Array.from(bubble.querySelectorAll('button')).find((n) => n.textContent === '保存');
-      if (!save) return 'no-save';
-      save.click();
-      return 'clicked';`
+  // 划词 UI 只认真实手势（isTrusted 守卫，审计 P1-1）：全部经 CDP Input 派发可信鼠标事件驱动
+  const bubbleButton = (text) =>
+    `Array.from(document.querySelectorAll('[data-dt-ui] button')).find((n) => n.textContent === ${JSON.stringify(text)})`;
+  const fillTermForm = async (target) => {
+    const opened = await clickAtExpr(a, `document.querySelector('span[aria-label="加入术语表"]')`);
+    if (!opened) return 'no-button';
+    const filled = await until(
+      () =>
+        pageEval(
+          a,
+          `const bubble = Array.from(document.querySelectorAll('[data-dt-ui]')).find((n) => n.textContent.includes('Glossary term goes here.'));
+          const inputs = bubble ? Array.from(bubble.querySelectorAll('input')) : [];
+          if (inputs.length < 2) return '';
+          inputs[0].value = 'Rebranded term';
+          inputs[1].value = ` + JSON.stringify(target) + `;
+          return 'filled';`
+        ),
+      8000
     );
+    if (filled !== 'filled') return filled || 'no-form';
+    const saved = await clickAtExpr(a, bubbleButton('保存'));
+    return saved ? 'clicked' : 'no-save';
+  };
 
   await tabMsg(a.tabId, { type: 'dt:translateSelection', text: 'Glossary term goes here.' });
   await bubble('译:Glossary term goes here.');
@@ -1107,17 +1113,9 @@ async function articleChecks() {
   const notYet = await termOf('另一个译法');
   check('没点「覆盖」之前旧译法还在', !notYet && !!(await termOf('凛狐术语')), JSON.stringify(notYet));
 
-  const confirmed = await pageEval(
-    a,
-    `const bubble = Array.from(document.querySelectorAll('[data-dt-ui]')).find((n) => n.textContent.includes('已有译法'));
-    if (!bubble) return 'no-bubble';
-    const ow = Array.from(bubble.querySelectorAll('button')).find((n) => n.textContent === '覆盖');
-    if (!ow) return 'no-overwrite';
-    ow.click();
-    return 'clicked';`
-  );
+  const confirmed = await clickAtExpr(a, bubbleButton('覆盖'));
   const replaced = await until(() => termOf('另一个译法'), 8000);
-  check('点「覆盖」后换成新译法', confirmed === 'clicked' && !!replaced && !(await termOf('凛狐术语')), confirmed + ' / ' + JSON.stringify(replaced));
+  check('点「覆盖」后换成新译法', confirmed === true && !!replaced && !(await termOf('凛狐术语')), confirmed + ' / ' + JSON.stringify(replaced));
 
   // 后面的设置页用例假设术语表是空的（它要验证「导入配置带着术语表一起进来」）：把这段留下的条目清掉
   await patchConfig({ glossary: [] });
@@ -3101,6 +3099,19 @@ async function clickAt(tab, selector) {
   const at = await pageEval(
     tab,
     `return (function(){var e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;e.scrollIntoView({block:'center'});var r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};})()`
+  );
+  if (!at) return false;
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(at.x), y: Math.round(at.y), button: 'left', clickCount: 1, pointerType: 'mouse' }, tab.s);
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: Math.round(at.x), y: Math.round(at.y), button: 'left', clickCount: 1, pointerType: 'mouse' }, tab.s);
+  return true;
+}
+
+// 同 clickAt，但元素用 JS 表达式求值（划词气泡里的胶囊 / 表单按钮没有稳定选择器）。
+// 划词 UI 的 isTrusted 守卫要求真手势：必须走 CDP Input，不能用 .click() 合成。
+async function clickAtExpr(tab, expr) {
+  const at = await pageEval(
+    tab,
+    `return (function(){var e=(${expr});if(!e)return null;e.scrollIntoView({block:'center'});var r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};})()`
   );
   if (!at) return false;
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(at.x), y: Math.round(at.y), button: 'left', clickCount: 1, pointerType: 'mouse' }, tab.s);
