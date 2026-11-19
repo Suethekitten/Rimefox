@@ -30,6 +30,8 @@ on:
       - tools/e2e-reader.mjs
       - tools/e2e-pdf-reader.mjs
       - tools/e2e-extension.mjs
+      - tools/e2e-inline-layout.mjs
+      - tools/e2e-link-order.mjs
   workflow_dispatch:
 
 permissions:
