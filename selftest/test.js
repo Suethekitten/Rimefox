@@ -5228,15 +5228,23 @@
       var cancelled = false;
       var accepted = 0;
       var firstSlice = 0;
+      var scheduled = false;
       var stopped = await DT.collectPage(function () { accepted += 1; return true; }, {
         cancelled: function () { return cancelled; },
         onYield: function () {
+          // 首个让出窗口可能没有任何段落：runner 被调度饿住时 8ms deadline 一进循环就过期。
+          // 这种窗口不设取消点，等第一次有进展的让出再安排，避免把 firstSlice 记成 0
+          if (scheduled || accepted === 0) return;
+          scheduled = true;
           firstSlice = accepted;
           setTimeout(function () { cancelled = true; }, 0);
         }
       });
-      return stopped === null && firstSlice > 0 && firstSlice < original.length && accepted === firstSlice
-        ? true : '取消后继续收集';
+      if (stopped !== null) return '取消后仍返回了结果';
+      if (!scheduled || firstSlice === 0) return '取消点前没有任何段落被接收';
+      if (firstSlice >= original.length) return '取消前已收集全部段落';
+      if (accepted !== firstSlice) return '取消后仍在继续收集（已接收 ' + accepted + '，取消点 ' + firstSlice + '）';
+      return true;
     } finally {
       DT.setSiteRule(null);
       root.remove();
